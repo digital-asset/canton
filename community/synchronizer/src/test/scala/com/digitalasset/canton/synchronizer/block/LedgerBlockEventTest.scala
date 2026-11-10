@@ -22,8 +22,8 @@ import com.digitalasset.canton.sequencing.protocol.{
   SubmissionRequest,
 }
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.Send
-import com.digitalasset.canton.synchronizer.block.RawLedgerBlock.RawBlockEvent
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
+import com.digitalasset.canton.synchronizer.sequencer.block.RawLedgerBlock.RawBlockEvent
 import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, SequencerId}
 import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.google.protobuf.ByteString

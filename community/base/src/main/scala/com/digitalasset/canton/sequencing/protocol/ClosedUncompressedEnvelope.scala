@@ -44,7 +44,6 @@ import scala.concurrent.ExecutionContext
   * a [[com.digitalasset.canton.protocol.messages.TypedSignedProtocolMessageContent]] otherwise. It
   * itself is serialized without version wrappers inside a [[Batch]].
   */
-// TODO(#35535) Consider deleting (de)serialization machinery for this one
 final case class ClosedUncompressedEnvelope private[protocol] (
     override val bytes: ByteString,
     override val recipients: Recipients,

@@ -20,7 +20,7 @@ import com.daml.ledger.api.v2.update_service.{
 import com.daml.tracing.{Event, SpanAttribute, Spans}
 import com.digitalasset.base.error.DamlErrorWithDefiniteAnswer
 import com.digitalasset.base.error.utils.DecodedCantonError
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
@@ -798,9 +798,7 @@ private[index] class IndexServiceImpl(
     val memoizedSelection =
       TrieMap.empty[(Identifier, Ref.PackageName), Future[Either[Status, Ref.PackageId]]]
     val contextualizedErrorLogger = ErrorLoggingContext(logger, loggingContextWithTrace)
-    implicit val directExecutionContext: DirectExecutionContext = DirectExecutionContext(
-      noTracingLogger
-    )
+    implicit val directExecutionContextImplicit: ExecutionContext = directExecutionContext
 
     def handlePreferredPackageVersionError(
         computeUpgradeResult: Try[Either[String, Ref.PackageId]],

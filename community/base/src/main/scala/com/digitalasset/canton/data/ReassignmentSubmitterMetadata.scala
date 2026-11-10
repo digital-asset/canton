@@ -5,12 +5,12 @@ package com.digitalasset.canton.data
 
 import com.digitalasset.canton.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
 import com.digitalasset.canton.version.ProtocolVersionValidation
 
 /** Information about the submitters of the transaction in the case of a reassignment. This data
@@ -24,9 +24,12 @@ final case class ReassignmentSubmitterMetadata(
     submissionId: Option[LedgerSubmissionId],
     userId: LedgerUserId,
     workflowId: Option[LfWorkflowId],
+    // TODO(#37720): Make the max sequencing time mandatory once protocol version 37 is removed
+    maxSequencingTime: Option[CantonTimestamp],
 ) extends HasSubmissionTrackerData {
 
-  override def submissionTrackerData: Option[SubmissionTrackerData] = None
+  override def submissionTrackerData: Option[SubmissionTrackerData] =
+    maxSequencingTime.map(SubmissionTrackerData(submittingParticipant, _))
 
   def toProtoV30: v30.ReassignmentSubmitterMetadata =
     v30.ReassignmentSubmitterMetadata(
@@ -36,6 +39,17 @@ final case class ReassignmentSubmitterMetadata(
       submissionId = submissionId.getOrElse("").toProtoUnvalidated,
       userId = userId,
       workflowId = workflowId.getOrElse("").toProtoUnvalidated,
+    )
+
+  def toProtoV31: v31.ReassignmentSubmitterMetadata =
+    v31.ReassignmentSubmitterMetadata(
+      submitter = submitter,
+      submittingParticipantUid = submittingParticipant.uid.toProtoPrimitive,
+      commandId = commandId,
+      submissionId = submissionId.getOrElse("").toProtoUnvalidated,
+      userId = userId,
+      workflowId = workflowId.getOrElse("").toProtoUnvalidated,
+      maxSequencingTime = maxSequencingTime.map(_.toProtoTimestamp),
     )
 
   override def prettyCompanion: PrettyPrintingCompanion[ReassignmentSubmitterMetadata] =
@@ -54,6 +68,7 @@ object ReassignmentSubmitterMetadata
     paramIfDefined("submission id", _.submissionId),
     param("user id", _.userId),
     param("workflow id", _.workflowId),
+    paramIfDefined("max sequencing time", _.maxSequencingTime),
   )
 
   def fromProtoV30(
@@ -69,6 +84,61 @@ object ReassignmentSubmitterMetadata
       workflowIdP,
     ) = reassignmentSubmitterMetadataP
 
+    fromProto(
+      pvv,
+      submitterP,
+      submittingParticipantP,
+      commandIdP,
+      submissionIdP,
+      userIdP,
+      workflowIdP,
+      maxSequencingTime = None,
+    )
+  }
+
+  def fromProtoV31(
+      pvv: ProtocolVersionValidation,
+      reassignmentSubmitterMetadataP: v31.ReassignmentSubmitterMetadata,
+  ): ParsingResult[ReassignmentSubmitterMetadata] = {
+    val v31.ReassignmentSubmitterMetadata(
+      submitterP,
+      submittingParticipantP,
+      commandIdP,
+      submissionIdP,
+      userIdP,
+      workflowIdP,
+      maxSequencingTimeP,
+    ) = reassignmentSubmitterMetadataP
+
+    for {
+      maxSequencingTime <- ProtoConverter.parseRequired(
+        CantonTimestamp.fromProtoTimestamp,
+        "max_sequencing_time",
+        maxSequencingTimeP,
+      )
+      metadata <- fromProto(
+        pvv,
+        submitterP,
+        submittingParticipantP,
+        commandIdP,
+        submissionIdP,
+        userIdP,
+        workflowIdP,
+        Some(maxSequencingTime),
+      )
+    } yield metadata
+  }
+
+  private def fromProto(
+      pvv: ProtocolVersionValidation,
+      submitterP: ProtoUnvalidatedString,
+      submittingParticipantP: ProtoUnvalidatedString,
+      commandIdP: ProtoUnvalidatedString,
+      submissionIdP: ProtoUnvalidatedString,
+      userIdP: ProtoUnvalidatedString,
+      workflowIdP: ProtoUnvalidatedString,
+      maxSequencingTime: Option[CantonTimestamp],
+  ): ParsingResult[ReassignmentSubmitterMetadata] =
     for {
       submitter <- ProtoValidation.validateThen(submitterP, "submitter", pvv)(
         ProtoConverter.parseLfPartyId
@@ -98,6 +168,6 @@ object ReassignmentSubmitterMetadata
       submissionId,
       userId,
       workflowId,
+      maxSequencingTime,
     )
-  }
 }

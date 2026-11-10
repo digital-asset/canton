@@ -588,17 +588,18 @@ trait ProcessingSteps[
     *   The verdict that is contained in the `event`
     * @param pendingRequestData
     *   The `requestType.PendingRequestData` produced in Phase 3
-    * @param pendingSubmissions
-    *   The data stored on submissions in the [[PendingSubmissions]]
+    * @param pendingSubmissionDataO
+    *   The [[PendingSubmissionData]] of this request, removed from the [[PendingSubmissions]].
+    *   [[scala.None$]] if this participant did not submit the request, or after a crash.
     * @return
     *   The [[com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet]], the
     *   contracts from Phase 3 to be persisted to the contract store, and the event to be published
     */
   def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       pendingRequestData: requestType.PendingRequestData,
-      pendingSubmissions: PendingSubmissions,
+      pendingSubmissionDataO: Option[PendingSubmissionData],
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext

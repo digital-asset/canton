@@ -86,8 +86,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
     EnvironmentDefinition.P3_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
-        // this only sets/enables session signing keys when running with PV35 or higher
-        ConfigTransforms.setSigningKeysIfPV35OrHigher(
+        ConfigTransforms.setSigningKeys(
           SessionSigningKeysConfig.enabled.copy(
             // we evict the session key cache right away to make sure we use a fresh session signing key for each request
             keyEvictionPeriod = config.PositiveFiniteDuration.ofMillis(1),

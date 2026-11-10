@@ -1,0 +1,21 @@
+name: corpus-upgrades-tests
+version: 1.0.0
+source: .
+data-dependencies:
+  - ${TARGET_ROOT}/models/upgrades-v1.dar
+  - ${TARGET_ROOT}/models/upgrades-v2.dar
+module-prefixes:
+  corpus-upgrades-model-1.0.0: V1
+  corpus-upgrades-model-2.0.0: V2
+dependencies:
+  - daml-prim
+  - daml-stdlib
+  - daml-script
+build-options:
+  - --target=2.4
+  - --output=${TARGET_ROOT}/suites/upgrades.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION

@@ -67,6 +67,7 @@ class TestProcessingSteps(
     pendingRequestData: Option[TestPendingRequestData],
     informeesOfView: ViewHash => Set[LfPartyId] = _ => Set.empty,
     submissionDataForTrackerO: Option[SubmissionTrackerData] = None,
+    rejectedCommandEventO: Option[SequencedEventUpdate] = None,
 )(implicit val ec: ExecutionContext)
     extends ProcessingSteps[
       Int,
@@ -321,7 +322,7 @@ class TestProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): (Option[SequencedEventUpdate], Option[PendingSubmissionId]) =
-    (None, None)
+    (rejectedCommandEventO, None)
 
   override def createRejectionEvent(rejectionArgs: Unit)(implicit
       traceContext: TraceContext
@@ -329,10 +330,10 @@ class TestProcessingSteps(
     Right(None)
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       pendingRequestData: RequestType#PendingRequestData,
-      pendingSubmissionMap: PendingSubmissions,
+      pendingSubmissionDataO: Option[PendingSubmissionData],
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext

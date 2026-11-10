@@ -1479,6 +1479,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         None,
         LedgerUserId.assertFromString(LedgerApiCommands.defaultUserId),
         None,
+        maxSequencingTime = None,
       ),
       ContractsReassignmentBatch(
         instance,

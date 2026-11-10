@@ -9,7 +9,6 @@ import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse.Update
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricHandle
-import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
@@ -45,8 +44,6 @@ final class TransactionOrReassignmentPointwiseReader(
     extends NamedLogging {
 
   protected val dbMetrics: metrics.index.db.type = metrics.index.db
-
-  val directEC: DirectExecutionContext = DirectExecutionContext(noTracingLogger)
 
   private def fetchRawAcsDeltaEvents(
       eventSeqIdRange: EventSeqIdRange,

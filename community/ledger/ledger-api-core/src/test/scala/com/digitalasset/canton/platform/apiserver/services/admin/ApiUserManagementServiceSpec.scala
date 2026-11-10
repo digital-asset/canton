@@ -8,6 +8,8 @@ import com.daml.ledger.api.v2.admin.user_management_service as proto
 import com.daml.platform.v1.page_tokens.ListUsersPageTokenPayload
 import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.sizeconfig.v2.admin.{
@@ -31,7 +33,7 @@ import org.slf4j.event.Level
 
 import java.nio.charset.StandardCharsets
 import java.util.Base64
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
 class ApiUserManagementServiceSpec
     extends AnyFlatSpec
@@ -109,7 +111,7 @@ class ApiUserManagementServiceSpec
 
   private val maxElements = 1
   private val apiServiceWithLimits = {
-    implicit val ec: ExecutionContext = directExecutionContext
+    implicit val ec: DirectExecutionContext = directExecutionContext
     val defaultSizeLimitsConfig = LedgerApiSizeLimitsConfig()
     implicit val sizeLimitsConfig: LedgerApiSizeLimitsConfig = defaultSizeLimitsConfig.copy(
       adminLapiSizeConfig = defaultSizeLimitsConfig.adminLapiSizeConfig.copy(

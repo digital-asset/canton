@@ -48,12 +48,14 @@ import com.digitalasset.canton.sequencing.protocol.{
   SequencedEvent,
 }
 import com.digitalasset.canton.sequencing.{
+  ConnectionSerializedEvent,
   MaybeCompressedSerializedEvent,
   OrdinarySerializedEvent,
   ProcessingSerializedEvent,
   SequencedSerializedEvent,
 }
 import com.digitalasset.canton.store.SequencedEventStore.{
+  ConnectionSequencedEvent,
   IgnoredSequencedEvent,
   SequencedEventWithTraceContext,
 }
@@ -184,7 +186,11 @@ trait SequencedEventValidator extends AutoCloseable {
       sequencerId: SequencerId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], SequencedSerializedEvent]
+  ): EitherT[
+    FutureUnlessShutdown,
+    SequencedEventValidationError[Nothing],
+    ConnectionSerializedEvent,
+  ]
 
   /** Validates a sequenced event when we reconnect against the prior event supplied to
     * [[SequencedEventValidatorFactory.create]]
@@ -199,7 +205,11 @@ trait SequencedEventValidator extends AutoCloseable {
       sequencerId: SequencerId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], SequencedSerializedEvent]
+  ): EitherT[
+    FutureUnlessShutdown,
+    SequencedEventValidationError[Nothing],
+    ConnectionSerializedEvent,
+  ]
 
   /** Add event validation to the given
     * [[com.digitalasset.canton.sequencing.client.SequencerSubscriptionPekko]]. Stuttering is
@@ -248,9 +258,11 @@ object SequencedEventValidator extends HasLoggerName {
         sequencerId: SequencerId,
     )(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[
-      Nothing
-    ], SequencedSerializedEvent] =
+    ): EitherT[
+      FutureUnlessShutdown,
+      SequencedEventValidationError[Nothing],
+      ConnectionSerializedEvent,
+    ] =
       // Decompress within the limit; an event exceeding it fails with DecompressionFailed.
       EitherT
         .right[SequencedEventValidationError[Nothing]](decompressionPolicyProvider(traceContext))
@@ -269,9 +281,11 @@ object SequencedEventValidator extends HasLoggerName {
         sequencerId: SequencerId,
     )(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[
-      Nothing
-    ], SequencedSerializedEvent] =
+    ): EitherT[
+      FutureUnlessShutdown,
+      SequencedEventValidationError[Nothing],
+      ConnectionSerializedEvent,
+    ] =
       validate(priorEvent, reconnectEvent, sequencerId)
 
     // No size limit here: Pekko subscriptions deliver events that are already decoded. In
@@ -293,20 +307,20 @@ object SequencedEventValidator extends HasLoggerName {
   }
 
   /** Decompresses the batch of a (possibly still compressed) serialized event using the given
-    * bound, yielding a fully decompressed [[SequencedSerializedEvent]]. Decompression failure (e.g.
-    * the batch exceeds `maxBytesToDecompress`) is reported as a validation error.
+    * bound, yielding a fully decompressed [[ConnectionSerializedEvent]]. Decompression failure
+    * (e.g. the batch exceeds `maxBytesToDecompress`) is reported as a validation error.
     */
   private[client] def decompressEvent(
       event: MaybeCompressedSerializedEvent,
       pvv: ProtocolVersionValidation,
       decompressionPolicy: DecompressionPolicy,
       synchronizerLimits: SynchronizerLimits,
-  ): Either[SequencedEventValidationError[Nothing], SequencedSerializedEvent] =
+  ): Either[SequencedEventValidationError[Nothing], ConnectionSerializedEvent] =
     event.signedEvent
       .traverse(SequencedEvent.decompress(_, pvv, decompressionPolicy, synchronizerLimits))
       .bimap(
         err => SequencedEventValidationError.DecompressionFailed(event.timestamp, err.toString),
-        signedEvent => SequencedEventWithTraceContext(signedEvent)(event.traceContext),
+        signedEvent => ConnectionSequencedEvent(signedEvent)(event.traceContext),
       )
 
   /** Do not validate sequenced events (signatures, ordering). Only use it in case of a programming
@@ -493,7 +507,7 @@ class SequencedEventValidatorImpl(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[
     Nothing
-  ], SequencedSerializedEvent] = {
+  ], ConnectionSerializedEvent] = {
     val expectedPreviousTimestamp = priorEventO.map(_.timestamp).orElse(None)
     val newTimestamp = event.timestamp
 
@@ -553,7 +567,7 @@ class SequencedEventValidatorImpl(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[
     Nothing
-  ], SequencedSerializedEvent] = {
+  ], ConnectionSerializedEvent] = {
     implicit val traceContext: TraceContext = reconnectEvent.traceContext
     val priorEvent = priorEvent0.getOrElse(
       ErrorUtil.internalError(
@@ -565,43 +579,38 @@ class SequencedEventValidatorImpl(
 
     // The fork check compares the decompressed `SequencedEvent` contents against the prior event.
     def checkFork(
-        decompressed: SequencedSerializedEvent
-    ): Either[SequencedEventValidationError[Nothing], Unit] = priorEvent match {
-      case SequencedEventWithTraceContext(signedEvent) =>
-        val oldSequencedEvent = signedEvent.content
-        val newSequencedEvent = decompressed.signedEvent.content
-        // We compare the contents of the `SequencedEvent` rather than their serialization
-        // because the SequencerReader serializes the `SequencedEvent` afresh upon each resubscription
-        // and the serialization may therefore differ from time to time. This is fine for auditability
-        // because the sequencer also delivers a new signature on the new serialization.
+        decompressed: ConnectionSerializedEvent
+    ): Either[SequencedEventValidationError[Nothing], Unit] = {
+      val newSequencedEvent = decompressed.signedEvent.content
+      // We compare the contents of the `SequencedEvent` rather than their serialization
+      // because the SequencerReader serializes the `SequencedEvent` afresh upon each resubscription
+      // and the serialization may therefore differ from time to time. This is fine for auditability
+      // because the sequencer also delivers a new signature on the new serialization.
+      def checkSameContent(
+          oldSequencedEvent: SequencedEvent[Batch[ClosedEnvelope]]
+      ): Either[SequencedEventValidationError[Nothing], Unit] =
         Either.cond(
           oldSequencedEvent == newSequencedEvent,
           (),
           ForkHappened(oldSequencedEvent.timestamp, newSequencedEvent, Some(oldSequencedEvent)),
         )
-      case ordinaryPrior: OrdinarySerializedEvent =>
-        val oldSequencedEvent = ordinaryPrior.signedEvent.content
-        val newSequencedEvent = decompressed.signedEvent.content
-        // We compare the contents of the `SequencedEvent` rather than their serialization
-        // because the SequencerReader serializes the `SequencedEvent` afresh upon each resubscription
-        // and the serialization may therefore differ from time to time. This is fine for auditability
-        // because the sequencer also delivers a new signature on the new serialization.
-        Either.cond(
-          oldSequencedEvent == newSequencedEvent,
-          (),
-          ForkHappened(oldSequencedEvent.timestamp, newSequencedEvent, Some(oldSequencedEvent)),
-        )
-      case ignored: IgnoredSequencedEvent[Batch[ClosedEnvelope]] =>
-        // If the event should be ignored, we nevertheless check the timestamp
-        Either.cond(
-          ignored.timestamp == reconnectEvent.timestamp,
-          (),
-          ForkHappened(
-            ignored.timestamp,
-            decompressed.signedEvent.content,
-            ignored.underlying.map(_.content),
-          ),
-        )
+      priorEvent match {
+        case ConnectionSequencedEvent(signedEvent) => checkSameContent(signedEvent.content)
+        case SequencedEventWithTraceContext(signedEvent) => checkSameContent(signedEvent.content)
+        case ordinaryPrior: OrdinarySerializedEvent =>
+          checkSameContent(ordinaryPrior.signedEvent.content)
+        case ignored: IgnoredSequencedEvent[Batch[ClosedEnvelope]] =>
+          // If the event should be ignored, we nevertheless check the timestamp
+          Either.cond(
+            ignored.timestamp == reconnectEvent.timestamp,
+            (),
+            ForkHappened(
+              ignored.timestamp,
+              newSequencedEvent,
+              ignored.underlying.map(_.content),
+            ),
+          )
+      }
     }
 
     for {
@@ -698,7 +707,7 @@ class SequencedEventValidatorImpl(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[
     Nothing
-  ], SequencedSerializedEvent] =
+  ], ConnectionSerializedEvent] =
     if (event.previousTimestamp.isEmpty) {
       // TODO(#4933) This is a fresh subscription. Either fetch the synchronizer keys via a future sequencer API and validate the signature
       //  or wait until the topology processor has processed the topology information in the first message and then validate the signature.
@@ -758,10 +767,10 @@ class SequencedEventValidatorImpl(
       traceContext: TraceContext
   ): SequencerSubscriptionPekko[SequencedEventValidationError[E]] = {
     def performValidation(
-        rememberedAndCurrent: NonEmpty[Seq[WithKillSwitch[Either[E, SequencedSerializedEvent]]]]
+        rememberedAndCurrent: NonEmpty[Seq[WithKillSwitch[Either[E, ConnectionSerializedEvent]]]]
     ): FutureUnlessShutdown[WithKillSwitch[
       // None if the element should not be emitted
-      Option[Either[SequencedEventValidationError[E], SequencedSerializedEvent]]
+      Option[Either[SequencedEventValidationError[E], ConnectionSerializedEvent]]
     ]] =
       rememberedAndCurrent.last1.traverse {
         case Left(err) => FutureUnlessShutdown.pure(Some(Left(UpstreamSubscriptionError(err))))
@@ -769,7 +778,7 @@ class SequencedEventValidatorImpl(
           val validationEF =
             if (rememberedAndCurrent.sizeIs <= 1)
               validateOnReconnect(priorReconnectEvent, current, sequencerId).value.map(
-                _.traverse((_: SequencedSerializedEvent) => None)
+                _.traverse((_: ConnectionSerializedEvent) => None)
               )
             else {
               val previousEvent = rememberedAndCurrent.head1.value.valueOr { previousErr =>
@@ -784,7 +793,7 @@ class SequencedEventValidatorImpl(
               val stutter = previousEventId == currentEventId
               if (stutter)
                 validateOnReconnect(Some(previousEvent), current, sequencerId).value
-                  .map(_.traverse((_: SequencedSerializedEvent) => None))
+                  .map(_.traverse((_: ConnectionSerializedEvent) => None))
               else
                 validate(Some(previousEvent), current, sequencerId).value
                   .map(_.traverse(validated => Option(validated)))

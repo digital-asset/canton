@@ -44,8 +44,6 @@ import org.bouncycastle.jce.spec.IESParameterSpec
 import java.security.interfaces.*
 import java.security.{
   GeneralSecurityException,
-  InvalidKeyException,
-  NoSuchAlgorithmException,
   SecureRandom,
   Security,
   PrivateKey as JPrivateKey,
@@ -147,7 +145,8 @@ class JcePureCrypto(
   /* security parameters for EciesP256HmacSha256Aes128Cbc encryption scheme,
     in particular for the HMAC and symmetric crypto algorithms.
    */
-  private object EciesHmacSha256Aes128CbcParams {
+  @VisibleForTesting
+  private[jce] object EciesHmacSha256Aes128CbcParams {
     // the internal jce designation for this scheme
     val jceInternalName: String = "ECIESwithSHA256andAES-CBC"
     // the key size in bits for HMACSHA256 is 64bytes (recommended)
@@ -257,7 +256,7 @@ class JcePureCrypto(
       // this encryption scheme AES-128-GCM requires an IV/nonce of 12bytes.
       iv = JceSecureRandom.generateRandomBytes(Aes128GcmParams.ivSizeForAesGcmInBytes)
       encrypter <- Either
-        .catchOnly[GeneralSecurityException] {
+        .catchNonFatal {
           val keySpec = new SecretKeySpec(symmetricKey.toByteArray, Aes128GcmParams.jceKeyAlgorithm)
           val cipher = Cipher.getInstance(
             Aes128GcmParams.jceInternalName,
@@ -272,7 +271,7 @@ class JcePureCrypto(
         }
         .leftMap(err => EncryptionError.InvalidSymmetricKey(err.toString))
       ciphertext <- Either
-        .catchOnly[GeneralSecurityException](
+        .catchNonFatal(
           encrypter.doFinal(plaintext.toByteArray)
         )
         .leftMap(err => EncryptionError.FailedToEncrypt(err.toString))
@@ -297,7 +296,7 @@ class JcePureCrypto(
       iv = ciphertext.toByteArray.take(Aes128GcmParams.ivSizeForAesGcmInBytes)
       rawCiphertext = ciphertext.toByteArray.drop(Aes128GcmParams.ivSizeForAesGcmInBytes)
       decrypter <- Either
-        .catchOnly[GeneralSecurityException] {
+        .catchNonFatal {
           val keySpec = new SecretKeySpec(symmetricKey.toByteArray, Aes128GcmParams.jceKeyAlgorithm)
           val cipher = Cipher.getInstance(
             Aes128GcmParams.jceInternalName,
@@ -312,7 +311,7 @@ class JcePureCrypto(
         }
         .leftMap(err => DecryptionError.InvalidSymmetricKey(err.toString))
       plaintext <- Either
-        .catchOnly[GeneralSecurityException](
+        .catchNonFatal(
           decrypter.doFinal(rawCiphertext)
         )
         .leftMap(err => DecryptionError.FailedToDecrypt(err.toString))
@@ -378,7 +377,7 @@ class JcePureCrypto(
         signature <- signingMetrics.signingLatency
           .time(
             Either
-              .catchOnly[GeneralSecurityException] {
+              .catchNonFatal {
                 val signer = JSignature.getInstance(
                   signingAlgorithmSpec.jcaAlgorithmName,
                   JceSecurityProvider.bouncyCastleProvider,
@@ -456,7 +455,7 @@ class JcePureCrypto(
             )
         }
         _ <- Either
-          .catchOnly[GeneralSecurityException] {
+          .catchNonFatal {
             val signatureBytes = signature.unwrap.toByteArray
             val verifier = JSignature.getInstance(
               signingAlgorithmSpec.jcaAlgorithmName,
@@ -548,7 +547,7 @@ class JcePureCrypto(
       iv = new Array[Byte](EciesHmacSha256Aes128CbcParams.ivSizeForAesCbcInBytes)
       _ = random.nextBytes(iv)
       encrypter <- Either
-        .catchOnly[GeneralSecurityException] {
+        .catchNonFatal {
           val cipher = Cipher
             .getInstance(
               EciesHmacSha256Aes128CbcParams.jceInternalName,
@@ -566,7 +565,7 @@ class JcePureCrypto(
           EncryptionError.InvalidEncryptionKey(ThrowableUtil.messageWithStacktrace(err))
         )
       ciphertext <- Either
-        .catchOnly[GeneralSecurityException](
+        .catchNonFatal(
           encrypter.doFinal(message.toByteString.toByteArray)
         )
         .leftMap(err => EncryptionError.FailedToEncrypt(ThrowableUtil.messageWithStacktrace(err)))
@@ -591,7 +590,7 @@ class JcePureCrypto(
         EncryptionError.InvalidEncryptionKey.apply,
       )
       encrypter <- Either
-        .catchOnly[GeneralSecurityException] {
+        .catchNonFatal {
           val cipher = Cipher
             .getInstance(
               RsaOaepSha256Params.jceInternalName,
@@ -604,7 +603,7 @@ class JcePureCrypto(
           EncryptionError.InvalidEncryptionKey(ThrowableUtil.messageWithStacktrace(err))
         )
       ciphertext <- Either
-        .catchOnly[GeneralSecurityException](
+        .catchNonFatal(
           encrypter.doFinal(message.toByteString.toByteArray)
         )
         .leftMap(err => EncryptionError.FailedToEncrypt(ThrowableUtil.messageWithStacktrace(err)))
@@ -734,7 +733,7 @@ class JcePureCrypto(
               plaintext <- decryptionMetrics.decryptLatency.time(
                 for {
                   decrypter <- Either
-                    .catchOnly[GeneralSecurityException] {
+                    .catchNonFatal {
                       val cipher = Cipher.getInstance(
                         EciesHmacSha256Aes128CbcParams.jceInternalName,
                         JceSecurityProvider.bouncyCastleProvider,
@@ -750,7 +749,7 @@ class JcePureCrypto(
                       DecryptionError.InvalidEncryptionKey(ThrowableUtil.messageWithStacktrace(err))
                     )
                   plaintext <- Either
-                    .catchOnly[GeneralSecurityException](
+                    .catchNonFatal(
                       decrypter.doFinal(ciphertext.toByteArray)
                     )
                     .leftMap(err =>
@@ -771,7 +770,7 @@ class JcePureCrypto(
               plaintext <- decryptionMetrics.decryptLatency.time(
                 for {
                   decrypter <- Either
-                    .catchOnly[GeneralSecurityException] {
+                    .catchNonFatal {
                       val cipher = Cipher
                         .getInstance(
                           RsaOaepSha256Params.jceInternalName,
@@ -833,14 +832,15 @@ class JcePureCrypto(
   ): Either[HmacError, Hmac] =
     for {
       mac <- Either
-        .catchOnly[NoSuchAlgorithmException](
+        .catchNonFatal(
           Mac.getInstance(algorithm.name, JceSecurityProvider.bouncyCastleProvider)
         )
         .leftMap(ex => UnknownHmacAlgorithm(algorithm, ex))
-      key = new SecretKeySpec(secret.toByteArray, algorithm.name)
-      _ <- Either.catchOnly[InvalidKeyException](mac.init(key)).leftMap(ex => InvalidHmacSecret(ex))
+      _ <- Either
+        .catchNonFatal(mac.init(new SecretKeySpec(secret.toByteArray, algorithm.name)))
+        .leftMap(ex => InvalidHmacSecret(ex))
       hmacBytes <- Either
-        .catchOnly[IllegalStateException](mac.doFinal(message.toByteArray))
+        .catchNonFatal(mac.doFinal(message.toByteArray))
         .leftMap(ex => FailedToComputeHmac(ex))
       hmac <- Hmac.create(ByteString.copyFrom(hmacBytes), algorithm)
     } yield hmac

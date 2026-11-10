@@ -1,0 +1,16 @@
+name: corpus-interfaces-model
+version: 1.0.0
+source: .
+data-dependencies:
+  - ${TARGET_ROOT}/models/holding.dar
+dependencies:
+  - daml-prim
+  - daml-stdlib
+build-options:
+  - --target=2.4
+  - --output=${TARGET_ROOT}/models/interfaces.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION

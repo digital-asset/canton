@@ -1,0 +1,14 @@
+name: corpus-upgrades-model
+version: 2.0.0
+source: .
+dependencies:
+  - daml-prim
+  - daml-stdlib
+build-options:
+  - --target=2.4
+  - --output=${TARGET_ROOT}/models/upgrades-v2.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION

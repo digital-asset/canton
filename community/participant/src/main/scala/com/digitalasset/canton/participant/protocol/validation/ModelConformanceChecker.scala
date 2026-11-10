@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.validation
 
 import cats.Eval
 import cats.data.EitherT
-import cats.implicits.{toFoldableOps, toFunctorOps}
+import cats.implicits.toFunctorOps
 import cats.syntax.alternative.*
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
@@ -119,8 +119,6 @@ class ModelConformanceChecker(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ErrorWithSubTransaction[ViewEffect], Result] = {
 
-    val transactionMerge: TransactionMerge = TransactionMerge(protocolVersion)
-
     val CommonData(updateId, ledgerTime, preparationTime) = commonData
 
     // Previous checks in Phase 3 ensure that all the root views are sent to the same
@@ -226,7 +224,7 @@ class ModelConformanceChecker(
         )
       )
 
-      val (wftxO, mergeErrorOO) = NonEmpty.from(txs).map(transactionMerge.merge(_)).separate
+      val (wftxO, mergeErrorOO) = NonEmpty.from(txs).map(TransactionMerge.merge(_)).separate
       val mergeErrorO = mergeErrorOO.flatten.map(MergeError.apply)
 
       NonEmpty.from(
@@ -391,16 +389,11 @@ class ModelConformanceChecker(
         _,
       ) = lfTxAndMetadata
 
-      _ <-
-        if (protocolVersion >= ProtocolVersion.v36) {
-          checkTxPackageVetting(topologySnapshot, lfTx, metadata.ledgerTime)
-        } else {
-          checkViewPackageVetting(view, topologySnapshot, usedPackages, metadata.ledgerTime)
-        }
+      _ <- checkTxPackageVetting(topologySnapshot, lfTx, metadata.ledgerTime)
 
       wfTx <- EitherT.fromEither[FutureUnlessShutdown](
         WellFormedTransaction
-          .check(lfTx, metadata, WithoutSuffixes, RollbackContextFactory(protocolVersion))
+          .check(lfTx, metadata, WithoutSuffixes)
           .leftMap[Error](err => TransactionNotWellFormed(err, view.viewHash))
       )
 
@@ -446,38 +439,9 @@ class ModelConformanceChecker(
       )
 
     } yield WithRollbackScope(
-      rbContext.rollbackScope,
+      rbContext,
       suffixedTx,
     )
-  }
-
-  // Checks vetting for informees of view, but not subviews informees.
-  private def checkViewPackageVetting(
-      view: TransactionView,
-      snapshot: TopologySnapshot,
-      usedPackages: UsedPackages,
-      ledgerTime: CantonTimestamp,
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Error, Unit] = {
-
-    val informees = view.viewCommonData.tryUnwrap.viewConfirmationParameters.informees
-
-    EitherT(for {
-      informeeParticipantsByParty <-
-        snapshot.activeParticipantsOfParties(informees.toSeq)
-
-      informeeParticipants = informeeParticipantsByParty.values.flatten.toSet
-
-      unvetted <- MonadUtil.parTraverseWithLimit(parallelism)(informeeParticipants)(p =>
-        snapshot.loadUnvettedPackagesOrDependencies(
-          participantId = p,
-          packages = usedPackages.actionNodePackageIds,
-          ledgerTime = ledgerTime,
-        )
-      )
-    } yield {
-      val combined = unvetted.combineAll.unknownOrUnvetted
-      Either.cond(combined.isEmpty, (), UnvettedPackages(combined))
-    })
   }
 
   // Checks package vetting for entire (sub) transaction so also checks subview vetting

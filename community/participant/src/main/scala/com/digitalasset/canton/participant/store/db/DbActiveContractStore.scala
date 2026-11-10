@@ -162,7 +162,7 @@ class DbActiveContractStore(
 
   private val fetchAggregator = BatchAggregator(
     fetchAggregatorProcessor,
-    batchingConfig.contractStoreAggregator,
+    batchingConfig.contractJournalAggregator,
   )
 
   private type ActiveContractJournalUpdate = ((LfContractId, TimeOfChange), ActivenessChangeDetail)
@@ -189,7 +189,7 @@ class DbActiveContractStore(
 
   private val insertAggregator = BatchAggregator(
     insertAggregatorProcessor,
-    batchingConfig.contractStoreAggregator,
+    batchingConfig.contractJournalAggregator,
   )
 
   override def markContractsCreatedOrAdded(

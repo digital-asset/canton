@@ -4,7 +4,7 @@
 package com.digitalasset.canton.util
 
 import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -773,12 +773,10 @@ class OrderedBucketMergeHub[Name: Pretty, A, Config, Offset: Pretty, M](
         )
     }
 
-    private[this] def completeCompletionFuture(): Unit = {
-      val directExecutionContext = DirectExecutionContext(noTracingLogger)
+    private[this] def completeCompletionFuture(): Unit =
       completionPromise.completeWith(
         flushFutureForOrderedSources.flush().map(_ => Done)(directExecutionContext)
       )
-    }
 
     private[this] def removeFromBuckets(elems: Seq[BucketElement[OrderedSource, A]]): Unit =
       elems.foreach { case BucketElement(_id, source, _elem) =>

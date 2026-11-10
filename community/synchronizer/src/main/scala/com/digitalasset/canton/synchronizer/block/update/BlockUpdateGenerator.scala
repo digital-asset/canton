@@ -26,9 +26,10 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.*
 import com.digitalasset.canton.synchronizer.block.data.{BlockEphemeralState, BlockInfo}
-import com.digitalasset.canton.synchronizer.block.{BlockEvents, LedgerBlockEvent, RawLedgerBlock}
+import com.digitalasset.canton.synchronizer.block.{BlockEvents, LedgerBlockEvent}
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
+import com.digitalasset.canton.synchronizer.sequencer.block.RawLedgerBlock
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   InvalidLedgerEvent,
   SequencingTimeNotAdmissible,
@@ -136,9 +137,11 @@ object BlockUpdateGenerator {
   ) extends BlockChunk
 
   /** @param baseBlockSequencingTime
-    *   See [[RawLedgerBlock.baseSequencingTimeMicrosFromEpoch]]
+    *   See
+    *   [[com.digitalasset.canton.synchronizer.sequencer.block.RawLedgerBlock#baseSequencingTimeMicrosFromEpoch]]
     * @param tickTopologyAtLeastAt
-    *   See [[RawLedgerBlock.tickTopologyAtMicrosFromEpoch]]
+    *   See
+    *   [[com.digitalasset.canton.synchronizer.sequencer.block.RawLedgerBlock#tickTopologyAtMicrosFromEpoch]]
     */
   final case class MaybeTopologyTickChunk(
       blockHeight: Long,
@@ -261,7 +264,6 @@ class BlockUpdateGeneratorImpl(
           block.blockHeight,
           CantonTimestamp.assertFromLong(block.baseSequencingTimeMicrosFromEpoch),
           // Reorder block events according to BlockReorderer priority before constructing BlockEvents.
-          // (starting with pv35)
           reorderer.reordered(ledgerBlockEvents)(blockTraceContext),
           tickTopologyAtLeastAt =
             block.tickTopologyAtMicrosFromEpoch.map(CantonTimestamp.assertFromLong),

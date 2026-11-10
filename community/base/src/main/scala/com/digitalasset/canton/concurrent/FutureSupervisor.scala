@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.concurrent
 
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -280,8 +281,7 @@ object FutureSupervisor {
 
           // Use the direct execution context so that the supervision follow-up steps doesn't affect task-based scheduling
           // because the follow-up is run on the future itself.
-          implicit val directExecutionContext: ExecutionContext =
-            DirectExecutionContext(errorLoggingContext.noTracingLogger)
+          implicit val directExecutionContextImplicit: ExecutionContext = directExecutionContext
           fut.thereafter {
             case Success(_) =>
               val time = elapsed(itm)

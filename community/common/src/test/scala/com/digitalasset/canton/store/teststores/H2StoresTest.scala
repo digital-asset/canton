@@ -5,7 +5,7 @@ package com.digitalasset.canton.store.teststores
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.NamedLogging
@@ -28,7 +28,7 @@ trait H2StoresTest
 
   // Use this to mimic InMemory stores behavior as close as possible
   // Some tests rely on precise sequencing of actions
-  protected val h2InMemoryEc: ExecutionContext = DirectExecutionContext(noTracingLogger)
+  protected val h2InMemoryEc: ExecutionContext = directExecutionContext
 
   /** Flag to define the migration mode for the schemas */
   private def migrationMode: MigrationMode =

@@ -41,7 +41,7 @@ trait SessionSigningKeysLifecycleIntegrationTest
   )
 
   override protected def otherConfigTransforms: Seq[ConfigTransform] = Seq(
-    ConfigTransforms.setSigningKeysIfPV35OrHigher(sessionSigningKeysConfig),
+    ConfigTransforms.setSigningKeys(sessionSigningKeysConfig),
     // adjust the max sequencing time offset so requests remain compatible with the short validity
     // periods of session signing keys.
     ConfigTransforms.updateAllSequencerConfigs_(

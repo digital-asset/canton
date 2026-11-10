@@ -672,26 +672,6 @@ trait SequencerStoreTest
     }
 
     "save payloads" should {
-      // TODO(#16087) enable test for database sequencer with blockSequencerMode=false
-      "return an error if there is a conflicting id for database sequencer" ignore {
-        val env = Env()
-
-        val Seq(p1, p2, p3) =
-          0.until(3).map(n => BytesPayload(PayloadId(ts(n)), ByteString.copyFromUtf8(n.toString)))
-
-        // we'll first write p1 and p2 that should work
-        // then write p2 and p3 with a separate instance discriminator which should fail due to a conflicting id
-        for {
-          _ <- env.store
-            .savePayloads(NonEmpty(Seq, p1, p2), instanceDiscriminator1)
-            .valueOrFail("savePayloads1")
-          error <- env.store
-            .savePayloads(NonEmpty(Seq, p2, p3), instanceDiscriminator2)
-            .leftOrFail("savePayloads2")
-        } yield error shouldBe SavePayloadsError.ConflictingPayloadId(p2.id, instanceDiscriminator1)
-      }
-
-      // TODO(#16087) when bringing back database sequencer, only run this test if blockSequencerMode=true
       "succeed on a conflicting payload id for unified sequencer" in {
         val env = Env()
 

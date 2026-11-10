@@ -67,8 +67,8 @@ import scala.jdk.DurationConverters.ScalaDurationOps
   *   1. Migrating nodes to fresh instances and rehydrating them.
   *   1. Reconnecting the nodes and checking state of the system.
   *
-  * In 3, the sequencer is rehydrated from the shared sequencer driver DB and both the mediator and
-  * the participant are rehydrated from the sequencer.
+  * In 3, the BFT sequencer is rehydrated from state transferred from other nodes and both the
+  * mediator and the participant are rehydrated from the sequencer.
   */
 @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
 abstract class RehydrationIntegrationTest

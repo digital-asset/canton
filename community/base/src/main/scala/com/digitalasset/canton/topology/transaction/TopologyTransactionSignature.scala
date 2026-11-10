@@ -21,17 +21,31 @@ object TopologyTransactionSignature {
     * there are multiple signatures by the same signing key, the signature with the lowest index in
     * the sequence is picked for the result.
     */
-  def distinctSignatures(
+  def distinctTopologySignatures(
       signatures: NonEmpty[Seq[TopologyTransactionSignature]]
   ): NonEmpty[Set[TopologyTransactionSignature]] =
+    distinctBySigningKey(signatures)(_.authorizingLongTermKey)
+
+  /** Returns a set of signatures, such that only one signature per signing key is retained. In case
+    * there are multiple signatures by the same signing key, the signature with the lowest index in
+    * the sequence is picked for the result.
+    */
+  def distinctSignatures(
+      signatures: NonEmpty[Seq[Signature]]
+  ): NonEmpty[Set[Signature]] =
+    distinctBySigningKey(signatures)(_.authorizingLongTermKey)
+
+  private def distinctBySigningKey[A](
+      signatures: NonEmpty[Seq[A]]
+  )(signingKey: A => Fingerprint): NonEmpty[Set[A]] =
     signatures.zipWithIndex
-      .groupBy1 { case (tx, _) => tx.authorizingLongTermKey }
+      .groupBy1 { case (signature, _) => signingKey(signature) }
       .map { case (_, signatures) =>
         signatures.minBy1 { case (_, index) => index }
       }
       .toSeq
       .sortBy { case (_, index) => index }
-      .map { case (tx, _) => tx }
+      .map { case (signature, _) => signature }
       .toSet
 }
 
@@ -137,16 +151,19 @@ object MultiTransactionSignature {
         "signatures",
         signaturesSeqP,
       )
+      distinctSigs = TopologyTransactionSignature.distinctSignatures(signatures)
+      transactionHashSet = transactionHashes.toSet
       _ <- Either
         .cond(
-          transactionHashes.contains(transactionHash.hash),
+          transactionHashSet.contains(transactionHash.hash),
           (),
           ProtoDeserializationError
             .InvariantViolation("transaction_hashes", "does not contain the transaction hash"),
         )
         .leftWiden[ProtoDeserializationError]
-    } yield signatures.map { signature =>
-      MultiTransactionSignature(transactionHashes.toSet.map(TxHash(_)), signature)
+      txHashes = transactionHashSet.map(TxHash(_))
+    } yield distinctSigs.toSeq.map { signature =>
+      MultiTransactionSignature(txHashes, signature)
     }
   }
 }

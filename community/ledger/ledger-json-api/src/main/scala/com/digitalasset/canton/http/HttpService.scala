@@ -11,6 +11,7 @@ import com.daml.logging.LoggingContextOf
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.ports.{Port, PortFiles}
 import com.daml.tls.{
+  RevocationCheckingTrustManagerFactory,
   ServerAuthRequirementConfig,
   TlsClientCertificate,
   TlsClientConfig,
@@ -48,7 +49,7 @@ import org.apache.pekko.stream.Materializer
 import java.io.InputStream
 import java.nio.file.{Files, Path}
 import java.security.cert.{Certificate, CertificateFactory}
-import java.security.{Key, KeyStore}
+import java.security.{Key, KeyStore, SecureRandom}
 import javax.net.ssl.{KeyManagerFactory, SSLContext, TrustManagerFactory}
 import scala.concurrent.Future
 import scala.jdk.CollectionConverters.*
@@ -210,7 +211,7 @@ object HttpService extends NoTracing {
 
   def buildSSLContext(config: TlsServerConfig): SSLContext = {
     val serverKeyStore = buildKeyStore(config)
-    buildSSLContext(serverKeyStore)
+    buildSSLContext(serverKeyStore, serverTrustManagerFactory(config, serverKeyStore))
   }
 
   def buildSSLContext(config: TlsClientConfig): SSLContext = {
@@ -218,12 +219,29 @@ object HttpService extends NoTracing {
     buildSSLContext(keyStore)
   }
 
-  def buildSSLContext(keyStore: KeyStore): SSLContext = {
-    import java.security.SecureRandom
+  def buildSSLContext(keyStore: KeyStore): SSLContext =
+    buildSSLContext(keyStore, buildTrustManagerFactory(keyStore))
 
+  /** Trust managers used to verify client certificates. If certificate revocation checking is
+    * enabled and client certificates are requested, the check is scoped to this SSL context (see
+    * [[com.daml.tls.RevocationCheckingTrustManagerFactory]]), also when no trust collection is
+    * configured. Otherwise, if no trust collection is configured, the trust anchors of the JVM
+    * default trust store are used.
+    */
+  private[http] def serverTrustManagerFactory(
+      config: TlsServerConfig,
+      serverKeyStore: KeyStore,
+  ): TrustManagerFactory =
+    if (config.checkClientCertRevocation)
+      RevocationCheckingTrustManagerFactory(config.trustCollectionFile)
+    else if (config.trustCollectionFile.isEmpty) defaultTrustManagerFactory()
+    else buildTrustManagerFactory(serverKeyStore)
+
+  private def buildSSLContext(
+      keyStore: KeyStore,
+      trustManagerFactory: TrustManagerFactory,
+  ): SSLContext = {
     val keyManagerFactory = buildKeyManagerFactory(keyStore)
-
-    val trustManagerFactory = buildTrustManagerFactory(keyStore)
 
     val context = SSLContext.getInstance("TLS")
     context.init(
@@ -251,6 +269,16 @@ object HttpService extends NoTracing {
   private[http] def buildTrustManagerFactory(keyStore: KeyStore): TrustManagerFactory = {
     val trustManagerFactory = TrustManagerFactory.getInstance("PKIX")
     trustManagerFactory.init(keyStore)
+    trustManagerFactory
+  }
+
+  /** PKIX trust manager backed by the JVM default trust store. Used on the server side when no
+    * trust collection is configured, consistent with the gRPC Ledger API server.
+    */
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  private def defaultTrustManagerFactory(): TrustManagerFactory = {
+    val trustManagerFactory = TrustManagerFactory.getInstance("PKIX")
+    trustManagerFactory.init(null: KeyStore)
     trustManagerFactory
   }
 
@@ -298,9 +326,7 @@ object HttpService extends NoTracing {
   private def buildKeyStore(config: TlsServerConfig): KeyStore = buildKeyStore(
     config.certChainFile.pemStream,
     config.privateKeyFile.pemFile.unwrap.toPath,
-    config.trustCollectionFile
-      .getOrElse(sys.error("unexpected empty value for trustCollectionFile"))
-      .pemStream,
+    config.trustCollectionFile.map(_.pemStream),
   )
 
   private def buildKeyStore(config: TlsClientConfig): KeyStore = {
@@ -325,6 +351,15 @@ object HttpService extends NoTracing {
       certFile: InputStream,
       privateKeyFile: Path,
       caCertFile: InputStream,
+  ): KeyStore = buildKeyStore(certFile, privateKeyFile, Some(caCertFile))
+
+  /** @param caCertFileO
+    *   trusted CA certificate. If absent, the key store contains no trusted certificate entries.
+    */
+  private def buildKeyStore(
+      certFile: InputStream,
+      privateKeyFile: Path,
+      caCertFileO: Option[InputStream],
   ): KeyStore = {
     val alias = "key" // This can be anything as long as it's consistent.
 
@@ -332,13 +367,13 @@ object HttpService extends NoTracing {
     val certs = Using.resource(certFile) { stream =>
       cf.generateCertificates(stream).asScala.toArray[Certificate]
     }
-    val caCert = Using.resource(caCertFile)(cf.generateCertificate(_))
+    val caCertO = caCertFileO.map(Using.resource(_)(cf.generateCertificate(_)))
     val privateKey = loadPrivateKey(privateKeyFile)
 
     val keyStore = KeyStore.getInstance("PKCS12")
     keyStore.load(emptyLoadStoreParameter)
     keyStore.setKeyEntry(alias, privateKey, emptyPassword, certs)
-    keyStore.setCertificateEntry("trusted-ca", caCert)
+    caCertO.foreach(keyStore.setCertificateEntry("trusted-ca", _))
     keyStore
   }
 

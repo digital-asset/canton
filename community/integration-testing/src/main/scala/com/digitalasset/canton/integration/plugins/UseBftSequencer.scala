@@ -366,7 +366,6 @@ final class UseBftSequencer(
             val existingBlockSequencerConfig =
               config.sequencers.get(selfInstanceName).map(_.sequencer) match {
                 case Some(bft: SequencerConfig.BftSequencer) => bft.block
-                case Some(external: SequencerConfig.External) => external.block
                 case _ => BlockSequencerConfig()
               }
             if (shouldBenchmarkBftSequencer)

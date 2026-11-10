@@ -56,7 +56,7 @@ final class LsuSessionSigningKeysIntegrationTest
   )
 
   override protected def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms :+ ConfigTransforms.setSigningKeysIfPV35OrHigher(
+    super.configTransforms :+ ConfigTransforms.setSigningKeys(
       SessionSigningKeysConfig.enabled
     )
   override lazy val environmentDefinition: EnvironmentDefinition =

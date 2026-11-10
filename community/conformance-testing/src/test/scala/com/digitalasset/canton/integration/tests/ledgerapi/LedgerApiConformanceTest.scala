@@ -225,14 +225,14 @@ object LedgerApiConformanceBase {
     "RaceConditionIT:RWTransientCreateVsNonTransientCreate",
   )
 
-  private val excludedTestsForPV35AndAbove = Seq(
-    // Test disabled due to package dependency unvetting becoming supported starting with PV35
+  private val excludedTests = Seq(
+    // Test disabled due to package dependency unvetting becoming supported starting with pv=35
     "VettingIT:PVCheckUnvettedPackagesExceptWithForceFlag"
   )
 
   @nowarn("msg=is never used")
   def excludedTests(version: ProtocolVersion, protocolType: ProtocolType): Set[String] = {
-    val perProtocolVersionExclusions = excludedTestsForPV35AndAbove
+    val perProtocolVersionExclusions = excludedTests
     (disabledTests ++ perProtocolVersionExclusions).toSet
   }
 }

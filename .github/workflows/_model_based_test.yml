@@ -1,0 +1,80 @@
+name: Model Based Test
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+      protocol_version:
+        required: true
+        type: string
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  model_based_test:
+    name: Model Based Test
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 130
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Start Postgres container
+        id: start_postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: 0
+
+      - name: Set Canton Protocol Version
+        uses: ./.github/actions/test/set_canton_protocol_version
+        with:
+          protocol_version: ${{ inputs.protocol_version }}
+
+      - name: Run Model Based Tests
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: >-
+            dumpClassPath "testOnly com.digitalasset.canton.integration.tests.modelbased.*
+            -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+          execution_context_size: '8'
+          # No failed-only rerun, as on CircleCI: a flake must fail the run instead of
+          # passing on retry, and a rerun would not fit in the job's timeout-minutes.
+          failed_only_rerun: 'false'
+          num_parallel_tasks: '1'
+          num_test_buckets: '0'
+          # These tests break often, as they do not run on every PR, so failures are kept
+          # out of the flaky test pipeline and alerted by the nightly notify job instead.
+          report_to_datadog: 'false'
+          setup_gcp_kms: 'false'
+          # Must stay below the job's timeout-minutes so the sbt wrapper reports the timeout
+          # and the cleanup steps still run.
+          timeout: '120m'
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.start_postgres.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: model_based_test
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: model_based_test
+      shard_job_result: ${{ needs.model_based_test.result }}
+      runner: ${{ inputs.runner }}
+      protocol_version: ${{ inputs.protocol_version }}

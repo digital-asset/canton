@@ -5,11 +5,11 @@ package com.digitalasset.canton.integration.tests.sequencer.bftordering
 
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.integration.plugins.UseBftSequencer
-import com.digitalasset.canton.integration.tests.sequencer.reference.ReferenceDynamicOnboardingIntegrationTestBase
+import com.digitalasset.canton.integration.tests.sequencer.base.DynamicOnboardingIntegrationTestBase
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 
 class BftOrderingDynamicOnboardingIntegrationTest
-    extends ReferenceDynamicOnboardingIntegrationTestBase(BftSequencerFactory.ShortName) {
+    extends DynamicOnboardingIntegrationTestBase(BftSequencerFactory.ShortName) {
 
   import BftOrderingDynamicOnboardingIntegrationTest.*
 

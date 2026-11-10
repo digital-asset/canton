@@ -16,6 +16,16 @@ package object data {
   }
   type Numeric = Numeric.Numeric
 
+  val Uint256: Uint256Module = new Uint256Module {
+    override type Uint256 = java.math.BigInteger
+    @inline
+    override private[data] def cast(x: java.math.BigInteger): Uint256 = x
+    override val ZERO: Uint256 = java.math.BigInteger.ZERO
+    override val ONE: Uint256 = java.math.BigInteger.ONE
+    override val MaxValue: Uint256 = MODULUS.subtract(java.math.BigInteger.ONE)
+  }
+  type Uint256 = Uint256.Uint256
+
   type Relation[A, B] = Map[A, Set[B]]
 
   val Text: TextModule = TextModuleImpl

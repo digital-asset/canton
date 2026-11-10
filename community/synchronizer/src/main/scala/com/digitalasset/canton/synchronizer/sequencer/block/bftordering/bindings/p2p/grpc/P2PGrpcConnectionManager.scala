@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 
 import cats.data.OptionT
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -1281,7 +1281,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
             s"Executor shut down, shutting down gRPC channel $channelId to $p2pEndpointId directly"
           )
           closeAuthenticationContextAndShutDownChannel().discard
-      }(DirectExecutionContext(noTracingLogger)))
+      }(directExecutionContext))
     } else {
       logger.info(
         s"No need to shut down gRPC channel $channelId with authentication context $authenticationContextO " +

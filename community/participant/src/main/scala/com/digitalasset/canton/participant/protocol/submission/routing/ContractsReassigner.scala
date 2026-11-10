@@ -5,8 +5,6 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
 import cats.syntax.parallel.*
-import com.digitalasset.canton.LfSubmissionId
-import com.digitalasset.canton.data.ReassignmentSubmitterMetadata
 import com.digitalasset.canton.error.TransactionRoutingError
 import com.digitalasset.canton.error.TransactionRoutingError.AutomaticReassignmentForTransactionFailure
 import com.digitalasset.canton.ledger.participant.state.{
@@ -17,6 +15,7 @@ import com.digitalasset.canton.ledger.participant.state.{
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentSubmissionInfo
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizersLookup
 import com.digitalasset.canton.platform.apiserver.services.command.SubmissionAccounting
 import com.digitalasset.canton.protocol.*
@@ -25,6 +24,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.{LfPackageId, LfSubmissionId}
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
@@ -40,6 +40,7 @@ private[routing] class ContractsReassigner(
       submitterInfo: SubmitterInfo,
       synchronizerState: RoutingSynchronizerState,
       accounting: SubmissionAccounting,
+      validatedContractPackageIds: Map[LfContractId, Set[LfPackageId]],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionRoutingError, Unit] =
@@ -82,16 +83,27 @@ private[routing] class ContractsReassigner(
           ),
         )
 
+        _ <- {
+          val allCids = synchronizerRankTarget.reassignments.values.flatten.toSet
+          val missing = allCids -- validatedContractPackageIds.keySet
+          EitherTUtil.condUnitET[FutureUnlessShutdown](
+            missing.isEmpty,
+            TransactionRoutingError.AutomaticReassignmentForTransactionFailure.Failed(
+              s"Contracts without validation packages detected: $missing"
+            ),
+          )
+        }
+
         // The source topology is read from a map, not recomputed. Each batch only submits its
         // reassignment.
         _ <- synchronizerRankTarget.reassignments.toSeq
           .parTraverse_ { case ((lfParty, sourceSynchronizerId, _), cids) =>
             val randomSuffix = UUID.randomUUID().toString.replace("-", "")
 
-            def reassignmentSubmitterMetadata(isUnassigned: Boolean) = {
+            def reassignmentSubmissionInfo(isUnassigned: Boolean) = {
               val kind = if (isUnassigned) "u" else "a"
 
-              ReassignmentSubmitterMetadata(
+              ReassignmentSubmissionInfo(
                 submitter = lfParty,
                 submittingParticipant = submittingParticipant,
                 commandId = submitterInfo.commandId,
@@ -110,14 +122,19 @@ private[routing] class ContractsReassigner(
                 synchronizerState.getTopologySnapshotFor(sourceSynchronizerId)
               )
 
+              // We check above all reassigned contracts are validated
+              validatedContractIds = validatedContractPackageIds.view
+                .filterKeys(cids.contains)
+                .toMap
+
               _ <- perform(
                 Source(sourceSynchronizerId),
                 Source(sourceTopology),
                 Target(targetPsid),
                 Target(targetTopology),
-                Source(reassignmentSubmitterMetadata(isUnassigned = true)),
-                Target(reassignmentSubmitterMetadata(isUnassigned = false)),
-                cids.toSeq,
+                Source(reassignmentSubmissionInfo(isUnassigned = true)),
+                Target(reassignmentSubmissionInfo(isUnassigned = false)),
+                validatedContractIds,
                 accounting,
               )
                 .mapK(FutureUnlessShutdown.outcomeK)
@@ -133,9 +150,9 @@ private[routing] class ContractsReassigner(
       sourceTopology: Source[TopologySnapshot],
       targetSynchronizerId: Target[PhysicalSynchronizerId],
       targetTopology: Target[TopologySnapshot],
-      submitterUnassignmentMetadata: Source[ReassignmentSubmitterMetadata],
-      submitterAssignmentMetadata: Target[ReassignmentSubmitterMetadata],
-      contractIds: Seq[LfContractId],
+      unassignmentSubmissionInfo: Source[ReassignmentSubmissionInfo],
+      assignmentSubmissionInfo: Target[ReassignmentSubmissionInfo],
+      validatedContractIds: Map[LfContractId, Set[LfPackageId]],
       accounting: SubmissionAccounting,
   )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, Unit] = {
     val reassignment = for {
@@ -159,13 +176,11 @@ private[routing] class ContractsReassigner(
         )
 
       unassignmentResult <- sourceSynchronizer
-        .submitUnassignments(
-          submitterUnassignmentMetadata.value,
-          contractIds,
+        .submitAutoUnassignments(
+          unassignmentSubmissionInfo.value,
+          validatedContractIds,
           targetSynchronizerId,
           sourceTopology,
-          overrideSourceValidationPkgIds = Source(Map.empty),
-          overrideTargetValidationPkgIds = Target(Map.empty),
           accounting,
         )
         .mapK(FutureUnlessShutdown.outcomeK)
@@ -188,7 +203,7 @@ private[routing] class ContractsReassigner(
 
       assignmentResult <- targetSynchronizer
         .submitAssignments(
-          submitterAssignmentMetadata.value,
+          assignmentSubmissionInfo.value,
           unassignmentResult.reassignmentId,
           targetTopology,
           accounting,

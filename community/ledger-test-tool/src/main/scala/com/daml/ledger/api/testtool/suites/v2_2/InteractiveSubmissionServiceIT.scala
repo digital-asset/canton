@@ -627,6 +627,49 @@ final class InteractiveSubmissionServiceIT(override protected val testDars: Test
   })
 
   test(
+    "ISSExecuteFailOnNonWellFormedTransaction",
+    "Fail all execute variants if the transaction is not well-formed",
+    allocate(SingleExternalParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party: ExternalParty))) =>
+    for {
+      created <- executeAndWaitForTransaction(ledger, party, new Dummy(party).create.commands)
+      dummy = Dummy.ContractId.fromContractId(
+        new com.daml.ledger.javaapi.data.codegen.ContractId(
+          created.getTransaction.events.headOption.value.getCreated.contractId
+        )
+      )
+      prepareResponse <- ledger.prepareSubmission(
+        ledger.prepareSubmissionRequest(party, dummy.exerciseDummyChoice1().commands)
+      )
+      transaction = prepareResponse.getPreparedTransaction.getTransaction
+      rootId = assertSingleton("Prepared transaction roots", transaction.roots)
+      // The root exercise lists itself as its only child
+      tampered = prepareResponse.update(
+        _.preparedTransaction.transaction.nodes := transaction.nodes.map(node =>
+          if (node.nodeId == rootId) node.update(_.v1.exercise.children := Seq(rootId))
+          else node
+        )
+      )
+      expectedMessage = Some(s"Transaction is not well-formed: AliasedNode [$rootId]")
+      _ <- ledger
+        .executeSubmission(ledger.executeSubmissionRequest(party, tampered))
+        .mustFailWith("Execute", InteractiveSubmissionExecuteError.code, expectedMessage)
+      _ <- ledger
+        .executeSubmissionAndWait(ledger.executeSubmissionAndWaitRequest(party, tampered))
+        .mustFailWith("Execute and wait", InteractiveSubmissionExecuteError.code, expectedMessage)
+      _ <- ledger
+        .executeSubmissionAndWaitForTransaction(
+          ledger.executeSubmissionAndWaitForTransactionRequest(party, tampered, None)
+        )
+        .mustFailWith(
+          "Execute and wait for transaction",
+          InteractiveSubmissionExecuteError.code,
+          expectedMessage,
+        )
+    } yield ()
+  })
+
+  test(
     "ISSDuplicateExecuteAndWaitForTransactionData",
     "ExecuteSubmissionAndWaitForTransaction should fail on duplicate requests",
     allocate(SingleExternalParty),

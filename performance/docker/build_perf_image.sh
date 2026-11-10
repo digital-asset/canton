@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 version_tag=$(date +"%Y%m%d")
-release_suffix="3.7.0-snapshot-$(date -u +%F).$(git rev-parse --short HEAD)"
+release_suffix="3.8.0-snapshot-$(date -u +%F).$(git rev-parse --short HEAD)"
 
 echo "... Preparing files for docker builds"
 ../pack-performance.sh -p -s

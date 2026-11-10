@@ -1,0 +1,11 @@
+[profile.default]
+src = "."
+test = "."
+libs = []
+solc_version = "0.8.26"
+# Keep build output out of the test resources (sbt copies them to the classpath).
+# These paths point to community/daml-lf/data-tests/target, so `sbt clean` removes them.
+out = "../../../../target/forge/out"
+cache_path = "../../../../target/forge/cache"
+fs_permissions = [{ access = "read", path = "." }]
+

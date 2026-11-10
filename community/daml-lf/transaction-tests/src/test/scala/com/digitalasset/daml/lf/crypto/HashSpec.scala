@@ -6,7 +6,15 @@ package crypto
 
 import com.digitalasset.daml.lf.crypto.Hash.{Purpose, noCid2String}
 import com.digitalasset.daml.lf.data.Ref.PackageName
-import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Numeric, Ref, SortedLookupList, Time}
+import com.digitalasset.daml.lf.data.{
+  Bytes,
+  FrontStack,
+  ImmArray,
+  Numeric,
+  Ref,
+  SortedLookupList,
+  Time,
+}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.*
 import com.digitalasset.daml.lf.value.test.TypedValueGenerators.ValueAddend as VA
@@ -1187,17 +1195,17 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
   "Hash.hashAssignmentReassignmentId" should {
 
-    val reassignmentId = Ref.HexString.assertFromString("00" + "a" * 64)
+    val reassignmentId = Bytes.assertFromString("00" + "a" * 64)
 
     "not produce collisions" in {
       Hash.hashAssignmentReassignmentId(reassignmentId) should not be
-        Hash.hashAssignmentReassignmentId(Ref.HexString.assertFromString("00" + "b" * 64))
+        Hash.hashAssignmentReassignmentId(Bytes.assertFromString("00" + "b" * 64))
     }
 
     "be stable" in {
       Hash.hashAssignmentReassignmentId(reassignmentId) shouldBe
         Hash.assertFromString(
-          "38efc06b129aac674e2f14bd553908eea3bfaec39490e9b7fd26013e41767930"
+          "8f6059a96730efcc7ff4138c8769f1277478e9ee60c590421e465d25cbae5a77"
         )
     }
   }

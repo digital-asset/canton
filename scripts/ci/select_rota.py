@@ -69,7 +69,7 @@ DEFAULT_ROTATION_COLUMNS = 1
 
 # CircleCI job name -> rotation to ping when that job fails on main (the red-main ping).
 # Exact matches win, then TEST_JOB_PREFIXES, then everything else pings the CI rota. Keep in
-# sync with the jobs that invoke slack_red_main_with_volunteer.
+# sync with the jobs that invoke slack_notify_failure_with_volunteer.
 JOB_ROTATION: dict[str, str] = {
     "blackduck": "release-blackduck",
 }

@@ -275,9 +275,9 @@ class ModelConformanceCheckerTest
     }
   }
 
-  // From protocol version 35 exceptions can only be caught if there have not been ledger modifications
+  // Exceptions can only be caught if there have not been ledger modifications
   // inside the try-catch block. This section tests allowable modifications (no choice execution, non consuming execution)
-  // and ones that are not allowed as part of PV35 (contract creation, consuming execution).
+  // and ones that are not allowed (contract creation, consuming execution).
   "When exceptions are thrown during submission" should {
 
     val underTest: ModelConformanceChecker = buildUnderTest()
@@ -609,7 +609,6 @@ class ModelConformanceCheckerTest
       val extra = CreatedContract.tryCreate(
         contract = ExampleContractFactory.build(),
         consumedInCore = false,
-        rolledBack = false,
       )
 
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
@@ -767,7 +766,6 @@ class ModelConformanceCheckerTest
       },
       suffixed.metadata,
       WellFormedTransaction.WithoutSuffixes,
-      PathRollbackContextFactory,
     )
 
   // Verify that an (un-mutated) example passes model conformance checking
@@ -792,7 +790,6 @@ class ModelConformanceCheckerTest
           example.tx,
           TransactionMetadata.fromLf(example.ledgerTime, example.metadata),
           WellFormedTransaction.WithoutSuffixes,
-          PathRollbackContextFactory,
         )
       )
 
@@ -826,7 +823,6 @@ class ModelConformanceCheckerTest
         lfTransaction = example.tx,
         metadata = TransactionMetadata.fromLf(example.ledgerTime, example.metadata),
         state = WellFormedTransaction.WithoutSuffixes,
-        PathRollbackContextFactory,
       )
 
     val submitterInfo = SubmitterInfo(

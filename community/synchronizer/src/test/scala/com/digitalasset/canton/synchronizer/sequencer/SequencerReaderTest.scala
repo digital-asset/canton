@@ -16,7 +16,7 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.SuppressionRule.FullSuppression
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.sequencing.SequencedSerializedEvent
+import com.digitalasset.canton.sequencing.ConnectionSerializedEvent
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.protocol.ProtocolObjectTestUtils.assertSequencedEventEquals
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
@@ -186,7 +186,7 @@ class SequencerReaderTest
         member: Member,
         timestampInclusive: Option[CantonTimestamp],
         take: Int,
-    ): FutureUnlessShutdown[Seq[SequencedSerializedEvent]] =
+    ): FutureUnlessShutdown[Seq[ConnectionSerializedEvent]] =
       FutureUnlessShutdown.outcomeF(
         valueOrFail(reader.read(member, timestampInclusive).failOnShutdown)(
           s"Events source for $member"
@@ -208,7 +208,7 @@ class SequencerReaderTest
     def readWithQueueFUS(
         member: Member,
         timestampInclusive: Option[CantonTimestamp],
-    ): FutureUnlessShutdown[SinkQueueWithCancel[SequencedSerializedEvent]] = {
+    ): FutureUnlessShutdown[SinkQueueWithCancel[ConnectionSerializedEvent]] = {
 
       val subscribeF = valueOrFail(reader.read(member, timestampInclusive).failOnShutdown)(
         s"Events source for $member"
@@ -231,7 +231,7 @@ class SequencerReaderTest
     def readWithQueue(
         member: Member,
         timestampInclusive: Option[CantonTimestamp],
-    ): SinkQueueWithCancel[SequencedSerializedEvent] =
+    ): SinkQueueWithCancel[ConnectionSerializedEvent] =
       Source
         .future(
           valueOrFail(reader.read(member, timestampInclusive).failOnShutdown)(
@@ -248,8 +248,8 @@ class SequencerReaderTest
         .runWith(Sink.queue())
 
     def pullFromQueue(
-        queue: SinkQueueWithCancel[SequencedSerializedEvent]
-    ): FutureUnlessShutdown[Option[SequencedSerializedEvent]] =
+        queue: SinkQueueWithCancel[ConnectionSerializedEvent]
+    ): FutureUnlessShutdown[Option[ConnectionSerializedEvent]] =
       FutureUnlessShutdown.outcomeF(queue.pull())
 
     def waitFor(duration: FiniteDuration): FutureUnlessShutdown[Unit] =

@@ -1,0 +1,16 @@
+helmDefaults:
+  diffArgs:
+    - "--dry-run=server"
+
+releases:
+  - name: perf-test
+    namespace: perf-test
+    chart: perf-test/
+    values:
+      - perf-test/values.yaml
+
+  - name: monitoring
+    chart: monitoring/
+    namespace: monitoring
+    values:
+      - monitoring/values.yaml

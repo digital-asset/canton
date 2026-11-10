@@ -6,13 +6,12 @@ package com.digitalasset.canton.protocol
 import com.daml.ledger.javaapi.data.Identifier
 import com.digitalasset.canton.ComparesLfTransactions.{TxTree, buildLfTransaction}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.{CantonTimestamp, RollbackContextFactory}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithAbsoluteSuffixes
 import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier}
 import com.digitalasset.canton.util.LfTransactionUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   ComparesLfTransactions,
@@ -32,7 +31,7 @@ import org.scalatest.wordspec.AnyWordSpec
 /** Tests WellFormedTransaction.merge particularly with respect to handling of top-level rollback
   * nodes.
   */
-class TransactionMergeTest
+final class TransactionMergeTest
     extends AnyWordSpec
     with BaseTest
     with HasExecutionContext
@@ -44,16 +43,12 @@ class TransactionMergeTest
   private val bob = PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"bob::party"))
   private val carol = PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"bob::party"))
 
-  private val rollbackContextFactory = RollbackContextFactory(testedProtocolVersion)
-  private val emptyRollbackScope = rollbackContextFactory.empty.rollbackScope
-  private val underTest = TransactionMerge(testedProtocolVersion)
-  private val testingWithNoPathMerge = testedProtocolVersion >= ProtocolVersion.v36
+  private val rollbackContextFactory = RollbackScope
+  private val emptyRollbackScope = rollbackContextFactory.empty
+  private val underTest = TransactionMerge
 
   private def rollbackScopeForPath(path: Seq[PositiveInt]): RollbackScope =
-    if (testingWithNoPathMerge)
-      NoPathRollbackScope(inRollback = path.nonEmpty)
-    else
-      PathRollbackScope(path)
+    RollbackScope(inRollback = path.nonEmpty)
 
   // Top-level lf transaction builder for "state-less" lf node creations.
   private implicit val tb: TestNodeBuilder = TestNodeBuilder
@@ -125,8 +120,8 @@ class TransactionMergeTest
 
     "wrap transactions under common rollback" when {
       "single transaction has multiple roots" in {
-        val actual = merge(inputTransaction(Seq(1), Seq(subTxTree1) ++ subTxTree2: _*))
-        val expected = expectedTransaction(TxTree(tb.rollback(), Seq(subTxTree1) ++ subTxTree2: _*))
+        val actual = merge(inputTransaction(Seq(1), (Seq(subTxTree1) ++ subTxTree2)*))
+        val expected = expectedTransaction(TxTree(tb.rollback(), (Seq(subTxTree1) ++ subTxTree2)*))
 
         assertTransactionsMatch(expected, actual)
       }
@@ -136,14 +131,10 @@ class TransactionMergeTest
           inputTransaction(Seq(1), subTxTree1),
           inputTransaction(Seq(1), subTxTree2*),
         )
-        val expected =
-          if (testingWithNoPathMerge)
-            expectedTransaction(
-              TxTree(tb.rollback(), subTxTree1),
-              TxTree(tb.rollback(), subTxTree2*),
-            )
-          else
-            expectedTransaction(TxTree(tb.rollback(), Seq(subTxTree1) ++ subTxTree2: _*))
+        val expected = expectedTransaction(
+          TxTree(tb.rollback(), subTxTree1),
+          TxTree(tb.rollback(), subTxTree2*),
+        )
 
         assertTransactionsMatch(expected, actual)
       }
@@ -156,18 +147,10 @@ class TransactionMergeTest
           inputTransaction((1 to levels).map(PositiveInt.tryCreate), subTxTree2*),
         )
 
-        val expected =
-          if (testingWithNoPathMerge)
-            expectedTransaction(
-              TxTree(tb.rollback(), subTxTree1),
-              TxTree(tb.rollback(), subTxTree2*),
-            )
-          else
-            expectedTransaction(
-              (2 to levels).foldLeft(TxTree(tb.rollback(), Seq(subTxTree1) ++ subTxTree2: _*)) {
-                case (a, _) => TxTree(tb.rollback(), a)
-              }
-            )
+        val expected = expectedTransaction(
+          TxTree(tb.rollback(), subTxTree1),
+          TxTree(tb.rollback(), subTxTree2*),
+        )
 
         assertTransactionsMatch(expected, actual)
 
@@ -180,7 +163,7 @@ class TransactionMergeTest
           inputTransaction(Seq(1), subTxTree1),
           inputTransaction(Seq.empty, subTxTree2*),
         )
-        val expected = expectedTransaction(Seq(TxTree(tb.rollback(), subTxTree1)) ++ subTxTree2: _*)
+        val expected = expectedTransaction((Seq(TxTree(tb.rollback(), subTxTree1)) ++ subTxTree2)*)
 
         assertTransactionsMatch(expected, actual)
       }
@@ -202,9 +185,9 @@ class TransactionMergeTest
           inputTransaction(Seq(1), subTxTree3),
         )
         val expected = expectedTransaction(
-          Seq(TxTree(tb.rollback(), subTxTree1)) ++
+          (Seq(TxTree(tb.rollback(), subTxTree1)) ++
             subTxTree2 :+
-            TxTree(tb.rollback(), subTxTree3): _*
+            TxTree(tb.rollback(), subTxTree3))*
         )
 
         assertTransactionsMatch(expected, actual)
@@ -239,31 +222,16 @@ class TransactionMergeTest
 
         val actual = merge(transactions*)
 
-        val expected =
-          if (testingWithNoPathMerge)
-            expectedTransaction(
-              (
-                Seq.empty[TxTree]
-                  :+ subTxTree0
-                  :+ TxTree(tb.rollback(), subTxTree1)
-                  :+ TxTree(tb.rollback(), subTxTree2*)
-                  :+ TxTree(tb.rollback(), subTxTree3)
-                  :+ subTxTree4
-              )*
-            )
-          else
-            expectedTransaction(
-              subTxTree0,
-              TxTree(
-                tb.rollback(),
-                subTxTree1,
-                TxTree(
-                  tb.rollback(),
-                  subTxTree2 :+ TxTree(tb.rollback(), TxTree(tb.rollback(), subTxTree3)): _*
-                ),
-              ),
-              subTxTree4,
-            )
+        val expected = expectedTransaction(
+          (
+            Seq.empty[TxTree]
+              :+ subTxTree0
+              :+ TxTree(tb.rollback(), subTxTree1)
+              :+ TxTree(tb.rollback(), subTxTree2*)
+              :+ TxTree(tb.rollback(), subTxTree3)
+              :+ subTxTree4
+          )*
+        )
 
         assertTransactionsMatch(expected, actual)
       }
@@ -277,31 +245,16 @@ class TransactionMergeTest
           inputTransaction(Seq.empty, subTxTree4),
         )
 
-        val expected =
-          if (testingWithNoPathMerge)
-            expectedTransaction(
-              (
-                Seq.empty[TxTree]
-                  :+ subTxTree0
-                  :+ TxTree(tb.rollback(), subTxTree1)
-                  :+ TxTree(tb.rollback(), subTxTree2*)
-                  :+ TxTree(tb.rollback(), subTxTree3)
-                  :+ subTxTree4
-              )*
-            )
-          else
-            expectedTransaction(
-              subTxTree0,
-              TxTree(
-                tb.rollback(),
-                TxTree(
-                  tb.rollback(),
-                  TxTree(tb.rollback(), Seq(TxTree(tb.rollback(), subTxTree1)) ++ subTxTree2: _*),
-                ),
-                subTxTree3,
-              ),
-              subTxTree4,
-            )
+        val expected = expectedTransaction(
+          (
+            Seq.empty[TxTree]
+              :+ subTxTree0
+              :+ TxTree(tb.rollback(), subTxTree1)
+              :+ TxTree(tb.rollback(), subTxTree2*)
+              :+ TxTree(tb.rollback(), subTxTree3)
+              :+ subTxTree4
+          )*
+        )
 
         assertTransactionsMatch(expected, actual)
       }
@@ -317,26 +270,16 @@ class TransactionMergeTest
           inputTransaction(Seq.empty, subTxTree4),
         )
 
-        val expected =
-          if (testingWithNoPathMerge)
-            expectedTransaction(
-              (
-                Seq.empty[TxTree]
-                  :+ subTxTree0
-                  :+ TxTree(tb.rollback(), subTxTree1)
-                  :++ subTxTree2
-                  :+ TxTree(tb.rollback(), subTxTree3)
-                  :+ subTxTree4
-              )*
-            )
-          else
-            expectedTransaction(
-              Seq(subTxTree0) :+
-                TxTree(tb.rollback(), TxTree(tb.rollback(), TxTree(tb.rollback(), subTxTree1))) :++
-                subTxTree2 :+
-                TxTree(tb.rollback(), TxTree(tb.rollback(), TxTree(tb.rollback(), subTxTree3))) :+
-                subTxTree4: _*
-            )
+        val expected = expectedTransaction(
+          (
+            Seq.empty[TxTree]
+              :+ subTxTree0
+              :+ TxTree(tb.rollback(), subTxTree1)
+              :++ subTxTree2
+              :+ TxTree(tb.rollback(), subTxTree3)
+              :+ subTxTree4
+          )*
+        )
 
         assertTransactionsMatch(expected, actual)
       }
@@ -351,7 +294,7 @@ class TransactionMergeTest
           contractArg: VersionedValue,
       ): WithRollbackScope[WellFormedTransaction[WithAbsoluteSuffixes.type]] =
         WithRollbackScope(
-          rollbackContextFactory.empty.rollbackScope,
+          RollbackScope.empty,
           WellFormedTransaction
             .check(
               transaction(
@@ -360,7 +303,6 @@ class TransactionMergeTest
               ),
               factory.mkMetadata(Map(NodeId(0) -> lfHash(0))),
               WithAbsoluteSuffixes,
-              rollbackContextFactory,
             )
             .value,
         )
@@ -393,7 +335,6 @@ class TransactionMergeTest
             ),
             factory.mkMetadata(Map(NodeId(0) -> lfHash(0))),
             WithAbsoluteSuffixes,
-            rollbackContextFactory,
           )
           .value,
       )
@@ -633,8 +574,7 @@ class TransactionMergeTest
       assertTransactionsMatch(expectedTx, actualTx.unwrap.unwrap)
 
       // ensure a subsequent merge call does not get upset about root-level rollback nodes
-      val (mergedTx, err) =
-        TransactionMerge(testedProtocolVersion).merge(NonEmpty.apply(Seq, actualTx))
+      val (mergedTx, err) = TransactionMerge.merge(NonEmpty.apply(Seq, actualTx))
       err shouldBe None
       val expectedMergedTx =
         expectedTransaction(
@@ -666,7 +606,6 @@ class TransactionMergeTest
             },
           ),
           WithAbsoluteSuffixes,
-          rollbackContextFactory,
         ),
       )
     )
@@ -685,7 +624,7 @@ class TransactionMergeTest
     wftx.unwrap
   }
 
-  private def create[T](
+  private def create(
       cid: LfContractId,
       template: Identifier,
       payer: PartyId,

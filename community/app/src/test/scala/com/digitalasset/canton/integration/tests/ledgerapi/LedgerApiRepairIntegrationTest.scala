@@ -12,7 +12,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.repair.RepairServiceIntegrationTest
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.lifecycle.RunOnClosing
-import com.digitalasset.canton.sequencing.SequencedSerializedEvent
+import com.digitalasset.canton.sequencing.ConnectionSerializedEvent
 import com.digitalasset.canton.sequencing.client.DelayedSequencerClient
 import com.digitalasset.canton.sequencing.client.DelayedSequencerClient.{
   DelaySequencerClient,
@@ -172,7 +172,7 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
       .delayedSequencerClient(this.getClass.getSimpleName, sync, participant.id.uid.toString)
       .value
     participantSequencerClientInterceptor.setDelayPolicy(new SequencedEventDelayPolicy {
-      override def apply(sse: SequencedSerializedEvent): DelaySequencerClient = {
+      override def apply(sse: ConnectionSerializedEvent): DelaySequencerClient = {
         val isEmpty = sse.signedEvent.content match {
           case d: Deliver[?] => d.batch.envelopes.isEmpty
           case _ => false

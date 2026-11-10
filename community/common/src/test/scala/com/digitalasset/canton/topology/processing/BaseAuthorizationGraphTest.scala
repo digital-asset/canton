@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.processing
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeyUsage, SigningPublicKey}
 import com.digitalasset.canton.topology.DefaultTestIdentities.sequencerId

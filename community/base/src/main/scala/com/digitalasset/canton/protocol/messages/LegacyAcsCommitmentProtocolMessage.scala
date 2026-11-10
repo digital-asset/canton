@@ -20,9 +20,8 @@ import com.digitalasset.canton.version.{
 }
 import com.digitalasset.nonempty.NonEmpty
 
-/** INTERNAL protocol message type used for ACS commitments in transit starting with PV35. Do NOT
-  * USE this message outside of envelope transit (e.g.,
-  * `ClosedUncompressedEnvelope.tryFromProtocolMessage` and
+/** INTERNAL protocol message type used for ACS commitments in transit. Do NOT USE this message
+  * outside of envelope transit (e.g., `ClosedUncompressedEnvelope.tryFromProtocolMessage` and
   * `ClosedUncompressedEnvelope.toOpenEnvelope`).
   *
   * This type allows us to hide the signatures from the sequencer so that they are not verified when

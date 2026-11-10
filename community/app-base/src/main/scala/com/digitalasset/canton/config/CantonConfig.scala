@@ -2191,10 +2191,6 @@ object CantonConfig {
         Map("type" -> BftSequencerFactory.ShortName).toConfig
           .withFallback(sequencerConfigBftSequencerWriter.to(bftSequencerConfig))
 
-      case otherSequencerConfig: SequencerConfig.External =>
-        import pureconfig.syntax.*
-        Map("type" -> "reference").toConfig
-
       case deprecated: SequencerConfig.DeprecatedSequencerConfig =>
         import pureconfig.syntax.*
         Map("type" -> deprecated.sequencerType).toConfig

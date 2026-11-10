@@ -1370,6 +1370,44 @@ class SBuiltinTest
         }
       }
 
+      "TEXT_TO_CONTRACT_ID" - {
+        val builtin = e"TEXT_TO_CONTRACT_ID @Mod:T"
+
+        def textToCid(s: String) =
+          eval(Ast.EApp(builtin, Ast.EBuiltinLit(Ast.BLText(s))))
+
+        "returns Some for a valid absolute (suffixed) contract id" in {
+          val cid = ContractId.V1(
+            Hash.hashPrivateKey("abc"),
+            Bytes.fromByteArray(Array(-1, 0, 1, 2)),
+          )
+          textToCid(cid.coid) shouldBe Right(SOptional(Some(SContractId(cid))))
+        }
+
+        "returns None for a local (unsuffixed) contract id" in {
+          val cid = ContractId.V1(Hash.hashPrivateKey("abc"))
+          textToCid(cid.coid) shouldBe Right(SOptional(None))
+        }
+
+        "returns None for malformed input" in {
+          val validCid =
+            ContractId.V1(Hash.hashPrivateKey("abc"), Bytes.fromByteArray(Array(-1))).coid
+          val negativeTestCases = Table(
+            "input",
+            "",
+            "abc",
+            "00",
+            "00" + "z" * 64,
+            "#contract1",
+            " " + validCid,
+            validCid + " ",
+          )
+          forEvery(negativeTestCases) { s =>
+            textToCid(s) shouldBe Right(SOptional(None))
+          }
+        }
+      }
+
       "handle ridiculously huge strings" in {
 
         val testCases = Table(

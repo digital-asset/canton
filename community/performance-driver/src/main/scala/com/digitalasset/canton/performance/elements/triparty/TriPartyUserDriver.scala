@@ -117,26 +117,41 @@ class TriPartyUserDriver(
     loggerFactory,
   ) {}
 
-  private val assetRequests = new ContractStore[
-    M.triparty.bootstrap.BootstrapAsset.Contract,
-    M.triparty.bootstrap.BootstrapAsset.ContractId,
-    M.triparty.bootstrap.BootstrapAsset,
+  private val accountRequests = new ContractStore[
+    M.triparty.bootstrap.BootstrapUserAccount.Contract,
+    M.triparty.bootstrap.BootstrapUserAccount.ContractId,
+    M.triparty.bootstrap.BootstrapUserAccount,
     Unit,
   ](
-    "assetRequests",
-    M.triparty.bootstrap.BootstrapAsset.COMPANION,
+    "accountRequests",
+    M.triparty.bootstrap.BootstrapUserAccount.COMPANION,
     index = _ => (),
     filter = _ => true,
     loggerFactory,
   ) {}
 
-  listeners.appendAll(Seq(assets, agreements, settlementApp, assetRequests))
+  private val BootstrapUser =
+    new ContractStore[
+      M.triparty.bootstrap.BootstrapUser.Contract,
+      M.triparty.bootstrap.BootstrapUser.ContractId,
+      M.triparty.bootstrap.BootstrapUser,
+      Unit,
+    ](
+      "bootstrap-custodian",
+      M.triparty.bootstrap.BootstrapUser.COMPANION,
+      index = _ => (),
+      filter = _ => true,
+      loggerFactory,
+    )
+
+  listeners.appendAll(Seq(assets, agreements, settlementApp, accountRequests, BootstrapUser))
 
   protected def subscribeToTemplates: Seq[javaapi.data.Identifier] = Seq(
     M.triparty.asset.Asset.TEMPLATE_ID,
     M.triparty.tripartyagreement.TriPartyAgreement.TEMPLATE_ID,
     M.triparty.settle.SettlementApp.TEMPLATE_ID,
-    M.triparty.bootstrap.BootstrapAsset.TEMPLATE_ID,
+    M.triparty.bootstrap.BootstrapUserAccount.TEMPLATE_ID,
+    M.triparty.bootstrap.BootstrapUser.TEMPLATE_ID,
   )
 
   override def flush(): Boolean =
@@ -147,24 +162,45 @@ class TriPartyUserDriver(
       } else if (
         updateParticipantFlagAndReturnReady(
           master
-        ) && !settlementApp.entirelyEmpty && assetRequests.entirelyEmpty
+        ) && !settlementApp.entirelyEmpty
       ) {
         rate.updateRate(CantonTimestamp.now())
         updateStats(master)
-        if (master.data.mode == Mode.PREPARETRADER || master.data.mode == Mode.THROUGHPUT) {
+        if (master.data.mode == Mode.PREPAREUSER || master.data.mode == Mode.THROUGHPUT) {
           updateTransferStats(master.data.mode)
           if (rate.available > 0) {
-            // open agreements first
-            if (!allAreOpen.get()) {
+            // first get assets
+            if (!accountRequests.entirelyEmpty || !BootstrapUser.entirelyEmpty) {
+              processAccountRequests()
+              // then open agreements
+            } else if (!allAreOpen.get()) {
               initAccountToSync(master.data)
               openAgreements()
-            } else {
+            } else if (master.data.mode == Mode.THROUGHPUT) {
               // run substitution transfers
-              substituteNext(attempts = accountToSync.size)
-            }
+              substituteNext(
+                // start with a random index
+                idx = scala.util.Random.nextInt(accountToSync.size),
+                attempts = accountToSync.size,
+              )
+            } else false
           } else false
         } else false
       } else false
+    }
+
+  private def processAccountRequests(): Boolean =
+    accountRequests.allAvailable.headOption.exists { request =>
+      val cmd = request.id.exerciseProcessBootstrap().commands().asScala.toSeq
+      val submissionF =
+        submitCommand(
+          "process-account-request",
+          cmd,
+          s"Processing account request ${request.data.accountIndex}",
+        )
+      setPending(accountRequests, request.id, submissionF)
+      rate.newSubmission(submissionF)
+      true
     }
 
   private def updateStats(master: M.orchestration.TestRun.Contract): Unit =
@@ -182,7 +218,7 @@ class TriPartyUserDriver(
       case _ => Instant.MIN
     }
     if (lastStatsUpdate < Instant.now.minusMillis(500)) {
-      logger.info(
+      logger.debug(
         s"mode $mode rate $rate, stats $transferStats"
       )
       currentStatus.set(
@@ -205,10 +241,10 @@ class TriPartyUserDriver(
   }
 
   @tailrec
-  private def substituteNext(attempts: Int): Boolean = if (attempts == 0) false
+  private def substituteNext(idx: Int, attempts: Int): Boolean = if (attempts == 0) false
   else {
-    // pick a random account
-    val (account, sync) = accountToSync(scala.util.Random.nextInt(accountToSync.size))
+    // pick next account
+    val (account, sync) = accountToSync(idx % accountToSync.size)
     agreements.one(account) match {
       case Some((_, agreement)) =>
         val (eligible, assetsInAccount) = eligibleAssets(agreement.data)
@@ -248,16 +284,7 @@ class TriPartyUserDriver(
               .asScala
               .toSeq
             logger.debug(
-              s"Submitting to $sync substitution for agreement " + agreement.data.account + "\n  " + substitutions.asScala
-                .map { s =>
-                  s"sub ${s.oldAssetId} / ${s.oldQty} => ${s.newAssetId} / ${s.newQty}"
-                }
-                .mkString("\n  ") + "\n  assets\n  :"
-                + assetsInAccount
-                  .map { a =>
-                    s"own=${a.data.owner} id=${a.data.id} acc=${a.data.account} qt=${a.data.qty}, cid=${a.id}\n"
-                  }
-                  .mkString("\n  ")
+              s"Submitting to $sync substitution for agreement " + agreement.data.account
             )
             val submissionF =
               submitCommand(
@@ -285,7 +312,7 @@ class TriPartyUserDriver(
             false
         }
 
-      case None => substituteNext(attempts - 1)
+      case None => substituteNext(idx + 1, attempts - 1)
     }
 
   }
@@ -313,8 +340,8 @@ class TriPartyUserDriver(
 
   private def initAccountToSync(master: M.orchestration.TestRun): Unit =
     // as bootstrap creates all agreements at once, we can populate the accountToSync once
-    if (accountToSync.isEmpty && !agreements.entirelyEmpty && assetRequests.entirelyEmpty) {
-      val myIdx = master.traders.indexOf(partyLf)
+    if (accountToSync.isEmpty && !agreements.entirelyEmpty && accountRequests.entirelyEmpty) {
+      val myIdx = master.users.indexOf(partyLf)
       if (myIdx < 0) {
         sys.error("The party is not listed in the master contracts traders list.")
       }
@@ -399,7 +426,7 @@ class TriPartyUserDriver(
                 .find { case (account, _) => account == agreement.data.account }
                 .map(_._2)
               logger.info(
-                s"Opening agreement ${agreement.data.account} on sync $syncId with sub ${settle.data.registry}"
+                s"Opening agreement ${agreement.data.account} on sync $syncId with assets=${assetsInAccount.size} with sub ${settle.data.registry}"
               )
               val submissionF =
                 submitCommand(
@@ -441,13 +468,13 @@ class TriPartyUserDriver(
           true
         } else if (res.data.flag == M.orchestration.ParticipantFlag.INITIALISING) {
           // waiting for settlement app to show up
-          if (settlementApp.entirelyEmpty || !assetRequests.entirelyEmpty || !allAreOpen.get()) {
+          if (settlementApp.entirelyEmpty || !accountRequests.entirelyEmpty || !allAreOpen.get()) {
             ensureFlag(ParticipantFlag.INITIALISING)
             val (open, notopen) = agreements.all.partition { case (_, _, agreement) =>
               agreement.data.amount.compareTo(BigDecimal.valueOf(0)) > 0
             }
             logger.info(
-              s"Driver is not yet ready. SettlementApps=${settlementApp.totalNum}, asset-requests=${assetRequests.totalNum}, agreements-open=${open.size}, agreements-not-open=${notopen.size}, all-are-open=${allAreOpen.get()}"
+              s"Driver is not yet ready. SettlementApps=${settlementApp.totalNum}, account-requests=${accountRequests.totalNum}, agreements-open=${open.size}, agreements-not-open=${notopen.size}, all-are-open=${allAreOpen.get()}"
             )
           } else {
             updateFlag(res, M.orchestration.ParticipantFlag.READY)

@@ -5,6 +5,7 @@ package com.digitalasset.canton.protocol.messages
 
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{
   Fingerprint,
   Signature,
@@ -12,6 +13,7 @@ import com.digitalasset.canton.crypto.{
   SigningKeysWithThreshold,
   SigningPublicKey,
   TestHash,
+  v30 as cryptoV30,
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.{TestSynchronizerParameters, TopologyLimits, v30}
@@ -1047,6 +1049,37 @@ final class TopologyTransactionTest
             Seq(multiTxSigP(maxHashes + 1, 1), multiTxSigP(maxHashes + 1, maxSignatures)),
           ),
         ).value.transaction shouldBe tx
+      }
+
+      "keep only the first multi transaction signature per signing key" in {
+        def signatureOfP(key: String, content: String): cryptoV30.Signature =
+          SymbolicCrypto
+            .signature(
+              ByteString.copyFromUtf8(content),
+              Fingerprint.tryFromString(key),
+            )
+            .toProtoV30
+
+        val firstSignatureOfKey1 = signatureOfP("key1", "first")
+        val secondSignatureOfKey1 = signatureOfP("key1", "second")
+        val signatureOfKey2 = signatureOfP("key2", "other")
+
+        val multiSignaturesP = v30.MultiTransactionSignatures(
+          transactionHashes = ProtoUnvalidatedSeq(Seq(tx.hash.hash.getCryptographicEvidence)),
+          signatures = ProtoUnvalidatedSeq(
+            Seq(firstSignatureOfKey1, secondSignatureOfKey1, signatureOfKey2)
+          ),
+        )
+
+        val parsedSignatures = parse(
+          ProtocolVersionValidation.AlwaysValidation,
+          signedTopoTxP(0, Seq(multiSignaturesP)),
+        ).value.signatures
+
+        parsedSignatures.forgetNE.map(_.signature) shouldBe Set(
+          Signature.fromProtoV30(firstSignatureOfKey1).value,
+          Signature.fromProtoV30(signatureOfKey2).value,
+        )
       }
     }
 

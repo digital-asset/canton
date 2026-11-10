@@ -251,7 +251,7 @@ trait MessageDispatcher { this: NamedLogging =>
     */
   protected def processBatch(
       sequencerCounter: SequencerCounter,
-      eventE: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      eventE: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
   )(implicit traceContext: TraceContext): ProcessingResult = {
     val deliver = eventE.event.content
     // TODO(#13883) Validate the topology timestamp
@@ -321,7 +321,7 @@ trait MessageDispatcher { this: NamedLogging =>
     )
 
   private def processTransactionAndReassignmentMessages(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       sc: SequencerCounter,
       ts: CantonTimestamp,
       envelopes: Seq[DefaultOpenEnvelope],
@@ -760,7 +760,7 @@ trait MessageDispatcher { this: NamedLogging =>
       sc: SequencerCounter,
       ts: CantonTimestamp,
       msgId: Option[MessageId],
-      evt: SignedContent[DecompressedSequencedEvent[DefaultOpenEnvelope]],
+      evt: AggregatedSignedContent[DecompressedSequencedEvent[DefaultOpenEnvelope]],
   )(implicit traceContext: TraceContext): Unit = {
     val envelopes = SequencedEvent.envelopesOf(evt.content)
     if (logger.underlying.isDebugEnabled)

@@ -44,7 +44,7 @@ import com.digitalasset.canton.participant.config.{
   AlphaOnlinePartyReplicationConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.CircuitBreakerConfig
-import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{BftSequencer, External}
+import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.BftSequencer
 import com.digitalasset.canton.synchronizer.sequencer.config.{
   AlphaSequencerChannelConfig,
   SequencerNodeConfig,
@@ -105,7 +105,6 @@ sealed trait OnlinePartyReplicationNegotiationTest
 
     config.focus(_.sequencer).modify {
       case bft: BftSequencer => bft.focus(_.block.circuitBreaker).replace(disabledCb)
-      case ext: External => ext.focus(_.block.circuitBreaker).replace(disabledCb)
       case other => other
     }
   }
@@ -473,7 +472,6 @@ sealed trait OnlinePartyReplicationNegotiationTest
       val participantWithParty = participant1
       val participantWithParty2 = participant2
       val participantWithoutParty = participant3
-      val synchronizerId = participantWithParty.synchronizers.list_connected().head.synchronizerId
 
       import scala.concurrent.duration.*
 
@@ -652,17 +650,6 @@ sealed trait OnlinePartyReplicationNegotiationTest
             }
         }
 
-      def findLatestPtpTopologyTimestamp(participant: LocalParticipantReference): CantonTimestamp =
-        CantonTimestamp
-          .fromInstant(
-            participant.topology.party_to_participant_mappings
-              .list(synchronizerId, filterParty = aliceName)
-              .head
-              .context
-              .validFrom
-          )
-          .value
-
       testParsingError(
         "bad-party-id-format",
         "Invalid partyId .*Invalid unique identifier .* with missing namespace",
@@ -700,7 +687,8 @@ sealed trait OnlinePartyReplicationNegotiationTest
         "PartyToParticipant mapping for party .* doesn't exist for either source or target participant",
         sourceParticipant = participantWithoutParty,
         targetParticipant = participantWithParty,
-        timestamp = findLatestPtpTopologyTimestamp(participantWithParty),
+        // timestamp after which the party is known to the synchronizer:
+        timestamp = CantonTimestamp.MaxValue,
       )
 
       testAgreementError(

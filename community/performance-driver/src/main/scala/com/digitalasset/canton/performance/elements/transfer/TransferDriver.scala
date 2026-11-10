@@ -198,7 +198,7 @@ class TransferDriver(
   override def masterCreated(master: TestRun.Contract): Unit = {
     super.masterCreated(master)
     traderBalancer.set(
-      master.data.traders.asScala.map(new Party(_)).filter(_ != party).toIndexedSeq
+      master.data.users.asScala.map(new Party(_)).filter(_ != party).toIndexedSeq
     )
     masterChanged.set(true)
   }
@@ -295,7 +295,7 @@ class TransferDriver(
     // Update so the following queries to rate.available observe an updated value
     rate.updateRate(CantonTimestamp.now())
     initExisting()
-    val havePreapprovals = createTransferPreapprovals(master.data.traders.asScala.toSeq)
+    val havePreapprovals = createTransferPreapprovals(master.data.users.asScala.toSeq)
     val haveAssets =
       acquireAssets(master, params.payloadSize, params.numAssetsPerActor, params.transferBatchSize)
     val res = updateParticipantFlagAndReturnReady(master, havePreapprovals && haveAssets)
@@ -317,7 +317,7 @@ class TransferDriver(
           val baseFilter = role.issuers.map(_ + "::")
           // if there is a new issuer that we haven't seen before
           val issuers =
-            master.data.issuers.asScala.toSeq
+            master.data.providers.asScala.toSeq
               .filterNot(res.data.processedIssuers.contains)
               .filter(issuerUid => baseFilter.isEmpty || baseFilter.exists(issuerUid.startsWith))
           if (issuers.isEmpty)
@@ -452,8 +452,8 @@ class TransferDriver(
           assets.totalNum,
         )
         master.data.mode match {
-          case Mode.PREPAREISSUER => false
-          case Mode.PREPARETRADER =>
+          case Mode.PREPAREPROVIDER => false
+          case Mode.PREPAREUSER =>
             prepareAndDetermineIfWeAreReady(master, params).discard
             false
           case Mode.THROUGHPUT =>

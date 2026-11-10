@@ -18,11 +18,13 @@ object DriverStatus {
       approvalsPerSecond: Double,
       totalProposals: Long,
       totalApprovals: Long,
+      participants: Map[(String, String), Int],
   ) extends DriverStatus {
 
     override def toString: String =
-      s"master(age=${Instant.now.toEpochMilli - timestamp.toEpochMilli}ms, mode=$mode, tps=${"%1.1f" format (proposalsPerSecond + approvalsPerSecond)}, total=${totalProposals + totalApprovals})"
-
+      s"master(age=${Instant.now.toEpochMilli - timestamp.toEpochMilli}ms, mode=$mode, tps=${"%1.1f" format (proposalsPerSecond + approvalsPerSecond)}, total=${totalProposals + totalApprovals}), participants=${participants.toSeq
+          .map { case ((role, flag), count) => s"$role/$flag=$count" }
+          .mkString(",")})"
   }
 
   final case class StepStatus(submitted: Int, observed: Int, open: Int) {

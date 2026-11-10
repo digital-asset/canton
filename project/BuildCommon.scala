@@ -712,8 +712,6 @@ object BuildCommon {
       `daml-script-tests`,
       `performance-driver`,
       performance,
-      `sequencer-driver-api`,
-      `reference-sequencer-driver`,
       blake2b,
       `slick-fork`,
       `wartremover-extension`,
@@ -1226,8 +1224,7 @@ object BuildCommon {
     lazy val `community-synchronizer` = project
       .in(file("community/synchronizer"))
       .dependsOn(
-        `community-common` % "compile->compile;test->test",
-        `reference-sequencer-driver`,
+        `community-common` % "compile->compile;test->test"
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -1565,49 +1562,6 @@ object BuildCommon {
         sharedCantonCommunitySettings
       )
 
-    // Project for specifying the sequencer driver API
-    lazy val `sequencer-driver-api` = project
-      .in(file("community/sequencer-driver"))
-      .dependsOn(
-        `util-external`,
-        `util-observability`,
-      )
-      .settings(
-        sharedCantonCommunitySettings,
-        libraryDependencies ++= Seq(
-          logback_classic,
-          logback_core,
-          scala_logging,
-          scala_collection_contrib,
-          scalatest % Test,
-          mockito_scala % Test,
-          scalatestMockito % Test,
-          better_files,
-          cats,
-          jul_to_slf4j % Test,
-          log4j_core,
-          log4j_api,
-          monocle_macro, // Include it here, even if unused, so that it can be used everywhere
-          pureconfig_core,
-        ),
-        dependencyOverrides ++= Seq(log4j_core, log4j_api),
-      )
-
-    lazy val `reference-sequencer-driver` = project
-      .in(file("community/reference-sequencer-driver"))
-      .dependsOn(
-        `util-external`,
-        `community-common` % "compile->compile;test->test",
-        `sequencer-driver-api` % "compile->compile;test->test",
-      )
-      .settings(
-        sharedCantonCommunitySettings,
-        dependencyOverrides ++= Seq(log4j_core, log4j_api),
-        Compile / PB.targets := Seq(
-          scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
-        ),
-      )
-
     lazy val blake2b = project
       .in(file("community/lib/Blake2b"))
       .disablePlugins(BufPlugin, ScalafmtPlugin, JavaFormatterPlugin, WartRemover)
@@ -1869,11 +1823,9 @@ object BuildCommon {
           },
         )
 
-    // The TlsCertificateRevocationCheckingSpec relies on the "com.sun.net.ssl.checkRevocation" system variable to
-    // function properly. However, if another test (e.g. TlsSpec) modifies this variable, the change will not be
-    // realized. This happens since java.sun.security.validator.PKIXValidator uses a static variable that is initialized
-    // by the system variable "com.sun.net.ssl.checkRevocation". To ensure that the test runs correctly it needs to be
-    // executed in its own JVM instance that is isolated from other tests.
+    // Runs the TlsCertificateRevocationCheckingSpec in its own test group so that it does not run concurrently with
+    // other suites (e.g. TlsSpec). The TLS fixtures all bind the Ledger API server to a dynamic port and therefore
+    // register the same in-process gRPC name ("inprocess-grpc-0"), which fails when two of them run at the same time.
     def separateRevocationTest(
         tests: Seq[TestDefinition]
     ): Seq[Group] = {
@@ -3535,6 +3487,7 @@ object BuildCommon {
           scalacheck % Test,
           scalatest % Test,
           scalatestScalacheck % Test,
+          circe_parser % Test,
         ),
         addProtobufFilesToHeaderCheck(Compile),
         // TODO(#30144): replace with @nowarn once the bazel targets are deleted
@@ -3988,6 +3941,7 @@ object BuildCommon {
         excludeTranscodeConflictingDependencies,
         libraryDependencies ++= Seq(
           google_protobuf_java,
+          google_protobuf_java_util,
           scalatest % Test,
           scopt,
         ),
@@ -4008,6 +3962,14 @@ object BuildCommon {
           System.setProperty("damlVersion", Dependencies.daml_libraries_version)
           System.setProperty("dpmRegistry", Dependencies.dpm_registry)
         },
+        // corpus-tests is a multi-package project whose suites CantonTestsCorpus records
+        Test / parallelDamlBuildSourceInput := baseDirectory.value / "corpus-tests",
+        Test / testOptions += {
+          val dars = (Test / parallelDamlBuildDarsOutput).value.getAbsolutePath
+          Tests.Setup(() => System.setProperty("corpusTestsDars", dars))
+        },
+        Test / test := (Test / test).dependsOn(Test / parallelDamlBuild).value,
+        Test / testOnly := (Test / testOnly).dependsOn(Test / parallelDamlBuild).evaluated,
       )
 
     lazy val `daml-lf-interpreter` = project

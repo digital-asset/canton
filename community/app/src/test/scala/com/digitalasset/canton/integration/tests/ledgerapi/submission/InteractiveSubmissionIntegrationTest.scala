@@ -253,6 +253,43 @@ final class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIn
       )
     }
 
+    "fail executing a transaction with a self-referencing exercise node" in { implicit env =>
+      val cycle = createCycleContract(epn, aliceE, "self-referencing-exercise")
+
+      val prepared = cpn.ledger_api.javaapi.interactive_submission.prepare(
+        Seq(aliceE.partyId),
+        Seq(cycle.id.exerciseRepeat().commands().loneElement),
+        hashingSchemeVersion = testedApiHashingSchemeVersion,
+      )
+      val preparedTx = prepared.preparedTransaction.value
+      val rootId = preparedTx.transaction.value.roots.loneElement
+      val rootNode = preparedTx.transaction.value.nodes.find(_.nodeId == rootId).value
+
+      // Keep only the root exercise node and make it its own (only) child
+      val selfReferencingRoot = rootNode.update(_.v1.exercise.children := Seq(rootId))
+      val cyclicTx = preparedTx.update(
+        _.transaction.nodes := Seq(selfReferencingRoot),
+        _.transaction.nodeSeeds := preparedTx.transaction.value.nodeSeeds
+          .filter(_.nodeId.toString == rootId),
+      )
+
+      assertThrowsAndLogsCommandFailures(
+        epn.ledger_api.interactive_submission.execute(
+          cyclicTx,
+          // No interest in the signature
+          Map(aliceE.partyId -> Seq.empty),
+          UUID.randomUUID().toString,
+          prepared.hashingSchemeVersion,
+        ),
+        entry => {
+          entry.shouldBeCantonErrorCode(CommandExecutionErrors.InteractiveSubmissionExecuteError)
+          entry.errorMessage should (include("Failed to deserialize transaction") and include(
+            s"Transaction is not well-formed: AliasedNode [$rootId]"
+          ))
+        },
+      )
+    }
+
     "require threshold-many signatures from different keys" in { implicit env =>
       import env.*
 
@@ -985,8 +1022,6 @@ final class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIn
 
     "fail in phase 1 if the number of signatures is above the number of registered keys" in {
       implicit env =>
-        import env.*
-
         val prepared = ppn.ledger_api.javaapi.interactive_submission.prepare(
           Seq(aliceE.partyId),
           Seq(
@@ -999,7 +1034,9 @@ final class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIn
         )
 
         val maxSignatures =
-          participant1.config.ledgerApi.interactiveSubmissionService.maximumNumberOfSignaturesPerParty
+          epn.config.ledgerApi.interactiveSubmissionService.maximumNumberOfSignaturesPerParty
+        val limitMessage =
+          s"One or more parties provided more than the maximum number of signatures allowed ($maxSignatures)"
 
         val sigs = List.fill(maxSignatures.increment.value.value)(
           env.global_secret.sign(
@@ -1009,11 +1046,22 @@ final class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIn
           )
         )
 
-        execFailure(
-          prepared,
-          Map(aliceE.partyId -> sigs),
-          s"One or more parties provided more than the maximum number of signatures allowed ($maxSignatures)",
-        )
+        execFailure(prepared, Map(aliceE.partyId -> sigs), limitMessage)
+
+        Seq(
+          () => execAndWait(prepared, Map(aliceE.partyId -> sigs)),
+          () => execAndWaitForTransaction(prepared, Map(aliceE.partyId -> sigs)),
+        ).foreach { execute =>
+          loggerFactory.assertThrowsAndLogs[CommandFailure](
+            execute(),
+            entry => {
+              entry.shouldBeCantonErrorCode(
+                CommandExecutionErrors.InteractiveSubmissionExecuteError
+              )
+              entry.errorMessage should include(limitMessage)
+            },
+          )
+        }
     }
 
     "fail in phase 1 if the number of signatures is under the threshold" in { implicit env =>

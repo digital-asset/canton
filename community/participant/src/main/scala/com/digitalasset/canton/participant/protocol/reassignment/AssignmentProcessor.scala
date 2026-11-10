@@ -15,7 +15,6 @@ import com.digitalasset.canton.data.{
   CantonTimestamp,
   ContractReassignment,
   ContractsReassignmentBatch,
-  ReassignmentSubmitterMetadata,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
@@ -133,7 +132,7 @@ class AssignmentProcessor private (
       submissionParam: AssignmentProcessingSteps.SubmissionParam
   ): MetricsContext =
     MetricsContext(
-      "user-id" -> submissionParam.submitterMetadata.userId,
+      "user-id" -> submissionParam.submissionInfo.userId,
       "type" -> "assignment",
     )
 
@@ -145,7 +144,7 @@ class AssignmentProcessor private (
   ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
     ReassignmentProcessingSteps.registerWithTrafficEnforcement(
       trafficEnforcementBackendO,
-      submissionParam.submitterMetadata,
+      submissionParam.submissionInfo,
       submissionParam.accounting,
       trafficCost,
       logger,
@@ -159,7 +158,7 @@ class AssignmentProcessor private (
     *   A collection of contracts with common stakeholders.
     */
   def buildSubmissionBatchForCostEstimation(
-      submitterMetadata: ReassignmentSubmitterMetadata,
+      submissionInfo: ReassignmentSubmissionInfo,
       contracts: Seq[ContractInstance],
       sourceSynchronizer: Source[PhysicalSynchronizerId],
       sourceSnapshot: Source[TopologySnapshot],
@@ -200,7 +199,7 @@ class AssignmentProcessor private (
 
       data <- assignmentSteps.buildSubmissionData(
         reassignmentId,
-        submitterMetadata,
+        submissionInfo,
         batch,
         sourceSynchronizer,
         mediator,

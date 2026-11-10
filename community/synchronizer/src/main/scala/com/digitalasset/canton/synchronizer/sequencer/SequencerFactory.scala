@@ -16,9 +16,7 @@ import com.digitalasset.canton.synchronizer.sequencer.HASequencerExclusiveStorag
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
   BftSequencer,
   DeprecatedSequencerConfig,
-  External,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.DriverBlockSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
 import com.digitalasset.canton.synchronizer.sequencer.time.{
@@ -169,20 +167,6 @@ object SequencerMetaFactory {
           nodeParameters,
           metrics,
           executorServiceMetrics,
-          loggerFactory,
-          blockSequencerConfig.testingInterceptor,
-        )
-
-      case External(blockSequencerConfig, config) =>
-        DriverBlockSequencerFactory(
-          config,
-          blockSequencerConfig,
-          health,
-          storage,
-          protocolVersion,
-          sequencerId,
-          nodeParameters,
-          metrics,
           loggerFactory,
           blockSequencerConfig.testingInterceptor,
         )

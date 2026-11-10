@@ -128,10 +128,7 @@ object ContractStateMachineGenerativeSpec {
   private val dummyTmplId: Ref.TypeConId = Ref.TypeConId.assertFromString("-dummy-:Mod:T")
 
   private val generators =
-    new ConcreteGenerators(
-      contractKeys = true,
-      readOnlyRollbacks = true,
-    )
+    new ConcreteGenerators(contractKeys = true)
 
   private val pkgName: Ref.PackageName = Ref.PackageName.assertFromString("test-package")
   private val templateId: Ref.TypeConId = "Mod:T"

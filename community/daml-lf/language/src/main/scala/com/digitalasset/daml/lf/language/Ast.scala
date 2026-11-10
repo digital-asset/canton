@@ -508,6 +508,8 @@ object Ast {
   final case object BTextToInt64 extends BuiltinFunction // : Text -> Optional Int64
   final case object BTextToNumeric
       extends BuiltinFunction // :  ∀s.  Numeric s → Text -> Optional (Numeric s)
+  final case object BTextToContractId
+      extends BuiltinFunction // : forall t. Text -> Optional (ContractId t)
   final case object BTextToCodePoints extends BuiltinFunction // : Text -> List Int64
 
   final case object BSHA256Text extends BuiltinFunction // : Text -> Text

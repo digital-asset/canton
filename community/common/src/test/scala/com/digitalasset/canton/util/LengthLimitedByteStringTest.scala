@@ -4,6 +4,9 @@
 package com.digitalasset.canton.util
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
+import com.digitalasset.canton.validation.ProtoUnvalidatedByteString
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -52,6 +55,41 @@ class LengthLimitedByteStringTest extends AnyWordSpec with BaseTest {
 
       s256.hashCode() == s.hashCode() shouldBe true
       s256.hashCode() == bar.hashCode() shouldBe false
+    }
+
+    "have a correctly working .fromProtoPrimitive" in {
+      val validBytes = ByteString.copyFromUtf8("a" * 256)
+      val tooLongBytes = ByteString.copyFromUtf8("a" * 257)
+
+      val ok = ByteString256.fromProtoPrimitive(
+        ProtocolVersionValidation.AlwaysValidation,
+        "someField",
+        ProtoUnvalidatedByteString(validBytes),
+      )
+      ok.value.unwrap shouldBe validBytes
+
+      val notOk = ByteString256.fromProtoPrimitive(
+        ProtocolVersionValidation.AlwaysValidation,
+        "someField",
+        ProtoUnvalidatedByteString(tooLongBytes),
+      )
+      val err = notOk.left.value
+      err shouldBe a[InvariantViolation]
+      err.message should (include("exceeds maximum limit of 256 bytes") and include("someField"))
+    }
+
+    "return InvariantViolation on oversized payload when using NoValidation" in {
+      val oversizedBytes = ProtoUnvalidatedByteString(
+        ByteString.copyFrom(new Array[Byte](ByteString190.maxLength + 1))
+      )
+
+      val result = ByteString190.fromProtoPrimitive(
+        ProtocolVersionValidation.NoValidation,
+        "test_field",
+        oversizedBytes,
+      )
+
+      result.left.value shouldBe a[InvariantViolation]
     }
   }
 }

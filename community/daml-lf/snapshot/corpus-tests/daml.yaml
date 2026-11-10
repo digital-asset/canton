@@ -1,0 +1,3 @@
+override-components:
+  damlc:
+    version: $DAML_VERSION

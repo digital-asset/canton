@@ -11,8 +11,8 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.tracing.Traced
 
-/** Removes the [[com.digitalasset.canton.sequencing.protocol.SignedContent]] wrapper before
-  * providing to a handler
+/** Removes the [[com.digitalasset.canton.sequencing.protocol.AggregatedSignedContent]] wrapper
+  * before providing to a handler
   */
 object StripSignature {
   def apply[Env <: Envelope[?]](

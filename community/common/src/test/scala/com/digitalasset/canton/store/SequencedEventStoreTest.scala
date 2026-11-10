@@ -191,7 +191,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
       event: SignedContent[DecompressedSequencedEvent[ClosedEnvelope]],
       traceContext: TraceContext = TraceContext.empty,
   ): SequencedSerializedEvent =
-    SequencedEventWithTraceContext(event)(traceContext)
+    SequencedEventWithTraceContext(SequencerTestUtils.aggregate(event))(traceContext)
 
   private def mkEmptyIgnoredEvent(
       counter: Long,

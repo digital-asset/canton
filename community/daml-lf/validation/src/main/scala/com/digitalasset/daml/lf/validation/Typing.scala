@@ -252,6 +252,7 @@ private[validation] object Typing {
         alpha.name -> KNat,
         TNumeric(alpha) ->: TText ->: TOptional(TNumeric(alpha)),
       ),
+      BTextToContractId -> TForall(alpha.name -> KStar, TText ->: TOptional(TContractId(alpha))),
       BTextToCodePoints -> (TText ->: TList(TInt64)),
       BError -> TForall(alpha.name -> KStar, TText ->: alpha),
       // ComparisonsA

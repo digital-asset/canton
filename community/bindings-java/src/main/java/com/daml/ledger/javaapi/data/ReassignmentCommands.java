@@ -94,7 +94,7 @@ public final class ReassignmentCommands {
         submitter,
         commands,
         submissionId,
-        Optional.of(accountId).filter(id -> !id.isEmpty()));
+        Utils.optionalNonEmpty(accountId));
   }
 
   @NonNull
@@ -152,18 +152,9 @@ public final class ReassignmentCommands {
 
   public static ReassignmentCommands fromProto(
       ReassignmentCommandOuterClass.ReassignmentCommands commands) {
-    Optional<String> workflowId =
-        commands.getWorkflowId().isEmpty()
-            ? Optional.empty()
-            : Optional.of(commands.getWorkflowId());
-
-    Optional<String> submissionId =
-        commands.getSubmissionId().isEmpty()
-            ? Optional.empty()
-            : Optional.of(commands.getSubmissionId());
-
-    Optional<String> accountId =
-        commands.getAccountId().isEmpty() ? Optional.empty() : Optional.of(commands.getAccountId());
+    Optional<String> workflowId = Utils.optionalNonEmpty(commands.getWorkflowId());
+    Optional<String> submissionId = Utils.optionalNonEmpty(commands.getSubmissionId());
+    Optional<String> accountId = Utils.optionalNonEmpty(commands.getAccountId());
 
     List<ReassignmentCommand> convertedCommands =
         commands.getCommandsList().stream()

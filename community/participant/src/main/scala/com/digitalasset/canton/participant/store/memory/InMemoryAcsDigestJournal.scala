@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -31,8 +31,7 @@ class InMemoryAcsDigestJournal[K](
     with NamedLogging {
   import InMemoryAcsDigestJournal.*
 
-  override protected val executionContext: ExecutionContext =
-    DirectExecutionContext(noTracingLogger)
+  override protected val executionContext: ExecutionContext = directExecutionContext
 
   private val journal: scala.collection.concurrent.Map[K, TreeMap[Offset, AcsDigestUpdate[K]]] =
     TrieMap[K, TreeMap[Offset, AcsDigestUpdate[K]]]()

@@ -40,7 +40,7 @@ import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.CircuitBreakerConfig
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
-import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{BftSequencer, External}
+import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.BftSequencer
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.topology.*
@@ -116,7 +116,6 @@ abstract class SynchronizerChangeIntegrationTest(
 
     config.focus(_.sequencer).modify {
       case bft: BftSequencer => bft.focus(_.block.circuitBreaker).replace(disabledCb)
-      case ext: External => ext.focus(_.block.circuitBreaker).replace(disabledCb)
       case other => other
     }
   }
@@ -383,7 +382,7 @@ abstract class SynchronizerChangeSimClockIntegrationTest
       participants: Seq[LocalParticipantReference],
       party: PartyId,
   ): (CantonTimestamp, CantonTimestamp) =
-    if (testedProtocolVersion <= ProtocolVersion.v36) {
+    if (testedProtocolVersion == ProtocolVersion.v36) {
       val exclusivityDeadline = CantonTimestamp
         .fromProtoTimestamp(
           getIncompleteUnassignedContracts(participants, party).assignmentExclusivity.value
@@ -848,7 +847,7 @@ trait SynchronizerChangeRealClockIntegrationTest
 
           val unassignedEvent = unassignedEvents.loneElement
 
-          if (testedProtocolVersion <= ProtocolVersion.v36)
+          if (testedProtocolVersion == ProtocolVersion.v36)
             // The time proof can vary depending on other concurrent events
             (CantonTimestamp
               .fromProtoTimestamp(unassignedEvent.assignmentExclusivity.value)

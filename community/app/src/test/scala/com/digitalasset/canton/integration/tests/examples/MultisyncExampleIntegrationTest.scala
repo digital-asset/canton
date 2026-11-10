@@ -84,7 +84,7 @@ class MultisyncExampleIntegrationTest
       }
 
   private val notVettedErrorMessage =
-    if (testedProtocolVersion <= ProtocolVersion.v36)
+    if (testedProtocolVersion == ProtocolVersion.v36)
       "has not vetted"
     else
       "requires package model-tests, which is not available on participants"

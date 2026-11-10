@@ -223,7 +223,7 @@ final class SequencerRateLimitManagerImplTest
     val eventCostDetails = EventCostDetails(
       trafficConfig.readVsWriteScalingFactor,
       groupToMembersSize = Map.empty, // Unused in this test
-      envelopes = Map.empty, // Unused in this test
+      envelopes = Nil, // Unused in this test
       correctCost,
     )
     when(
@@ -233,6 +233,7 @@ final class SequencerRateLimitManagerImplTest
           same(sequencingFactor),
           any[Map[GroupRecipient, Set[Member]]],
           any[NonNegativeLong],
+          same(testedProtocolVersion),
         )
     ).thenReturn(eventCostDetails)
 
@@ -306,7 +307,7 @@ final class SequencerRateLimitManagerImplTest
     val eventCostDetails = EventCostDetails(
       trafficConfig.readVsWriteScalingFactor,
       groupToMembersSize = Map.empty, // Unused in this test
-      envelopes = Map.empty, // Unused in this test
+      envelopes = Nil, // Unused in this test
       cost,
     )
     when(
@@ -316,6 +317,7 @@ final class SequencerRateLimitManagerImplTest
           same(senderFactor),
           any[Map[GroupRecipient, Set[Member]]],
           any[NonNegativeLong],
+          same(testedProtocolVersion),
         )
     )
       .thenReturn(eventCostDetails)
@@ -325,7 +327,7 @@ final class SequencerRateLimitManagerImplTest
     val eventCostDetails = EventCostDetails(
       trafficConfig.readVsWriteScalingFactor,
       groupToMembersSize = Map.empty, // Unused in this test
-      envelopes = Map.empty, // Unused in this test
+      envelopes = Nil, // Unused in this test
       eventCostNonNegative,
     )
     when(
@@ -335,6 +337,7 @@ final class SequencerRateLimitManagerImplTest
           any[PositiveInt],
           any[Map[GroupRecipient, Set[Member]]],
           any[NonNegativeLong],
+          same(testedProtocolVersion),
         )
     )
       .thenReturn(eventCostDetails)
@@ -452,7 +455,7 @@ final class SequencerRateLimitManagerImplTest
               EventCostDetails(
                 trafficConfig.readVsWriteScalingFactor,
                 Map.empty,
-                Map.empty,
+                Nil,
                 eventCostNonNegative,
               ),
             )
@@ -505,7 +508,7 @@ final class SequencerRateLimitManagerImplTest
               correctCostDetails = EventCostDetails(
                 trafficConfig.readVsWriteScalingFactor,
                 Map.empty,
-                Map.empty,
+                Nil,
                 eventCostNonNegative,
               ),
             )
@@ -532,7 +535,7 @@ final class SequencerRateLimitManagerImplTest
               EventCostDetails(
                 trafficConfig.readVsWriteScalingFactor,
                 Map.empty,
-                Map.empty,
+                Nil,
                 eventCostNonNegative,
               ),
             )
@@ -804,7 +807,7 @@ final class SequencerRateLimitManagerImplTest
               EventCostDetails(
                 trafficConfig.readVsWriteScalingFactor,
                 Map.empty,
-                Map.empty,
+                Nil,
                 eventCostNonNegative,
               ),
             )
@@ -870,7 +873,7 @@ final class SequencerRateLimitManagerImplTest
               EventCostDetails(
                 trafficConfig.readVsWriteScalingFactor,
                 Map.empty,
-                Map.empty,
+                Nil,
                 eventCostNonNegative,
               ),
             )
@@ -947,7 +950,7 @@ final class SequencerRateLimitManagerImplTest
     val eventCostDetails = EventCostDetails(
       trafficConfig.readVsWriteScalingFactor,
       groupToMembersSize = Map.empty, // Unused in this test
-      envelopes = Map.empty, // Unused in this test
+      envelopes = Nil, // Unused in this test
       eventCostNonNegative,
     )
     when(
@@ -957,6 +960,7 @@ final class SequencerRateLimitManagerImplTest
           same(sequencerFactor),
           any[Map[GroupRecipient, Set[Member]]],
           any[NonNegativeLong],
+          same(testedProtocolVersion),
         )
     )
       .thenReturn(eventCostDetails)

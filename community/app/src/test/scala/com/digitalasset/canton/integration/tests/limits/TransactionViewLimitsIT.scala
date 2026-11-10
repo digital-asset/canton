@@ -23,7 +23,6 @@ import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{Observation, Submission}
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.util.SetupPackageVetting
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.value.Value.ContractId
 import monocle.macros.syntax.lens.*
 
@@ -54,14 +53,13 @@ class TransactionViewLimitsIT
             synchronizerThreshold = PositiveInt.one,
             sequencers = Seq(sequencer1),
             mediators = Seq(mediator1),
-            overrideStaticSynchronizerParameters =
-              Option.when(testedProtocolVersion >= ProtocolVersion.v36)(
-                defaultSsp
-                  .focus(_.synchronizerLimits.transactionProtocolLimits.maxTransactionRootViews)
-                  .replace(PositiveInt.one)
-                  .focus(_.synchronizerLimits.transactionProtocolLimits.maxTransactionSubViews)
-                  .replace(PositiveInt.one)
-              ),
+            overrideStaticSynchronizerParameters = Option(
+              defaultSsp
+                .focus(_.synchronizerLimits.transactionProtocolLimits.maxTransactionRootViews)
+                .replace(PositiveInt.one)
+                .focus(_.synchronizerLimits.transactionProtocolLimits.maxTransactionSubViews)
+                .replace(PositiveInt.one)
+            ),
           )
         )
       }

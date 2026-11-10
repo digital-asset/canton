@@ -16,7 +16,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
   TopologyAdminCommands,
 }
 import com.digitalasset.canton.admin.api.client.data.{ListPartiesResult, PartyOnboardingFlagStatus}
-import com.digitalasset.canton.admin.participant.v30.ExportPartyAcsResponse
+import com.digitalasset.canton.admin.participant.v30.{ExportPartyAcsResponse, GetRemoteAcsResponse}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
 import com.digitalasset.canton.console.commands.TopologyTxFiltering.{
@@ -34,6 +34,7 @@ import com.digitalasset.canton.console.{
   Helpful,
   ParticipantReference,
 }
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.grpc.OutputFileStreamObserver
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -1018,6 +1019,93 @@ class ParticipantPartiesAdministrationGroup(
       )
     }
 
+  @Help.Summary(
+    "Retrieves the ACS for a given party from another, remote participant"
+  )
+  @Help.Description(
+    """This command retrieves the ACS for a given party from the specified source participant
+      |and the specified synchronizer via the target participant to which this request is
+      |addressed returning the ACS to the caller.
+      |
+      |Restricts the retrieval to contracts not already known to the target participant due to
+      |shared stakeholders hosted by the target participant.
+      |
+      |The command uses the specified `asOf` time to determine the precise state of the ACS to
+      |retrieve from the source participant. The target participant must be listed as a hosting
+      |participant at the `asOf` time.
+      |
+      |Upon successful completion, the command writes a GZIP-compressed ACS snapshot
+      |file. While designed to work in tandem with the `import_party_acs` command, the
+      |resulting file is a standard ACS snapshot that can also be used with other
+      |compatible commands (such as `repair.import_acs`).
+      |
+      |Parameters:
+      |- party: The party whose ACS is being read remotely.
+      |- synchronizerId: Restricts the remote read to the given synchronizer.
+      |- sourceParticipantId: Unique source participant identifier from which the ACS
+      |  will be retrieved.
+      |- asOf: The timestamp at which the ACS snapshot is remotely read.
+      |- getRemoteAcsFilePath: The path denoting the file where the ACS snapshot will be
+      |  stored. Defaults to "canton-remote-acs.gz" when undefined.
+      |- timeout: A timeout for this operation to complete.
+      """
+  )
+  def get_remote_acs(
+      party: PartyId,
+      synchronizerId: SynchronizerId,
+      sourceParticipantId: ParticipantId,
+      asOf: CantonTimestamp,
+      getRemoteAcsFilePath: String = "canton-remote-acs.gz",
+      timeout: config.NonNegativeDuration = timeouts.unbounded,
+  ): Unit =
+    consoleEnvironment.run {
+      val file = File(getRemoteAcsFilePath)
+      val responseObserver = new OutputFileStreamObserver[GetRemoteAcsResponse](file, _.chunk)
+
+      def call: ConsoleCommandResult[Context.CancellableContext] =
+        reference.adminCommand(
+          ParticipantAdminCommands.PartyManagement.GetRemoteAcs(
+            party,
+            synchronizerId,
+            sourceParticipantId,
+            asOf,
+            responseObserver,
+          )
+        )
+
+      processResult(
+        call,
+        responseObserver.result,
+        timeout,
+        request = "get remote acs",
+        cleanupOnError = () => file.delete(),
+      )
+    }
+
+  @Help.Summary(
+    "Looks up the timestamp as of which a party as been marked as `Freezing`"
+  )
+  @Help.Description(
+    """This command determines the point in time at which the specified party freezing state
+      |has started to become effective on the local participant and specified synchronizer.
+      |
+      |The party must still be in the freezing state for the command to return the freezing
+      |timestamp.
+      |
+      |Parameters:
+      |- party: The party whose freezing hosting state is to be looked up.
+      |- synchronizerId: The synchronizer in which to look for the freezing hosting state.
+      """
+  )
+  def get_party_freezing_time(
+      party: PartyId,
+      synchronizerId: SynchronizerId,
+  ): CantonTimestamp =
+    consoleEnvironment.run {
+      reference.adminCommand(
+        ParticipantAdminCommands.PartyManagement.GetPartyFreezingTime(party, synchronizerId)
+      )
+    }
 }
 
 private[canton] object PartiesAdministration {

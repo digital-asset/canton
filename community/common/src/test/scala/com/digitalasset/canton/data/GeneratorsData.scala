@@ -21,7 +21,7 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.{GeneratorsTopology, ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.collection.SeqUtil
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{GeneratorsVersion, ProtocolVersion}
 import com.digitalasset.canton.{GeneratorsLf, LfInterfaceId, LfPackageId, LfPartyId, LfVersioned}
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.{CreationTime, ExternalCallResult}
@@ -164,45 +164,43 @@ final class GeneratorsData(
   )
 
   private val viewExternalCallResultsGen: Gen[Seq[ViewParticipantData.ViewExternalCallResult]] =
-    if (protocolVersion >= ProtocolVersion.v36) {
-      boundedListGen {
-        for {
-          extensionId <- Gen.identifier
-          functionId <- Gen.identifier
-          config <- Gen.alphaStr
-          input <- Gen.alphaStr
-          output <- Gen.alphaStr
-          exerciseIndex <- Gen.choose(1, 10).map(NonNegativeInt.tryCreate)
-          checkingParties <- boundedSetGen[LfPartyId]
-        } yield (
-          ExternalCallResult(
-            extensionId = extensionId,
-            functionId = functionId,
-            config = Bytes.fromStringUtf8(config),
-            input = Bytes.fromStringUtf8(input),
-            output = Bytes.fromStringUtf8(output),
-          ),
-          exerciseIndex,
-          checkingParties,
+    boundedListGen {
+      for {
+        extensionId <- Gen.identifier
+        functionId <- Gen.identifier
+        config <- Gen.alphaStr
+        input <- Gen.alphaStr
+        output <- Gen.alphaStr
+        exerciseIndex <- Gen.choose(1, 10).map(NonNegativeInt.tryCreate)
+        checkingParties <- boundedSetGen[LfPartyId]
+      } yield (
+        ExternalCallResult(
+          extensionId = extensionId,
+          functionId = functionId,
+          config = Bytes.fromStringUtf8(config),
+          input = Bytes.fromStringUtf8(input),
+          output = Bytes.fromStringUtf8(output),
+        ),
+        exerciseIndex,
+        checkingParties,
+      )
+    }.map { results =>
+      // A key recorded with conflicting outputs makes the view malformed (rejected by
+      // TransactionView.validated) and must not be generated. Several occurrences recording
+      // the same output for one key are legal, so they keep their multiplicity and only the
+      // outputs are canonicalized per key.
+      val canonicalOutputByKey = results.groupMapReduce { case (result, _, _) =>
+        ExternalCallKey.fromResult(result)
+      } { case (result, _, _) => result.output }((first, _) => first)
+      results.zipWithIndex.map { case ((result, exerciseIndex, checkingParties), callIndex) =>
+        ViewParticipantData.ViewExternalCallResult(
+          result = result.copy(output = canonicalOutputByKey(ExternalCallKey.fromResult(result))),
+          exerciseIndex = exerciseIndex,
+          callIndex = NonNegativeInt.tryCreate(callIndex),
+          checkingParties = checkingParties,
         )
-      }.map { results =>
-        // A key recorded with conflicting outputs makes the view malformed (rejected by
-        // TransactionView.validated) and must not be generated. Several occurrences recording
-        // the same output for one key are legal, so they keep their multiplicity and only the
-        // outputs are canonicalized per key.
-        val canonicalOutputByKey = results.groupMapReduce { case (result, _, _) =>
-          ExternalCallKey.fromResult(result)
-        } { case (result, _, _) => result.output }((first, _) => first)
-        results.zipWithIndex.map { case ((result, exerciseIndex, checkingParties), callIndex) =>
-          ViewParticipantData.ViewExternalCallResult(
-            result = result.copy(output = canonicalOutputByKey(ExternalCallKey.fromResult(result))),
-            exerciseIndex = exerciseIndex,
-            callIndex = NonNegativeInt.tryCreate(callIndex),
-            checkingParties = checkingParties,
-          )
-        }
       }
-    } else Gen.const(Seq.empty)
+    }
 
   val createViewParticipantDataArb: Arbitrary[ViewParticipantData] = Arbitrary(
     for {
@@ -212,11 +210,9 @@ final class GeneratorsData(
         .contractInstanceArb(genTime = Arbitrary.arbitrary[CreationTime.CreatedAt])
         .arbitrary
       salt <- Arbitrary.arbitrary[Salt]
-      createdContractRolledBack <- createdContractRolledBackArb.arbitrary
       createdContract = CreatedContract.tryCreate(
         contract,
         consumedInCore = false,
-        rolledBack = createdContractRolledBack,
       )
       actionDescription = CreateActionDescription(contract.contractId, seed)
     } yield ViewParticipantData.tryCreate(TestHash)(
@@ -275,7 +271,6 @@ final class GeneratorsData(
               .contractInstanceArb(genTime = Arbitrary.arbitrary[CreationTime.CreatedAt])
               .arbitrary,
             Gen.oneOf(true, false),
-            createdContractRolledBackArb.arbitrary,
           )
         )
           .map(_.map(CreatedContract.tryCreate tupled))
@@ -502,6 +497,10 @@ final class GeneratorsData(
         commandId <- commandIdArb.arbitrary.map(_.unwrap)
         submissionId <- Gen.option(ledgerSubmissionIdArb.arbitrary)
         workflowId <- Gen.option(workflowIdArb.arbitrary.map(_.unwrap))
+        maxSequencingTime <- GeneratorsVersion.valueForEmptyOptionExactlyUntilExclusive(
+          protocolVersion,
+          UnassignmentCommonData.maxSequencingTimeInvariant,
+        )
 
       } yield ReassignmentSubmitterMetadata(
         submitter,
@@ -510,6 +509,7 @@ final class GeneratorsData(
         submissionId,
         userId,
         workflowId,
+        maxSequencingTime,
       )
     )
 
@@ -650,7 +650,7 @@ final class GeneratorsData(
       targetTimestamp <- Arbitrary.arbitrary[Target[CantonTimestamp]]
       unassignmentTs <- Arbitrary.arbitrary[CantonTimestamp]
     } yield UnassignmentData(
-      submitterMetadata,
+      submitterMetadata.copy(maxSequencingTime = None),
       contracts,
       reassigningParticipants,
       sourceSynchronizer,

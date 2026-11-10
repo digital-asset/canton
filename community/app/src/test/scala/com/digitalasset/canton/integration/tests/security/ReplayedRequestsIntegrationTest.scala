@@ -8,7 +8,6 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.{Availability, Integrity}
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.BigDecimalImplicits.*
-import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.{CommandFailure, ParticipantReference}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCrypto}
 import com.digitalasset.canton.error.MediatorError
@@ -284,7 +283,7 @@ trait ReplayedRequestsIntegrationTest
       ),
     )
 
-    assertNoExtraCompletion(offsetAtBeginning)
+    assertNoExtraCompletion(participant1, participant1.adminParty, offsetAtBeginning)
   }
 
   private def captureRequest(
@@ -325,23 +324,6 @@ trait ReplayedRequestsIntegrationTest
   private def assertUuidInUseError(entry: LogEntry): Assertion = {
     entry.shouldBeCantonErrorCode(MediatorError.DuplicateConfirmationRequest)
     entry.infoMessage should include regex "The request UUID \\(.*\\) is a duplicate of a previous request with an identical UUID. It cannot be re-used until"
-  }
-
-  private def assertNoExtraCompletion(
-      offsetAtBeginning: Long,
-      timeoutMillis: Long = 10000,
-  )(implicit env: TestConsoleEnvironment): Assertion = {
-    import env.*
-
-    val completionsAfterReplay =
-      participant1.ledger_api.completions.list(
-        participant1.adminParty,
-        2,
-        offsetAtBeginning,
-        timeout = NonNegativeDuration.ofMillis(timeoutMillis),
-      )
-
-    completionsAfterReplay should have size 1
   }
 
   "A mediator rejects a replayed pending request" taggedAs testReplayAttack in { implicit env =>
@@ -395,7 +377,7 @@ trait ReplayedRequestsIntegrationTest
     )
 
     // Wait a bit longer than usual, because the first request still needs to be processed.
-    assertNoExtraCompletion(offsetAtBeginning, 1000)
+    assertNoExtraCompletion(participant1, participant1.adminParty, offsetAtBeginning, 1000)
   }
 
   "A mediator rejects a replayed rejected request" taggedAs testReplayAttack in { implicit env =>
@@ -452,7 +434,7 @@ trait ReplayedRequestsIntegrationTest
       ),
     )
 
-    assertNoExtraCompletion(offsetAtBeginning)
+    assertNoExtraCompletion(participant1, participant1.adminParty, offsetAtBeginning)
   }
 
   "A dropped but replayed request does not generate a duplicate completion event" taggedAs SecurityTest(
@@ -519,7 +501,7 @@ trait ReplayedRequestsIntegrationTest
     // As the observation of the submission timeout is evidence for this, simply using assertEventuallyLogsSeq above
     // is enough.
     assertPingSucceeds(participant1, participant2, timeoutMillis = 60000)
-    assertNoExtraCompletion(offsetAtBeginning)
+    assertNoExtraCompletion(participant1, participant1.adminParty, offsetAtBeginning)
   }
 
   private def captureAndDropRequest(

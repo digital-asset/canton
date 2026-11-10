@@ -297,7 +297,7 @@ final class GeneratorsProtocol(
 
   implicit val signedContent: Arbitrary[SignedContent[HasCryptographicEvidence]] = Arbitrary(
     for {
-      signatures <- Generators.nonEmptyListGen[Signature]
+      signature <- Arbitrary.arbitrary[Signature]
       ts <- Gen.option(Arbitrary.arbitrary[CantonTimestamp])
       content <- signedProtocolMessageContentArb.arbitrary
       byteStringWithCryptographicEvidence = BytestringWithCryptographicEvidence(
@@ -308,13 +308,22 @@ final class GeneratorsProtocol(
       // This is why I pass directly a byteStringWithCryptographicEvidence instead of any Content With HasCryptographicEvidence.
       SignedContent.create(
         content = byteStringWithCryptographicEvidence,
-        signatures = signatures,
+        signature = signature,
         timestampOfSigningKey = ts,
         representativeProtocolVersion =
           SignedContent.protocolVersionRepresentativeFor(protocolVersion),
       )
     }
   )
+
+  implicit val aggregatedSignedContent
+      : Arbitrary[AggregatedSignedContent[HasCryptographicEvidence]] =
+    Arbitrary(
+      for {
+        signedContent <- signedContent.arbitrary
+        signatures <- Generators.nonEmptyListGen[Signature]
+      } yield AggregatedSignedContent(signedContent.content, signatures, protocolVersion)
+    )
 
   private def recipientsTreeGen(
       recipientArb: Arbitrary[Recipient]

@@ -35,7 +35,6 @@ trait ExampleTransaction {
       versionedUnsuffixedTransaction,
       metadata,
       WithoutSuffixes,
-      PathRollbackContextFactory,
     )
 
   /** The key resolver to be used for iterating over the transaction nodes */
@@ -97,7 +96,6 @@ trait ExampleTransaction {
       versionedSuffixedTransaction,
       metadata,
       WithSuffixes,
-      PathRollbackContextFactory,
     )
 
   def usedAndCreated: UsedAndCreatedContracts

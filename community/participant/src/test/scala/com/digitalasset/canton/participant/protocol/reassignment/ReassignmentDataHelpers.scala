@@ -16,6 +16,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.transaction.FatContractInstance
 
@@ -51,6 +52,8 @@ final case class ReassignmentDataHelpers(
       // Match LedgerApiCommands.defaultUserId so that myParticipant.ledger-api can be used to capture completions.
       LedgerUserId.assertFromString("CantonConsole"),
       workflowId = None,
+      maxSequencingTime =
+        ReassignmentDataHelpers.maxSequencingTimeFor(sourceSynchronizer.unwrap.protocolVersion),
     )
 
   def fullUnassignmentTree(
@@ -116,6 +119,11 @@ final case class ReassignmentDataHelpers(
 }
 
 object ReassignmentDataHelpers {
+
+  def maxSequencingTimeFor(protocolVersion: ProtocolVersion): Option[CantonTimestamp] =
+    Option.when(protocolVersion >= ProtocolVersion.reassignmentReplayProtection)(
+      CantonTimestamp.MaxValue
+    )
 
   def apply(
       contract: ContractInstance,

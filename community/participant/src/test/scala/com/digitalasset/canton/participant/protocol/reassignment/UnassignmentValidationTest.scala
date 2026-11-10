@@ -167,6 +167,35 @@ class UnassignmentValidationTest
       validation.isSuccessful.futureValueUS shouldBe true
     }
 
+    "report a replay if the request of the submitting participant is not fresh own timely" onlyRunWithOrGreaterThan ProtocolVersion.reassignmentReplayProtection in {
+      val result = performValidation(isFreshOwnTimelyRequest = false).futureValueUS.value
+
+      result.commonValidationResult.replayCheckResult shouldBe defined
+      result.isSuccessful.futureValueUS shouldBe false
+    }
+
+    "not report a replay if the request of the submitting participant is fresh own timely" onlyRunWithOrGreaterThan ProtocolVersion.reassignmentReplayProtection in {
+      val result = performValidation(isFreshOwnTimelyRequest = true).futureValueUS.value
+
+      result.commonValidationResult.replayCheckResult shouldBe None
+      result.isSuccessful.futureValueUS shouldBe true
+    }
+
+    "not report a replay on a participant other than the submitting participant" onlyRunWithOrGreaterThan ProtocolVersion.reassignmentReplayProtection in {
+      val result = performValidation(
+        validatingParticipant = observingParticipant,
+        isFreshOwnTimelyRequest = false,
+      ).futureValueUS.value
+
+      result.commonValidationResult.replayCheckResult shouldBe None
+    }
+
+    "not report a replay before the replay protection for reassignments" onlyRunLessThan ProtocolVersion.reassignmentReplayProtection in {
+      val result = performValidation(isFreshOwnTimelyRequest = false).futureValueUS.value
+
+      result.commonValidationResult.replayCheckResult shouldBe None
+    }
+
     "only compute the assignment exclusivity up to protocol version 36" in {
       def assignmentExclusivity(protocolVersion: ProtocolVersion) =
         performValidation(
@@ -478,6 +507,7 @@ class UnassignmentValidationTest
       recipients: Recipients,
       signatureO: Option[Signature],
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      isFreshOwnTimelyRequest: Boolean,
   ): ParsedReassignmentRequest[FullUnassignmentTree] = ParsedReassignmentRequest(
     rc = RequestCounter(1),
     requestTimestamp = CantonTimestamp.Epoch,
@@ -486,7 +516,7 @@ class UnassignmentValidationTest
     recipients = recipients,
     signatureO = signatureO,
     submitterMetadataO = None,
-    isFreshOwnTimelyRequest = true,
+    isFreshOwnTimelyRequest = isFreshOwnTimelyRequest,
     areContractsUnknown = false,
     malformedPayloads = Seq.empty,
     mediator = sourceMediator,
@@ -503,6 +533,7 @@ class UnassignmentValidationTest
       contractValidator: ContractValidator = ContractValidator.AllowAll,
       validatingParticipant: ParticipantId = confirmingParticipant,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi = cryptoSnapshot,
+      isFreshOwnTimelyRequest: Boolean = true,
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, UnassignmentValidationResult] = {
     val recipients = Recipients.cc(
       reassigningParticipants.toSeq.head,
@@ -516,7 +547,13 @@ class UnassignmentValidationTest
       )
       .futureValueUS
       .value
-    val parsed = mkParsedRequest(fullUnassignmentTree, recipients, Some(signature), cryptoSnapshot)
+    val parsed = mkParsedRequest(
+      fullUnassignmentTree,
+      recipients,
+      Some(signature),
+      cryptoSnapshot,
+      isFreshOwnTimelyRequest,
+    )
 
     val getTopologyAtTs = new GetTopologyAtTimestamp {
 
@@ -555,6 +592,7 @@ class UnassignmentValidationTest
       contractValidator: ContractValidator = ContractValidator.AllowAll,
       sourceValidationPackageId: Option[LfPackageId] = None,
       targetValidationPackageId: Option[LfPackageId] = None,
+      isFreshOwnTimelyRequest: Boolean = true,
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, UnassignmentValidationResult] = {
     val unassignmentRequest =
       ReassignmentDataHelpers
@@ -592,6 +630,7 @@ class UnassignmentValidationTest
       contractValidator,
       validatingParticipant,
       cryptoSnapshot,
+      isFreshOwnTimelyRequest,
     )
   }
 }

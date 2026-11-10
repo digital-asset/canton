@@ -8,7 +8,7 @@ import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.reassignment_commands.ReassignmentCommands
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -94,7 +94,7 @@ object SubmissionTracker {
       with Spanning
       with NamedLogging {
 
-    implicit val directEc: ExecutionContext = DirectExecutionContext(noTracingLogger)
+    implicit val directExecutionContextImplicit: ExecutionContext = directExecutionContext
 
     // Set max-in-flight capacity
     metrics.commands.maxInFlightCapacity.inc(maxCommandsInFlight.toLong)(MetricsContext.Empty)

@@ -8,6 +8,10 @@ on:
       protocol_version:
         required: true
         type: string
+      job_name:
+        description: Name reported to the flaky-test pipeline. Empty falls back to this workflow's own job id.
+        default: ""
+        type: string
       runner:
         required: true
         type: string
@@ -87,6 +91,7 @@ jobs:
       AWS_RETRY_MODE: adaptive
       AWS_MAX_ATTEMPTS: "10"
       EXECUTOR_JVM_HEAP_SIZE: 14000M
+      CANTON_CI_JOB_NAME: ${{ inputs.job_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5

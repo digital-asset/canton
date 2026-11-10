@@ -6,7 +6,7 @@ package com.digitalasset.canton.ledger.api.grpc
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.grpc.adapter.server.pekko.ServerAdapter
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
@@ -20,11 +20,10 @@ import org.apache.pekko.{Done, NotUsed}
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, Future}
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 trait StreamingServiceLifecycleManagement extends AutoCloseable with NamedLogging {
 
-  private val directEc = DirectExecutionContext(noTracingLogger)
   private val StreamAbortTimeout = Duration(10, "seconds")
   private val lock = new Mutex()
 
@@ -32,7 +31,7 @@ trait StreamingServiceLifecycleManagement extends AutoCloseable with NamedLoggin
   private val _killSwitches = TrieMap.empty[KillSwitch, (TraceContext, Future[Done])]
 
   def close(): Unit = {
-    implicit val ec = directEc
+    implicit val ec: ExecutionContext = directExecutionContext
     val completions = (lock.exclusive {
       if (!_closed) {
         _closed = true
@@ -101,7 +100,7 @@ trait StreamingServiceLifecycleManagement extends AutoCloseable with NamedLoggin
             doneF.onComplete { _ =>
               logger.debug(s"Streaming to gRPC client finished")
               _killSwitches -= killSwitch
-            }(directEc)
+            }(directExecutionContext)
           }
         }
       }

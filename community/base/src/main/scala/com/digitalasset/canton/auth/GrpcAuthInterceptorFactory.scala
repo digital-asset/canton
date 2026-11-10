@@ -4,7 +4,7 @@
 package com.digitalasset.canton.auth
 
 import com.daml.jwt.JwtTimestampLeeway
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.{
   AdminTokenConfig,
   ApiLoggingConfig,
@@ -41,18 +41,14 @@ object GrpcAuthInterceptorFactory {
     val genericInterceptor = new AuthInterceptor(
       authServices,
       loggerFactory,
-      DirectExecutionContext(
-        loggerFactory.getLogger(AuthInterceptor.getClass)
-      ),
+      directExecutionContext,
       RequiringAdminClaimResolver,
     )
     new GrpcAuthInterceptor(
       genericInterceptor,
       loggerFactory,
       apiLoggingConfig,
-      DirectExecutionContext(
-        loggerFactory.getLogger(AuthInterceptor.getClass)
-      ),
+      directExecutionContext,
     )
   }
 

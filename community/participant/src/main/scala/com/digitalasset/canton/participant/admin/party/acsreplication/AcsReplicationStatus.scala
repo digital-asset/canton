@@ -9,7 +9,6 @@ import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
-  PrettyPrinting,
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
@@ -38,6 +37,8 @@ import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, RepairCounter}
 import com.google.protobuf.ByteString
 import io.scalaland.chimney.dsl.*
+
+import java.io.OutputStream as JOutputStream
 
 /** Internal state representation of the ACS replication process. Refer to acs_replication.proto
   * AcsReplicationStatus for the semantics.
@@ -296,7 +297,10 @@ object AcsReplicationStatus
       * operations store in
       * [[com.digitalasset.canton.participant.store.AcsReplicationStateManager]].
       */
-    sealed trait AcsReplicationDestination extends PrettyPrinting with Product with Serializable {
+    sealed trait AcsReplicationDestination
+        extends PrettyPrintingFromCompanion
+        with Product
+        with Serializable {
       def toProtoV30: v30.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
     }
 
@@ -313,6 +317,12 @@ object AcsReplicationStatus
         override def toProtoV30: ReplicationDestinationProto =
           ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_PERSISTENCE
 
+        override def prettyCompanion: PrettyPrintingCompanion[Persistence.this.type] =
+          PersistencePrettyPrintingCompanion
+      }
+
+      private object PersistencePrettyPrintingCompanion
+          extends PrettyPrintingCompanion[Persistence.type] {
         override protected val pretty: Pretty[Persistence.type] = prettyOfObject[Persistence.type]
       }
 
@@ -321,11 +331,16 @@ object AcsReplicationStatus
         *
         * Contract handler is created by the ACS replication component.
         */
-      case object OutputStream extends AcsReplicationDestination {
+      final case class OutputStream(destination: JOutputStream) extends AcsReplicationDestination {
         override def toProtoV30: ReplicationDestinationProto =
           ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_OUTPUT_STREAM
 
-        override protected val pretty: Pretty[OutputStream.type] = prettyOfObject[OutputStream.type]
+        override def prettyCompanion: PrettyPrintingCompanion[OutputStream.this.type] =
+          OutputStream
+      }
+
+      object OutputStream extends PrettyPrintingCompanion[OutputStream] {
+        override protected val pretty: Pretty[OutputStream] = prettyOfClass()
       }
 
       def fromProtoV30(
@@ -336,7 +351,12 @@ object AcsReplicationStatus
             case ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_PERSISTENCE =>
               Right(Some(Persistence))
             case ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_OUTPUT_STREAM =>
-              Right(Some(OutputStream))
+              Left(
+                ProtoDeserializationError.InvariantViolation(
+                  "acs_replication_destination",
+                  "output stream destination cannot be deserialized",
+                )
+              )
             case ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_UNSPECIFIED =>
               Left(ProtoDeserializationError.FieldNotSet("acs_replication_destination"))
             case ReplicationDestinationProto.Unrecognized(unknown) =>

@@ -333,8 +333,8 @@ object LongRunning {
       Left(
         Master(
           masterName,
-          quorumParticipants = (tradersPerNode * numParticipants),
-          quorumIssuers = (issuersPerNode * numParticipants),
+          quorumUsers = (tradersPerNode * numParticipants),
+          quorumProviders = (issuersPerNode * numParticipants),
           runConfig = MasterDynamicConfig(
             totalCycles = totalCycles,
             reportFrequency = Math.min(reportFrequency, totalCycles / 2 + 1),

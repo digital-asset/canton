@@ -118,6 +118,29 @@ class TlsConfigTest extends AnyWordSpec with Matchers with TableDrivenPropertyCh
     }
   }
 
+  "TlsServerConfig.checkClientCertRevocation" should {
+    "only be enabled if revocation checking is enabled and client certificates are requested" in {
+      val cases = Table[Boolean, ServerAuthRequirementConfig, Boolean](
+        ("enableCertRevocationChecking", "clientAuth", "expected"),
+        (true, ServerAuthRequirementConfig.Require(dummyClientCert), true),
+        (true, ServerAuthRequirementConfig.Optional, true),
+        (true, ServerAuthRequirementConfig.None, false),
+        (false, ServerAuthRequirementConfig.Require(dummyClientCert), false),
+        (false, ServerAuthRequirementConfig.Optional, false),
+        (false, ServerAuthRequirementConfig.None, false),
+      )
+
+      forAll(cases) { (enableCertRevocationChecking, clientAuth, expected) =>
+        TlsServerConfig(
+          certChainFile = dummyCert,
+          privateKeyFile = dummyKey,
+          clientAuth = clientAuth,
+          enableCertRevocationChecking = enableCertRevocationChecking,
+        ).checkClientCertRevocation shouldBe expected
+      }
+    }
+  }
+
   "TlsClientConfig transformations" should {
     "correctly strip and restore client certificates" in {
       val originalConfig = TlsClientConfig(
@@ -164,25 +187,6 @@ class TlsConfigTest extends AnyWordSpec with Matchers with TableDrivenPropertyCh
           cipher should not include "SHA1" // OpenSSL-style SHA-1
           cipher should not endWith "_SHA" // Java JSSE-style SHA-1 (e.g. _CBC_SHA)
         }
-      }
-    }
-  }
-
-  "TlsServerConfig.setJvmTlsProperties" should {
-    "execute cleanly when enableCertRevocationChecking is enabled" in {
-      val config = TlsServerConfig(
-        certChainFile = dummyCert,
-        privateKeyFile = dummyKey,
-        enableCertRevocationChecking = true,
-      )
-
-      try {
-        noException should be thrownBy config.setJvmTlsProperties()
-      } finally {
-        // Cleanup: Reset the global JVM properties
-        System.clearProperty("com.sun.net.ssl.checkRevocation")
-        System.clearProperty("com.sun.security.enableCRLDP")
-        java.security.Security.setProperty("ocsp.enable", "false")
       }
     }
   }

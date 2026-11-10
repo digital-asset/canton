@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.localstore
 
 import com.daml.metrics.DatabaseMetrics
 import com.daml.nameof.NameOf.*
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
 import com.digitalasset.canton.ledger.localstore.PersistentUserManagementStore.{
@@ -47,8 +47,6 @@ class PersistentUserManagementStore(
     flagCloseable: FlagCloseable,
 ) extends UserManagementStore
     with NamedLogging {
-
-  private val directEc = DirectExecutionContext(noTracingLogger)
 
   private val backend = dbSupport.storageBackendFactory.createUserManagementStorageBackend
   private val dbDispatcher = dbSupport.dbDispatcher
@@ -117,7 +115,7 @@ class PersistentUserManagementStore(
            else "no rights") +
           s", ${loggingContext.serializeFiltered("submissionId")}."
       )
-    })(directEc)
+    })(directExecutionContext)
 
   override def updateUser(
       userUpdate: UserUpdate
@@ -228,7 +226,7 @@ class PersistentUserManagementStore(
       } yield apiUser
     }.map(tapSuccess { _ =>
       logger.info(s"Updated user $id idp from $sourceIdp to $targetIdp.")
-    })(directEc)
+    })(directExecutionContext)
 
   override def deleteUser(
       id: UserId,
@@ -244,7 +242,7 @@ class PersistentUserManagementStore(
       logger.info(
         s"Deleted user with id: $id, ${loggingContext.serializeFiltered("submissionId")}."
       )
-    })(directEc)
+    })(directExecutionContext)
 
   override def grantRights(
       id: UserId,
@@ -279,7 +277,7 @@ class PersistentUserManagementStore(
         s"Granted ${grantedRights.size} user rights to user $id: ${rightsDigestText(grantedRights)}, ${loggingContext
             .serializeFiltered("submissionId")}."
       )
-    })(directEc)
+    })(directExecutionContext)
 
   override def revokeRights(
       id: UserId,
@@ -298,7 +296,7 @@ class PersistentUserManagementStore(
         s"Revoked ${revokedRights.size} user rights from user $id: ${rightsDigestText(revokedRights)}, ${loggingContext
             .serializeFiltered("submissionId")}."
       )
-    })(directEc)
+    })(directExecutionContext)
 
   override def listUsers(
       fromExcl: Option[Ref.UserId],
@@ -331,7 +329,7 @@ class PersistentUserManagementStore(
   )(implicit loggingContext: LoggingContextWithTrace): Future[Result[T]] = {
     def execute(): Future[Result[T]] =
       dbDispatcher.executeSql(dbMetric(metrics.userManagement))(thunk)
-    implicit val ec: ExecutionContext = directEc
+    implicit val ec: ExecutionContext = directExecutionContext
     implicit val success = Success.always
     val retry = Backoff(
       logger = logger,

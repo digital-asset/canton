@@ -5,7 +5,7 @@
 - **Who gets pinged, and why.** Two alerts @-mention people, both resolving the on-duty name from the rota Google sheet via `select_rota.py` and matching a Slack ID in `roster_people.json`:
   - **Flaky/nightly alert** (`alert_slack.py`), when the same test fails on several consecutive commits on a tracked branch:
     - a **flaky streak** and a **broken nightly** both ping the **Flaky Canton** rotation (three people), since fixing a broken test is theirs.
-  - **Red-main alert** (`slack_red_main_with_volunteer`), when a job fails on `main`: it pings the rota mapped to the failed job by `rotation_for_job` in `select_rota.py`. A red **blackduck** job pings the **Release & Blackduck** rota, test jobs (matched by `TEST_JOB_PREFIXES`) ping **Flaky Canton**, and everything else pings the **CI rota**.
+  - **Red-main alert** (`slack_notify_failure_with_volunteer`), when a job fails on `main`: it pings the rota mapped to the failed job by `rotation_for_job` in `select_rota.py`. A red **blackduck** job pings the **Release & Blackduck** rota, test jobs (matched by `TEST_JOB_PREFIXES`) ping **Flaky Canton**, and everything else pings the **CI rota**.
     - **GitHub Actions** alerts only on **build or infrastructure** jobs. Test-job failures are excluded, since the flaky/nightly alert above covers them. The one exception is `crash_recovery_test_36*`, an infra job that never reaches the flaky pipeline, which pings Flaky Canton as a test. Which jobs count as tests is set in [`notify_job_classification.yml`](notify_job_classification.yml), kept in sync with the workflow by `check_canton_build_required_gate.py`.
     - **CircleCI** has no test/infra split, so every failed job alerts and the prefixes decide who is pinged.
 - **Fallback when the lookup fails.** If the sheet cannot be read (`GCLOUD_SHEETS_SA_KEY` unset, the service account is not a Viewer), nobody is on rota that week, or the name has no Slack ID in `roster_people.json`, the alert @-mentions `fallback_pool` from `roster_people.json` instead of pinging no one.
@@ -56,7 +56,9 @@ flowchart TD
 
     H1 --> J{"issue has an assignee?"}
     I -->|yes| J
-    J -->|no| K["streaks.json"]
+    J -->|no| J5{"nightly, or new commit at<br/>streak 3, 6, 9, …?<br/>past 30: first today?"}
+    J5 -->|no| J6["suppressed, already alerted"]
+    J5 -->|yes| K["streaks.json"]
     J -->|yes| J2{"within 24h of assignment?"}
     J2 -->|yes| J1["suppressed, grace period"]
     J2 -->|no| J3{"already failed today?"}
@@ -69,7 +71,7 @@ flowchart TD
     M -->|no| M2["Flaky test alert<br/>@ Flaky Canton rota"]
 ```
 
-The separate red-main alert (`slack_red_main_with_volunteer`) is not shown here. It pings per failing job rather than per streak, and covers build and infrastructure failures. See the TLDR for how the two alerts divide the work.
+The separate red-main alert (`slack_notify_failure_with_volunteer`) is not shown here. It pings per failing job rather than per streak, and covers build and infrastructure failures. See the TLDR for how the two alerts divide the work.
 
 ### What do we check?
 
@@ -102,8 +104,8 @@ The goals of the system are:
   Multi-shard failures or manual retries on the same commit collapse to one entry for this count.
   The threshold avoids noise from one-off failures or manual retries while ensuring that a genuinely broken test gets human attention quickly.
   The message @-mentions whoever is on the relevant rota shift that week, read from the [rota Google Sheet](https://docs.google.com/spreadsheets/d/1PEmLKqoB2DpokVhao5PNxznMI5ufZZbXgUju7Npn0BU) via `select_rota.py` (falling back to the roster pool in `roster_people.json` if the sheet is unreadable).
-  If the same alert keeps appearing, it means the test is still broken and has not been fixed yet, not that the notification system is misbehaving.
-  For the first 24 hours after an issue is assigned the alert is suppressed, to give whoever picked it up room to work without Slack noise. Past that window an assigned but still-failing test resumes alerting, capped to once per UTC calendar day rather than on every consecutive-failure streak, so a genuine breakage cannot stay silent for weeks just because someone is assigned, but a test that keeps streaking on every run does not re-page the assignee dozens of times a day either. The cap reuses the Date column already recorded in the issue's own history table, if a row from today is already there, the day's alert has already gone out. Unassigned issues are not rate-limited, they keep alerting on every streak until someone picks them up.
+  For an unassigned issue, an unbroken streak alerts on every threshold-th failing commit (3, 6, 9, …, or 10, 20, 30 for unstable jobs) rather than on every one, and each affected test shows its streak length ("failed on 6 consecutive commits"). A test left broken keeps resurfacing and reads as more urgent each time, without pinging the rota on every merge. Streaks are counted up to 30 commits (one GitHub API call per commit, cached for the run) and shown as "30+" beyond. If a GitHub API error cuts the count short, the alert is skipped and not sent later. The next one comes at the next alert point, the next threshold-th commit, or the next UTC day for a lower bound. An assigned issue still gets its daily alert, with the count so far as "4+". A streak that runs into rows trimmed from the history table shows the commits still in it as a lower bound ("12+"). With only a lower bound, the alert falls back to the first new failing commit of each UTC day. A rerun of a commit already in the history never alerts again.
+  For the first 24 hours after an issue is assigned the alert is suppressed, to give whoever picked it up room to work without Slack noise. Past that window an assigned but still-failing test resumes alerting, capped to once per UTC calendar day rather than on every consecutive-failure streak, so a genuine breakage cannot stay silent for weeks just because someone is assigned, but a test that keeps streaking on every run does not re-page the assignee dozens of times a day either. The cap reuses the Date column already recorded in the issue's own history table, if a row from today is already there, the day's alert has already gone out.
 
 ### Nightly tests
 
@@ -118,7 +120,7 @@ When the streak fires, the issue is labelled `broken-nightly` and `alert_slack.p
 
 Two caveats:
 
-- Only jobs prefixed `nightly_`, or explicitly listed in `NIGHTLY_JOBS_WITHOUT_PREFIX` (currently just `toxiproxy_test_slow`), take this path. Other jobs that run solely in the nightly workflow but are neither prefixed nor listed (for example `postgres_conformance_test`, `test_with_java17`, `external_parties_test`, `protocol_continuity_test_all`) fall back to the consecutive-commit check, which effectively never fires at nightly cadence, so they get no confirmed broken-nightly signal. They still open a tracking issue and still trigger the per-run `slack_red_main_with_volunteer` ping on `main`, so their failures are not silent, they just miss the dedicated escalation. A prefix-less nightly job that should get the escalation needs adding to `NIGHTLY_JOBS_WITHOUT_PREFIX` in `flaky_common.py`.
+- Only jobs prefixed `nightly_`, or explicitly listed in `NIGHTLY_JOBS_WITHOUT_PREFIX` (currently just `toxiproxy_test_slow`), take this path. Other jobs that run solely in the nightly workflow but are neither prefixed nor listed (for example `postgres_conformance_test`, `test_with_java17`, `external_parties_test`, `protocol_continuity_test_all`) fall back to the consecutive-commit check, which effectively never fires at nightly cadence, so they get no confirmed broken-nightly signal. They still open a tracking issue and still trigger the per-run `slack_notify_failure_with_volunteer` ping on `main`, so their failures are not silent, they just miss the dedicated escalation. A prefix-less nightly job that should get the escalation needs adding to `NIGHTLY_JOBS_WITHOUT_PREFIX` in `flaky_common.py`.
 - On a very low-commit branch, where fewer than 3 distinct commits span the nightly window, `nightly_streak` cannot assemble 3 commits and does not fire.
 
 The label marks a test that is broken now, not one that ever was, so `update_issue` removes it once the test no longer fails in nightly runs, for example after a fix or a move to per-commit jobs.
@@ -142,7 +144,7 @@ Subsequent failures
   → gh issue reopen  (if closed, unless the failing commit predates the close)
   → gh issue comment (evidence comment, see Failure evidence)
   → gh issue edit    (new row appended to the table, linking the evidence comment)
-  → if 3 consecutive commits all fail AND (issue is unassigned OR (assigned more than 24h ago AND no row from today yet)): Slack alert sent
+  → if 3 consecutive commits all fail AND (issue is unassigned AND the streak is at a new 3rd, 6th, 9th, … commit OR (assigned more than 24h ago AND no row from today yet)): Slack alert sent
 
 OSS (digital-asset/canton) or other branches
   → Datadog metric only, no GitHub issue

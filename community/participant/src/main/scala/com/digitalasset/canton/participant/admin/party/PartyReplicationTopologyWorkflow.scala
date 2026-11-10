@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Hash
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
@@ -17,8 +18,10 @@ import com.digitalasset.canton.participant.admin.data.{
   FlagSet,
   PartyOnboardingFlagStatus,
 }
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow.AuthorizeClearanceError
-import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationTopologyWorkflow.partyToParticipantTopologyHeadO
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow.{
+  AuthorizeClearanceError,
+  partyToParticipantTopologyHeadO,
+}
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer
 import com.digitalasset.canton.protocol.DynamicSynchronizerParametersHistory
 import com.digitalasset.canton.time.SynchronizerTimeTracker
@@ -33,6 +36,7 @@ import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
   PartyToParticipant,
   TopologyChangeOp,
+  TopologyMapping,
 }
 import com.digitalasset.canton.topology.{
   ForceFlags,
@@ -43,6 +47,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.nowarn
@@ -90,6 +95,29 @@ object PartyReplicationTopologyWorkflow {
       */
     def synchronizerContext: Option[SynchronizerTopologyContext]
   }
+
+  /** The party's current mapping, or its current proposal if `proposal` is set. Filters by the uid
+    * only: with a namespace filter, the store also returns the mappings of other parties of that
+    * namespace.
+    */
+  private[party] def partyToParticipantTopologyHeadO(
+      partyId: PartyId,
+      topologyStore: TopologyStore[SynchronizerStore],
+      proposal: Boolean = false,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[Option[StoredTopologyTransaction[Replace, PartyToParticipant]]] =
+    topologyStore
+      .findPositiveTransactions(
+        asOf = CantonTimestamp.MaxValue,
+        asOfInclusive = false,
+        isProposal = proposal,
+        types = Seq(TopologyMapping.Code.PartyToParticipant),
+        filterUid = Some(NonEmpty(Seq, partyId.uid)),
+        filterNamespace = None,
+      )
+      .map(_.collectOfMapping[PartyToParticipant].result.headOption)
 }
 
 /** The OnPR topology workflow manages the interaction with topology processing with respect to

@@ -11,7 +11,7 @@ import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction as LapiTo
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.*
-import com.digitalasset.canton.crypto.Hash
+import com.digitalasset.canton.crypto.{Hash, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -29,7 +29,10 @@ import com.digitalasset.canton.participant.admin.data.{
 import com.digitalasset.canton.participant.admin.grpc.GrpcPartyManagementService.ImportPartyAcsContext
 import com.digitalasset.canton.participant.admin.party.*
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.PartyReplicationArguments
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator.AcsReplicationArguments
 import com.digitalasset.canton.participant.admin.party.acsreplication.{
+  AcsReplicationTopologyWorkflow,
   AcsReplicator,
   PartyParticipantPermission,
 }
@@ -46,6 +49,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   PartyToParticipant,
@@ -1067,6 +1071,185 @@ class GrpcPartyManagementService(
       request.waitForActivationTimeout,
     )(ledgerEnd, synchronizerIds)
 
+  override def getRemoteAcs(
+      request: GetRemoteAcsRequest,
+      responseObserver: StreamObserver[GetRemoteAcsResponse],
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    GrpcStreamingUtils.streamToClient(
+      (out: OutputStream) => processGetRemoteAcsRequest(request, new GZIPOutputStream(out)),
+      responseObserver,
+      byteString => v30.GetRemoteAcsResponse(byteString),
+      parameters.processingTimeouts.adminStreamOpenBound.duration,
+      chunkSizeO = None,
+    )
+  }
+
+  private def processGetRemoteAcsRequest(
+      request: v30.GetRemoteAcsRequest,
+      out: OutputStream,
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    val allLogicalSynchronizerIds = sync.syncPersistentStateManager.getAllLatest.keySet
+    val res = for {
+      partyId <- EitherT.fromEither[FutureUnlessShutdown](
+        UniqueIdentifier
+          .fromProtoPrimitive(request.partyId, "party_id")
+          .bimap(
+            error => PartyManagementServiceError.InvalidArgument.Error(error.message),
+            PartyId(_),
+          )
+      )
+      parsedSynchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
+        SynchronizerId
+          .fromProtoPrimitive(
+            request.synchronizerId,
+            "synchronizer_id",
+          )
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+      synchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
+        Either
+          .cond(
+            allLogicalSynchronizerIds.contains(parsedSynchronizerId),
+            parsedSynchronizerId,
+            OtherError(s"Synchronizer ID $parsedSynchronizerId is unknown"),
+          )
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+
+      sourceParticipantId <- EitherT.fromEither[FutureUnlessShutdown](
+        UniqueIdentifier
+          .fromProtoPrimitive(request.sourceParticipantUid, "source_participant_uid")
+          .bimap(
+            error => PartyManagementServiceError.InvalidArgument.Error(error.message),
+            ParticipantId(_),
+          )
+      )
+
+      asOf <- EitherT.fromEither[FutureUnlessShutdown](
+        ProtoConverter
+          .parseRequired(CantonTimestamp.fromProtoTimestamp, "as_of", request.asOf)
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+
+      acsReplicator <- EitherT.fromEither[FutureUnlessShutdown](
+        acsReplicatorO
+          .toRight(PartyManagementServiceError.InvalidState.Error("ACS replication is not enabled"))
+      )
+
+      connectedSynchronizer <- EitherT.fromOption[FutureUnlessShutdown](
+        sync.readyConnectedSynchronizerById(synchronizerId),
+        PartyManagementServiceError.InvalidState.Error(
+          s"A connection to synchronizer $synchronizerId is required to perform this operation."
+        ): PartyManagementServiceError,
+      )
+
+      requestId =
+        connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi
+          .build(HashPurpose.OnlinePartyReplicationId)
+          .addString(partyId.toProtoPrimitive)
+          .addString(synchronizerId.toProtoPrimitive)
+          .addString(sourceParticipantId.toProtoPrimitive)
+          .addLong(asOf.toMicros)
+          .finish()
+
+      partyReplicationArguments = AcsReplicationArguments(
+        requestId,
+        partyId,
+        synchronizerId,
+        sourceParticipantId,
+        asOf,
+        AcsReplicationDestination.OutputStream(out),
+      )
+
+      _ <- acsReplicator
+        .replicateAcsAsync(partyReplicationArguments)
+        .leftMap(error =>
+          PartyManagementServiceError.GetRemoteAcsFailed.Error(
+            partyId,
+            synchronizerId,
+            sourceParticipantId,
+            asOf,
+            error,
+          ): PartyManagementServiceError
+        )
+
+      _ <- acsReplicator
+        .awaitRemoteAcsReadCompletion(partyReplicationArguments.requestId)
+        .leftMap(error =>
+          PartyManagementServiceError.GetRemoteAcsFailed.Error(
+            partyId,
+            synchronizerId,
+            sourceParticipantId,
+            asOf,
+            error,
+          ): PartyManagementServiceError
+        )
+    } yield ()
+
+    mapErrNewEUS(res.leftMap(_.toCantonRpcError))
+  }
+
+  override def getPartyFreezingTime(
+      request: GetPartyFreezingTimeRequest
+  ): Future[GetPartyFreezingTimeResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val allLogicalSynchronizerIds = sync.syncPersistentStateManager.getAllLatest.keySet
+    val res = for {
+      partyId <- EitherT.fromEither[FutureUnlessShutdown](
+        UniqueIdentifier
+          .fromProtoPrimitive(request.partyId, "party_id")
+          .bimap(
+            error => PartyManagementServiceError.InvalidArgument.Error(error.message),
+            PartyId(_),
+          )
+      )
+      parsedSynchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
+        SynchronizerId
+          .fromProtoPrimitive(
+            request.synchronizerId,
+            "synchronizer_id",
+          )
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+      synchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
+        Either
+          .cond(
+            allLogicalSynchronizerIds.contains(parsedSynchronizerId),
+            parsedSynchronizerId,
+            OtherError(s"Synchronizer ID $parsedSynchronizerId is unknown"),
+          )
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+      connectedSynchronizer <- EitherT.fromOption[FutureUnlessShutdown](
+        sync.readyConnectedSynchronizerById(synchronizerId),
+        PartyManagementServiceError.InvalidState.Error(
+          s"A connection to synchronizer $synchronizerId is required to perform this operation."
+        ): PartyManagementServiceError,
+      )
+      effectiveTime <- EitherT(
+        AcsReplicationTopologyWorkflow
+          .partyToParticipantHostingStateValidFrom(
+            partyId,
+            participantId,
+            HostingState.Freezing,
+            connectedSynchronizer.synchronizerHandle.syncPersistentState.topologyStore,
+          )
+          .map(
+            _.toRight(
+              PartyManagementServiceError.PartyNotInFreezingHostingState.Error(
+                partyId,
+                synchronizerId,
+                participantId,
+              ): PartyManagementServiceError
+            )
+          )
+      )
+    } yield GetPartyFreezingTimeResponse(Some(effectiveTime.value.toProtoTimestamp))
+
+    mapErrNewEUS(res.leftMap(_.toCantonRpcError))
+  }
 }
 
 object GrpcPartyManagementService {

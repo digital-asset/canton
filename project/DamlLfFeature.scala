@@ -151,6 +151,12 @@ object DamlLfFeature {
     versionRange = VersionRange.From(v2_3),
   )
 
+  val featureTextToContractId = DamlLfFeature(
+    name = "Text to ContractId conversion",
+    cppFlag = "DAML_TEXT_TO_CONTRACT_ID",
+    versionRange = VersionRange.From(v2_dev),
+  )
+
   val featurePV34 = DamlLfFeature(
     name = "LF versions supported by PV34",
     cppFlag = "DAML_PV34",
@@ -193,6 +199,7 @@ object DamlLfFeature {
     "featureUnsafeFromInterface" -> featureUnsafeFromInterface,
     "featureExtendedCryptoPrimitives" -> featureExtendedCryptoPrimitives,
     "featureStableCallStack" -> featureStableCallStack,
+    "featureTextToContractId" -> featureTextToContractId,
     "featurePV34" -> featurePV34,
     "featurePV35" -> featurePV35,
     "featurePV36" -> featurePV36,

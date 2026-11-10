@@ -154,11 +154,21 @@ class SetupDriver(
       def getSucceeded(x: Option[A]): A = x.getOrElse(throw new RuntimeException(s"Failed $opName"))
       withRetry(AllExceptionRetryPolicy, opName)(task).map(getSucceeded)
     }
-
+    val limit = 1000
     retryUntilDefined(s"waiting for party $party to appear on $participantId") {
       client.partyManagementClient
-        .listKnownParties()
-        .map { case (parties, _) => parties.find(p => p.party.startsWith(party)) }
+        .listKnownParties(
+          filterParty = party,
+          pageSize = limit,
+        )
+        .map { case (parties, _) =>
+          if (parties.sizeIs >= limit) {
+            logger.error(
+              s"The number of returned parties is at the limit $limit, which means we might miss it. "
+            )
+          }
+          parties.find(p => p.party.startsWith(party))
+        }
     }.flatMap { p =>
       retryUntilDefined(
         s"waiting for ${p.party} to be connected to $configuredSynchronizers synchronizers on $participantId"
@@ -204,7 +214,7 @@ class SetupDriver(
             synchronizerId = Some(synchronizer.toProtoPrimitive),
           )
           .map { x =>
-            logger.debug(
+            logger.info(
               s"Allocated new party ${x.party} for $party on $participantId on synchronizer $synchronizer"
             )
             x.party

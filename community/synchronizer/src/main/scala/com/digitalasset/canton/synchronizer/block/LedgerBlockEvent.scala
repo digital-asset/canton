@@ -10,19 +10,19 @@ import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.sequencing.protocol.{
   AcknowledgeRequest,
   DecompressionPolicy,
+  SignatureCountCheck,
   SignedContent,
   SubmissionRequest,
   SubmissionRequestDeserializationContext,
 }
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
+import com.digitalasset.canton.synchronizer.sequencer.block.RawLedgerBlock.RawBlockEvent
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfTimestamp, ProtoDeserializationError}
 import com.google.protobuf.ByteString
-
-import RawLedgerBlock.RawBlockEvent
 
 /** Trait that generalizes over the kind of events that could be observed from a
   * [[com.digitalasset.canton.synchronizer.sequencer.block.BlockOrderer]].
@@ -102,7 +102,9 @@ object LedgerBlockEvent extends HasLoggerName {
       synchronizerLimits: SynchronizerLimits,
   )(submissionRequestBytes: ByteString): ParsingResult[SignedSubmissionRequest] =
     SignedContent
-      .fromByteString(protocolVersion, submissionRequestBytes)
+      .fromByteString(protocolVersion, SignatureCountCheck.ByProtocolVersion)(
+        submissionRequestBytes
+      )
       .flatMap(
         _.deserializeContent(
           SubmissionRequest.fromByteString(
@@ -116,16 +118,18 @@ object LedgerBlockEvent extends HasLoggerName {
       ackRequestBytes: ByteString
   ): ParsingResult[SignedContent[AcknowledgeRequest]] =
     SignedContent
-      .fromByteString(protocolVersion, ackRequestBytes)
+      .fromByteString(protocolVersion, SignatureCountCheck.ByProtocolVersion)(ackRequestBytes)
       .flatMap(
         _.deserializeContent(AcknowledgeRequest.fromByteString(protocolVersion, _))
       )
 }
 
 /** @param baseBlockSequencingTime
-  *   See [[RawLedgerBlock.baseSequencingTimeMicrosFromEpoch]]
+  *   See
+  *   [[com.digitalasset.canton.synchronizer.sequencer.block.RawLedgerBlock#baseSequencingTimeMicrosFromEpoch]]
   * @param tickTopologyAtLeastAt
-  *   See [[RawLedgerBlock.tickTopologyAtMicrosFromEpoch]]
+  *   See
+  *   [[com.digitalasset.canton.synchronizer.sequencer.block.RawLedgerBlock#tickTopologyAtMicrosFromEpoch]]
   */
 final case class BlockEvents(
     height: Long,

@@ -12,7 +12,7 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.base.error.ErrorCategory
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.LedgerParticipantId
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
@@ -104,10 +104,8 @@ abstract class AcsCommitmentSender(
   private val pipelineShutdownHandle: AtomicReference[Option[(KillSwitch, Future[Done])]] =
     new AtomicReference(None)
 
-  private val directExecutionContext: ExecutionContext = DirectExecutionContext(noTracingLogger)
-
   /** First determines the latest available reconciliation interval tick checkpoint and sends ACS
-    * commitments for all reconciliationtick checkpoints after the send watermark up to including
+    * commitments for all reconciliation tick checkpoints after the send watermark up to including
     * this crash recovery offset.
     *
     * After crash recovery, whenever the `tickSource` produces an offset, the sender attempts to
@@ -635,58 +633,6 @@ class AcsCommitmentSenderImpl(
     protocolVersion = synchronizerId.protocolVersion,
     limits = sizeLimits,
   )
-}
-
-/** Instead of actually sending the commitments to counterparticipants, this sender merely increases
-  * the sender watermark. This is useful in the following scenario:
-  *
-  *   - the ACS commitment pipeline is turned on for reinitialization and computing digests while
-  *     being connected to synchronizers with protocol version < 36.
-  *   - After some time, the synchronizer upgrades to a protocol version >= 36.
-  *
-  * Without this component, the participant would send commitments to all counterparticipants for
-  * all reconciliation periods since the first reinitialization. Not only is this not really useful,
-  * it also floods the sequencer with many (stale) commitment messages and might trigger message
-  * caps that then prevent other messages from being sent due to the rate limiting.
-  */
-class AcsCommitmentNoopSender(
-    digestStore: AcsDigestStore,
-    watermarkStore: AcsCommitmentSenderWatermarkStore,
-    stringInterningEval: Eval[StringInterning],
-    metrics: CommitmentSenderMetrics,
-    synchronizerId: PhysicalSynchronizerId,
-    override val timeouts: ProcessingTimeout,
-    override val loggerFactory: NamedLoggerFactory,
-)(implicit ec: ExecutionContext, mat: Materializer)
-    extends AcsCommitmentSender(
-      digestStore,
-      watermarkStore,
-      stringInterningEval,
-      metrics,
-      synchronizerId,
-      timeouts,
-      loggerFactory,
-    ) {
-
-  /** Bumps the sender watermark to the latest checkpoint up to `upToInclusive`.
-    */
-  @VisibleForTesting
-  override private[commitment] def processCommitmentsUpTo(
-      upToInclusive: Offset
-  ): FutureUnlessShutdown[Unit] = {
-    implicit val freshTraceContext = TraceContext.createNew("send-commitments")
-    for {
-      watermarkO <- watermarkStore.lookupWatermark()
-      checkpointO <-
-        digestStore.latestCheckpointUpTo(
-          upToInclusive,
-          AcsDigestStore.checkpointReconciliationFilter,
-        )
-      _ <- checkpointO
-        .filter(cp => watermarkO.forall(wm => wm.offset < cp.offset))
-        .traverse(cp => increaseWatermark(cp.timepoint))
-    } yield ()
-  }
 }
 
 object AcsCommitmentSender {

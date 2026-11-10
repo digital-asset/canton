@@ -15,7 +15,7 @@ object TestSubmissionTrackingData {
     TransactionSubmissionTrackingData.create(
       DefaultParticipantStateValues
         .completionInfo(List.empty, paidTrafficCost = NonNegativeLong.tryCreate(12356)),
-      TransactionSubmissionTrackingData.TimeoutCause,
+      SubmissionTrackingData.TimeoutCause,
       SynchronizerId.tryFromString("da::default").toPhysical,
       transactionHash = None,
     )

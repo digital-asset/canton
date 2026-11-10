@@ -25,7 +25,7 @@ import com.digitalasset.canton.participant.protocol.ProcessingSteps.InternalCont
 import com.digitalasset.canton.participant.protocol.conflictdetection.{ActivenessResult, CommitSet}
 import com.digitalasset.canton.participant.protocol.validation.AuthenticationError
 import com.digitalasset.canton.protocol.{ReassignmentId, RootHash, UpdateId}
-import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.canton.util.ReassignmentTag.Target
@@ -63,8 +63,8 @@ final case class UnassignmentValidationResult(
   def commitSet: CommitSet =
     CommitSet.createForUnassignment(contracts, targetSynchronizer, stakeholders)
 
-  /** @param participantId
-    *   the participant emitting the event
+  /** @param shouldEmitCompletion
+    *   whether the event carries the command completion of the submitting participant
     * @param recordTime
     *   record time of the emitted event
     * @param trafficCost
@@ -74,7 +74,7 @@ final case class UnassignmentValidationResult(
     *   `isReassigningParticipant`
     */
   def createReassignmentAccepted(
-      participantId: ParticipantId,
+      shouldEmitCompletion: Boolean,
       recordTime: CantonTimestamp,
       trafficCost: NonNegativeLong,
       storedInReassignmentStore: Boolean,
@@ -83,9 +83,7 @@ final case class UnassignmentValidationResult(
   ): AcsChangeFactory => InternalContractIds => Update.SequencedReassignmentAccepted = {
     val updateId = rootHash
     val completionInfo =
-      Option.when(
-        participantId == submitterMetadata.submittingParticipant
-      )(
+      Option.when(shouldEmitCompletion)(
         CompletionInfo(
           actAs = List(submitterMetadata.submitter),
           userId = submitterMetadata.userId,
@@ -141,6 +139,7 @@ object UnassignmentValidationResult {
       packageVettingResult: Option[ReassignmentValidationError],
       submitterCheckResult: Option[ReassignmentValidationError],
       multiSynchronizerFeatureFlagCheckResult: Option[ReassignmentValidationError],
+      replayCheckResult: Option[ReassignmentValidationError],
   ) extends ReassignmentValidationResult.CommonValidationResult {
 
     // The contract must be serializable on the source synchronizer

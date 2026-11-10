@@ -23,7 +23,12 @@ import com.digitalasset.canton.sequencing.SequencerAggregator.{
   SequencerAggregatorError,
 }
 import com.digitalasset.canton.sequencing.SequencerAggregatorXImpl.EventAndOrdinal
-import com.digitalasset.canton.sequencing.protocol.{Batch, Envelope, SignedContent}
+import com.digitalasset.canton.sequencing.protocol.{
+  AggregatedSignedContent,
+  Batch,
+  Envelope,
+  SignedContent,
+}
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -97,7 +102,7 @@ class SequencerAggregatorXImpl(
     }
 
   override def combine(
-      messages: NonEmpty[Seq[SequencedSerializedEvent]]
+      messages: NonEmpty[Seq[ConnectionSerializedEvent]]
   ): Either[SequencerAggregatorError, SequencedSerializedEvent] =
     throw new UnsupportedOperationException(
       """This is used only in `SequencerAggregatorTest`, but not for `SequencerAggregatorXImpl`
@@ -107,7 +112,7 @@ class SequencerAggregatorXImpl(
       |""".stripMargin
     )
 
-  override def combineAndMergeEvent(sequencerId: SequencerId, newEvent: SequencedSerializedEvent)(
+  override def combineAndMergeEvent(sequencerId: SequencerId, newEvent: ConnectionSerializedEvent)(
       implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -376,31 +381,30 @@ object SequencerAggregatorXImpl {
   }
 
   private final case class EventAndSignatures private (
-      event: SequencedSerializedEvent,
-      sequencerWithSignatures: NonEmpty[Seq[(SequencerId, NonEmpty[Seq[Signature]], TraceContext)]],
+      event: ConnectionSerializedEvent,
+      sequencerWithSignatures: NonEmpty[Seq[(SequencerId, Signature, TraceContext)]],
   ) {
     def updated(
         sequencerId: SequencerId,
-        newEvent: SequencedSerializedEvent,
+        newEvent: ConnectionSerializedEvent,
     ): EventAndSignatures = copy(sequencerWithSignatures =
       (
         sequencerId,
-        newEvent.signedEvent.signatures,
+        newEvent.signedEvent.signature,
         newEvent.traceContext,
       ) +: sequencerWithSignatures
     )
 
     def combineSignatures: SequencedSerializedEvent = {
-      val combinedSignatures = sequencerWithSignatures.flatMap {
-        case (_sequencerId, signatures, _traceContext) =>
-          signatures
+      val combinedSignatures = sequencerWithSignatures.map {
+        case (_sequencerId, signature, _traceContext) => signature
       }
 
       // Node operators can opt to not propagate trace contexts, so we cannot use them in the event hashes.
       // Malicious sequencers can also provide incorrect trace contexts.
       // As a best effort, we use the most frequent trace context within the quorum.
       val mostFrequentTraceContext = sequencerWithSignatures.forgetNE
-        .mapFilter { case (_sequencerId, _signatures, tc) =>
+        .mapFilter { case (_sequencerId, _signature, tc) =>
           Option.when(tc != TraceContext.empty)(tc) // Skip empty tcs
         }
         .groupMapReduce(identity)(_ => 1)(_ + _) // Count occurrences
@@ -408,17 +412,21 @@ object SequencerAggregatorXImpl {
         .map { case (tc, _count) => tc }
         .getOrElse(TraceContext.empty) // Fall back to empty tc if there is really nothing else
 
-      SequencedEventWithTraceContext(event.signedEvent.copy(signatures = combinedSignatures))(
-        mostFrequentTraceContext
-      )
+      SequencedEventWithTraceContext(
+        AggregatedSignedContent(
+          event.signedEvent.content,
+          combinedSignatures,
+          event.signedEvent.representativeProtocolVersion.representative,
+        )
+      )(mostFrequentTraceContext)
     }
   }
 
   private object EventAndSignatures {
-    def create(sequencerId: SequencerId, event: SequencedSerializedEvent): EventAndSignatures =
+    def create(sequencerId: SequencerId, event: ConnectionSerializedEvent): EventAndSignatures =
       EventAndSignatures(
         event,
-        NonEmpty(Seq, (sequencerId, event.signedEvent.signatures, event.traceContext)),
+        NonEmpty(Seq, (sequencerId, event.signedEvent.signature, event.traceContext)),
       )
   }
 

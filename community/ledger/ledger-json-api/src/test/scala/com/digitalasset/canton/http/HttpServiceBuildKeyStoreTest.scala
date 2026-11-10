@@ -3,7 +3,10 @@
 
 package com.digitalasset.canton.http
 
+import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.PemFile
+import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.util.JarResourceUtils
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -102,6 +105,20 @@ class HttpServiceBuildKeyStoreTest extends AnyWordSpec with BaseTest {
 
       noException should be thrownBy trustManager.checkServerTrusted(serverChain, "RSA")
       noException should be thrownBy trustManager.checkClientTrusted(serverChain, "RSA")
+    }
+  }
+
+  "HttpService.buildSSLContext" should {
+
+    "build a server SSL context when no trust collection is configured" in {
+      val config = TlsServerConfig(
+        certChainFile = PemFile(ExistingFile.tryCreate(certResource("server.crt"))),
+        privateKeyFile = PemFile(ExistingFile.tryCreate(certResource("server.pem"))),
+        trustCollectionFile = None,
+      )
+
+      val context = HttpService.buildSSLContext(config)
+      noException should be thrownBy context.createSSLEngine()
     }
   }
 

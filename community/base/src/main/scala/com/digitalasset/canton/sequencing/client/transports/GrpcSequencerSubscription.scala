@@ -20,7 +20,7 @@ import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.TokenEx
 import com.digitalasset.canton.sequencing.client.{SequencerSubscription, SubscriptionCloseReason}
 import com.digitalasset.canton.sequencing.protocol.SubscriptionResponse
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
+import com.digitalasset.canton.store.SequencedEventStore.ConnectionSequencedEvent
 import com.digitalasset.canton.tracing.TraceContext.withTraceContext
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -430,7 +430,7 @@ object GrpcSequencerSubscription {
               ),
             response =>
               handler(
-                SequencedEventWithTraceContext(response.signedSequencedEvent)(response.traceContext)
+                ConnectionSequencedEvent(response.signedSequencedEvent)(response.traceContext)
               ),
           )
       )

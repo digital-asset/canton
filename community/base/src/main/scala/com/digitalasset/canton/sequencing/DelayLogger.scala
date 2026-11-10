@@ -9,7 +9,7 @@ import com.digitalasset.canton.metrics.SequencingTimeMetrics
 import com.digitalasset.canton.store.SequencedEventStore.{
   OrdinarySequencedEvent,
   PossiblyIgnoredSequencedEvent,
-  SequencedEventWithTraceContext,
+  ProcessingSequencedEvent,
 }
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.tracing.TraceContext
@@ -30,7 +30,7 @@ class DelayLogger(
   def checkForDelay(event: PossiblyIgnoredSequencedEvent[?]): Unit =
     event match {
       case event: OrdinarySequencedEvent[?] =>
-        checkForDelay_(event.asSequencedSerializedEvent)
+        checkForDelay_(event)
       case _ => ()
     }
 
@@ -56,8 +56,8 @@ class DelayLogger(
     }
   }
 
-  def checkForDelay_(event: SequencedEventWithTraceContext[?]): Unit = {
+  def checkForDelay_(event: ProcessingSequencedEvent[?]): Unit = {
     implicit val traceContext: TraceContext = event.traceContext
-    handleTimestamp(event.signedEvent.content.timestamp)
+    handleTimestamp(event.timestamp)
   }
 }

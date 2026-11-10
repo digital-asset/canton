@@ -58,7 +58,7 @@ initialize a Participant Node as follows:
 
 Wait for the Participant Node to initialize:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/reliability/RestartSequencersReliabilityTest.scala
+.. literalinclude:: CANTON/community/app-base/src/main/scala/com/digitalasset/canton/console/RepairMacros.scala
    :language: scala
    :start-after: user-manual-entry-begin: WaitForParticipantInitialization
    :end-before: user-manual-entry-end: WaitForParticipantInitialization

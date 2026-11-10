@@ -387,6 +387,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
     "TEXT_TO_PARTY" -> BTextToParty,
     "TEXT_TO_INT64" -> BTextToInt64,
     "TEXT_TO_NUMERIC" -> BTextToNumeric,
+    "TEXT_TO_CONTRACT_ID" -> BTextToContractId,
     "TEXT_TO_CODE_POINTS" -> BTextToCodePoints,
     "ERROR" -> BError,
     "LESS_NUMERIC" -> BLessNumeric,

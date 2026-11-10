@@ -19,17 +19,19 @@ import com.digitalasset.canton.sequencing.protocol.{
   DecompressionPolicy,
   SequencedEvent,
 }
-import com.digitalasset.canton.sequencing.{MaybeCompressedSerializedEvent, SequencedSerializedEvent}
+import com.digitalasset.canton.sequencing.{
+  ConnectionSerializedEvent,
+  MaybeCompressedSerializedEvent,
+}
 import com.digitalasset.canton.store.SequencedEventStore.{
+  ConnectionSequencedEvent,
   IgnoredSequencedEvent,
-  SequencedEventWithTraceContext,
 }
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.util.PekkoUtil.noOpKillSwitch
 import com.digitalasset.canton.util.PekkoUtilTest.withNoOpKillSwitch
 import com.digitalasset.canton.util.{MaxBytesToDecompress, ResourceUtil}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
-import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import org.scalatest.wordspec.FixtureAnyWordSpec
@@ -55,11 +57,11 @@ final class SequencedEventValidatorTest
   /** Re-serializes a (decompressed) event and parses it back keeping the batch compressed, so that
     * the validator actually has to decompress it (and can hit the decompression bound).
     */
-  private def toCompressed(event: SequencedSerializedEvent): MaybeCompressedSerializedEvent = {
+  private def toCompressed(event: ConnectionSerializedEvent): MaybeCompressedSerializedEvent = {
     val compressedSignedEvent = event.signedEvent
       .traverse(se => SequencedEvent.fromTrustedByteStringCompressed(se.toByteString))
       .valueOr(err => fail(s"failed to re-parse keeping the batch compressed: $err"))
-    SequencedEventWithTraceContext(compressedSignedEvent)(event.traceContext)
+    ConnectionSequencedEvent(compressedSignedEvent)(event.traceContext)
   }
 
   "decompressEvent" should {
@@ -149,7 +151,7 @@ final class SequencedEventValidatorTest
       ).futureValueUS
       assert(sig != priorEvent.signedEvent.signature)
       val eventWithNewSig =
-        priorEvent.copy(signedEvent = priorEvent.signedEvent.copy(signatures = NonEmpty(Seq, sig)))(
+        priorEvent.copy(signedEvent = priorEvent.signedEvent.copy(signature = sig))(
           traceContext = fixtureTraceContext
         )
       validator
@@ -161,9 +163,8 @@ final class SequencedEventValidatorTest
 
     "accept a different serialization of the same content" in { fixture =>
       import fixture.*
-      val deliver1 = createEventWithCounterAndTs(1L, CantonTimestamp.Epoch).futureValueUS
-      val deliver2 = createEventWithCounterAndTs(
-        1L,
+      val deliver1 = createEventWithTs(CantonTimestamp.Epoch).futureValueUS
+      val deliver2 = createEventWithTs(
         CantonTimestamp.Epoch,
         customSerialization = Some(ByteString.copyFromUtf8("Different serialization")),
       ).futureValueUS // changing serialization, but not the contents
@@ -172,7 +173,7 @@ final class SequencedEventValidatorTest
       validator
         .validateOnReconnect(
           Some(deliver1),
-          deliver2.asSequencedSerializedEvent,
+          deliver2,
           DefaultTestIdentities.sequencerId,
         )
         .valueOrFail("Different serialization should be accepted")
@@ -231,16 +232,15 @@ final class SequencedEventValidatorTest
           .leftOrFail("fork on timestamp")
       )
 
-      val differentContent = createEventWithCounterAndTs(
-        counter = updatedCounter,
-        CantonTimestamp.Epoch,
+      val differentContent = createEventWithTs(
+        CantonTimestamp.Epoch
       ).futureValueUS
 
       val errContent = expectLog(
         validator
           .validateOnReconnect(
             Some(priorEvent),
-            differentContent.asSequencedSerializedEvent,
+            differentContent,
             DefaultTestIdentities.sequencerId,
           )
           .leftOrFail("fork on content")
@@ -298,7 +298,7 @@ final class SequencedEventValidatorTest
       import fixture.*
       val incorrectSynchronizerId =
         SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive("wrong-synchronizer::id")).toPhysical
-      val event = createEvent(incorrectSynchronizerId, counter = 0L).futureValueUS
+      val event = createEvent(incorrectSynchronizerId).futureValueUS
       val validator = mkValidator()
       val result = validator
         .validate(None, event, DefaultTestIdentities.sequencerId)
@@ -314,7 +314,6 @@ final class SequencedEventValidatorTest
         createEvent(
           previousTimestamp = Some(CantonTimestamp.MinValue),
           timestamp = CantonTimestamp.Epoch.immediatePredecessor,
-          counter = 42L,
         ).futureValueUS
       val badSig =
         sign(ByteString.copyFromUtf8("not-the-message"), CantonTimestamp.Epoch).futureValueUS
@@ -322,7 +321,6 @@ final class SequencedEventValidatorTest
         previousTimestamp = Some(priorEvent.timestamp),
         signatureOverride = Some(badSig),
         timestamp = CantonTimestamp.Epoch.immediateSuccessor.immediateSuccessor,
-        counter = 43L,
       ).futureValueUS
       val validator = mkValidator()
       val result = validator
@@ -357,15 +355,14 @@ final class SequencedEventValidatorTest
           underlying = None,
         )(fixtureTraceContext)
       val deliver =
-        createEventWithCounterAndTs(
+        createEventWithTs(
           previousTimestamp = Some(priorEvent.timestamp),
           timestamp = ts(2),
-          counter = 42,
         ).futureValueUS
       valueOrFail(
         validator.validate(
           Some(priorEvent),
-          deliver.asSequencedSerializedEvent,
+          deliver,
           DefaultTestIdentities.sequencerId,
         )
       )(
@@ -386,15 +383,14 @@ final class SequencedEventValidatorTest
         )
       val validator = mkValidator()
 
-      val deliver = createEventWithCounterAndTs(
-        counter = 42,
+      val deliver = createEventWithTs(
         timestamp = CantonTimestamp.ofEpochSecond(1),
         previousTimestamp = Some(priorEvent.timestamp),
       ).futureValueUS
       validator
         .validate(
           Some(priorEvent),
-          deliver.asSequencedSerializedEvent,
+          deliver,
           DefaultTestIdentities.sequencerId,
         )
         .valueOrFail("validate1")
@@ -403,7 +399,7 @@ final class SequencedEventValidatorTest
       val err = validator
         .validate(
           Some(deliver),
-          deliver.asSequencedSerializedEvent,
+          deliver,
           DefaultTestIdentities.sequencerId,
         )
         .leftOrFail("validate2")
@@ -427,16 +423,15 @@ final class SequencedEventValidatorTest
       val validator =
         mkValidator()
 
-      val deliver = createEventWithCounterAndTs(
+      val deliver = createEventWithTs(
         previousTimestamp = Some(priorEvent.timestamp),
         timestamp = CantonTimestamp.MinValue,
-        counter = 42L,
       ).futureValueUS
 
       val error = validator
         .validate(
           Some(priorEvent),
-          deliver.asSequencedSerializedEvent,
+          deliver,
           DefaultTestIdentities.sequencerId,
         )
         .leftOrFail("deliver1")
@@ -463,28 +458,25 @@ final class SequencedEventValidatorTest
       val validator = mkValidator()
 
       val deliver1 =
-        createEventWithCounterAndTs(
+        createEventWithTs(
           previousTimestamp = Some(CantonTimestamp.Epoch),
           timestamp = CantonTimestamp.ofEpochSecond(1),
-          counter = 42L,
         ).futureValueUS
       val deliver2 =
-        createEventWithCounterAndTs(
+        createEventWithTs(
           previousTimestamp = Some(CantonTimestamp.ofEpochSecond(1)),
           timestamp = CantonTimestamp.ofEpochSecond(2),
-          counter = 43L,
         ).futureValueUS
       val deliver3 =
-        createEventWithCounterAndTs(
+        createEventWithTs(
           previousTimestamp = Some(CantonTimestamp.ofEpochSecond(2)),
           timestamp = CantonTimestamp.ofEpochSecond(3),
-          counter = 44L,
         ).futureValueUS
 
       val result1 = validator
         .validate(
           priorEventO = Some(priorEventIgnore0),
-          event = deliver2.asSequencedSerializedEvent,
+          event = deliver2,
           DefaultTestIdentities.sequencerId,
         )
         .leftOrFail("deliver1")
@@ -494,7 +486,7 @@ final class SequencedEventValidatorTest
       validator
         .validate(
           Some(priorEventIgnore0),
-          deliver1.asSequencedSerializedEvent,
+          deliver1,
           DefaultTestIdentities.sequencerId,
         )
         .valueOrFail("deliver2")
@@ -504,7 +496,7 @@ final class SequencedEventValidatorTest
       val result3 = validator
         .validate(
           Some(deliver1),
-          deliver3.asSequencedSerializedEvent,
+          deliver3,
           DefaultTestIdentities.sequencerId,
         )
         .leftOrFail("deliver3")
@@ -548,41 +540,38 @@ final class SequencedEventValidatorTest
       import fixture.*
 
       val validator = mkValidator()
-      val deliver1 = createEventWithCounterAndTs(
-        counter = 42L,
+      val deliver1 = createEventWithTs(
         timestamp = CantonTimestamp.Epoch,
         previousTimestamp = None,
       ).futureValueUS
       val deliver2 =
-        createEventWithCounterAndTs(
-          counter = 43L,
+        createEventWithTs(
           timestamp = CantonTimestamp.ofEpochSecond(1),
           previousTimestamp = Some(deliver1.timestamp),
         ).futureValueUS
       val deliver3 =
-        createEventWithCounterAndTs(
-          counter = 44L,
+        createEventWithTs(
           timestamp = CantonTimestamp.ofEpochSecond(2),
           previousTimestamp = Some(deliver2.timestamp),
         ).futureValueUS
 
       val source = Source(
         Seq(deliver1, deliver1, deliver2, deliver2, deliver2, deliver3).map(event =>
-          withNoOpKillSwitch(Either.right(event.asSequencedSerializedEvent))
+          withNoOpKillSwitch(Either.right(event))
         )
       ).watchTermination()((_, doneF) => noOpKillSwitch -> doneF)
       val subscription = SequencerSubscriptionPekko[String](source, alwaysHealthyComponent)
       val validatedSubscription =
         validator.validatePekko(
           subscription,
-          Some(deliver1.asSequencedSerializedEvent),
+          Some(aggregated(deliver1)),
           DefaultTestIdentities.sequencerId,
         )
       val validatedEventsF = validatedSubscription.source.runWith(Sink.seq)
       // deliver1 should be filtered out because it's the prior event
       validatedEventsF.futureValue.map(_.value) shouldBe Seq(
-        Right(deliver2.asSequencedSerializedEvent),
-        Right(deliver3.asSequencedSerializedEvent),
+        Right(deliver2),
+        Right(deliver3),
       )
     }
 
@@ -590,43 +579,37 @@ final class SequencedEventValidatorTest
       import fixture.*
 
       val validator = mkValidator()
-      val deliver1 = createEventWithCounterAndTs(
-        counter = 1L,
+      val deliver1 = createEventWithTs(
         timestamp = CantonTimestamp.Epoch,
         previousTimestamp = None,
       ).futureValueUS
-      val deliver2 = createEventWithCounterAndTs(
-        counter = 2L,
+      val deliver2 = createEventWithTs(
         timestamp = CantonTimestamp.ofEpochSecond(1),
         previousTimestamp = Some(CantonTimestamp.Epoch),
       ).futureValueUS
-      val deliver3 = createEventWithCounterAndTs(
-        counter = 4L,
+      val deliver3 = createEventWithTs(
         timestamp = CantonTimestamp.ofEpochSecond(3),
         previousTimestamp = Some(CantonTimestamp.ofEpochSecond(2)),
       ).futureValueUS
-      val deliver4 = createEventWithCounterAndTs(
-        counter = 5L,
+      val deliver4 = createEventWithTs(
         timestamp = CantonTimestamp.ofEpochSecond(4),
         previousTimestamp = Some(CantonTimestamp.ofEpochSecond(3)),
       ).futureValueUS
 
       val source = Source(
-        Seq(deliver1, deliver2, deliver3, deliver4).map(event =>
-          withNoOpKillSwitch(Right(event.asSequencedSerializedEvent))
-        )
+        Seq(deliver1, deliver2, deliver3, deliver4).map(event => withNoOpKillSwitch(Right(event)))
       ).watchTermination()((_, doneF) => noOpKillSwitch -> doneF)
       val subscription = SequencerSubscriptionPekko(source, alwaysHealthyComponent)
       val validatedSubscription =
         validator.validatePekko(
           subscription,
-          Some(deliver1.asSequencedSerializedEvent),
+          Some(aggregated(deliver1)),
           DefaultTestIdentities.sequencerId,
         )
       val validatedEventsF = validatedSubscription.source.runWith(Sink.seq)
       // deliver1 should be filtered out because it's the prior event
       validatedEventsF.futureValue.map(_.value) shouldBe Seq(
-        Right(deliver2.asSequencedSerializedEvent),
+        Right(deliver2),
         Left(
           PreviousTimestampMismatch(
             receivedPreviousTimestamp = deliver3.previousTimestamp,
@@ -640,34 +623,29 @@ final class SequencedEventValidatorTest
       import fixture.*
 
       val validator = mkValidator()
-      val deliver1 = createEventWithCounterAndTs(
-        counter = 1L,
+      val deliver1 = createEventWithTs(
         timestamp = CantonTimestamp.Epoch,
         previousTimestamp = None,
       ).futureValueUS
       // Forked event, the fork is on the previous timestamp field
       val deliver1a =
-        createEventWithCounterAndTs(
-          counter = 1L,
+        createEventWithTs(
           timestamp = CantonTimestamp.Epoch,
           previousTimestamp = Some(CantonTimestamp.MinValue),
         ).futureValueUS
-      val deliver2 = createEventWithCounterAndTs(
-        counter = 2L,
+      val deliver2 = createEventWithTs(
         timestamp = CantonTimestamp.ofEpochSecond(1),
         previousTimestamp = Some(CantonTimestamp.Epoch),
       ).futureValueUS
 
       val source = Source(
-        Seq(deliver1, deliver2).map(event =>
-          withNoOpKillSwitch(Right(event.asSequencedSerializedEvent))
-        )
+        Seq(deliver1, deliver2).map(event => withNoOpKillSwitch(Right(event)))
       ).watchTermination()((_, doneF) => noOpKillSwitch -> doneF)
       val subscription = SequencerSubscriptionPekko(source, alwaysHealthyComponent)
       val validatedSubscription =
         validator.validatePekko(
           subscription,
-          Some(deliver1a.asSequencedSerializedEvent),
+          Some(aggregated(deliver1a)),
           DefaultTestIdentities.sequencerId,
         )
       loggerFactory.assertLogs(
@@ -697,24 +675,20 @@ final class SequencedEventValidatorTest
           CantonTimestamp.ofEpochSecond(2),
         )
       val validator = mkValidator(syncCryptoApi)
-      val deliver1 = createEventWithCounterAndTs(
-        counter = 1L,
+      val deliver1 = createEventWithTs(
         timestamp = CantonTimestamp.Epoch,
         previousTimestamp = None,
       ).futureValueUS
-      val deliver2 = createEventWithCounterAndTs(
-        counter = 2L,
+      val deliver2 = createEventWithTs(
         timestamp = CantonTimestamp.ofEpochSecond(1),
         previousTimestamp = Some(CantonTimestamp.Epoch),
       ).futureValueUS
-      val deliver3 = createEventWithCounterAndTs(
-        counter = 4L,
+      val deliver3 = createEventWithTs(
         timestamp = CantonTimestamp.ofEpochSecond(3),
         previousTimestamp = Some(CantonTimestamp.ofEpochSecond(2)),
       ).futureValueUS
       val deliver4 =
-        createEventWithCounterAndTs(
-          counter = 5L,
+        createEventWithTs(
           timestamp = CantonTimestamp.ofEpochSecond(300),
           previousTimestamp = Some(CantonTimestamp.ofEpochSecond(3)),
         ).futureValueUS
@@ -732,22 +706,20 @@ final class SequencedEventValidatorTest
         .futureValue shouldBe a[IllegalArgumentException]
 
       val source = Source(
-        Seq(deliver1, deliver2, deliver3, deliver4).map(event =>
-          withNoOpKillSwitch(Right(event.asSequencedSerializedEvent))
-        )
+        Seq(deliver1, deliver2, deliver3, deliver4).map(event => withNoOpKillSwitch(Right(event)))
       ).watchTermination()((_, doneF) => noOpKillSwitch -> doneF)
       val subscription = SequencerSubscriptionPekko(source, alwaysHealthyComponent)
       val validatedSubscription =
         validator.validatePekko(
           subscription,
-          Some(deliver1.asSequencedSerializedEvent),
+          Some(aggregated(deliver1)),
           DefaultTestIdentities.sequencerId,
         )
       val ((killSwitch, doneF), validatedEventsF) =
         validatedSubscription.source.toMat(Sink.seq)(Keep.both).run()
       // deliver1 should be filtered out because it's the prior event
       validatedEventsF.futureValue.map(_.value) shouldBe Seq(
-        Right(deliver2.asSequencedSerializedEvent),
+        Right(deliver2),
         Left(
           PreviousTimestampMismatch(
             receivedPreviousTimestamp = deliver3.previousTimestamp,

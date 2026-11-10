@@ -7,9 +7,14 @@ import com.daml.ledger.api.v2.TraceContextOuterClass;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 
 public class Utils {
   private Utils() {}
+
+  static Optional<String> optionalNonEmpty(String value) {
+    return value.isEmpty() ? Optional.empty() : Optional.of(value);
+  }
 
   public static com.google.protobuf.Timestamp instantToProto(Instant instant) {
     return com.google.protobuf.Timestamp.newBuilder()

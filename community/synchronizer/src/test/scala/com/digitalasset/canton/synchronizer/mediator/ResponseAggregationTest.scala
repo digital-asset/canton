@@ -5,6 +5,8 @@ package com.digitalasset.canton.synchronizer.mediator
 
 import com.daml.metrics.api.MetricHandle.Meter
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
@@ -37,13 +39,12 @@ import org.scalatest.funspec.PathAnyFunSpec
 
 import java.time.Duration
 import java.util.UUID
-import scala.concurrent.ExecutionContext
 import scala.jdk.CollectionConverters.ListHasAsScala
 import scala.language.existentials
 
 class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
-  private implicit val ec: ExecutionContext = directExecutionContext
+  private implicit val dec: DirectExecutionContext = directExecutionContext
 
   val batchingConfig = BatchingConfig()
 

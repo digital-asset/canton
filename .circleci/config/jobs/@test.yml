@@ -171,7 +171,7 @@ stability_crash_recovery_test_alerting:
     - check_number_of_successes:
         min_successes: 8 # Low threshold, since test failures are reported to datadog anyway
         job_name: << parameters.stability_crash_recovery_test_name >>
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 benchmark:
   executor: canton-xlarge-plus-docker-with-postgres
@@ -188,7 +188,7 @@ benchmark:
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.benchmarks"
         num_parallel_tasks: "1"
     - post_benchmark_metrics
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 release_test:
   executor: canton-xlarge-docker-with-postgres
@@ -217,7 +217,7 @@ release_test:
         num_test_buckets: ""
         num_parallel_tasks: "1"
         do_checkout: false # we already did the checkout before restoring the KMS driver
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 test_docker_images:
   executor: canton-large-docker-on-cci
@@ -237,7 +237,7 @@ test_docker_images:
         path: docker/canton/tests/ping/ci-artifacts/compose-logs
         destination: docker-ping-test-logs
         when: always
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 protocol_continuity_test_all:
   executor: canton-xlarge-docker-with-postgres
@@ -324,7 +324,7 @@ nightly_cn_topology_snapshot_test_only:
         num_test_buckets: "4"
         num_parallel_tasks: "1"
         timeout: "240m" # Very large timeout on purpose, because topology validation can take a long time
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 nightly_integration_test_sequencer_only:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
@@ -358,7 +358,7 @@ nightly_integration_test_bftordering_only:
         num_test_buckets: "2"
         num_parallel_tasks: "1"
         timeout: "60m"
-    - slack_red_main_with_volunteer:
+    - slack_notify_failure_with_volunteer:
         fixed_volunteer: "U04S25SG9D5" # Daniel
 
 nightly_test_upgrades_matrix_and_check:
@@ -377,7 +377,7 @@ nightly_test_upgrades_matrix_and_check:
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.UpgradesMatrixIntegration"
         timeout: "120m"
         report_to_datadog: false
-    - slack_red_main_with_volunteer:
+    - slack_notify_failure_with_volunteer:
         fixed_volunteer: "U03HCPABC9M" # Dylan
 
 model_based_external_parties_test:
@@ -396,7 +396,7 @@ model_based_external_parties_test:
         num_parallel_tasks: "1"
         timeout: "120m"
         report_to_datadog: false
-    - slack_red_main_with_volunteer:
+    - slack_notify_failure_with_volunteer:
         fixed_volunteer: "U03NCGBFCDP" # Thibault
 
 model_based_test:
@@ -418,7 +418,7 @@ model_based_test:
         # reporting to avoid spamming the flaky test rota. Paul is notified of
         # failures on slack for now (see fixed_volunteer below).
         report_to_datadog: false
-    - slack_red_main_with_volunteer:
+    - slack_notify_failure_with_volunteer:
         fixed_volunteer: "U05KX5V7KJN" # Paul
 
 generate_transaction_snapshot:
@@ -472,7 +472,7 @@ generate_transaction_snapshot:
         command: |
           echo $GCLOUD_DAML_LF_SERVICE_ACCOUNT | gcloud auth activate-service-account --key-file=-
           gcloud storage cp --recursive "$SNAPSHOT_DIR" "gs://daml-lf-snapshot-data"
-    - slack_red_main_with_volunteer:
+    - slack_notify_failure_with_volunteer:
         fixed_volunteer: U03K3A3UAGY # Carl
 
 benchmark_transaction_snapshot:
@@ -548,7 +548,7 @@ benchmark_transaction_snapshot:
         name: Store log directory as artifacts (if any)
         path: log
     - post_transaction_snapshot_metrics
-    - slack_red_main_with_volunteer:
+    - slack_notify_failure_with_volunteer:
         fixed_volunteer: U03K3A3UAGY # Carl
 
 toxiproxy_test_fast:
@@ -668,7 +668,7 @@ test_performance_runner:
             mv -v $ff log
           done
     - cleanup_test_job
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 generate_data_continuity_dumps:
   executor: canton-xlarge-docker-with-postgres
@@ -729,7 +729,7 @@ generate_data_continuity_dumps:
         command: |
           .ci/nix-exec ./scripts/ci/publish-data-continuity-dumps-to-s3.sh
     - cleanup_test_job
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 test_data_continuity_dumps:
   executor: canton-xlarge-docker-with-postgres
@@ -747,7 +747,7 @@ test_data_continuity_dumps:
         num_test_buckets: "8"
         num_parallel_tasks: "1" # ports are hardcoded
         timeout: 1h
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 print_tests:
   executor: canton-xlarge-docker
@@ -839,7 +839,7 @@ test_ping_arm:
         destination: log
         name: Store test logs as artifacts (if any)
         path: log
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 test_scala3:
   executor: canton-large-docker

@@ -129,7 +129,7 @@ trait HmacOps {
 sealed trait HmacError extends Product with Serializable with PrettyPrintingFromCompanion
 
 object HmacError {
-  final case class UnknownHmacAlgorithm(algorithm: HmacAlgorithm, cause: Exception)
+  final case class UnknownHmacAlgorithm(algorithm: HmacAlgorithm, cause: Throwable)
       extends HmacError {
     override def prettyCompanion: PrettyPrintingCompanion[UnknownHmacAlgorithm] =
       UnknownHmacAlgorithm
@@ -167,13 +167,13 @@ object HmacError {
       param("maximumLength", _.maximumLength),
     )
   }
-  final case class InvalidHmacSecret(cause: Exception) extends HmacError {
+  final case class InvalidHmacSecret(cause: Throwable) extends HmacError {
     override def prettyCompanion: PrettyPrintingCompanion[InvalidHmacSecret] = InvalidHmacSecret
   }
   object InvalidHmacSecret extends PrettyPrintingCompanion[InvalidHmacSecret] {
     override protected val pretty: Pretty[InvalidHmacSecret] = prettyOfClass(unnamedParam(_.cause))
   }
-  final case class FailedToComputeHmac(cause: Exception) extends HmacError {
+  final case class FailedToComputeHmac(cause: Throwable) extends HmacError {
     override def prettyCompanion: PrettyPrintingCompanion[FailedToComputeHmac] = FailedToComputeHmac
   }
   object FailedToComputeHmac extends PrettyPrintingCompanion[FailedToComputeHmac] {

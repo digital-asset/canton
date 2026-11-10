@@ -16,7 +16,7 @@ import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.Sequ
 import com.digitalasset.canton.sequencing.client.transports.ServerSubscriptionCloseReason
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
-import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
+import com.digitalasset.canton.store.SequencedEventStore.ConnectionSequencedEvent
 import com.digitalasset.canton.synchronizer.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
@@ -78,11 +78,11 @@ class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExec
         testedProtocolVersion,
       )
       handler.fold(fail("handler not registered"))(h =>
-        Await.result(h(Right(SequencedEventWithTraceContext(event)(traceContext))), 5.seconds)
+        Await.result(h(Right(ConnectionSequencedEvent(event)(traceContext))), 5.seconds)
       )
     }
 
-    private def toSubscriptionResponseV30(event: SequencedSerializedEvent) =
+    private def toSubscriptionResponseV30(event: ConnectionSerializedEvent) =
       v30.SubscriptionResponse(
         signedSequencedEvent = event.signedEvent.toByteString,
         Some(SerializableTraceContext(event.traceContext).toProtoV30),

@@ -285,6 +285,31 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
       }
     }
 
+    "be validated with the transaction seed instead of the submission seed" in {
+      forAll(cases) { case (templateId, signatories, submitters) =>
+        val Right((tx, meta)) = interpretResult(templateId, signatories, submitters)
+        val ntx = SubmittedTransaction(Normalization.normalizeTx(tx))
+        def validate(transactionSeed: crypto.Hash) =
+          suffixLenientEngine
+            .validateWithTransactionSeedAndCollectMetrics(
+              submitters,
+              ntx,
+              let,
+              meta.preparationTime,
+              transactionSeed,
+              contractIdVersion,
+              InterpretationConfig.DefaultForTesting,
+            )
+            .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
+        validate(
+          crypto.Hash.deriveTransactionSeed(submissionSeed, participant, meta.preparationTime)
+        ) shouldBe a[Right[?, ?]]
+        inside(validate(crypto.Hash.hashPrivateKey("another seed"))) {
+          case Left(VErr(VErr.ReplayMismatch(_))) => succeed
+        }
+      }
+    }
+
     "allow replay with a superset of submitters" in {
       forAll(cases) { case (templateId, signatories, submitters) =>
         val Right((tx, _)) = interpretResult(templateId, signatories, submitters)

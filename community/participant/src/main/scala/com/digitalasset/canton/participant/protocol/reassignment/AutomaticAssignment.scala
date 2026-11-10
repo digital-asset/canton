@@ -14,7 +14,7 @@ import com.digitalasset.canton.config.{
   ReassignmentsConfig,
 }
 import com.digitalasset.canton.crypto.PseudoRandom
-import com.digitalasset.canton.data.{CantonTimestamp, ReassignmentSubmitterMetadata}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonBaseError.isStatusErrorCode
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -98,7 +98,7 @@ private[participant] object AutomaticAssignment {
         submissionResult <- reassignmentCoordination
           .assign(
             targetSynchronizer,
-            ReassignmentSubmitterMetadata(
+            ReassignmentSubmissionInfo(
               assignmentSubmitter,
               participantId,
               commandId(id),

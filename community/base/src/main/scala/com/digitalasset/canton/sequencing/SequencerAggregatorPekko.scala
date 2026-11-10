@@ -96,7 +96,7 @@ class SequencerAggregatorPekko(
     val ops = new SequencerAggregatorMergeOps(initialTimestampOrPriorEvent)
     val hub = new OrderedBucketMergeHub[
       SequencerId,
-      SequencedSerializedEvent,
+      ConnectionSerializedEvent,
       HasSequencerSubscriptionFactoryPekko[E],
       Option[CantonTimestamp],
       HealthComponent,
@@ -123,31 +123,18 @@ class SequencerAggregatorPekko(
   }
 
   private def mergeBucket(
-      elems: NonEmpty[Map[SequencerId, SequencedSerializedEvent]]
+      elems: NonEmpty[Map[SequencerId, ConnectionSerializedEvent]]
   ): SequencedSerializedEvent = {
-    val (_, someElem) = elems.head1
-
-    // By the definition of `Bucket`, the contents
-    // and the representative protocol version are the same
-    // The SequencedEventValidator ensures that the timestamp of signing key is always None.
-    val content = someElem.signedEvent.content
-    val representativeProtocolVersion = someElem.signedEvent.representativeProtocolVersion
-
     // We don't want to force trace contexts to be propagated identically.
     // So lets merge them.
     implicit val mergedTraceContext: TraceContext =
       TraceContext.ofBatch("merge_bucket_batch")(elems.values)(logger)
 
-    val mergedSigs = elems.flatMap { case (_, event) => event.signedEvent.signatures }.toSeq
-    val mergedSignedEvent = SignedContent
-      .create(
-        content,
-        mergedSigs,
-        timestampOfSigningKey = None,
-        representativeProtocolVersion,
-      )
-    // We intentionally do not use the copy method
-    // so that we notice when fields are added
+    // By the definition of `Bucket`, the contents
+    // and the representative protocol version are the same
+    // The SequencedEventValidator ensures that the timestamp of signing key is always None.
+    val mergedSignedEvent =
+      SequencerAggregator.mergeSignatures(elems.toSeq.map { case (_, event) => event.signedEvent })
     SequencedEventWithTraceContext(mergedSignedEvent)(mergedTraceContext)
   }
 
@@ -185,7 +172,7 @@ class SequencerAggregatorPekko(
   )(implicit val traceContext: TraceContext)
       extends OrderedBucketMergeHubOps[
         SequencerId,
-        SequencedSerializedEvent,
+        ConnectionSerializedEvent,
         HasSequencerSubscriptionFactoryPekko[E],
         Option[CantonTimestamp],
         HealthComponent,
@@ -195,7 +182,7 @@ class SequencerAggregatorPekko(
 
     override def prettyBucket: Pretty[Bucket] = implicitly[Pretty[Bucket]]
 
-    override def bucketOf(event: SequencedSerializedEvent): Bucket =
+    override def bucketOf(event: ConnectionSerializedEvent): Bucket =
       Bucket(
         Some(event.timestamp),
         // keep only the content hash instead of the content itself.
@@ -230,7 +217,7 @@ class SequencerAggregatorPekko(
       timestampToSubscribeFrom
     }
 
-    override def traceContextOf(event: SequencedSerializedEvent): TraceContext =
+    override def traceContextOf(event: ConnectionSerializedEvent): TraceContext =
       event.traceContext
 
     override type PriorElement = ProcessingSerializedEvent
@@ -239,7 +226,7 @@ class SequencerAggregatorPekko(
       initialTimestampOrPriorEvent.toOption
 
     override def toPriorElement(
-        output: OrderedBucketMergeHub.OutputElement[SequencerId, SequencedSerializedEvent]
+        output: OrderedBucketMergeHub.OutputElement[SequencerId, ConnectionSerializedEvent]
     ): PriorElement = mergeBucket(output.elem)
 
     override def makeSource(
@@ -247,7 +234,7 @@ class SequencerAggregatorPekko(
         config: HasSequencerSubscriptionFactoryPekko[E],
         startFromInclusive: Option[CantonTimestamp],
         priorElement: Option[PriorElement],
-    ): Source[SequencedSerializedEvent, (KillSwitch, Future[Done], HealthComponent)] = {
+    ): Source[ConnectionSerializedEvent, (KillSwitch, Future[Done], HealthComponent)] = {
       val prior = priorElement.collect { case event @ SequencedEventWithTraceContext(_) =>
         event
       }
@@ -282,14 +269,14 @@ object SequencerAggregatorPekko {
   type SubscriptionControl[E] = ControlOutput[
     SequencerId,
     HasSequencerSubscriptionFactoryPekko[E],
-    SequencedSerializedEvent,
+    ConnectionSerializedEvent,
     Option[CantonTimestamp],
   ]
 
   private type SubscriptionControlInternal[E] = ControlOutput[
     SequencerId,
     (HasSequencerSubscriptionFactoryPekko[E], Option[HealthComponent]),
-    SequencedSerializedEvent,
+    ConnectionSerializedEvent,
     Option[CantonTimestamp],
   ]
 

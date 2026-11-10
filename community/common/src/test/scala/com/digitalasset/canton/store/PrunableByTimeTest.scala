@@ -6,6 +6,7 @@ package com.digitalasset.canton.store
 import cats.instances.future.catsStdInstancesForFuture
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
@@ -139,8 +140,7 @@ class PrunableByTimeLogicTest
       PrunableByTimeParameters.testingParams
     )
 
-    override protected implicit val ec: ExecutionContext =
-      PrunableByTimeLogicTest.this.directExecutionContext
+    override protected implicit val ec: ExecutionContext = directExecutionContext
 
     // variable used to record which pruning intervals where invoked
     val pruningRequests =

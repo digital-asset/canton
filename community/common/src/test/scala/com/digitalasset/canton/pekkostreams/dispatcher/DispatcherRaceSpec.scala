@@ -5,7 +5,8 @@ package com.digitalasset.canton.pekkostreams.dispatcher
 
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.pekkostreams.dispatcher.DispatcherImpl.Incrementable
 import com.digitalasset.canton.pekkostreams.dispatcher.SubSource.RangeSource
@@ -70,7 +71,7 @@ class DispatcherRaceSpec
                     readElement(index).map { t =>
                       val nextIndex = readSuccessor(index)
                       Some((nextIndex, (index, t)))
-                    }(DirectExecutionContext(noTracingLogger))
+                    }(directExecutionContext)
                   }
                 }
             ),

@@ -6,15 +6,14 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.Functor
 import cats.data.EitherT
 import cats.syntax.traverse.*
-import com.digitalasset.canton.checked
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.protocol.{SynchronizerLimits, v30}
+import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
   BytestringWithCryptographicEvidence,
@@ -24,46 +23,45 @@ import com.digitalasset.canton.serialization.{
 }
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
-  OriginalByteString,
   ProtoVersion,
   ProtocolVersion,
   ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
-  VersioningCompanionMemoization2,
+  VersioningCompanionContextMemoization2,
 }
-import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext
 
-/** @param timestampOfSigningKey
+/** Content signed by a single member. Content signed by several sequencers is a
+  * [[AggregatedSignedContent]].
+  *
+  * @param signature
+  *   The signature of the content.
+  * @param timestampOfSigningKey
   *   The timestamp of the topology snapshot that was used for signing the content. [[scala.None$]]
   *   if the signing timestamp can be derived from the content.
-  * @param signatures
-  *   Signatures of the content provided by the different sequencers.
   */
 final case class SignedContent[+A <: HasCryptographicEvidence] private (
     content: A,
-    signatures: NonEmpty[Seq[Signature]],
+    signature: Signature,
     timestampOfSigningKey: Option[CantonTimestamp],
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[SignedContent.type],
     override val deserializedFrom: Option[ByteString],
 ) extends HasProtocolVersionedWrapper[SignedContent[HasCryptographicEvidence]]
-    with ProtocolVersionedMemoizedEvidence
-    with Serializable
-    with Product {
+    with ProtocolVersionedMemoizedEvidence {
 
   @transient override protected lazy val companionObj: SignedContent.type = SignedContent
 
   def toProtoV30: v30.SignedContent =
     v30.SignedContent(
       Some(content.getCryptographicEvidence),
-      signatures.map(_.toProtoV30),
+      Seq(signature.toProtoV30),
       timestampOfSigningKey.map(_.toProtoPrimitive),
     )
 
@@ -102,20 +100,19 @@ final case class SignedContent[+A <: HasCryptographicEvidence] private (
 
   def deserializeContent[B <: HasCryptographicEvidence](
       contentDeserializer: ByteString => ParsingResult[B]
+  )(implicit
+      ev: A <:< BytestringWithCryptographicEvidence
   ): ParsingResult[SignedContent[B]] =
-    this.traverse(content => contentDeserializer(content.getCryptographicEvidence))
-
-  // TODO(i12076): Start using multiple signatures
-  val signature: Signature = signatures.last1
+    this.traverse(content => contentDeserializer(ev(content).bytes))
 
   def copy[B <: HasCryptographicEvidence](
       content: B = this.content,
-      signatures: NonEmpty[Seq[Signature]] = this.signatures,
+      signature: Signature = this.signature,
       timestampOfSigningKey: Option[CantonTimestamp] = this.timestampOfSigningKey,
   ): SignedContent[B] =
     SignedContent.create(
       content,
-      signatures,
+      signature,
       timestampOfSigningKey,
       representativeProtocolVersion,
     )
@@ -125,76 +122,48 @@ final case class SignedContent[+A <: HasCryptographicEvidence] private (
 }
 
 object SignedContent
-    extends VersioningCompanionMemoization2[
+    extends VersioningCompanionContextMemoization2[
       SignedContent[HasCryptographicEvidence],
+      SignatureCountCheck,
       SignedContent[BytestringWithCryptographicEvidence],
+      Unit,
     ] {
 
   override def name: String = "SignedContent"
 
   override val versioningTable: VersioningTable = VersioningTable(
+    // TODO(i37895): Split the wire format of SignedContent and AggregatedSignedContent
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.SignedContent)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
 
-  // TODO(i12076): Start using multiple signatures
   def apply[A <: HasCryptographicEvidence](
       content: A,
       signature: Signature,
       timestampOfSigningKey: Option[CantonTimestamp],
       protocolVersion: ProtocolVersion,
-  ): SignedContent[A] = checked( // There is only a single signature
+  ): SignedContent[A] =
     SignedContent.create(
       content,
-      NonEmpty(Seq, signature),
+      signature,
       timestampOfSigningKey,
       protocolVersionRepresentativeFor(protocolVersion),
     )
-  )
-
-  def apply[A <: HasCryptographicEvidence](
-      content: A,
-      signatures: NonEmpty[Seq[Signature]],
-      timestampOfSigningKey: Option[CantonTimestamp],
-      protoVersion: ProtoVersion,
-  ): ParsingResult[SignedContent[A]] =
-    protocolVersionRepresentativeFor(protoVersion).map { rpv =>
-      checked( // There is only a single signature
-        SignedContent.create(
-          content,
-          signatures,
-          timestampOfSigningKey,
-          rpv,
-        )
-      )
-    }
 
   /** Creates a new signed content from scratch. Use when creating without having an existing
     * serialized SignedContent.
     */
   def create[A <: HasCryptographicEvidence](
       content: A,
-      signatures: NonEmpty[Seq[Signature]],
+      signature: Signature,
       timestampOfSigningKey: Option[CantonTimestamp],
       representativeProtocolVersion: RepresentativeProtocolVersion[SignedContent.type],
   ): SignedContent[A] =
-    new SignedContent(content, signatures, timestampOfSigningKey)(
+    new SignedContent(content, signature, timestampOfSigningKey)(
       representativeProtocolVersion,
       None,
-    )
-
-  private def createFromProto[A <: HasCryptographicEvidence](
-      content: A,
-      signatures: NonEmpty[Seq[Signature]],
-      timestampOfSigningKey: Option[CantonTimestamp],
-      representativeProtocolVersion: RepresentativeProtocolVersion[SignedContent.type],
-      originalByteString: OriginalByteString,
-  ): SignedContent[A] =
-    new SignedContent(content, signatures, timestampOfSigningKey)(
-      representativeProtocolVersion,
-      Some(originalByteString),
     )
 
   /** @param timestampOfSigningKey
@@ -265,32 +234,40 @@ object SignedContent
     )
       .valueOr(err => throw new IllegalStateException(s"Failed to create signed content: $err"))
 
-  def fromProtoV30(
+  private def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      signatureCountCheck: SignatureCountCheck,
       signedValueP: v30.SignedContent,
   )(
       bytes: ByteString
   ): ParsingResult[SignedContent[BytestringWithCryptographicEvidence]] = {
-    val v30.SignedContent(content, signatures, timestampOfSigningKey) = signedValueP
+    val v30.SignedContent(content, signaturesP, timestampOfSigningKey) = signedValueP
+    val (signatureCountPvv, maxSignatures) = signatureCountCheck match {
+      case SignatureCountCheck.Strict =>
+        (
+          ProtocolVersionValidation.AlwaysValidation,
+          ValidationParam(ProtocolVersion.minimum -> PositiveInt.one),
+        )
+      case SignatureCountCheck.ByProtocolVersion =>
+        (pvv, ValidationParam(ProtocolVersion.nextValidationBoundPV -> PositiveInt.one))
+    }
     for {
       contentB <- ProtoConverter.required("content", content)
       signaturesSeq <- ProtoValidation
-        .validateLength(signatures, "signature", pvv, ProtoValidation.MaxCollectionSize)
+        .validateLength(signaturesP, "signatures", signatureCountPvv, maxSignatures)
       signatures <- ProtoConverter.parseRequiredNonEmpty(
         Signature.fromProtoV30,
-        "signature",
+        "signatures",
         signaturesSeq,
       )
       ts <- timestampOfSigningKey.traverse(CantonTimestamp.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-      signedContent = createFromProto(
-        BytestringWithCryptographicEvidence(contentB),
-        signatures,
-        ts,
-        rpv,
-        bytes,
-      )
-    } yield signedContent
+      // Protocol versions before the bound accept several signatures, of which only the last one is
+      // verified. Keep only that one so that all nodes see the same signature.
+    } yield new SignedContent(BytestringWithCryptographicEvidence(contentB), signatures.last1, ts)(
+      rpv,
+      Some(bytes),
+    )
   }
 
   implicit def prettySignedContent[A <: HasCryptographicEvidence](implicit
@@ -299,23 +276,28 @@ object SignedContent
     import com.digitalasset.canton.logging.pretty.PrettyUtil.*
     prettyOfClass(
       unnamedParam(_.content),
-      param("signatures", _.signatures),
+      param("signature", _.signature),
       paramIfDefined("timestamp of signing key", _.timestampOfSigningKey),
     )
   }
 
-  def openEnvelopes(event: SignedContent[DecompressedSequencedEvent[ClosedEnvelope]])(
-      protocolVersion: ProtocolVersion,
-      hashOps: HashOps,
-      synchronizerLimits: SynchronizerLimits,
-  ): WithOpeningErrors[SignedContent[DecompressedSequencedEvent[DefaultOpenEnvelope]]] = {
-    val (openSequencedEvent, openingErrors) =
-      SequencedEvent.openEnvelopes(event.content)(protocolVersion, hashOps, synchronizerLimits)
-    WithOpeningErrors(
-      // The signature is still valid
-      event.copy(content = openSequencedEvent),
-      openingErrors,
-    )
-  }
+}
 
+/** How [[SignedContent]] deserialization treats a message with more than one signature. */
+sealed trait SignatureCountCheck extends Product with Serializable
+
+object SignatureCountCheck {
+
+  /** Reject more than one signature on every protocol version. Use where a node decides alone
+    * whether to accept the message, e.g. a sequencer receiving a request before ordering it.
+    */
+  case object Strict extends SignatureCountCheck
+
+  /** Reject more than one signature from
+    * [[com.digitalasset.canton.version.ProtocolVersion.nextValidationBoundPV]] on, and keep only
+    * the last signature on earlier protocol versions. Use where all nodes must reach the same
+    * result, e.g. after ordering, including nodes on different releases in cross-version
+    * deployments.
+    */
+  case object ByProtocolVersion extends SignatureCountCheck
 }

@@ -25,6 +25,9 @@ metric_short_version = "canton.failed_test_grouped"
 # Set to 10 for unstable tests. The trade off is about false alarms vs not detecting broken test.
 CONSECUTIVE_FAILURES_THRESHOLD: Final[int] = 3
 CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE: Final[int] = 10
+# Streaks are counted exactly up to this many commits, shown as "30+" beyond. Counting
+# costs one GitHub API call per commit, on every failure of a test that keeps failing.
+STREAK_COUNT_LIMIT: Final[int] = 30
 
 # A test that fails on this many consecutive *nightly* runs is treated as broken
 # (not merely flaky) and the CI rota is pinged. Nightly runs are days apart and
@@ -39,13 +42,13 @@ NIGHTLY_CRON_HOUR_UTC: Final[int] = 22
 # ignores cron slots younger than this, since their nightly run may not have reported yet.
 NIGHTLY_REPORT_DELAY: Final[datetime.timedelta] = datetime.timedelta(hours=12)
 # Nightly jobs that keep a historical name instead of the `nightly_` prefix. Matched
-# on the job name (CIRCLE_JOB / GITHUB_JOB), so keep in sync across a GHA migration.
+# on the job name (CIRCLE_JOB, or the job_name canton_nightly.yml passes on GHA), so
+# keep the nightly job names on both CIs and this list in sync.
 NIGHTLY_JOBS_WITHOUT_PREFIX: Final[frozenset[str]] = frozenset(
     {
         "toxiproxy_test_slow_36",
         "external_parties_test_36",
         "test_36_with_java17",
-        "test_37",
         "protocol_continuity_test_all",
         "crash_recovery_test_35",
         "crash_recovery_test_37",
@@ -500,21 +503,28 @@ def read_failing_test_causes(path: str) -> dict:
 
 
 def write_streaks(path: str, streaks) -> None:
-    """`streaks` is an iterable of (issue_id, title, commit_hash) tuples."""
-    payload = [{"issue_id": i, "title": t, "commit_hash": h} for (i, t, h) in streaks]
+    """`streaks` is an iterable of (issue_id, title, commit_hash, streak) tuples, streak
+    being the number of consecutive failing commits as shown in the alert ("6", or "30+"
+    when only a lower bound is known), or None for a nightly streak."""
+    payload = [
+        {"issue_id": i, "title": t, "commit_hash": h, "streak": s} for (i, t, h, s) in streaks
+    ]
     with open(path, "w") as f:
         json.dump({"version": ARTIFACT_VERSION, "streaks": payload}, f, indent=2)
     print(f"Wrote {len(payload)} streak(s) to {path}")
 
 
 def read_streaks(path: str) -> list:
-    """Returns a list of (issue_id, title, commit_hash) tuples."""
+    """Returns a list of (issue_id, title, commit_hash, streak) tuples, see write_streaks."""
     if not path or not os.path.exists(path):
         print(f"No streaks artifact at {path}; treating as empty.")
         return []
     with open(path) as f:
         data = json.load(f)
-    return [(s["issue_id"], s["title"], s["commit_hash"]) for s in data.get("streaks", [])]
+    return [
+        (s["issue_id"], s["title"], s["commit_hash"], s.get("streak"))
+        for s in data.get("streaks", [])
+    ]
 
 
 # --- env validation + self-test harness ----------------------------------
@@ -784,7 +794,7 @@ def test_is_nightly_job():
     assert is_nightly_job("toxiproxy_test_slow_36")  # nightly, keeps its historical name
     assert is_nightly_job("external_parties_test_36")  # nightly, keeps its historical name
     assert is_nightly_job("test_36_with_java17")  # nightly, keeps its historical name
-    assert is_nightly_job("test_37")  # nightly, keeps its historical name
+    assert not is_nightly_job("test_37")  # runs per-commit, not nightly
     assert is_nightly_job("protocol_continuity_test_all")  # nightly, keeps its historical name
     assert is_nightly_job("crash_recovery_test_35")  # nightly, keeps its historical name
     assert is_nightly_job("crash_recovery_test_37")  # nightly, keeps its historical name

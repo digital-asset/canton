@@ -15,7 +15,8 @@ import com.daml.metrics.api.{
   MetricsContext,
 }
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.{ComponentHealthState, HealthStatus, Healthy, Unhealthy}
@@ -27,7 +28,6 @@ import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   HasLoggerName,
   NamedLoggerFactory,
-  NamedLogging,
   NamedLoggingContext,
 }
 import com.digitalasset.canton.util.ShowUtil.*
@@ -269,9 +269,7 @@ object PekkoUtil extends HasLoggerName {
     */
   def statefulMapAsync[Out, Mat, S, T](graph: FlowOps[Out, Mat], initial: S)(
       f: (S, Out) => Future[(S, T)]
-  )(implicit loggingContext: NamedLoggingContext): graph.Repr[T] = {
-    val directExecutionContext =
-      DirectExecutionContext(NamedLogging.loggerWithoutTracing(loggingContext.tracedLogger))
+  )(implicit loggingContext: NamedLoggingContext): graph.Repr[T] =
     graph
       .scanAsync((initial, Option.empty[T])) { case ((state, _), next) =>
         f(state, next)
@@ -283,7 +281,6 @@ object PekkoUtil extends HasLoggerName {
           ErrorUtil.internalError(new NoSuchElementException("scanAsync did not return an element"))
         )
       )
-  }
 
   /** See the scaladoc of [[mapAsyncUS]] for details. This is the actual implementation except it
     * abstracts over the async method used, which allows it to be re-used for both mapAsyncUS and
@@ -301,8 +298,6 @@ object PekkoUtil extends HasLoggerName {
     // where the future may have been started before the first one aborted.
     // So we just need to throw away the results of the futures and convert them into aborts.
     if (parallelism == 1) {
-      val directExecutionContext =
-        DirectExecutionContext(NamedLogging.loggerWithoutTracing(loggingContext.tracedLogger))
       statefulMapAsync(graph, initial = false) { (aborted, next) =>
         if (aborted) Future.successful(true -> AbortedDueToShutdown)
         else f(next).unwrap.map(us => !us.isOutcome -> us)(directExecutionContext)
@@ -411,8 +406,7 @@ object PekkoUtil extends HasLoggerName {
       loggingContext: NamedLoggingContext,
       Context: SingletonTraverse.Aux[Context, C],
   ): graph.Repr[Context[UnlessShutdown[T]]] = {
-    implicit val directExecutionContext: ExecutionContext =
-      DirectExecutionContext(NamedLogging.loggerWithoutTracing(loggingContext.tracedLogger))
+    implicit val directExecutionContextImplicit: ExecutionContext = directExecutionContext
     statefulMapAsync(graph, initial = Option(initial)) {
       case (oldState @ Some(s), next) =>
         // Since the context contains at most one element, it is fine to use traverse with futures here
@@ -573,9 +567,6 @@ object PekkoUtil extends HasLoggerName {
       loggingContext: NamedLoggingContext,
       materializer: Materializer,
   ): Source[WithKillSwitch[A], (KillSwitch, Future[Done])] = {
-    val directExecutionContext =
-      DirectExecutionContext(NamedLogging.loggerWithoutTracing(loggingContext.tracedLogger))
-
     // Use immediate acknowledgements and buffer size 1 to minimize the risk that
     // several materializations of the returned source concurrently restart stuff.
     val (boundedSourceQueue, source) = Source.queue[S](bufferSize = 1).preMaterialize()
@@ -760,7 +751,7 @@ object PekkoUtil extends HasLoggerName {
       .watchTermination() { case (NotUsed, doneF) =>
         // The direct execution context ensures that this runs as soon as the future's promise is completed,
         // i.e., a downstream cancellation signal cannot propagate upstream while this is running.
-        implicit val ec = directExecutionContext
+        implicit val ec: ExecutionContext = directExecutionContext
         val everythingTerminatedF =
           doneF.thereafterF { _ =>
             // Complete the queue of elements again, to make sure that
@@ -959,12 +950,13 @@ object PekkoUtil extends HasLoggerName {
     * [[com.digitalasset.canton.util.PekkoUtil.DelayedKillSwitch.abort]] is called multiple times
     * before the delegate is available, then the winning call is non-deterministic.
     */
-  class DelayedKillSwitch(delegate: Future[KillSwitch], logger: Logger) extends KillSwitch {
-    private implicit val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
+  class DelayedKillSwitch(delegate: Future[KillSwitch]) extends KillSwitch {
 
-    override def shutdown(): Unit = delegate.onComplete(_.foreach(_.shutdown()))
+    override def shutdown(): Unit =
+      delegate.onComplete(_.foreach(_.shutdown()))(directExecutionContext)
 
-    override def abort(ex: Throwable): Unit = delegate.onComplete(_.foreach(_.abort(ex)))
+    override def abort(ex: Throwable): Unit =
+      delegate.onComplete(_.foreach(_.abort(ex)))(directExecutionContext)
   }
 
   /** Aggregates stream elements until the aggregation state is full or upstream completes. Ensures
@@ -1497,7 +1489,6 @@ object PekkoUtil extends HasLoggerName {
     assert(retryAttemptErrorThreshold >= retryAttemptWarnThreshold)
 
     private val logger = loggerFactory.getLogger(this.getClass)
-    private implicit val directEC: ExecutionContext = DirectExecutionContext(logger)
 
     @volatile
     private var consumer: Consumer[T] = Consumer.InitializationInProgress
@@ -1520,7 +1511,7 @@ object PekkoUtil extends HasLoggerName {
       firstSuccessfulConsumerInitializationPromise.tryFailure(
         new Exception("Shutting down, consumer never initialized successfully")
       )
-    )
+    )(directExecutionContext)
 
     def firstSuccessfulConsumerInitialization: Future[Unit] =
       firstSuccessfulConsumerInitializationPromise.future
@@ -1623,8 +1614,8 @@ object PekkoUtil extends HasLoggerName {
         .flatMap { innerFuture =>
           firstSuccessfulConsumerInitializationPromise.trySuccess(()).discard
           innerFuture
-        }(directEC)
-        .onComplete(consumerInitialized(_, attempt, atomicHealthStatus))(directEC)
+        }(directExecutionContext)
+        .onComplete(consumerInitialized(_, attempt, atomicHealthStatus))(directExecutionContext)
     }
 
     private def consumerInitialized(
@@ -1652,7 +1643,7 @@ object PekkoUtil extends HasLoggerName {
             )
             queueConsumer.futureQueue.shutdown()
             queueConsumer.futureQueue.done.onComplete(consumerTerminated(_, consumerHealthStatus))(
-              directEC
+              directExecutionContext
             )
           } else {
             logger.info("Consumer initialized")
@@ -1670,7 +1661,7 @@ object PekkoUtil extends HasLoggerName {
             )
             healthStateChanged()
             consumer.ifInitialized(
-              _.done.onComplete(consumerTerminated(_, consumerHealthStatus))(directEC)
+              _.done.onComplete(consumerTerminated(_, consumerHealthStatus))(directExecutionContext)
             )
           }
 
@@ -1767,7 +1758,6 @@ object PekkoUtil extends HasLoggerName {
     private var index = initialEndIndex + 1
     private var shutdownInitiated = false
     private var offerInProgress = false
-    private val directEC = DirectExecutionContext(logger)
 
     def push(): Unit = blockingSynchronized {
       if (!shutdownInitiated && !done.isCompleted && !offerInProgress) {
@@ -1776,7 +1766,7 @@ object PekkoUtil extends HasLoggerName {
           val offerF = delegate.offer(index -> elem)
           index += 1
           offerF
-            .onComplete(offerCompleted)(directEC)
+            .onComplete(offerCompleted)(directExecutionContext)
         }
       }
     }
@@ -1978,25 +1968,24 @@ object PekkoUtil extends HasLoggerName {
       // therefore we need to inject here the future manually, which signalizes all processing is finished with regards to the
       // delegate pekko-queue.
       sourceDone: Future[Done],
-      loggerFactory: NamedLoggerFactory,
   ) extends FutureQueue[T] {
-    private val logger = loggerFactory.getLogger(this.getClass)
-    private implicit val directEC: ExecutionContext = DirectExecutionContext(logger)
 
     override def offer(elem: T): Future[Done] =
-      sourceQueue.offer(elem).transform {
-        case Success(QueueOfferResult.Enqueued) => Success(Done)
-        case Success(QueueOfferResult.Dropped) =>
-          Failure(
-            new IllegalStateException(
-              "Unexpected: source queue dropped an element, please materialize the source queue with OverflowStrategy.Backpressure"
+      sourceQueue
+        .offer(elem)
+        .transform {
+          case Success(QueueOfferResult.Enqueued) => Success(Done)
+          case Success(QueueOfferResult.Dropped) =>
+            Failure(
+              new IllegalStateException(
+                "Unexpected: source queue dropped an element, please materialize the source queue with OverflowStrategy.Backpressure"
+              )
             )
-          )
-        case Success(QueueOfferResult.Failure(failure)) => Failure(failure)
-        case Success(QueueOfferResult.QueueClosed) =>
-          Failure(new IllegalStateException("Queue already closed"))
-        case Failure(failure) => Failure(failure)
-      }
+          case Success(QueueOfferResult.Failure(failure)) => Failure(failure)
+          case Success(QueueOfferResult.QueueClosed) =>
+            Failure(new IllegalStateException("Queue already closed"))
+          case Failure(failure) => Failure(failure)
+        }(directExecutionContext)
 
     override def shutdown(): Unit = sourceQueue.complete()
 
