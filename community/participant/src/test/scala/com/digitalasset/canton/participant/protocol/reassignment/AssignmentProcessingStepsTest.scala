@@ -22,7 +22,10 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{DefaultPromiseUnlessShutdownFactory, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.admin.party.{
+  FreezingToOnboardingScheduler,
+  OnboardingClearanceScheduler,
+}
 import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.{LedgerApiIndexer, LedgerApiStore}
@@ -249,6 +252,7 @@ final class AssignmentProcessingStepsTest
         mock[InFlightSubmissionSynchronizerTracker],
         mock[AcsCommitmentSender],
         mock[OnboardingClearanceScheduler],
+        mock[FreezingToOnboardingScheduler],
         persistentState,
         ledgerApiIndexer,
         contractStore,
@@ -970,7 +974,7 @@ final class AssignmentProcessingStepsTest
               NoOpeningErrors(
                 SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
               ),
-              Verdict.Approve(testedProtocolVersion),
+              Verdict.Approve.create(testedProtocolVersion),
               pendingRequestData,
               state.pendingAssignmentSubmissions,
               crypto.pureCrypto,
@@ -992,7 +996,7 @@ final class AssignmentProcessingStepsTest
                   NoOpeningErrors(
                     SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
                   ),
-                  Verdict.Approve(testedProtocolVersion),
+                  Verdict.Approve.create(testedProtocolVersion),
                   // request used MediatorGroupIndex.zero
                   pendingRequestData
                     .copy(mediator = MediatorGroupRecipient(MediatorGroupIndex.one)),
@@ -1030,7 +1034,7 @@ final class AssignmentProcessingStepsTest
                 NoOpeningErrors(
                   SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
                 ),
-                Verdict.Approve(testedProtocolVersion),
+                Verdict.Approve.create(testedProtocolVersion),
                 failingAssignmentValidation,
                 state.pendingAssignmentSubmissions,
                 crypto.pureCrypto,
@@ -1054,7 +1058,7 @@ final class AssignmentProcessingStepsTest
             NoOpeningErrors(
               SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
             ),
-            Verdict.Approve(testedProtocolVersion),
+            Verdict.Approve.create(testedProtocolVersion),
             pendingAssignment,
             state.pendingAssignmentSubmissions,
             crypto.pureCrypto,
@@ -1175,7 +1179,7 @@ final class AssignmentProcessingStepsTest
                 NoOpeningErrors(
                   SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
                 ),
-                Verdict.Approve(testedProtocolVersion),
+                Verdict.Approve.create(testedProtocolVersion),
                 reassigningParticipantData,
                 state.pendingAssignmentSubmissions,
                 crypto.pureCrypto,
@@ -1197,7 +1201,7 @@ final class AssignmentProcessingStepsTest
                 NoOpeningErrors(
                   SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
                 ),
-                Verdict.Approve(testedProtocolVersion),
+                Verdict.Approve.create(testedProtocolVersion),
                 pendingRequestData,
                 state.pendingAssignmentSubmissions,
                 crypto.pureCrypto,

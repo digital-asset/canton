@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
@@ -1874,11 +1874,9 @@ object ReassignmentStoreTest extends EitherValues with NoTracing {
   val reassignment20 = ReassignmentId.tryCreate("0020")
 
   val loggerFactoryNotUsed = NamedLoggerFactory.unnamedKey("test", "NotUsed-ReassignmentStoreTest")
-  val ec: ExecutionContext = DirectExecutionContext(
-    loggerFactoryNotUsed.getLogger(ReassignmentStoreTest.getClass)
-  )
+
   @unused
-  private implicit val _ec: ExecutionContext = ec
+  private implicit val _ec: ExecutionContext = directExecutionContext
 
   lazy val crypto = SymbolicCrypto.create(
     BaseTest.testedReleaseProtocolVersion,

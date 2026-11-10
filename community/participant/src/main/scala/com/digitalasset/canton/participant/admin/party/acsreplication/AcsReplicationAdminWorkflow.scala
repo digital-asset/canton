@@ -35,7 +35,6 @@ import com.digitalasset.canton.participant.ledger.api.client.{
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{
@@ -86,7 +85,6 @@ class AcsReplicationAdminWorkflow(
       sourceParticipantId: ParticipantId,
       sequencerCandidates: NonEmpty[Seq[SequencerId]],
       timestamp: CantonTimestamp,
-      participantPermission: ParticipantPermission,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
     val partyReplicationIdS = partyReplicationId.toHexString
     val proposal = new M.acsreplication.AcsReplicationProposal(
@@ -96,7 +94,6 @@ class AcsReplicationAdminWorkflow(
       participantId.adminParty.toProtoPrimitive,
       sequencerCandidates.forgetNE.map(_.uid.toProtoPrimitive).asJava,
       timestamp.toInstant,
-      PartyParticipantPermission.toDaml(participantPermission),
       "acs-replication", // TODO(#35267) pass the operation name from outside
     )
     EitherT(

@@ -43,10 +43,11 @@ object CryptoKeyValidation {
   )
 
   // Keeps track of the public keys that have been validated.
-  private lazy val validatedPublicKeys: Cache[Fingerprint, Either[KeyParseAndValidateError, Unit]] =
+  // NOTE: Keyed by the whole public key, as keys with the same fingerprint can declare different key specs
+  private lazy val validatedPublicKeys: Cache[PublicKey, Either[KeyParseAndValidateError, Unit]] =
     cacheConfig
       .buildScaffeineWithoutExecutor()
-      .build[Fingerprint, Either[KeyParseAndValidateError, Unit]]()
+      .build[PublicKey, Either[KeyParseAndValidateError, Unit]]()
 
   private lazy val validatedPrivateKeys
       : Cache[Fingerprint, Either[KeyParseAndValidateError, Unit]] =
@@ -462,7 +463,7 @@ object CryptoKeyValidation {
 
     // If the result is already in the cache it means the key has already been validated.
     (if (cacheValidation)
-       validatedPublicKeys.get(publicKey.id, _ => parseRes)
+       validatedPublicKeys.get(publicKey, _ => parseRes)
      else parseRes).leftMap(err =>
       errFn(
         s"Failed to deserialize or validate ${publicKey.format} public key [${publicKey.id}]: $err"

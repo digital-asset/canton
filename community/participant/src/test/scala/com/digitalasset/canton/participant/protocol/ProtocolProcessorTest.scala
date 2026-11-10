@@ -10,6 +10,7 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{
@@ -34,7 +35,10 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
-import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.admin.party.{
+  FreezingToOnboardingScheduler,
+  OnboardingClearanceScheduler,
+}
 import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
@@ -106,7 +110,6 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.ExecutionContext
 import scala.language.implicitConversions
 
 class ProtocolProcessorTest
@@ -215,7 +218,7 @@ class ProtocolProcessorTest
         Pretty.adHocPrettyInstance[ConfirmationResultMessage]
     }
   )
-  when(trm.verdict).thenAnswer(Verdict.Approve(testedProtocolVersion))
+  when(trm.verdict).thenAnswer(Verdict.Approve.create(testedProtocolVersion))
   when(trm.rootHash).thenAnswer(rootHash)
   when(trm.psid).thenAnswer(DefaultTestIdentities.physicalSynchronizerId)
 
@@ -399,6 +402,7 @@ class ProtocolProcessorTest
         inFlightSubmissionSynchronizerTracker,
         mock[AcsCommitmentSender],
         mock[OnboardingClearanceScheduler],
+        mock[FreezingToOnboardingScheduler],
         persistentState,
         ledgerApiIndexer,
         contractStore,
@@ -440,7 +444,7 @@ class ProtocolProcessorTest
         loggerFactory,
         FutureSupervisor.Noop,
         FlagCloseable.withCloseContext(logger, timeouts),
-      )(directExecutionContext: ExecutionContext) {
+      )(directExecutionContext) {
         override def testingConfig: TestingConfigInternal =
           TestingConfigInternal()
 

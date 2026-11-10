@@ -16,8 +16,9 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.data.ActiveContract
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
+import com.digitalasset.canton.participant.config.AlphaAcsReplicationSourceConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.protocol.party.*
 import com.digitalasset.canton.participant.store
@@ -83,18 +84,16 @@ final class AcsReplicationSourceParticipantProcessor private (
     protected val replicationProgressState: AcsReplicationProgress,
     protected val onError: String => Unit,
     protected val onDisconnect: (String, TraceContext) => Unit,
+    config: AlphaAcsReplicationSourceConfig,
     protected val futureSupervisor: FutureSupervisor,
     protected val exitOnFatalFailures: Boolean,
     protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
-    protected val testOnlyInterceptor: PartyReplicationTestInterceptor,
+    protected val testOnlyInterceptor: AcsReplicationTestInterceptor,
 )(implicit override val executionContext: ExecutionContext, mat: Materializer)
     extends AcsReplicationProcessor {
   protected val processorStore: SourceParticipantStore =
     InMemoryProcessorStore.sourceParticipant(loggerFactory, timeouts)
-
-  // TODO(#22251): Make this configurable.
-  private val contractsPerBatch = PositiveInt.two
 
   override def replicatedContractsCount: NonNegativeLong = processorStore.sentContractsCount
 
@@ -173,6 +172,8 @@ final class AcsReplicationSourceParticipantProcessor private (
           excludedStakeholders,
           sourceParticipantId,
           agreedAt,
+          config.acsBatchSize,
+          config.acsReaderMaxQueueSize,
           lapiIndexService,
           _,
           _,
@@ -195,9 +196,9 @@ final class AcsReplicationSourceParticipantProcessor private (
             !hasEndOfACSBeenReached &&
             testOnlyInterceptor.onSourceParticipantProgress(
               processorStore
-            ) == PartyReplicationTestInterceptor.Proceed &&
+            ) == AcsReplicationTestInterceptor.Proceed &&
             processorStore.initialContractOrdinalInclusiveO.isDefined &&
-            processorStore.sentContractsCount.unwrap < processorStore.contractOrdinalToSendUpToExclusive.unwrap - 1 // -1 for exclusive to inclusive
+            processorStore.sentContractsCount.unwrap < processorStore.contractOrdinalToSendUpToExclusive.unwrap
         )(
           respondToTargetParticipant()
         )
@@ -228,15 +229,14 @@ final class AcsReplicationSourceParticipantProcessor private (
           processorStore.acsReaderO.toRight("ACS reader not initialized")
         )
 
-        (haveReachedEndOfAcs, contracts) = acsReader.readContracts(maxNumActiveContractsToProcess)
-        numContractsSending = contracts.size
+        (haveReachedEndOfAcs, contractBatches) = acsReader.readContracts(
+          maxNumActiveContractsToProcess
+        )
+        numContractsSending = contractBatches.flatten.size
 
         _ <- EitherTUtil.ifThenET(numContractsSending > 0) {
-          val contractBatches = contracts
-            .grouped(contractsPerBatch.unwrap)
-            .toSeq
-            .map(NonEmptyUtil.fromUnsafe)
-          sendContracts(contractBatches, fromInclusive, numContractsSending).map(_ =>
+          val contractBatchesNE = contractBatches.map(NonEmptyUtil.fromUnsafe)
+          sendContracts(contractBatchesNE, fromInclusive, numContractsSending).map(_ =>
             processorStore
               .increaseSentContractsCount(NonNegativeInt.tryCreate(numContractsSending))
               .discard
@@ -278,7 +278,7 @@ final class AcsReplicationSourceParticipantProcessor private (
     val indexedContractBatches = contractBatches.zipWithIndex.map { case (batch, index) =>
       val fromInclusive = firstContractOrdinal +
         (checked(NonNegativeLong.tryCreate(index.toLong)) * checked(
-          NonNegativeLong.tryCreate(contractsPerBatch.unwrap.toLong)
+          NonNegativeLong.tryCreate(config.acsBatchSize.unwrap.toLong)
         ))
       val toInclusive = fromInclusive + checked(NonNegativeLong.tryCreate(batch.size.toLong - 1L))
       (batch, (fromInclusive, toInclusive))
@@ -363,13 +363,13 @@ object AcsReplicationSourceParticipantProcessor {
       replicationProgressState: store.AcsReplicationProgress,
       onError: String => Unit,
       onDisconnect: (String, TraceContext) => Unit,
+      config: AlphaAcsReplicationSourceConfig,
       ledgerApiStore: LedgerApiStore,
       futureSupervisor: FutureSupervisor,
       exitOnFatalFailures: Boolean,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-      testInterceptor: PartyReplicationTestInterceptor =
-        PartyReplicationTestInterceptor.AlwaysProceed,
+      testInterceptor: AcsReplicationTestInterceptor = AcsReplicationTestInterceptor.AlwaysProceed,
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -397,6 +397,7 @@ object AcsReplicationSourceParticipantProcessor {
       replicationProgressState,
       onError,
       onDisconnect,
+      config,
       futureSupervisor,
       exitOnFatalFailures,
       timeouts,

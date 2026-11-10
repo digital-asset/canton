@@ -21,6 +21,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.party.{
+  FreezingToOnboardingScheduler,
   OnboardingClearanceScheduler,
   PartyReplicationTriggers,
 }
@@ -102,6 +103,7 @@ class TopologyComponentFactory(
       missingKeysAlerter: MissingKeysAlerter,
       sequencerConnectionSuccessorListener: SequencerConnectionSuccessorListener,
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
+      freezingToOnboardingScheduler: FreezingToOnboardingScheduler,
       topologyClient: SynchronizerTopologyClientWithInit,
       recordOrderPublisher: RecordOrderPublisher,
       pendingLsuOperationsStore: PendingLsuOperation.Store,
@@ -169,6 +171,7 @@ class TopologyComponentFactory(
         processor.subscribe(missingKeysAlerter.attachToTopologyProcessor())
         processor.subscribe(sequencerConnectionSuccessorListener)
         processor.subscribe(onboardingClearanceScheduler)
+        processor.subscribe(freezingToOnboardingScheduler)
         processor.subscribe(topologyClient)
         processor
       }

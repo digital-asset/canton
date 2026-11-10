@@ -95,6 +95,7 @@ import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, SynchronizerStore}
 import com.digitalasset.canton.topology.transaction.HostingParticipant
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.{
   EitherTUtil,
   FutureUnlessShutdownUtil,
@@ -688,7 +689,27 @@ class ParticipantNodeBootstrap(
               val trafficEnforcementAppContainer = new LifeCycleContainer(
                 stateName = "traffic-enforcement-app",
                 create = () =>
-                  FutureUnlessShutdown.pure(
+                  withNewTraceContext("upload_traffic_credit_dar") { implicit traceContext =>
+                    // The credit projection subscribes to the TrafficCreditReporter interface, which
+                    // the Ledger API rejects until the package is known, so upload it before
+                    // starting TEA.
+                    MonadUtil.when(parameters.damlTopUpEnabled)(
+                      if (parameters.adminWorkflow.autoLoadDar) {
+                        EitherTUtil.toFutureUnlessShutdown(
+                          AdminWorkflowServices.uploadTrafficCreditDarUnlessRegistered(
+                            packageService
+                          )
+                        )
+                      } else {
+                        if (!AdminWorkflowServices.isTrafficCreditDarRegistered(packageService))
+                          logger.warn(
+                            "Daml top-up is enabled but auto-load of DARs is disabled and the traffic credit DAR is not uploaded. " +
+                              "On-ledger traffic top-ups will not work until it is uploaded."
+                          )
+                        FutureUnlessShutdown.unit
+                      }
+                    )
+                  }.map(_ =>
                     TrafficEnforcementApp(
                       storage = storage,
                       token = () => teaTokenDispenserO.map(_.getCurrentToken.secret),
@@ -950,8 +971,8 @@ class ParticipantNodeBootstrap(
             EitherT.right[String](ledgerApiIndexServiceContainer.initializeNext())
           else EitherT.right[String](FutureUnlessShutdown.unit)
 
-        acsReplicatorContainerO = config.parameters.alphaOnlinePartyReplicationSupport.map {
-          config =>
+        acsReplicatorContainerO =
+          config.parameters.alphaAcsReplicationSupport.map { config =>
             new LifeCycleContainer[AcsReplicator](
               stateName = "acs-replicator",
               create = () =>
@@ -975,7 +996,7 @@ class ParticipantNodeBootstrap(
                 ),
               loggerFactory = loggerFactory,
             )
-        }
+          }
         _ <- acsReplicatorContainerO match {
           // Initialize ACS replicator only if configured and the participant is active
           case Some(acsReplicatorContainer) if sync.isActive() =>

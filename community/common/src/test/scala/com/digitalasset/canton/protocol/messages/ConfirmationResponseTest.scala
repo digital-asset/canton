@@ -4,14 +4,17 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.either.*
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
-import com.digitalasset.canton.protocol.{LocalRejectError, RequestId, RootHash}
+import com.digitalasset.canton.protocol.{LocalRejectError, RequestId, RootHash, v30}
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
 import com.digitalasset.canton.topology.{SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.{BaseTest, LfPartyId, topology}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
+import com.google.rpc.code.Code
+import com.google.rpc.status.Status
 import org.scalatest.wordspec.AnyWordSpec
 
 class ConfirmationResponseTest extends AnyWordSpec with BaseTest with HasCryptographicEvidenceTest {
@@ -68,5 +71,30 @@ class ConfirmationResponseTest extends AnyWordSpec with BaseTest with HasCryptog
       response2.getCryptographicEvidence,
       "response2",
     )(fromByteString)
+  }
+
+  "MediatorReject" should {
+    val okStatus = Status(code = Code.OK.value, message = "ok")
+    val abortedStatus = Status(code = Code.ABORTED.value, message = "aborted")
+
+    "reject the status code OK" in {
+      Verdict.MediatorReject.create(okStatus, isMalformed = false, testedProtocolVersion) shouldBe
+        Left("Rejection must not use status code OK")
+    }
+
+    "accept a non-OK status code" in {
+      Verdict.MediatorReject
+        .create(abortedStatus, isMalformed = true, testedProtocolVersion)
+        .value
+        .reason shouldBe abortedStatus
+    }
+
+    "fail deserialization of the status code OK" in {
+      Verdict.MediatorReject.fromProtoV30(
+        v30.MediatorReject(reason = Some(okStatus), isMalformed = false)
+      ) shouldBe Left(
+        InvariantViolation(None, "Rejection must not use status code OK")
+      )
+    }
   }
 }

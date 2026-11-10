@@ -10,7 +10,8 @@ import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -139,9 +140,6 @@ private[participant] class ConflictDetector(
     */
   private[this] val pendingReplicatedContractsEvictions
       : TrieMap[AddPartyRequestId, PendingReplicatedContractsEvictions] = new TrieMap()
-
-  private[this] val directExecutionContext: DirectExecutionContext =
-    DirectExecutionContext(noTracingLogger)
 
   private[this] val initialReassignmentCounter = ReassignmentCounter.Genesis
 

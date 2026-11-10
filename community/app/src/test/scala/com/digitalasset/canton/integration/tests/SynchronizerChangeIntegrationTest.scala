@@ -24,6 +24,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.*
+import com.digitalasset.canton.integration.HasSimClockUtils.advanceClockInStepsTo
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
@@ -41,7 +42,7 @@ import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.Circu
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{BftSequencer, External}
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.DamlPackageLoader
@@ -435,10 +436,17 @@ abstract class SynchronizerChangeSimClockIntegrationTest
             painter,
           ) // assignment did not happen yet
 
-          // Advance clock to the latest automatic assignment so that it is triggered
-          clock.advanceTo(latestAssignment)
-
-          participants.foreach(_.testing.fetch_synchronizer_times())
+          // BFT sequencing time can lag behind the simulated clock, so a large jump can trigger
+          //  assignments with stale timestamps whose response deadlines expire as BFT time catches
+          //  up.
+          //  Use steps below the response timeout and fetch times between them to bound this lag.
+          advanceClockInStepsTo(
+            clock,
+            latestAssignment,
+            maxStep = PositiveFiniteDuration.tryOfSeconds(10),
+          ) {
+            participants.foreach(_.testing.fetch_synchronizer_times())
+          }
 
           // The reassignment store should be empty once the automatic assignment has completed
           checkReassignmentStoreIsEmpty(iouSynchronizerId, participants, painter)
@@ -509,9 +517,15 @@ abstract class SynchronizerChangeSimClockIntegrationTest
               painter,
             ) // assignment did not happen yet
 
-            // Advance clock to the latest automatic assignment so that it is triggered
-            clock.advanceTo(latestAssignment)
-            participants.foreach(_.testing.fetch_synchronizer_times())
+            // As above, step through the window and fetch times so automatic assignments are not
+            //  sequenced at stale timestamps with already-expired confirmation-response deadlines.
+            advanceClockInStepsTo(
+              clock,
+              latestAssignment,
+              maxStep = PositiveFiniteDuration.tryOfSeconds(10),
+            ) {
+              participants.foreach(_.testing.fetch_synchronizer_times())
+            }
 
             // The reassignment store should be empty once the automatic assignment has completed
             checkReassignmentStoreIsEmpty(iouSynchronizerId, participants, painter)

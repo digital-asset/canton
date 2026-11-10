@@ -6,7 +6,8 @@ package com.digitalasset.canton.resource
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DbConfig, DbLockedConnectionPoolConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -234,7 +235,7 @@ class DbLockedConnectionPool private (
       }
 
       // Run health check scheduling on the direct execution context to avoid rejected execution exceptions
-      result.map(_ => scheduleHealthCheck(clock.now))(DirectExecutionContext(noTracingLogger))
+      result.map(_ => scheduleHealthCheck(clock.now))(directExecutionContext)
     }
 
     // Run the health check and becoming active/passive through the queue to ensure there's only one attempt at a time.

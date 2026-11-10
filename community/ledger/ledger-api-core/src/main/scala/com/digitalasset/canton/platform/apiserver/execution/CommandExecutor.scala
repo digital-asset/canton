@@ -96,7 +96,7 @@ private[execution] class DefaultCommandExecutor(
           .forProtocolVersion(pv)
           // During interpretation in Phase 1, we want to fail on all contract key hash mismatches,
           // independent of the protocol version.
-          .copy(errorOnContractKeyMismatch = true)
+          .copy(errorOnContractKeyHashMismatch = true)
       )
       .getOrElse(LfInterpretationConfig.Default)
 

@@ -37,7 +37,6 @@ import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.PackageMetadataViewConfig
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
-import com.digitalasset.canton.config.TopologyConfigConverters.*
 import com.digitalasset.canton.console.{AmmoniteConsoleConfig, FeatureFlag}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.kms.KmsKeyId
@@ -122,6 +121,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
   WeightedDistribution,
 }
 import com.digitalasset.canton.synchronizer.sequencer.config.{
+  AlphaSequencerChannelConfig,
   AsyncWriterConfig,
   LsuRepair,
   LsuSequencingBoundsOverride,
@@ -534,6 +534,8 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
         acsCommitments = participantParameters.acsCommitments,
         deprecatedApis = participantConfig.features.deprecated,
         enableRepairService = features.enableRepairCommands,
+        alphaAcsReplicationSupport = participantParameters.alphaAcsReplicationSupport,
+        damlTopUpEnabled = participantConfig.trafficAccounting.damlTopUpEnabled,
       )
     }
 
@@ -557,8 +559,7 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
           sequencerNodeConfig.parameters.maxConfirmationRequestsBurstFactor,
         asyncWriter = sequencerNodeConfig.parameters.asyncWriter.toParameters,
         timeAdvancingTopology = sequencerNodeConfig.parameters.timeAdvancingTopology,
-        unsafeSequencerChannelSupport =
-          sequencerNodeConfig.parameters.unsafeSequencerChannelSupport,
+        alphaSequencerChannelSupport = sequencerNodeConfig.parameters.alphaSequencerChannelSupport,
         requestLimits = sequencerNodeConfig.publicApi.limits,
         maxAuthTokensPerMember = sequencerNodeConfig.publicApi.maxAuthTokensPerMember,
         maxSubscriptionsPerMember = sequencerNodeConfig.publicApi.maxSubscriptionsPerMember,
@@ -1315,6 +1316,10 @@ object CantonConfig {
         : ConfigReader[LsuSequencingBoundsOverride] =
       deriveReader[LsuSequencingBoundsOverride]
 
+    lazy implicit final val alphaSequencerChannelConfigReader
+        : ConfigReader[AlphaSequencerChannelConfig] =
+      deriveReader[AlphaSequencerChannelConfig]
+
     lazy implicit final val sequencerNodeParametersConfigReader
         : ConfigReader[SequencerNodeParameterConfig] =
       deriveReader[SequencerNodeParameterConfig].applyDeprecations
@@ -1547,12 +1552,12 @@ object CantonConfig {
         deriveReader[PackageMetadataViewConfig].applyDeprecations
 
       implicit val partyReplicatorTestInterceptorReader
-          : ConfigReader[AlphaOnlinePartyReplicationConfig.TestInterceptor] =
+          : ConfigReader[AlphaAcsReplicationConfig.TestInterceptor] =
         (_: ConfigCursor) =>
           sys.error("party replicator test interceptor cannot be created from pureconfig")
       implicit val onlinePartyReplicationTargetConfig
-          : ConfigReader[OnlinePartyReplicationTargetConfig] =
-        deriveReader[OnlinePartyReplicationTargetConfig]
+          : ConfigReader[AlphaOnlinePartyReplicationTargetConfig] =
+        deriveReader[AlphaOnlinePartyReplicationTargetConfig]
       implicit val alphaOnlinePartyReplicationConfig
           : ConfigReader[AlphaOnlinePartyReplicationConfig] =
         deriveReader[AlphaOnlinePartyReplicationConfig]
@@ -1565,6 +1570,14 @@ object CantonConfig {
       implicit val lsuHandshakeReader: ConfigReader[LsuHandshake] = deriveReader[LsuHandshake]
 
       implicit val lsuReader: ConfigReader[LsuConfig] = deriveReader[LsuConfig].applyDeprecations
+
+      implicit val alphaAcsReplicationSourceReader: ConfigReader[AlphaAcsReplicationSourceConfig] =
+        deriveReader[AlphaAcsReplicationSourceConfig]
+      implicit val alphaAcsReplicationTargetReader: ConfigReader[AlphaAcsReplicationTargetConfig] =
+        deriveReader[AlphaAcsReplicationTargetConfig]
+      implicit val alphaAcsReplicationReader: ConfigReader[AlphaAcsReplicationConfig] =
+        deriveReader[AlphaAcsReplicationConfig]
+
       deriveReader[ParticipantNodeParameterConfig].applyDeprecations
     }
     lazy implicit final val timeTrackerConfigReader: ConfigReader[SynchronizerTimeTrackerConfig] = {
@@ -2187,6 +2200,9 @@ object CantonConfig {
         deriveWriter[SequencerLsuConfig]
       implicit val lsuRepairConfigWriter: ConfigWriter[LsuRepair] = deriveWriter[LsuRepair]
 
+      implicit val alphaSequencerChannelConfigWriter: ConfigWriter[AlphaSequencerChannelConfig] =
+        deriveWriter[AlphaSequencerChannelConfig]
+
       deriveWriter[SequencerNodeParameterConfig]
     }
     lazy implicit final val SequencerHealthConfigWriter: ConfigWriter[SequencerHealthConfig] =
@@ -2373,11 +2389,11 @@ object CantonConfig {
       implicit val packageMetadataViewConfigWriter: ConfigWriter[PackageMetadataViewConfig] =
         deriveWriter[PackageMetadataViewConfig]
       implicit val partyReplicatorTestInterceptorWriter
-          : ConfigWriter[AlphaOnlinePartyReplicationConfig.TestInterceptor] =
+          : ConfigWriter[AlphaAcsReplicationConfig.TestInterceptor] =
         ConfigWriter.toString(_ => "None")
-      implicit val onlinePartyReplicationTargetConfigWriter
-          : ConfigWriter[OnlinePartyReplicationTargetConfig] =
-        deriveWriter[OnlinePartyReplicationTargetConfig]
+      implicit val alphaOnlinePartyReplicationTargetConfigWriter
+          : ConfigWriter[AlphaOnlinePartyReplicationTargetConfig] =
+        deriveWriter[AlphaOnlinePartyReplicationTargetConfig]
       implicit val alphaOnlinePartyReplicationConfigWriter
           : ConfigWriter[AlphaOnlinePartyReplicationConfig] =
         deriveWriter[AlphaOnlinePartyReplicationConfig]
@@ -2386,6 +2402,12 @@ object CantonConfig {
       implicit val purgeWriter: ConfigWriter[PurgeConfig] = deriveWriter[PurgeConfig]
       implicit val lsuHandshakeWriter: ConfigWriter[LsuHandshake] = deriveWriter[LsuHandshake]
       implicit val lsuWriter: ConfigWriter[LsuConfig] = deriveWriter[LsuConfig]
+      implicit val alphaAcsReplicationSourceConfig: ConfigWriter[AlphaAcsReplicationSourceConfig] =
+        deriveWriter[AlphaAcsReplicationSourceConfig]
+      implicit val alphaAcsReplicationTargetConfig: ConfigWriter[AlphaAcsReplicationTargetConfig] =
+        deriveWriter[AlphaAcsReplicationTargetConfig]
+      implicit val alphaAcsReplicationConfig: ConfigWriter[AlphaAcsReplicationConfig] =
+        deriveWriter[AlphaAcsReplicationConfig]
       deriveWriter[ParticipantNodeParameterConfig]
     }
     lazy implicit final val timeTrackerConfigWriter: ConfigWriter[SynchronizerTimeTrackerConfig] = {

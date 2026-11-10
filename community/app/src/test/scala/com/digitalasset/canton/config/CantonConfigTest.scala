@@ -22,6 +22,12 @@ import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.config.ExtensionServiceAuthConfig
+import com.digitalasset.canton.platform.config.{
+  TopUpConfig,
+  TrafficAccountingConfig,
+  TrafficEnforcementServerConfig,
+}
+import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import com.digitalasset.canton.version.{
   ApiDeprecation,
@@ -157,6 +163,51 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
         loggerFactory.assertLogs(
           loadFiles(Seq(simpleConfPath, "invalid-configs/negative-port.conf")),
           _.errorMessage should (include("negative-port.conf") and include("Unable to create Port")),
+        )
+      result.left.value shouldBe a[GenericConfigError.Error]
+    }
+  }
+
+  "the traffic accounting top-up configuration" should {
+
+    def damlTopUp(cfg: TrafficAccountingConfig): Option[TopUpConfig.DamlCredit] =
+      Some(cfg.trafficEnforcementServer).flatMap {
+        case internal: TrafficEnforcementServerConfig.Internal =>
+          Some(internal.topUp).collect { case damlCredit: TopUpConfig.DamlCredit => damlCredit }
+      }
+
+    "default to disabled" in {
+      val config = loadFiles(Seq(simpleConfPath)).value
+      config.participants.values.map(cfg =>
+        damlTopUp(cfg.trafficAccounting)
+      ) should contain only None
+    }
+
+    "load the Daml credit top-up" in {
+      val config =
+        loadFiles(Seq(simpleConfPath, "traffic-accounting-daml-top-up.conf")).value
+      val participant = config.participants.get(InstanceName.tryCreate("participant1")).value
+      damlTopUp(participant.trafficAccounting) shouldBe Some(
+        TopUpConfig.DamlCredit(
+          paymasters = NonEmpty(
+            Set,
+            PartyId.tryFromProtoPrimitive("paymaster::1220aa"),
+            PartyId.tryFromProtoPrimitive("paymaster::1220bb"),
+          ),
+          initialOffsetBeginExclusive = Some(42L),
+        )
+      )
+    }
+
+    "reject a Daml credit top-up without paymasters" in {
+      val result =
+        loggerFactory.assertLogs(
+          loadFiles(
+            Seq(simpleConfPath, "invalid-configs/traffic-accounting-empty-paymasters.conf")
+          ),
+          _.errorMessage should (include("traffic-accounting-empty-paymasters.conf") and include(
+            "paymasters"
+          )),
         )
       result.left.value shouldBe a[GenericConfigError.Error]
     }

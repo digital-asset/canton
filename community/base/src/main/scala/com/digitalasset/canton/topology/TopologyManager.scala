@@ -1232,11 +1232,19 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       _ <- signingKeysWithThresholdO.traverse_ { case SigningKeysWithThreshold(keys, threshold) =>
         checkSigningThresholdCanBeReached(threshold, keys)
       }
-      _ <- checkConfirmingThresholdIsNotAboveNumberOfHostingNodes(
-        threshold,
-        nextParticipants.length,
-        forceChanges: ForceFlags,
-      )
+      _ <- operation match {
+        case TopologyChangeOp.Replace =>
+          checkConfirmingThresholdIsNotAboveNumberOfHostingNodes(
+            threshold,
+            // Observation entries never confirm. Entries in any hosting state count: the ones
+            // that are not Active yet confirm once they are.
+            nextParticipants.count(_.permission != Observation),
+            forceChanges: ForceFlags,
+          )
+        // A removal leaves no hosts, so the threshold does not matter
+        case TopologyChangeOp.Remove =>
+          EitherTUtil.unitUS[TopologyManagerError]
+      }
 
       currentMappingO <- EitherT.right(currentMappingF)
       currentThresholdO = currentMappingO.map(_.threshold)

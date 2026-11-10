@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.Eval
 import cats.data.EitherT
 import cats.implicits.*
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.{
@@ -29,7 +30,10 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{DefaultPromiseUnlessShutdownFactory, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.admin.party.{
+  FreezingToOnboardingScheduler,
+  OnboardingClearanceScheduler,
+}
 import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.{LedgerApiIndexer, LedgerApiStore}
@@ -228,6 +232,7 @@ final class UnassignmentProcessingStepsTest
       mock[InFlightSubmissionSynchronizerTracker],
       mock[AcsCommitmentSender],
       mock[OnboardingClearanceScheduler],
+      mock[FreezingToOnboardingScheduler],
       persistentState,
       ledgerApiIndexer,
       contractStore,
@@ -1138,7 +1143,7 @@ final class UnassignmentProcessingStepsTest
         UnassignmentViewType,
         RequestId(CantonTimestamp.Epoch),
         rootHash,
-        Verdict.Approve(testedProtocolVersion),
+        Verdict.Approve.create(testedProtocolVersion),
         testedProtocolVersion,
       )
 

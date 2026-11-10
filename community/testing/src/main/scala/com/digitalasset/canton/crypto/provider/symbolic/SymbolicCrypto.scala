@@ -4,7 +4,7 @@
 package com.digitalasset.canton.crypto.provider.symbolic
 
 import cats.data.EitherT
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.memory.{
@@ -115,14 +115,16 @@ object SymbolicCrypto {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   ): SymbolicCrypto = {
-    implicit val ec: ExecutionContext =
-      DirectExecutionContext(loggerFactory.getLogger(this.getClass))
 
     val pureCrypto = new SymbolicPureCrypto()
-    val cryptoPublicStore = new InMemoryCryptoPublicStore(loggerFactory)
-    val cryptoPrivateStore = new InMemoryCryptoPrivateStore(releaseProtocolVersion, loggerFactory)
+    val cryptoPublicStore = new InMemoryCryptoPublicStore(loggerFactory)(directExecutionContext)
+    val cryptoPrivateStore = new InMemoryCryptoPrivateStore(releaseProtocolVersion, loggerFactory)(
+      directExecutionContext
+    )
     val privateCrypto =
-      new SymbolicPrivateCrypto(pureCrypto, cryptoPrivateStore, timeouts, loggerFactory)
+      new SymbolicPrivateCrypto(pureCrypto, cryptoPrivateStore, timeouts, loggerFactory)(
+        directExecutionContext
+      )
 
     new SymbolicCrypto(
       pureCrypto,
@@ -131,7 +133,7 @@ object SymbolicCrypto {
       cryptoPublicStore,
       timeouts,
       loggerFactory,
-    )
+    )(directExecutionContext)
   }
 
 }

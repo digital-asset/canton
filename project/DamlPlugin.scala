@@ -1,8 +1,8 @@
-import io.circe.{parser, Decoder}
+import io.circe.{Decoder, parser}
 import io.circe.generic.semiauto.deriveDecoder
 
 import java.io.{File, FileReader, FileWriter, StringReader}
-import java.nio.file.Files
+import java.nio.file.{Files, Path}
 import java.util.Map as JMap
 import java.util.concurrent.Executors
 import com.esotericsoftware.yamlbeans.{YamlConfig, YamlReader, YamlWriter}
@@ -495,6 +495,10 @@ object DamlPlugin extends AutoPlugin {
     cachedOutput(cacheInput)
   }
 
+  /** Returns a file relative to the given directory. */
+  private def relativeFile(dir: File, path: Path): File =
+    dir.toPath.relativize(path).normalize().toFile
+
   private def damlBuildTask = Def.taskDyn {
     damlInstall.value
     val streams = Keys.streams.value
@@ -508,7 +512,7 @@ object DamlPlugin extends AutoPlugin {
     val buildDependencies = damlBuildOrder.value
     val shouldExtractMainDalf = damlExtractMainDalf.value
     val relativePinnedProjectFiles = damlPinnedProjects.value
-      .map(p => sourceDirectory.toPath.resolve("daml.yaml").relativize(p.toPath).normalize().toFile)
+      .map(p => relativeFile(sourceDirectory, p.toPath.resolve("daml.yaml")))
       .toSet
 
     if (lfVersions.isEmpty)
@@ -571,8 +575,7 @@ object DamlPlugin extends AutoPlugin {
             // build the daml files in a sorted way, using the build order definition
             for {
               projectFile <- damlProjectFiles.sortWith(buildOrder)
-              relativeProjectFile =
-                sourceDirectory.toPath.relativize(projectFile.toPath).normalize().toFile
+              relativeProjectFile = relativeFile(sourceDirectory, projectFile.toPath)
               if !relativePinnedProjectFiles.contains(relativeProjectFile)
               file <-
                 buildDamlProject(

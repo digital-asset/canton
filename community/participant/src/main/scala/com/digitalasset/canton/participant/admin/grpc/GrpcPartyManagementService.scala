@@ -11,7 +11,7 @@ import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction as LapiTo
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.*
-import com.digitalasset.canton.crypto.Hash
+import com.digitalasset.canton.crypto.{Hash, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -22,19 +22,30 @@ import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.data.{
   ActiveContract,
   ContractImportMode,
+  ImportPartyAcsForceFlag,
   RepresentativePackageIdOverride,
   *,
 }
+import com.digitalasset.canton.participant.admin.grpc.GrpcPartyManagementService.{
+  ImportPartyAcsContext,
+  ImportTarget,
+}
 import com.digitalasset.canton.participant.admin.party.*
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.PartyReplicationArguments
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator.AcsReplicationArguments
 import com.digitalasset.canton.participant.admin.party.acsreplication.{
+  AcsReplicationTopologyWorkflow,
   AcsReplicator,
   PartyParticipantPermission,
 }
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore.LastSynchronizerOffset
-import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
+import com.digitalasset.canton.participant.protocol.party.{
+  FreezingToOnboardingOperation,
+  OnboardingClearanceOperation,
+}
 import com.digitalasset.canton.participant.store.SyncPersistentState
-import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.participant.sync.{CantonSyncService, SyncEphemeralStateFactory}
 import com.digitalasset.canton.participant.topology.TopologyLookup
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SynchronizerOffset
 import com.digitalasset.canton.platform.store.backend.LedgerEnd
@@ -44,6 +55,10 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.store.StoredTopologyTransactions.PositiveStoredTopologyTransactions
+import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   PartyToParticipant,
@@ -52,7 +67,7 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, OptionUtil, retry}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.duration.Duration
 import io.grpc.stub.StreamObserver
@@ -200,15 +215,13 @@ class GrpcPartyManagementService(
         .fromHexString(request.addPartyRequestId)
         .leftMap(err => toStatusRuntimeException(Status.INVALID_ARGUMENT)(err.message))
 
-      status <- partyReplicator
+      apiStatus <- partyReplicator
         .getAddPartyStatus(requestId)
         .toRight(
           toStatusRuntimeException(Status.UNKNOWN)(
             s"Add party request id ${request.addPartyRequestId} not found"
           )
         )
-      apiStatus = com.digitalasset.canton.participant.admin.data.PartyReplicationStatus
-        .fromInternal(status)
     } yield v30.GetAddPartyStatusResponse(Some(apiStatus.toProtoV30))).toFuture(identity)
 
   private def convert[T](
@@ -224,7 +237,7 @@ class GrpcPartyManagementService(
   private def ensureOnlinePartyReplicationEnabled() = partyReplicatorO
     .toRight(
       toStatusRuntimeException(Status.UNIMPLEMENTED)(
-        "Online party replication commands require the `alpha_online_party_replication_support` configuration"
+        "Online party replication commands require the `alpha-online-party-replication-support` and `alpha-acs-replication-support` configurations"
       )
     )
 
@@ -250,7 +263,7 @@ class GrpcPartyManagementService(
   private def ensureSequencerChannelAcsReplicationEnabled() = acsReplicatorO
     .toRight(
       toStatusRuntimeException(Status.UNIMPLEMENTED)(
-        "ACS replication commands require the `alpha_online_party_replication_support` configuration"
+        "ACS replication commands require the `alpha-acs-replication-support` configuration"
       )
     )
 
@@ -528,15 +541,7 @@ class GrpcPartyManagementService(
     */
   private def parseImportPartyAcsStreamingRequestGlobal(
       request: ImportPartyAcsRequest
-  ): ParsingResult[
-    (
-        SynchronizerId,
-        Option[PartyId],
-        Option[String],
-        ContractImportMode,
-        RepresentativePackageIdOverride,
-    )
-  ] =
+  ): ParsingResult[ImportPartyAcsContext] =
     for {
       synchronizerId <- ProtoConverter.parseRequired(
         SynchronizerId.fromProtoPrimitive(_, "synchronizer_id"),
@@ -557,15 +562,17 @@ class GrpcPartyManagementService(
         "contract_import_mode",
         request.contractImportMode,
       )
+      forceFlags <- request.forceFlags.traverse(ImportPartyAcsForceFlag.fromProtoV30)
       workflowIdPrefix = request.workflowIdPrefix
         .flatMap(OptionUtil.emptyStringAsNone)
         .orElse(Some(s"import-${UUID.randomUUID}"))
-    } yield (
-      synchronizerId,
-      partyIdO,
-      workflowIdPrefix,
-      contractImportMode,
-      representativePackageIdOverride,
+    } yield ImportPartyAcsContext(
+      synchronizerId = synchronizerId,
+      partyIdO = partyIdO,
+      workflowIdPrefix = workflowIdPrefix,
+      contractImportMode = contractImportMode,
+      representativePackageIdOverride = representativePackageIdOverride,
+      forceFlags = forceFlags.toSet,
     )
 
   override def importPartyAcs(
@@ -573,19 +580,10 @@ class GrpcPartyManagementService(
   ): StreamObserver[ImportPartyAcsRequest] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
-    type ImportContext =
-      (
-          SynchronizerId,
-          Option[PartyId],
-          Option[String],
-          ContractImportMode,
-          RepresentativePackageIdOverride,
-      )
-
     GrpcStreamingUtils.streamGzippedChunksFromClient[
       ImportPartyAcsRequest,
       ImportPartyAcsResponse,
-      ImportContext,
+      ImportPartyAcsContext,
       ActiveContract,
     ](
       responseObserver,
@@ -601,12 +599,13 @@ class GrpcPartyManagementService(
           .toTry
     ) {
       case (
-            (
+            ImportPartyAcsContext(
               synchronizerId,
-              partyIdO, // None if not provided by the user (backwards compatibility)
+              partyIdO,
               workflowIdPrefix,
               contractImportMode,
               representativePackageIdOverride,
+              forceFlags,
             ),
             source,
           ) =>
@@ -624,10 +623,10 @@ class GrpcPartyManagementService(
           }
 
         val resultET = for {
-          effectiveTimestampO <- partyIdO match {
-            case Some(partyId) => preImportValidation(synchronizerId, partyId)
-            case None => Right(Option.empty[EffectiveTime]).toEitherT[FutureUnlessShutdown]
-          }
+          importTargetO <- partyIdO.traverse(partyId =>
+            preImportValidation(synchronizerId, partyId, contractImportMode, forceFlags)
+              .map(partyId -> _)
+          )
 
           // Import ACS
           _ <- sync.repairService
@@ -644,8 +643,8 @@ class GrpcPartyManagementService(
             )
             .leftMap(err => PartyManagementServiceError.IOStream.Error(err))
 
-          _ <- partyIdO match {
-            case Some(partyId) =>
+          _ <- importTargetO match {
+            case Some((partyId, ImportTarget.Onboarding(effectiveTimestampO))) =>
               persistPendingOnboardingClearance(
                 partyId,
                 synchronizerId,
@@ -664,10 +663,13 @@ class GrpcPartyManagementService(
                   }
                 },
               )
+            case Some((partyId, ImportTarget.Freezing)) =>
+              persistPendingFreezingToActive(partyId, synchronizerId)
             case None =>
               logger.warn(
                 "Action Required: Skipped pending onboarding clearance (no party ID provided). " +
-                  "Please invoke the onboarding flag clearance endpoint after reconnecting to the synchronizer."
+                  "Please invoke the onboarding flag clearance endpoint after reconnecting to the synchronizer. " +
+                  "If this participant is Freezing for the party, import the ACS again with the party ID instead."
               )
               EitherT.rightT[FutureUnlessShutdown, PartyManagementServiceError](())
           }
@@ -678,17 +680,23 @@ class GrpcPartyManagementService(
     }
   }
 
-  /** Pre-import Topology Check: Abort import if a party is provided but no PTP mapping is found.
-    * This prevents creating a phantom "pending clearance" record for a party that isn't actually
-    * onboarding here, which would otherwise remain stranded in the database requiring manual
-    * cleanup.
+  /** Pre-import Topology Check: Abort import if a party is provided but no PTP mapping is found in
+    * which this participant is Onboarding or Freezing. This prevents creating a phantom "pending
+    * clearance" record for a party that isn't actually onboarding here, which would otherwise
+    * remain stranded in the database requiring manual cleanup.
+    *
+    * If this participant is Freezing for the party, the import requires the Validation mode.
+    * Otherwise, unless forced, it aborts the import once this participant has processed events past
+    * the party's activation.
     */
   private def preImportValidation(
       synchronizerId: SynchronizerId,
       partyId: PartyId,
+      contractImportMode: ContractImportMode,
+      forceFlags: Set[ImportPartyAcsForceFlag],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, Option[EffectiveTime]] =
+  ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, ImportTarget] =
     for {
       // Dependency validation for persisting a pending onboarding clearance operation as part of the import
       _ <- getPersistentState(synchronizerId)
@@ -700,7 +708,9 @@ class GrpcPartyManagementService(
         }
       )
 
-      // Query for both effective AND proposed transactions
+      // Query the effective transactions here, and the proposals only for an Onboarding participant.
+      // Filter by the uid only, as the store returns the transactions that match the uid or the
+      // namespace filter.
       effectiveTxs <- EitherT.right[PartyManagementServiceError](
         store.findPositiveTransactions(
           asOf = CantonTimestamp.MaxValue,
@@ -708,10 +718,48 @@ class GrpcPartyManagementService(
           isProposal = false,
           types = Seq(TopologyMapping.Code.PartyToParticipant),
           filterUid = Some(NonEmpty(Seq, partyId.uid)),
-          filterNamespace = Some(NonEmpty(Seq, partyId.namespace)),
+          filterNamespace = None,
         )
       )
 
+      freezing = effectiveTxs.result.exists(_.mapping match {
+        case ptp: PartyToParticipant =>
+          ptp.participants.exists(p =>
+            p.participantId == participantId && p.state == HostingState.Freezing
+          )
+        case _ => false
+      })
+
+      importTarget <-
+        if (freezing)
+          EitherT.cond[FutureUnlessShutdown](
+            contractImportMode == ContractImportMode.Validation,
+            ImportTarget.Freezing: ImportTarget,
+            PartyManagementServiceError.InvalidArgument.Error(
+              s"The import of the ACS of party $partyId, for which this participant is Freezing, requires the contract import mode Validation."
+            ): PartyManagementServiceError,
+          )
+        else
+          onboardingImportValidation(synchronizerId, partyId, forceFlags, store, effectiveTxs)
+            .map(ImportTarget.Onboarding(_): ImportTarget)
+    } yield importTarget
+
+  /** The checks of [[preImportValidation]] for an Onboarding participant.
+    *
+    * @return
+    *   The activation time if the onboarding mapping is already effective, empty if it is only
+    *   proposed.
+    */
+  private def onboardingImportValidation(
+      synchronizerId: SynchronizerId,
+      partyId: PartyId,
+      forceFlags: Set[ImportPartyAcsForceFlag],
+      store: TopologyStore[SynchronizerStore],
+      effectiveTxs: PositiveStoredTopologyTransactions,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, Option[EffectiveTime]] =
+    for {
       proposalTxs <- EitherT.right[PartyManagementServiceError](
         store.findPositiveTransactions(
           asOf = CantonTimestamp.MaxValue,
@@ -719,7 +767,7 @@ class GrpcPartyManagementService(
           isProposal = true,
           types = Seq(TopologyMapping.Code.PartyToParticipant),
           filterUid = Some(NonEmpty(Seq, partyId.uid)),
-          filterNamespace = Some(NonEmpty(Seq, partyId.namespace)),
+          filterNamespace = None,
         )
       )
 
@@ -745,6 +793,25 @@ class GrpcPartyManagementService(
         .filterNot(_.transaction.isProposal)
         .map(_.validFrom)
         .maxOption
+
+      // Past the activation, this participant may have processed archivals of contracts in the snapshot,
+      // which the onboarding flag lets it accept without their creation. Events at the activation time
+      // itself do not see the new hosting yet.
+      participantRecordTime = SyncEphemeralStateFactory.currentRecordTime(
+        sync.participantNodePersistentState.value.ledgerApiStore
+          .cleanSynchronizerIndex(synchronizerId)
+      )
+      _ <- effectiveTimestamp match {
+        case Some(activation)
+            if !forceFlags.contains(ImportPartyAcsForceFlag.AllowImportAfterActivation) =>
+          EitherT.cond[FutureUnlessShutdown](
+            participantRecordTime <= activation.value,
+            (),
+            PartyManagementServiceError.AcsImportAfterActivation
+              .Error(partyId, activation.value, participantRecordTime): PartyManagementServiceError,
+          )
+        case _ => EitherTUtil.unitUS[PartyManagementServiceError]
+      }
 
     } yield effectiveTimestamp
 
@@ -988,6 +1055,35 @@ class GrpcPartyManagementService(
         )
     } yield ()
 
+  /** Records the pending operations of an import for a party this participant is Freezing for: the
+    * onboarding clearance, which the Onboarding event of the move starts, and then the move to
+    * Onboarding. In this order, a crash in between leaves no move without its clearance.
+    */
+  private def persistPendingFreezingToActive(
+      partyId: PartyId,
+      synchronizerId: SynchronizerId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, Unit] =
+    for {
+      _ <- persistPendingOnboardingClearance(partyId, synchronizerId, effectiveTimestampO = None)
+      persistentState <- getPersistentState(synchronizerId)
+      _ = logger.info(
+        s"Recording the pending move from Freezing to Onboarding for $partyId on $synchronizerId."
+      )
+      _ <- persistentState.pendingFreezingToOnboardingStore
+        .insert(
+          FreezingToOnboardingOperation(ReleaseProtocolVersion.latest)
+            .toPendingOperation(synchronizerId, partyId)
+        )
+        .leftMap(err =>
+          PartyManagementServiceError.InvalidState
+            .Error(
+              s"Failed to insert the pending move from Freezing to Onboarding for party $partyId on synchronizer $synchronizerId: ${err.message}"
+            ): PartyManagementServiceError
+        )
+    } yield ()
+
   private def validateTopologyStateForClearance(
       indexService: InternalIndexService,
       connectedSynchronizer: com.digitalasset.canton.participant.sync.ConnectedSynchronizer,
@@ -1048,9 +1144,219 @@ class GrpcPartyManagementService(
       request.waitForActivationTimeout,
     )(ledgerEnd, synchronizerIds)
 
+  override def getRemoteAcs(
+      request: GetRemoteAcsRequest,
+      responseObserver: StreamObserver[GetRemoteAcsResponse],
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    GrpcStreamingUtils.streamToClient(
+      (out: OutputStream) => processGetRemoteAcsRequest(request, new GZIPOutputStream(out)),
+      responseObserver,
+      byteString => v30.GetRemoteAcsResponse(byteString),
+      parameters.processingTimeouts.adminStreamOpenBound.duration,
+      chunkSizeO = None,
+    )
+  }
+
+  private def processGetRemoteAcsRequest(
+      request: v30.GetRemoteAcsRequest,
+      out: OutputStream,
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    val allLogicalSynchronizerIds = sync.syncPersistentStateManager.getAllLatest.keySet
+    val res = for {
+      partyId <- EitherT.fromEither[FutureUnlessShutdown](
+        UniqueIdentifier
+          .fromProtoPrimitive(request.partyId, "party_id")
+          .bimap(
+            error => PartyManagementServiceError.InvalidArgument.Error(error.message),
+            PartyId(_),
+          )
+      )
+      parsedSynchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
+        SynchronizerId
+          .fromProtoPrimitive(
+            request.synchronizerId,
+            "synchronizer_id",
+          )
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+      synchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
+        Either
+          .cond(
+            allLogicalSynchronizerIds.contains(parsedSynchronizerId),
+            parsedSynchronizerId,
+            OtherError(s"Synchronizer ID $parsedSynchronizerId is unknown"),
+          )
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+
+      sourceParticipantId <- EitherT.fromEither[FutureUnlessShutdown](
+        UniqueIdentifier
+          .fromProtoPrimitive(request.sourceParticipantUid, "source_participant_uid")
+          .bimap(
+            error => PartyManagementServiceError.InvalidArgument.Error(error.message),
+            ParticipantId(_),
+          )
+      )
+
+      asOf <- EitherT.fromEither[FutureUnlessShutdown](
+        ProtoConverter
+          .parseRequired(CantonTimestamp.fromProtoTimestamp, "as_of", request.asOf)
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+
+      acsReplicator <- EitherT.fromEither[FutureUnlessShutdown](
+        acsReplicatorO
+          .toRight(PartyManagementServiceError.InvalidState.Error("ACS replication is not enabled"))
+      )
+
+      connectedSynchronizer <- EitherT.fromOption[FutureUnlessShutdown](
+        sync.readyConnectedSynchronizerById(synchronizerId),
+        PartyManagementServiceError.InvalidState.Error(
+          s"A connection to synchronizer $synchronizerId is required to perform this operation."
+        ): PartyManagementServiceError,
+      )
+
+      requestId =
+        connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi
+          .build(HashPurpose.OnlinePartyReplicationId)
+          .addString(partyId.toProtoPrimitive)
+          .addString(synchronizerId.toProtoPrimitive)
+          .addString(sourceParticipantId.toProtoPrimitive)
+          .addLong(asOf.toMicros)
+          .finish()
+
+      partyReplicationArguments = AcsReplicationArguments(
+        requestId,
+        partyId,
+        synchronizerId,
+        sourceParticipantId,
+        asOf,
+        AcsReplicationDestination.OutputStream(out),
+      )
+
+      _ <- acsReplicator
+        .replicateAcsAsync(partyReplicationArguments)
+        .leftMap(error =>
+          PartyManagementServiceError.GetRemoteAcsFailed.Error(
+            partyId,
+            synchronizerId,
+            sourceParticipantId,
+            asOf,
+            error,
+          ): PartyManagementServiceError
+        )
+
+      _ <- acsReplicator
+        .awaitRemoteAcsReadCompletion(partyReplicationArguments.requestId)
+        .leftMap(error =>
+          PartyManagementServiceError.GetRemoteAcsFailed.Error(
+            partyId,
+            synchronizerId,
+            sourceParticipantId,
+            asOf,
+            error,
+          ): PartyManagementServiceError
+        )
+    } yield ()
+
+    mapErrNewEUS(res.leftMap(_.toCantonRpcError))
+  }
+
+  override def getPartyFreezingTime(
+      request: GetPartyFreezingTimeRequest
+  ): Future[GetPartyFreezingTimeResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val allLogicalSynchronizerIds = sync.syncPersistentStateManager.getAllLatest.keySet
+    val res = for {
+      partyId <- EitherT.fromEither[FutureUnlessShutdown](
+        UniqueIdentifier
+          .fromProtoPrimitive(request.partyId, "party_id")
+          .bimap(
+            error => PartyManagementServiceError.InvalidArgument.Error(error.message),
+            PartyId(_),
+          )
+      )
+      parsedSynchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
+        SynchronizerId
+          .fromProtoPrimitive(
+            request.synchronizerId,
+            "synchronizer_id",
+          )
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+      synchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
+        Either
+          .cond(
+            allLogicalSynchronizerIds.contains(parsedSynchronizerId),
+            parsedSynchronizerId,
+            OtherError(s"Synchronizer ID $parsedSynchronizerId is unknown"),
+          )
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+      connectedSynchronizer <- EitherT.fromOption[FutureUnlessShutdown](
+        sync.readyConnectedSynchronizerById(synchronizerId),
+        PartyManagementServiceError.InvalidState.Error(
+          s"A connection to synchronizer $synchronizerId is required to perform this operation."
+        ): PartyManagementServiceError,
+      )
+      effectiveTime <- EitherT(
+        AcsReplicationTopologyWorkflow
+          .partyToParticipantHostingStateValidFrom(
+            partyId,
+            participantId,
+            HostingState.Freezing,
+            connectedSynchronizer.synchronizerHandle.syncPersistentState.topologyStore,
+          )
+          .map(
+            _.toRight(
+              PartyManagementServiceError.PartyNotInFreezingHostingState.Error(
+                partyId,
+                synchronizerId,
+                participantId,
+              ): PartyManagementServiceError
+            )
+          )
+      )
+    } yield GetPartyFreezingTimeResponse(Some(effectiveTime.value.toProtoTimestamp))
+
+    mapErrNewEUS(res.leftMap(_.toCantonRpcError))
+  }
 }
 
 object GrpcPartyManagementService {
+
+  /** How this participant's entry for the party admits a party ACS import. */
+  private sealed trait ImportTarget extends Product with Serializable
+  private object ImportTarget {
+
+    /** Legacy offline party replication: the participant is Onboarding.
+      *
+      * @param activation
+      *   The effective time of the onboarding mapping, empty if it is only proposed.
+      */
+    final case class Onboarding(activation: Option[EffectiveTime]) extends ImportTarget
+
+    /** HyPR (Hybrid Party Replication): the participant is Freezing, and moves to Onboarding once
+      * connected.
+      */
+    case object Freezing extends ImportTarget
+  }
+
+  /** The parameters of a party ACS import, set in the first message of the stream.
+    *
+    * @param partyIdO
+    *   Empty if not provided by the user (backwards compatibility).
+    */
+  private final case class ImportPartyAcsContext(
+      synchronizerId: SynchronizerId,
+      partyIdO: Option[PartyId],
+      workflowIdPrefix: Option[String],
+      contractImportMode: ContractImportMode,
+      representativePackageIdOverride: RepresentativePackageIdOverride,
+      forceFlags: Set[ImportPartyAcsForceFlag],
+  )
 
   /** [[com.digitalasset.canton.participant.admin.grpc.GrpcPartyManagementService#getHighestOffsetByTimestamp]]
     * computation of offset from timestamp placed in a pure function for unit testing.

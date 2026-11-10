@@ -4,6 +4,7 @@
 package com.digitalasset.canton.util
 
 import cats.data.EitherT
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.*
@@ -97,9 +98,6 @@ class SimpleExecutionQueue(
     logTaskTiming,
     failureMode = if (crashOnFailure) CrashAfterFailure else StopAfterFailure,
   )
-
-  protected val directExecutionContext: DirectExecutionContext =
-    DirectExecutionContext(noTracingLogger)
 
   /** Will execute the given function after all previous executions have completed successfully and
     * return the future with the result of this execution.

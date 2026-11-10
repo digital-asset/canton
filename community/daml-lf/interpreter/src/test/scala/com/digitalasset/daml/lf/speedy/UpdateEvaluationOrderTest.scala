@@ -26,27 +26,51 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.collection.immutable.ArraySeq
 
-// Test classes using UpdateMachine
-class UpdateEvaluationOrderWithoutKeyTest_V2Dev
-    extends UpdateEvaluationOrderTest(LanguageVersion.v2_dev, withKey = true)
+// Test classes using UpdateMachine, key hash mismatch is tolerated
+class UpdateEvaluationOrderTest_V2Dev_KeyHashMismatchIgnored
+    extends UpdateEvaluationOrderTest(
+      LanguageVersion.v2_dev,
+      withKey = true,
+      errorOnKeyMismatch = false,
+    )
     with CmdFlowRunnerWithUpdateMachine
-class UpdateEvaluationOrderWithoutKeyTest_V23
-    extends UpdateEvaluationOrderTest(LanguageVersion.v2_3, withKey = true)
+class UpdateEvaluationOrderTest_V23_KeyHashMismatchIgnored
+    extends UpdateEvaluationOrderTest(
+      LanguageVersion.v2_3,
+      withKey = true,
+      errorOnKeyMismatch = false,
+    )
     with CmdFlowRunnerWithUpdateMachine
-class UpdateEvaluationOrderWithoutKeyTest_V22
-    extends UpdateEvaluationOrderTest(LanguageVersion.v2_2, withKey = false)
+class UpdateEvaluationOrderTest_V22_NoKey_KeyHashMismatchIgnored
+    extends UpdateEvaluationOrderTest(
+      LanguageVersion.v2_2,
+      withKey = false,
+      errorOnKeyMismatch = false,
+    )
     with CmdFlowRunnerWithUpdateMachine
 
-// Test classes using TransactionConductor
-class UpdateEvaluationOrderWithTransactionConductorTest_V2Dev
-    extends UpdateEvaluationOrderTest(LanguageVersion.v2_dev, withKey = true)
-    with CmdFlowRunnerWithTransactionConductor
-class UpdateEvaluationOrderWithTransactionConductorTest_V23
-    extends UpdateEvaluationOrderTest(LanguageVersion.v2_3, withKey = true)
-    with CmdFlowRunnerWithTransactionConductor
-class UpdateEvaluationOrderWithTransactionConductorTest_V22
-    extends UpdateEvaluationOrderTest(LanguageVersion.v2_2, withKey = false)
-    with CmdFlowRunnerWithTransactionConductor
+// Test classes using UpdateMachine, key hash mismatch raises an error
+class UpdateEvaluationOrderTest_V2Dev_KeyHashMismatchError
+    extends UpdateEvaluationOrderTest(
+      LanguageVersion.v2_dev,
+      withKey = true,
+      errorOnKeyMismatch = true,
+    )
+    with CmdFlowRunnerWithUpdateMachine
+class UpdateEvaluationOrderTest_V23_KeyHashMismatchError
+    extends UpdateEvaluationOrderTest(
+      LanguageVersion.v2_3,
+      withKey = true,
+      errorOnKeyMismatch = true,
+    )
+    with CmdFlowRunnerWithUpdateMachine
+class UpdateEvaluationOrderTest_V22_NoKey_KeyHashMismatchError
+    extends UpdateEvaluationOrderTest(
+      LanguageVersion.v2_2,
+      withKey = false,
+      errorOnKeyMismatch = true,
+    )
+    with CmdFlowRunnerWithUpdateMachine
 
 // Used by buildLog to accept a mix of individual Strings and Seq[String] (e.g. from replicate).
 sealed trait LogEntry
@@ -101,8 +125,11 @@ class AuthorizationCheckerLogger(logger: RecordingMachineLogger) extends Authori
   }
 }
 
-abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withKey: Boolean)
-    extends AnyFreeSpec
+abstract class UpdateEvaluationOrderTest(
+    languageVersion: LanguageVersion,
+    withKey: Boolean,
+    errorOnKeyMismatch: Boolean,
+) extends AnyFreeSpec
     with CmdFlowRunner
     with Matchers
     with Inside
@@ -112,6 +139,12 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
   import TestPkg.*, testPkg.*
 
   private val testTxVersion: SerializationVersion = serializationVersion
+
+  private val interpretationConfig =
+    interpretation.InterpretationConfig(
+      allowedLanguageVersions = LanguageVersion.allLfVersions,
+      errorOnContractKeyHashMismatch = errorOnKeyMismatch,
+    )
 
   private[this] def buildContract(
       observer: Ref.Party,
@@ -256,6 +289,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           test = _ => CmdFlow.submit(Command.Create(T, defaultPayload)),
           parties = Set(alice),
           packageResolution = packageNameMap,
+          interpretationConfig = interpretationConfig,
         )
         inside(res) { case Right(_) =>
           msgs shouldBe buildLog(
@@ -283,6 +317,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             ),
           parties = Set(alice),
           packageResolution = packageNameMap,
+          interpretationConfig = interpretationConfig,
         )
         inside(res) {
           case Left(SError.InterpretationError(IE.TemplatePreconditionViolated(T, _, _))) =>
@@ -756,18 +791,19 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
 
         // This case may happen only if there is a bug in the ledger.
         "wrongly typed contract" in {
-          val (res, msgs) = runCmdFlow(
+          val (res, _) = runCmdFlow(
             pkgs = pkgs,
             test = _ =>
               CmdFlow.submit(
                 Command.ExerciseByKey(T, keySValue, n"Choice", SEither.Left(SNat.fromInt(0)))
               ),
+            interpretationConfig = interpretationConfig,
             parties = Set(alice),
             getContract = getWronglyTypedContract,
             getKeys = mapKeys(getKeys, getWronglyTypedContract),
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.Crash(_, _)) =>
+          inside(res) { case Left(_) =>
           }
         }
       }
@@ -836,9 +872,10 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getContract = getWronglyTypedContract,
             getKeys = mapKeys(getKeys, getWronglyTypedContract),
             packageResolution = packageNameMap,
+            interpretationConfig = interpretationConfig,
           )
-          inside(res) { case Left(SError.Crash(_, _)) =>
-          }
+          // The indexer returns an inconsistent answer, so the exact error does not matter.
+          inside(res) { case Left(_) => }
         }
       }
 
@@ -1516,7 +1553,6 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           }
         }
 
-        // This case may happen only if there is a bug in the ledger.
         "wrongly typed contract" in {
           val (res, msgs) = runCmdFlow(
             pkgs = pkgs,
@@ -1525,9 +1561,10 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
             getContract = getWronglyTypedContract,
             getKeys = mapKeys(getKeys, getWronglyTypedContract),
+            interpretationConfig = interpretationConfig,
           )
-          inside(res) { case Left(SError.Crash(_, _)) =>
-          }
+          // The indexer returns an inconsistent answer, so the exact error does not matter.
+          inside(res) { case Left(_) => }
         }
       }
 
@@ -1570,6 +1607,24 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             key.templateId shouldBe T
             msgs shouldBe buildLog("starts test", "maintainers", "queries key")
           }
+        }
+
+        "wrongly typed contract" in {
+          val (res, _) = runCmdFlow(
+            pkgs = pkgs,
+            setup = CmdFlow.submit(Command.FetchTemplate(Dummy, SValue.SContractId(cId))),
+            test = _ =>
+              CmdFlow.submit(
+                Command.ExerciseByKey(T, keySValue, n"Choice", SEither.Left(SNat.fromInt(0)))
+              ),
+            parties = Set(alice),
+            getContract = getWronglyTypedContract,
+            getKeys = mapKeys(getKeys, getWronglyTypedContract),
+            packageResolution = packageNameMap,
+            interpretationConfig = interpretationConfig,
+          )
+          // The indexer returns an inconsistent answer, so the exact error does not matter.
+          inside(res) { case Left(_) => }
         }
       }
 

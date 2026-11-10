@@ -1752,8 +1752,7 @@ private[lf] object SBuiltinFun {
           dstSArg,
           mbTypedNormalFormAuthenticator,
         )
-        (dstTmplId, dstArg, recomputedMetaData) = result
-        _ <- validateDeclaredKey(machine, coid, srcMetadata, recomputedMetaData)
+        (dstTmplId, dstArg, _) = result
       } yield SAny(Ast.TTyCon(dstTmplId), dstArg)
 
     machine.getIfLocalContract(coid) match {
@@ -2234,10 +2233,10 @@ private[lf] object SBuiltinFun {
                 mbToken,
               )
               (result, newMbtoken) = entry
-              // This check is superseded by `validateDeclaredKey`. We keep it here only when
-              // `errorOnContractKeyMismatch` is off (PV36) to be 100% sure we do not break
+              // This check is superseded by `checkContractUpgradable`. We keep it here only when
+              // `errorOnContractKeyHashMismatch` is off (PV36) to be 100% sure we do not break
               // backward compatibility.
-              _ = if (!machine.interpretationConfig.errorOnContractKeyMismatch)
+              _ = if (!machine.interpretationConfig.errorOnContractKeyHashMismatch)
                 result.foreach { case (contract, _, _) =>
                   if (contract.contractKeyWithMaintainers.forall(_.globalKey != gkey))
                     crash(
@@ -2851,37 +2850,6 @@ private[lf] object SBuiltinFun {
         throw SError.Crash(NameOf.qualifiedNameOfCurrentFunc, s"Invalid contract info struct: $v")
     }
 
-  private def validateDeclaredKey(
-      machine: UpdateMachine,
-      coid: V.ContractId,
-      declaredMetaData: ContractMetadata,
-      recomputedMetaData: ContractInfo,
-  ): Cont[Question.Update, Unit] =
-    if (
-      recomputedMetaData.keyOpt
-        .map(_.globalKey.hash) == declaredMetaData.keyOpt.map(_.globalKey.hash)
-    ) {
-      ContU.Unit
-    } else if (machine.interpretationConfig.errorOnContractKeyMismatch) {
-      ContU.throwError(
-        IE.Dev(
-          "fetchTemplate",
-          IE.Dev.ContractKeyMismatchError(
-            coid,
-            declaredMetaData.keyOpt,
-            recomputedMetaData.keyOpt,
-          ),
-        )
-      )
-    } else
-      ContU.pure(
-        machine.recordContractKeyMismatch(
-          coid,
-          declaredMetaData.keyOpt,
-          recomputedMetaData.keyOpt,
-        )
-      )
-
   /** Fetches the requested contract ID and:
     *   - authenticates the contract against its contract ID if the contract ID uses a legacy
     *     hashing method
@@ -2942,32 +2910,7 @@ private[lf] object SBuiltinFun {
             dstSArg,
             mbTypedNormalFormAuthenticator,
           )
-          (_, value, recomputedMetaData) = result
-          _ <-
-            if (
-              recomputedMetaData.keyOpt
-                .map(_.globalKey.hash) == srcMetadata.keyOpt.map(_.globalKey.hash)
-            ) {
-              ContU.Unit
-            } else if (machine.interpretationConfig.errorOnContractKeyMismatch) {
-              ContU.throwError(
-                IE.Dev(
-                  "fetchTemplate",
-                  IE.Dev.ContractKeyMismatchError(
-                    coid,
-                    srcMetadata.keyOpt,
-                    recomputedMetaData.keyOpt,
-                  ),
-                )
-              )
-            } else
-              ContU.pure(
-                machine.recordContractKeyMismatch(
-                  coid,
-                  srcMetadata.keyOpt,
-                  recomputedMetaData.keyOpt,
-                )
-              )
+          (_, value, _) = result
         } yield value
 
     machine.getIfLocalContract(coid) match {
@@ -3060,6 +3003,7 @@ private[lf] object SBuiltinFun {
         dstContract.packageName,
         srcContractMetadata,
         dstContract.metadata,
+        machine,
       )
       _ <- mbTypedNormalFormAuthenticator match {
         case Some(authenticator) =>
@@ -3141,6 +3085,7 @@ private[lf] object SBuiltinFun {
       dstPkgName: Ref.PackageName,
       original: ContractMetadata,
       recomputed: ContractMetadata,
+      machine: UpdateMachine,
   ): ContU[Unit] = {
 
     def check[T](getter: ContractMetadata => T, desc: String): Option[String] =
@@ -3148,11 +3093,22 @@ private[lf] object SBuiltinFun {
         s"$desc mismatch: $original vs $recomputed"
       )
 
+    val keyHashMismatchError: Option[String] =
+      if (original.keyOpt.map(_.globalKey.hash) == recomputed.keyOpt.map(_.globalKey.hash)) {
+        None
+      } else if (machine.interpretationConfig.errorOnContractKeyHashMismatch) {
+        check(_.keyOpt.map(_.globalKey.hash), "key hash")
+      } else {
+        machine.recordContractKeyMismatch(coid, original.keyOpt, recomputed.keyOpt)
+        None
+      }
+
     List(
       check(_.signatories, "signatories"),
       check(_.nonSignatoryStakeholders, "nonSignatoryStakeholders"),
       check(_.keyOpt.map(_.maintainers), "key maintainers"),
       check(_.keyOpt.map(_.globalKey.key), "key value"),
+      keyHashMismatchError,
       Option.when(srcPkgName != dstPkgName)(
         s"package name mismatch: $srcPkgName vs $dstPkgName"
       ),

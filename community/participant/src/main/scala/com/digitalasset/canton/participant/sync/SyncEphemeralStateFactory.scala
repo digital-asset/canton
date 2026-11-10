@@ -18,7 +18,10 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.admin.party.{
+  FreezingToOnboardingScheduler,
+  OnboardingClearanceScheduler,
+}
 import com.digitalasset.canton.participant.commitment.{
   AcsCommitmentNoopSender,
   AcsCommitmentSenderImpl,
@@ -64,6 +67,7 @@ trait SyncEphemeralStateFactory {
       transparencyCheckCacheConfig: CacheConfigWithTimeout,
       synchronizerConnectionConfig: StoredSynchronizerConnectionConfig,
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
+      freezingToOnboardingScheduler: FreezingToOnboardingScheduler,
       participantId: ParticipantId,
       synchronizerLoggerFactory: NamedLoggerFactory,
       performLsu: PerformLsuHandler,
@@ -96,6 +100,7 @@ class SyncEphemeralStateFactoryImpl(
       transparencyCheckCacheConfig: CacheConfigWithTimeout,
       synchronizerConnectionConfig: StoredSynchronizerConnectionConfig,
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
+      freezingToOnboardingScheduler: FreezingToOnboardingScheduler,
       participantId: ParticipantId,
       synchronizerLoggerFactory: NamedLoggerFactory,
       performLsu: PerformLsuHandler,
@@ -204,6 +209,7 @@ class SyncEphemeralStateFactoryImpl(
         inFlightSubmissionSynchronizerTracker,
         acsCommitmentSender,
         onboardingClearanceScheduler,
+        freezingToOnboardingScheduler,
         persistentState,
         ledgerApiIndexer.value,
         contractStore.value,

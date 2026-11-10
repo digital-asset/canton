@@ -17,10 +17,10 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.admin.data.{ActiveContract, RepairContract}
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters
-import com.digitalasset.canton.participant.config.OnlinePartyReplicationTargetConfig
+import com.digitalasset.canton.participant.config.AlphaAcsReplicationTargetConfig
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.protocol.party.acsreplication.{
@@ -37,7 +37,6 @@ import com.digitalasset.canton.participant.util.{CreatesActiveContracts, TimeOfC
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ReassignmentTag}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -66,6 +65,8 @@ sealed trait AcsReplicationProcessorTestBaseWithFixture
     with NeedsNewLfContractIds
     with CreatesActiveContracts {
   override protected val testSymbolicCrypto = new SymbolicPureCrypto()
+  protected val contractsToRequestEachTime: PositiveInt =
+    AlphaAcsReplicationTargetConfig().acsBatchSize
 
   class Env(cryptoClientO: Option[SynchronizerCryptoClient] = None) extends FlagCloseableAsync {
     override val timeouts: ProcessingTimeout =
@@ -77,8 +78,8 @@ sealed trait AcsReplicationProcessorTestBaseWithFixture
       mutable.Buffer[(String, AcsReplicationTargetParticipantMessage.Instruction)]()
 
     private var hasTestProcessorCompleted: Boolean = false
-    var tpProceedOrWait: PartyReplicationTestInterceptor.ProceedOrWait =
-      PartyReplicationTestInterceptor.Proceed
+    var tpProceedOrWait: AcsReplicationTestInterceptor.ProceedOrWait =
+      AcsReplicationTestInterceptor.Proceed
     var tpSendErrorOverrides: Map[String, String] = Map.empty
     var contractsReceived: Map[LfContractId, ReassignmentCounter] = Map.empty
     var persistContractMaybeInjectedError: EitherT[FutureUnlessShutdown, String, Unit] =
@@ -130,7 +131,6 @@ sealed trait AcsReplicationProcessorTestBaseWithFixture
           sourceParticipantId,
           targetParticipantId,
           CantonTimestamp.ofEpochSecond(10),
-          ParticipantPermission.Submission,
           AcsReplicationParameters.AcsReplicationDestination.Persistence,
         ),
         testedProtocolVersion,
@@ -196,19 +196,19 @@ sealed trait AcsReplicationProcessorTestBaseWithFixture
         onError = logger.info(_),
         onDisconnect = logger.info(_)(_),
         acsReplicationContractHandler = acsTransferContractHandler,
-        config = OnlinePartyReplicationTargetConfig(disableAcsDigestSourceSignatureValidation =
+        config = AlphaAcsReplicationTargetConfig(disableAcsDigestSourceSignatureValidation =
           cryptoClientO.isEmpty
         ),
         futureSupervisor = futureSupervisor,
         exitOnFatalFailures = true,
         timeouts = timeouts,
         loggerFactory = processorLoggerFactory,
-        testOnlyInterceptor = new PartyReplicationTestInterceptor {
+        testOnlyInterceptor = new AcsReplicationTestInterceptor {
           override def onTargetParticipantProgress(
               progress: AcsReplicationStatus.AcsReplicationProgress
           )(implicit
               traceContext: TraceContext
-          ): PartyReplicationTestInterceptor.ProceedOrWait = tpProceedOrWait
+          ): AcsReplicationTestInterceptor.ProceedOrWait = tpProceedOrWait
         },
       ) {
         override protected def sendPayload(operation: String, payload: ByteString)(implicit
@@ -387,7 +387,7 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
             NonNegativeLong.zero
           )
           val firstBatchEndOrdinal = NonNegativeLong.tryCreate(
-            TargetParticipantAcsPersistence.contractsToRequestEachTime.decrement.unwrap.toLong
+            contractsToRequestEachTime.decrement.unwrap.toLong
           )
           messagesSent(1)._2 shouldBe AcsReplicationTargetParticipantMessage.SendAcsUpTo(
             firstBatchEndOrdinal
@@ -408,7 +408,7 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
 
       "handle single ACS batch" onlyRunWith ProtocolVersion.dev inUS { env =>
         import env.*
-        val firstBatchSize = TargetParticipantAcsPersistence.contractsToRequestEachTime
+        val firstBatchSize = contractsToRequestEachTime
         for {
           _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
           acs = createAcs(firstBatchSize)
@@ -455,11 +455,11 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
       "complain if SP sends more contract batches than requested" onlyRunWith ProtocolVersion.dev inUS {
         env =>
           import env.*
-          val batchSize = TargetParticipantAcsPersistence.contractsToRequestEachTime
+          val batchSize = contractsToRequestEachTime
           for {
             _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
             // Make the TP processor wait to prevent it from automatically requesting more contracts
-            _ = env.tpProceedOrWait = PartyReplicationTestInterceptor.Wait
+            _ = env.tpProceedOrWait = AcsReplicationTestInterceptor.Wait
             _ <- execUntilDone(tp, "receive requested")(_.handlePayload(createAcsBatch(batchSize)))
             // Sending another, unrequested batch should cause an error
             errTooMany <- leftOrFail(tp.handlePayload(createAcsBatch(batchSize)))(
@@ -475,12 +475,11 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
       "complain if SP sends more contracts than requested" onlyRunWith ProtocolVersion.dev inUS {
         env =>
           import env.*
-          val batchSizeTooLarge =
-            TargetParticipantAcsPersistence.contractsToRequestEachTime.increment.value
+          val batchSizeTooLarge = contractsToRequestEachTime.increment.value
           for {
             _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
             // Make the TP processor wait to prevent it from automatically requesting more contracts
-            _ = env.tpProceedOrWait = PartyReplicationTestInterceptor.Wait
+            _ = env.tpProceedOrWait = AcsReplicationTestInterceptor.Wait
             errTooMany <- leftOrFail(tp.handlePayload(createAcsBatch(batchSizeTooLarge)))(
               "fail on AcsBatch with more contracts than requested"
             )
@@ -521,7 +520,7 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
       "log upon problem sending message to SP" onlyRunWith ProtocolVersion.dev inUS { env =>
         import env.*
         // Fail TP send on the second message to request more contracts
-        val acsBatchSize = TargetParticipantAcsPersistence.contractsToRequestEachTime
+        val acsBatchSize = contractsToRequestEachTime
         val secondRequestUpperBound = acsBatchSize.unwrap * 2 - 1
         tpSendErrorOverrides = Map(
           s"request next set of contracts up to ordinal $secondRequestUpperBound" -> "simulated request batch error"
@@ -530,11 +529,7 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
           for {
             _ <- valueOrFail(tp.onConnected())("initialize tp")
             _ <- execUntilDone(tp, "receive acs batch")(
-              _.handlePayload(
-                createAcsBatch(
-                  TargetParticipantAcsPersistence.contractsToRequestEachTime
-                )
-              )
+              _.handlePayload(createAcsBatch(contractsToRequestEachTime))
             )
           } yield {
             // send error observed via logged warning instead of here due to async send
@@ -619,7 +614,7 @@ final class AcsReplicationProcessorBadSourceParticipantSignatureTest
     "complain if SP signs ACS digest with invalid signature" onlyRunWith ProtocolVersion.dev inUS {
       env =>
         import env.*
-        val firstBatchSize = TargetParticipantAcsPersistence.contractsToRequestEachTime
+        val firstBatchSize = contractsToRequestEachTime
         for {
           _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
           acs = createAcs(firstBatchSize)

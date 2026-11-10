@@ -8,7 +8,6 @@ import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import io.scalaland.chimney.dsl.*
 
 /** Internal representation of party ACS agreement parameters.
@@ -21,7 +20,6 @@ final case class AcsReplicationAgreementParams(
     targetParticipantId: ParticipantId,
     sequencerId: SequencerId,
     timestamp: CantonTimestamp,
-    participantPermission: ParticipantPermission,
 )
 
 object AcsReplicationAgreementParams {
@@ -64,8 +62,6 @@ object AcsReplicationAgreementParams {
       timestamp <- CantonTimestamp
         .fromInstant(c.timestamp)
         .leftMap(err => s"Invalid timestamp ${c.timestamp}: $err")
-      // TODO(#35267) ACS replicator shouldn't know about party party participant permission
-      participantPermission = PartyParticipantPermission.fromDaml(c.participantPermission)
     } yield AcsReplicationAgreementParams(
       requestId,
       partyId,
@@ -74,7 +70,6 @@ object AcsReplicationAgreementParams {
       targetParticipantId,
       sequencerId,
       timestamp,
-      participantPermission, // TODO(#35267) ACS replicator shouldn't know about party party participant permission
     )
 
   def fromProposal(

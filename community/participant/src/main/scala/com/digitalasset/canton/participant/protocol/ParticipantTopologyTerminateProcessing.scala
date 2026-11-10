@@ -59,7 +59,7 @@ object ParticipantTopologyTerminateProcessing {
       event: Update.TopologyTransactionEffective,
       onboardingLocallyHostedParty: Boolean,
       clearingOnboardingLocallyHostedParty: Boolean,
-      abortingOnboardingLocallyHostedParty: Boolean,
+      revokingLocallyHostedParty: Boolean,
   )
 
   def relevantMappingsForEffectiveStateChanges(pv: ProtocolVersion): Seq[TopologyMapping.Code] =
@@ -148,7 +148,9 @@ class ParticipantTopologyTerminateProcessing(
     *
     * When a party is onboarded, it records a pending operation and schedules a clearance task. When
     * the party is finally added (onboarding flag cleared), it removes the pending operation from
-    * the store. When a party is revoked (offboarded), it cleans up any aborted operations.
+    * the store. When a party is revoked (offboarded), it removes any pending operation, also one
+    * that `clear_party_onboarding_flag` records after the flag is cleared, so that a later import
+    * of the party can record its own.
     */
   private def processPartyHostingEvents(eventInfo: EventInfo)(implicit
       traceContext: TraceContext,
@@ -157,7 +159,7 @@ class ParticipantTopologyTerminateProcessing(
 
     val requiresProcessing = eventInfo.onboardingLocallyHostedParty ||
       eventInfo.clearingOnboardingLocallyHostedParty ||
-      eventInfo.abortingOnboardingLocallyHostedParty
+      eventInfo.revokingLocallyHostedParty
 
     if (requiresProcessing) {
       // Pre-filter: We only care about PartyToParticipantAuthorization on the local participant
@@ -256,12 +258,7 @@ class ParticipantTopologyTerminateProcessing(
 
           // After ensuring the update is persisted (if it was needed), request clearance
           persistOperationFus.map { _ =>
-            val onboardingEffectiveAt =
-              record.operation.onboardingEffectiveAt.getOrElse(effectiveAt)
-            onboardingClearanceScheduler.requestClearanceInBackground(
-              partyId,
-              onboardingEffectiveAt,
-            )
+            onboardingClearanceScheduler.requestClearanceInBackground(partyId, effectiveAt)
           }
       }
   }
@@ -543,7 +540,7 @@ class ParticipantTopologyTerminateProcessing(
           ),
           onboardingLocallyHostedParty = onboardingLocalParty,
           clearingOnboardingLocallyHostedParty = clearingOnboardingLocalParty,
-          abortingOnboardingLocallyHostedParty = revokingLocalParty,
+          revokingLocallyHostedParty = revokingLocalParty,
         )
     }
 }

@@ -3,17 +3,17 @@
 
 package com.digitalasset.canton.participant.admin.party
 
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor.*
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor.*
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.protocol.party.SourceParticipantStore
 import com.digitalasset.canton.tracing.TraceContext
 
-/** OnPR test interceptor interface
+/** ACS replication test interceptor interface
   *
   * Only for use in integration tests. In fact the test interceptor is only configurable via
   * integration tests and disabled via pureconfig.
   */
-trait PartyReplicationTestInterceptor {
+trait AcsReplicationTestInterceptor {
 
   /** Specifies whether the SP proceeds or waits depending on the contents of the store.
     * @return
@@ -32,7 +32,7 @@ trait PartyReplicationTestInterceptor {
   ): ProceedOrWait = Proceed
 }
 
-object PartyReplicationTestInterceptor {
+object AcsReplicationTestInterceptor {
   sealed trait ProceedOrWait
   object Proceed extends ProceedOrWait
   object Wait extends ProceedOrWait
@@ -41,5 +41,5 @@ object PartyReplicationTestInterceptor {
   /** In production, always proceed as any type of disruptive or stalling behavior is to be used in
     * integration tests only.
     */
-  object AlwaysProceed extends PartyReplicationTestInterceptor
+  object AlwaysProceed extends AcsReplicationTestInterceptor
 }

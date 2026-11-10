@@ -22,8 +22,9 @@ import com.digitalasset.canton.console.FeatureFlag
 import com.digitalasset.canton.http.{JsonApiConfig, WebsocketConfig}
 import com.digitalasset.canton.participant.config.{
   AcsCommitmentConfig,
+  AlphaAcsReplicationConfig,
   AlphaOnlinePartyReplicationConfig,
-  OnlinePartyReplicationTargetConfig,
+  AlphaOnlinePartyReplicationTargetConfig,
   ParticipantNodeConfig,
   RemoteParticipantConfig,
   TestingTimeServiceConfig,
@@ -36,7 +37,10 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
   BftSequencer,
   SequencerHighAvailabilityConfig,
 }
-import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  AlphaSequencerChannelConfig,
+  SequencerNodeConfig,
+}
 import com.digitalasset.canton.synchronizer.sequencer.{BlockSequencerConfig, SequencerConfig}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
@@ -986,34 +990,50 @@ object ConfigTransforms {
     )
 
   def enableAlphaOnlinePartyReplicationSupport(
-      participantsWithOnPRInterceptor: Map[
+      participantsWithAcsReplicationInterceptor: Map[
         String,
-        AlphaOnlinePartyReplicationConfig.TestInterceptor,
+        AlphaAcsReplicationConfig.TestInterceptor,
       ] = Map.empty,
-      enableUnsafeSequencerChannelSupport: Boolean = false,
       pauseIndexer: Boolean = true,
   ): Seq[ConfigTransform] = Seq(updateAllParticipantConfigs { case (name, config) =>
+    val testInterceptor = participantsWithAcsReplicationInterceptor.get(name)
     config
       .focus(_.parameters.alphaOnlinePartyReplicationSupport)
       .replace(
         Some(
           AlphaOnlinePartyReplicationConfig(
-            testInterceptor = participantsWithOnPRInterceptor.get(name),
-            unsafeSequencerChannelSupport = enableUnsafeSequencerChannelSupport,
-            target =
-              OnlinePartyReplicationTargetConfig(pauseSynchronizerIndexingDuringPartyReplication =
-                pauseIndexer
-              ),
+            testFileImportInterceptor = testInterceptor,
+            target = AlphaOnlinePartyReplicationTargetConfig(
+              pauseSynchronizerIndexingDuringPartyReplication = pauseIndexer
+            ),
           )
         )
       )
-  }) ++ (if (enableUnsafeSequencerChannelSupport)
-           Seq(
-             updateAllSequencerConfigs_(
-               _.focus(_.parameters.unsafeSequencerChannelSupport).replace(true)
-             )
-           )
-         else Seq.empty)
+      .focus(_.parameters.alphaAcsReplicationSupport)
+      .replace(Some(AlphaAcsReplicationConfig(testInterceptor = testInterceptor)))
+  }) ++ Seq(
+    updateAllSequencerConfigs_(
+      _.focus(_.parameters.alphaSequencerChannelSupport)
+        .replace(Some(AlphaSequencerChannelConfig()))
+    )
+  )
+
+  def enableAlphaAcsReplicationSupport(
+      participantsWithAcsReplicationInterceptor: Map[
+        String,
+        AlphaAcsReplicationConfig.TestInterceptor,
+      ] = Map.empty
+  ): Seq[ConfigTransform] = Seq(updateAllParticipantConfigs { case (name, config) =>
+    val testInterceptor = participantsWithAcsReplicationInterceptor.get(name)
+    config
+      .focus(_.parameters.alphaAcsReplicationSupport)
+      .replace(Some(AlphaAcsReplicationConfig(testInterceptor = testInterceptor)))
+  }) ++ Seq(
+    updateAllSequencerConfigs_(
+      _.focus(_.parameters.alphaSequencerChannelSupport)
+        .replace(Some(AlphaSequencerChannelConfig()))
+    )
+  )
 
   def setDelayLoggingThreshold(duration: config.NonNegativeFiniteDuration): ConfigTransform =
     _.focus(_.monitoring.logging.delayLoggingThreshold).replace(duration)

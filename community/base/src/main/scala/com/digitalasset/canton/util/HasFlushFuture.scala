@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -14,7 +14,7 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{Future, Promise}
 
 /** Provides a single flush [[scala.concurrent.Future]] that runs asynchronously. Tasks can be
   * chained onto the flush future, although they will not run sequentially.
@@ -70,8 +70,6 @@ trait HasFlushFuture
   // Invariant: The contained futures never fail with an exception
   private val tasks: TrieMap[HasFlushFuture.NamedTask, Unit] =
     TrieMap.empty[HasFlushFuture.NamedTask, Unit]
-
-  private val directExecutionContext: ExecutionContext = DirectExecutionContext(noTracingLogger)
 
   /** Returns the list of currently incomplete tasks. Use only for inspection and debugging.
     */

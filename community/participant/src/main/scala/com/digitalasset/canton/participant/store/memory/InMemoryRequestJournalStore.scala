@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.RequestCounter
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -26,8 +26,7 @@ class InMemoryRequestJournalStore(protected val loggerFactory: NamedLoggerFactor
     extends RequestJournalStore
     with NamedLogging {
 
-  override private[store] implicit val ec: ExecutionContext =
-    DirectExecutionContext(noTracingLogger)
+  override private[store] implicit val ec: ExecutionContext = directExecutionContext
 
   private val requestTable = new TrieMap[RequestCounter, RequestData]
   private val lock = new Mutex()

@@ -163,7 +163,7 @@ checkout_and_restore_caches:
 cleanup_build_job:
   steps:
     - store_track_cpu_and_memory
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 cleanup_test_job:
   parameters:

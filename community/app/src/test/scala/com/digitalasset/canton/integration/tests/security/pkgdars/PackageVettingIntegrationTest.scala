@@ -326,7 +326,7 @@ sealed trait PackageVettingIntegrationTest
         daId,
         sequencer1,
         mediator1,
-        withMediatorVerdict(Verdict.Approve(testedProtocolVersion)),
+        withMediatorVerdict(Verdict.Approve.create(testedProtocolVersion)),
       ) {
         trackingLedgerEvents(Seq(participant2), Seq.empty) {
           maliciousP2.submitCommand(cmd).futureValueUS

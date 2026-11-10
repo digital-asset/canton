@@ -30,6 +30,8 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
   TestConsoleEnvironment,
 }
+import com.digitalasset.canton.participant.admin.data.ContractImportMode
+import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError
 import com.digitalasset.canton.participant.admin.repair.RepairServiceError.ImportAcsError
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
@@ -49,6 +51,8 @@ import scala.jdk.CollectionConverters.*
   * Test goal (security test evidence):
   *   - SEC1: the import in Validation mode rejects a snapshot in which a contract's contents were
   *     altered, as the contract ID no longer authenticates the contents.
+  *   - SEC3: the party ACS import rejects the Accept mode, which skips that check, while the target
+  *     is Freezing.
   *   - SEC2: a snapshot from which a contract was dropped, or to which an archived contract was
   *     added, leads to an ACS commitment mismatch after the target's activation, with a
   *     counterparticipant that shares another contract with the target.
@@ -58,7 +62,8 @@ import scala.jdk.CollectionConverters.*
   *     (participant2), Beta (participant3), and CP (participant4), which hosts Bob. The two SEC2
   *     cases use different targets, as a mismatch persists.
   *   - Each case uses its own party, hosted on SP only, with contracts shared with Bob.
-  *   - The remote ACS read and the import of its snapshot are simulated with the repair service.
+  *   - The remote ACS read is simulated with the repair service. SEC3 calls the party ACS import;
+  *     the other cases import with the repair service.
   */
 final class PartyFreezeSecurityIntegrationTest
     extends CommunityIntegrationTest
@@ -221,6 +226,38 @@ final class PartyFreezeSecurityIntegrationTest
           Request.ApprovedBy(Set(sp.id)),
         )
         scenario.assertCommitmentsMatchAmongHosts()
+    }
+
+    "SEC3: reject the party ACS import in Accept mode while the target is Freezing" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+      implicit env =>
+        val scenario = newScenario("SEC3")
+        scenario.nominate(Seq(da -> Confirmation), PositiveInt.one)
+        val frozenAt = scenario.freeze(da)
+        expectFrozen(scenario)
+
+        // The mode is checked before the import starts, so DA can stay connected
+        val snapshot = scenario.readAcs(frozenAt)
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          da.parties.import_party_acs(
+            env.daId.logical,
+            Some(scenario.party),
+            snapshot.path,
+            contractImportMode = ContractImportMode.Accept,
+          ),
+          entry => {
+            entry.shouldBeCantonErrorCode(PartyManagementServiceError.InvalidArgument)
+            entry.errorMessage should include("requires the contract import mode Validation")
+          },
+        )
+        da.testing.acs_search(env.daName, filterStakeholder = Some(scenario.party.partyId)) shouldBe
+          empty
+
+        scenario.remove(da, by = Signer.Participant)
+        scenario.expectStep(
+          Hosting.Hosted(PositiveInt.one, Set(sp.id)),
+          events = Set.empty,
+          Request.ApprovedBy(Set(sp.id)),
+        )
     }
   }
 

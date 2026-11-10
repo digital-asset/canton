@@ -12,19 +12,23 @@ import com.daml.ledger.api.v2.transaction_filter.{
   CumulativeFilter,
   EventFormat,
   Filters,
-  TemplateFilter,
+  InterfaceFilter,
 }
 import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
 import com.daml.ledger.api.v2.update_service.GetUpdatesResponse.Update
-import com.daml.ledger.api.v2.value.{Identifier, Record, Value}
+import com.daml.ledger.api.v2.value.{Identifier, Value}
+import com.daml.ledger.javaapi.data.Value as JavaValue
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.client.services.state.StateServiceClient
 import com.digitalasset.canton.ledger.client.services.updates.UpdateServiceClient
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
+import com.digitalasset.canton.platform.config.TopUpConfig
 import com.digitalasset.canton.tea.TrafficEnforcementErrors.TopUpNotCredited
-import com.digitalasset.canton.tea.ingestion.TrafficPurchaseModel.{ResultFields, Template}
+import com.digitalasset.canton.tea.daml.java.canton.api.traffic.creditv1.{
+  TrafficCreditReporter,
+  TrafficCreditReporter_PublishCredit,
+}
 import com.digitalasset.canton.tea.projection.{
   AccountDelta,
   AccountId,
@@ -39,38 +43,35 @@ import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.Future
 
-/** Builds the credit delta stream from the results of the top-up choices exercised on the ledger.
+/** Builds the credit delta stream from PublishCredit exercises on the ledger.
   *
   * Restart and offset-resume are handled by the Pekko projection that consumes [[grpcSource]].
   */
 final class TeaCreditIngestionService(
     updateServiceClient: UpdateServiceClient,
     stateServiceClient: StateServiceClient,
-    projectionConfig: ProjectionConfig,
+    topUpConfig: TopUpConfig.DamlCredit,
     override val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
   import TeaCreditIngestionService.*
 
-  private val templateId = Identifier(
-    packageId = s"#${Template.PackageName}",
-    moduleName = Template.ModuleName,
-    entityName = Template.TemplateName,
-  )
-
   private val filter = CumulativeFilter(
-    IdentifierFilter.TemplateFilter(
-      TemplateFilter(Some(templateId), includeCreatedEventBlob = false)
+    IdentifierFilter.InterfaceFilter(
+      InterfaceFilter(
+        Some(interfaceId),
+        includeInterfaceView = false,
+        includeCreatedEventBlob = false,
+      )
     )
   )
 
   // Convert the paymasters to the primitive representation used in the ledger API filter
-  private val paymasters = projectionConfig.topUpPaymasters.map(_.toProtoPrimitive)
+  private val paymasters: Set[String] = topUpConfig.paymasters.forgetNE.map(_.toProtoPrimitive)
 
   private val eventFormat = EventFormat(
     filtersByParty = paymasters.map(_ -> Filters(Seq(filter))).toMap,
     filtersForAnyParty = None,
-    // Record labels are needed to decode the choice result by field name
-    verbose = true,
+    verbose = false,
   )
 
   /** Offset-resume aware source factory: builds the credit delta source starting from the offset
@@ -81,7 +82,7 @@ final class TeaCreditIngestionService(
     TraceContext.withNewTraceContext("tea-credit-ingestion") { implicit tc =>
       val offsetF = beginOffset
         .map(Future.successful)
-        .orElse(projectionConfig.initialTopUpOffsetBeginExclusive.map(Future.successful))
+        .orElse(topUpConfig.initialOffsetBeginExclusive.map(Future.successful))
         // Without a known offset or specific config, we start from the current participant
         // pruned up to offset, which is as far back as we can go.
         .getOrElse(stateServiceClient.getParticipantPrunedUpToOffset())
@@ -121,7 +122,6 @@ final class TeaCreditIngestionService(
       None
   }
 
-  // TODO(#36625) Might need to rewrite this if we move the Daml contract to the canton repo.
   private def decodeTransaction(
       tx: Transaction
   )(implicit traceContext: TraceContext): Option[Traced[ProjectionEvent]] = {
@@ -132,7 +132,8 @@ final class TeaCreditIngestionService(
           s"Skipping top-up in transaction ${tx.updateId} at offset ${tx.offset}: $message"
         )
         None
-      case Left(InvalidResult(message)) =>
+      case Left(InvalidCredit(message)) =>
+        // This prints an ERROR to the log
         TopUpNotCredited.Reject(tx.updateId, tx.offset, message).discard
         None
     }
@@ -165,51 +166,71 @@ final class TeaCreditIngestionService(
 
 object TeaCreditIngestionService {
 
+  /** Classpath resource of the canton-api-traffic-credit-v1 DAR that the generated bindings come
+    * from.
+    */
+  val DarResourceFileName: String =
+    s"dar/${TrafficCreditReporter.PACKAGE_NAME}-${TrafficCreditReporter.PACKAGE_VERSION}.dar"
+
+  private val interfaceId =
+    Identifier.fromJavaProto(TrafficCreditReporter.INTERFACE_ID.toProto)
+
+  private val interfaceIdWithPackageId =
+    Identifier.fromJavaProto(TrafficCreditReporter.INTERFACE_ID_WITH_PACKAGE_ID.toProto)
+
   private final case class TopUp(nodeId: Int, account: AccountId, amount: Long)
 
-  /** Why a top-up choice is not credited. */
+  /** Why a PublishCredit exercise is not credited. */
   private sealed trait Rejection extends Product with Serializable
 
-  /** The top-up was made on a contract of a paymaster that is not configured, so it is not for this
-    * TEA to credit.
+  /** The top-up was published by a paymaster that is not configured, so it is not for this TEA to
+    * credit.
     */
   private final case class UntrustedPaymaster(message: String) extends Rejection
 
-  /** The result does not have the expected shape: TEA and the Daml model disagree, and a top-up
-    * that may have been paid for is not credited.
+  /** The credit does not have the expected shape or acting parties: TEA and the Daml model
+    * disagree, and a top-up that may have been paid for is not credited.
     */
-  private final case class InvalidResult(message: String) extends Rejection
+  private final case class InvalidCredit(message: String) extends Rejection
 
-  /** Decodes the top-ups of a transaction. Exercised events that are not one of the configured
-    * top-up choices are ignored, while top-up choices with an unexpected result or a paymaster that
-    * is not one of `paymasters` yield a `Left`.
+  /** Decodes PublishCredit exercises. Other events are ignored, while invalid credits or credits
+    * published by a paymaster that is not one of `paymasters` yield a `Left`.
     */
   private def decodeTopUps(
       tx: Transaction,
       paymasters: Set[String],
   ): Seq[Either[Rejection, TopUp]] =
+    // The subscription delivers all events on templates implementing the interface
     tx.events
       .flatMap(_.event.exercised)
-      .filter(isTopUpChoice)
+      .filter(exercised =>
+        exercised.interfaceId.contains(interfaceIdWithPackageId) &&
+          exercised.choice == TrafficCreditReporter.CHOICE_TrafficCreditReporter_PublishCredit.name
+      )
       .map(decodeTopUp(_, paymasters))
-
-  private def isTopUpChoice(exercised: ExercisedEvent): Boolean =
-    Template.ChoiceName == exercised.choice
 
   private def decodeTopUp(
       exercised: ExercisedEvent,
       paymasters: Set[String],
   ): Either[Rejection, TopUp] = {
     def describe(err: String): String =
-      s"choice ${exercised.choice} at node ${exercised.nodeId}: $err"
-    def invalid(err: String): Rejection = InvalidResult(describe(err))
+      s"PublishCredit exercise at node ${exercised.nodeId}: $err"
+    def invalid(err: String): Rejection = InvalidCredit(describe(err))
 
     for {
-      result <- exercised.exerciseResult
-        .toRight("missing exercise result")
-        .flatMap(asRecord)
-        .leftMap(invalid)
-      paymaster <- field(result, ResultFields.PaymasterField).flatMap(asParty).leftMap(invalid)
+      argument <- exercised.choiceArgument.toRight(invalid("missing choice argument"))
+      credit <- Either
+        .catchNonFatal(
+          TrafficCreditReporter_PublishCredit
+            .valueDecoder()
+            .decode(JavaValue.fromProto(Value.toJavaProto(argument)))
+        )
+        .leftMap(err => invalid(s"cannot decode: ${err.getMessage}"))
+      paymaster <- exercised.actingParties match {
+        case Seq(party) => Right(party)
+        case parties =>
+          Left(invalid(s"expected exactly one acting party, got ${parties.mkString(", ")}"))
+      }
       _ <- Either.cond(
         paymasters.contains(paymaster),
         (),
@@ -217,42 +238,15 @@ object TeaCreditIngestionService {
           describe(s"paymaster $paymaster is not one of the configured top-up paymasters")
         ),
       )
-      topUp <- decodeCredit(exercised.nodeId, result).leftMap(invalid)
-    } yield topUp
-  }
-
-  private def decodeCredit(nodeId: Int, result: Record): Either[String, TopUp] =
-    for {
-      targetAccount <- field(result, ResultFields.TargetAccountField).flatMap(asRecord)
-      accountIdText <- field(targetAccount, ResultFields.AccountIdField).flatMap(asText)
-      account <- AccountId.create(accountIdText).leftMap(err => s"invalid account id: $err")
-      amount <- field(result, ResultFields.TrafficAmountField).flatMap(asTrafficAmount)
-    } yield TopUp(nodeId, account, amount)
-
-  private def field(record: Record, label: String): Either[String, Value] =
-    record.fields
-      .find(_.label == label)
-      .flatMap(_.value)
-      .toRight(s"missing field '$label'")
-
-  private def asRecord(value: Value): Either[String, Record] = value.sum match {
-    case Value.Sum.Record(record) => Right(record)
-    case other => Left(s"expected a record, got $other")
-  }
-
-  private def asParty(value: Value): Either[String, String] = value.sum match {
-    case Value.Sum.Party(party) => Right(party)
-    case other => Left(s"expected a party, got $other")
-  }
-
-  private def asText(value: Value): Either[String, String] = value.sum match {
-    case Value.Sum.Text(text) => Right(text)
-    case other => Left(s"expected a text, got $other")
-  }
-
-  private def asTrafficAmount(value: Value): Either[String, Long] = value.sum match {
-    case Value.Sum.Int64(amount) =>
-      Either.cond(amount > 0, amount, s"traffic amount must be positive, got $amount")
-    case other => Left(s"expected an Int64 traffic amount, got $other")
+      _ <- Either.cond(credit.accountId.nonEmpty, (), invalid("account id must not be empty"))
+      account <- AccountId
+        .create(credit.accountId)
+        .leftMap(err => invalid(s"invalid account id: $err"))
+      _ <- Either.cond(
+        credit.trafficAmount > 0,
+        (),
+        invalid(s"traffic amount must be positive, got ${credit.trafficAmount}"),
+      )
+    } yield TopUp(exercised.nodeId, account, credit.trafficAmount)
   }
 }

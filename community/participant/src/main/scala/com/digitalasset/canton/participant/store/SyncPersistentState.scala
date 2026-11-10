@@ -12,6 +12,7 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle, Promi
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
+import com.digitalasset.canton.participant.protocol.party.FreezingToOnboardingOperation.PendingFreezingToOnboardingStore
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.store.db.{
   DbLogicalSyncPersistentState,
@@ -58,6 +59,8 @@ class SyncPersistentState(
   override def reassignmentStore: ReassignmentStore = logical.reassignmentStore
   override def pendingOnboardingClearanceStore: PendingOnboardingClearanceStore =
     logical.pendingOnboardingClearanceStore
+  override def pendingFreezingToOnboardingStore: PendingFreezingToOnboardingStore =
+    logical.pendingFreezingToOnboardingStore
   override def partyReplicationIndexingStoreIfOnPREnabled: Option[PartyReplicationIndexingStore] =
     logical.partyReplicationIndexingStoreIfOnPREnabled
 
@@ -104,6 +107,7 @@ trait LogicalSyncPersistentState extends NamedLogging with AutoCloseable {
   def acsCommitmentSenderWatermarkStore: AcsCommitmentSenderWatermarkStore
   def reassignmentStore: ReassignmentStore
   def pendingOnboardingClearanceStore: PendingOnboardingClearanceStore
+  def pendingFreezingToOnboardingStore: PendingFreezingToOnboardingStore
 
   def partyReplicationIndexingStoreIfOnPREnabled: Option[PartyReplicationIndexingStore]
 }

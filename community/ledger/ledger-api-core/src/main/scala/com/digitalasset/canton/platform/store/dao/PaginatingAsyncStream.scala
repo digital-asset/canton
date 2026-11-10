@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.dao.events.{IdPageSizing, Utils}
@@ -20,8 +20,6 @@ private[platform] class PaginatingAsyncStream(
 ) extends NamedLogging {
 
   import PaginatingAsyncStream.*
-
-  private val directEc = DirectExecutionContext(noTracingLogger)
 
   /** Concatenates the results of multiple asynchronous calls into a single [[Source]], passing the
     * last seen event's offset to the next iteration query, so it can continue reading events from
@@ -56,7 +54,7 @@ private[platform] class PaginatingAsyncStream(
           query(offset).map { result =>
             val nextPageOffset: Option[Off] = result.lastOption.flatMap(getOffset)
             Some((nextPageOffset, result))
-          }(directEc)
+          }(directExecutionContext)
       }
       .flatMapConcat(Source(_))
 
@@ -111,7 +109,7 @@ private[platform] class PaginatingAsyncStream(
                 last = page.lastPage,
               ) -> page.ids
             )
-          )(directEc)
+          )(directExecutionContext)
       }
       .buffer(idPageBufferSize, OverflowStrategy.backpressure)
       .mapConcat(identity)
@@ -217,13 +215,13 @@ private[platform] class PaginatingAsyncStream(
                 limit = state.pageSize,
               )
             )
-          )(directEc)
+          )(directExecutionContext)
         }
       }
       .mapAsync(idFilterQueryParallelism)(paginationInput =>
         executeFetchPage(
           fetchPageQuery(paginationInput.fromTo)
-        ).map(paginationInput -> _)(directEc)
+        ).map(paginationInput -> _)(directExecutionContext)
       )
   }
 }
