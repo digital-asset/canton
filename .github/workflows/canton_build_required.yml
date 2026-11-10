@@ -67,6 +67,7 @@ jobs:
     name: Static Tests
     needs: [pick_runner, setup_and_validation]
     if: |
+      needs.setup_and_validation.outputs.docs-only != 'true' &&
       needs.setup_and_validation.outputs.should-skip != 'true' &&
       (inputs.test_to_run_many_times != true || github.event_name != 'workflow_call') &&
       (inputs.manual_job == 'none' || github.event_name != 'workflow_call')
@@ -80,6 +81,7 @@ jobs:
     needs: [pick_runner, setup_and_validation]
     if: |
       (
+        needs.setup_and_validation.outputs.docs-only != 'true' &&
         needs.setup_and_validation.outputs.should-skip != 'true' &&
         (inputs.test_to_run_many_times != true || github.event_name != 'workflow_call') &&
         (inputs.manual_job == 'none' || github.event_name != 'workflow_call')
