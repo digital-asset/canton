@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.apiserver.tls
 import com.daml.testing.utils.{PekkoBeforeAndAfterAll, TestResourceContext}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.platform.apiserver.LedgerApiService
-import com.digitalasset.canton.util.JarResourceUtils
 import org.mockito.MockitoSugar
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -17,24 +16,6 @@ final class TlsCertificateRevocationCheckingSpec
     with TestResourceContext
     with OcspResponderFixture
     with BaseTest {
-  import TlsCertificateRevocationCheckingSpec.resource
-
-  val serverCrt = resource("server.crt")
-  val serverKey = resource("server.pem")
-  val caCrt = resource("ca.crt")
-  val clientCrt = resource("client.crt")
-  val clientKey = resource("client.pem")
-  val clientRevokedCrt = resource("client-revoked.crt")
-  val clientRevokedKey = resource("client-revoked.pem")
-  val ocspCrt = resource("ocsp.crt")
-  val ocspKey = resource("ocsp.key.pem")
-  val index = resource("index.txt")
-
-  override protected def indexPath: String = index.getAbsolutePath
-  override protected def caCertPath: String = caCrt.getAbsolutePath
-  override protected def ocspKeyPath: String = ocspKey.getAbsolutePath
-  override protected def ocspCertPath: String = ocspCrt.getAbsolutePath
-  override protected def ocspTestCertificate: String = clientCrt.getAbsolutePath
 
   classOf[LedgerApiService.type].getSimpleName when {
     "certificate revocation checking is enabled" should {
@@ -75,16 +56,19 @@ final class TlsCertificateRevocationCheckingSpec
       }
     }
 
+    // Revocation checking is scoped to the SSL context, so these run in the same JVM after the
+    // cases above and must not be affected by them.
     "certificate revocation checking is not enabled" should {
       "allow TLS connections with valid certificates" in {
         TlsFixture(
           loggerFactory,
-          tlsEnabled = false,
+          tlsEnabled = true,
           serverCrt,
           serverKey,
           caCrt,
           Some(clientCrt),
           Some(clientKey),
+          certRevocationChecking = false,
         )
           .makeARequest()
           .map(_ => succeed)
@@ -93,23 +77,17 @@ final class TlsCertificateRevocationCheckingSpec
       "allow TLS connections with revoked certificates" in {
         TlsFixture(
           loggerFactory,
-          tlsEnabled = false,
+          tlsEnabled = true,
           serverCrt,
           serverKey,
           caCrt,
           Some(clientRevokedCrt),
           Some(clientRevokedKey),
+          certRevocationChecking = false,
         )
           .makeARequest()
           .map(_ => succeed)
       }
     }
   }
-}
-
-object TlsCertificateRevocationCheckingSpec {
-
-  protected def resource(src: String) =
-    JarResourceUtils.resourceFile("test-certificates/" + src)
-
 }

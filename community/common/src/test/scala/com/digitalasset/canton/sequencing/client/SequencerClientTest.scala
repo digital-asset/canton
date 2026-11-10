@@ -101,7 +101,11 @@ import com.digitalasset.canton.sequencing.traffic.{
 }
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
-import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
+import com.digitalasset.canton.store.SequencedEventStore.{
+  ConnectionSequencedEvent,
+  OrdinarySequencedEvent,
+  SequencedEventWithTraceContext,
+}
 import com.digitalasset.canton.store.memory.{
   InMemorySendTrackerStore,
   InMemorySequencedEventStore,
@@ -164,8 +168,13 @@ final class SequencerClientTest
       CantonTimestamp.Epoch,
       synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
     )
-  private lazy val signedDeliver: SequencedEventWithTraceContext[Batch[ClosedEnvelope]] =
-    SequencedEventWithTraceContext(SequencerTestUtils.sign(deliver))(traceContext)
+  private lazy val signedDeliver: ConnectionSerializedEvent =
+    ConnectionSequencedEvent(SequencerTestUtils.sign(deliver))(traceContext)
+  private lazy val storedDeliver: OrdinarySerializedEvent =
+    OrdinarySequencedEvent(
+      SequencerCounter(42),
+      SequencerTestUtils.aggregate(signedDeliver.signedEvent),
+    )(traceContext)
 
   private lazy val nextDeliver: Deliver[Batch[Nothing]] = SequencerTestUtils.mockDeliver(
     timestamp = CantonTimestamp.ofEpochSecond(1),
@@ -280,7 +289,7 @@ final class SequencerClientTest
             ): EitherT[
               FutureUnlessShutdown,
               SequencedEventValidationError[Nothing],
-              SequencedSerializedEvent,
+              ConnectionSerializedEvent,
             ] = {
               validated.set(true)
               eventAlwaysValid.validate(priorEvent, event, sequencerId)
@@ -295,7 +304,7 @@ final class SequencerClientTest
             ): EitherT[
               FutureUnlessShutdown,
               SequencedEventValidationError[Nothing],
-              SequencedSerializedEvent,
+              ConnectionSerializedEvent,
             ] =
               validate(priorEvent, reconnectEvent, sequencerId)
 
@@ -537,7 +546,7 @@ final class SequencerClientTest
         } yield storedEvent
 
         storedEventF.futureValueUS shouldBe Seq(
-          signedDeliver.asOrdinaryEvent(counter = SequencerCounter(42))
+          storedDeliver
         )
         env.client.close()
       }
@@ -565,7 +574,7 @@ final class SequencerClientTest
         } yield storedEvent
 
         storedEventF.futureValueUS shouldBe Seq(
-          signedDeliver.asOrdinaryEvent(counter = SequencerCounter(42))
+          storedDeliver
         )
         env.client.close()
       }
@@ -1142,7 +1151,7 @@ final class SequencerClientTest
             )
             .value
           _ <- env.subscriber.value.sendToHandler(
-            SequencedEventWithTraceContext(
+            ConnectionSequencedEvent(
               SequencerTestUtils.sign(
                 SequencerTestUtils.mockDeliver(
                   CantonTimestamp.MinValue.immediateSuccessor,
@@ -1192,7 +1201,7 @@ final class SequencerClientTest
             )
             .value
           _ <- env.subscriber.value.sendToHandler(
-            SequencedEventWithTraceContext(
+            ConnectionSequencedEvent(
               SequencerTestUtils.sign(
                 SequencerTestUtils.mockDeliverError(
                   CantonTimestamp.MinValue.immediateSuccessor,
@@ -1643,12 +1652,12 @@ final class SequencerClientTest
   private sealed trait Subscriber[E] {
     def request: SubscriptionRequest
     def subscription: MockSubscription[E]
-    def sendToHandler(event: SequencedSerializedEvent): FutureUnlessShutdown[Unit]
+    def sendToHandler(event: ConnectionSerializedEvent): FutureUnlessShutdown[Unit]
 
     def sendToHandler(
         event: DecompressedSequencedEvent[ClosedEnvelope]
     ): FutureUnlessShutdown[Unit] =
-      sendToHandler(SequencedEventWithTraceContext(SequencerTestUtils.sign(event))(traceContext))
+      sendToHandler(ConnectionSequencedEvent(SequencerTestUtils.sign(event))(traceContext))
   }
 
   private case class OldStyleSubscriber[E](
@@ -1656,7 +1665,7 @@ final class SequencerClientTest
       private val handler: MaybeCompressedSequencedEventHandler[E],
       override val subscription: MockSubscription[E],
   ) extends Subscriber[E] {
-    override def sendToHandler(event: SequencedSerializedEvent): FutureUnlessShutdown[Unit] =
+    override def sendToHandler(event: ConnectionSerializedEvent): FutureUnlessShutdown[Unit] =
       handler(event).transform {
         case Success(UnlessShutdown.Outcome(Right(_))) => Success(UnlessShutdown.unit)
         case Success(UnlessShutdown.Outcome(Left(err))) =>
@@ -1672,10 +1681,10 @@ final class SequencerClientTest
 
   private case class SubscriberPekko[E](
       override val request: SubscriptionRequest,
-      private val queue: BoundedSourceQueue[SequencedSerializedEvent],
+      private val queue: BoundedSourceQueue[ConnectionSerializedEvent],
       override val subscription: MockSubscription[E],
   ) extends Subscriber[E] {
-    override def sendToHandler(event: SequencedSerializedEvent): FutureUnlessShutdown[Unit] =
+    override def sendToHandler(event: ConnectionSerializedEvent): FutureUnlessShutdown[Unit] =
       queue.offer(event) match {
         case QueueOfferResult.Enqueued =>
           // TODO(#13789) This may need more synchronization
@@ -1916,7 +1925,7 @@ final class SequencerClientTest
     ): SequencerSubscriptionPekko[SubscriptionError] = {
       // Choose a sufficiently large queue size so that we can test throttling
       val (queue, sourceQueue) =
-        Source.queue[SequencedSerializedEvent](200).preMaterialize()(materializer)
+        Source.queue[ConnectionSerializedEvent](200).preMaterialize()(materializer)
 
       val subscriber = SubscriberPekko(request, queue, new MockSubscription[Uninhabited]())
       subscriberRef.set(Some(subscriber))
@@ -2114,7 +2123,8 @@ final class SequencerClientTest
         sequencerCounterTrackerStore: SequencerCounterTrackerStore,
         initializeCounterAllocatorTo: Option[SequencerCounter],
     ): Unit = {
-      val signedEvents = storedEvents.map(SequencerTestUtils.sign)
+      val signedEvents =
+        storedEvents.map(event => SequencerTestUtils.aggregate(SequencerTestUtils.sign(event)))
       val preloadStores = for {
         _ <- initializeCounterAllocatorTo.traverse_(counter =>
           sequencedEventStore.reinitializeFromDbOrSetLowerBound(counter)

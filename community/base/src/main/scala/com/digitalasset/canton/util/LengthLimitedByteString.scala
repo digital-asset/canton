@@ -3,7 +3,17 @@
 
 package com.digitalasset.canton.util
 
+import cats.syntax.either.*
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.checked
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.validation.{
+  ProtoUnvalidatedByteString,
+  ProtoValidation,
+  ValidationParam,
+}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.google.protobuf.ByteString
 
 /** This trait wraps a ByteString that is limited to a certain maximum length. Classes implementing
@@ -74,7 +84,7 @@ object ByteString256 extends LengthLimitedByteStringCompanion[ByteString256] {
 
 final case class ByteString4096 private (str: ByteString)(override val name: Option[String])
     extends LengthLimitedByteString {
-  override def maxLength: Int = ByteString6144.maxLength
+  override def maxLength: Int = ByteString4096.maxLength
 }
 
 object ByteString4096 extends LengthLimitedByteStringCompanion[ByteString4096] {
@@ -132,4 +142,23 @@ trait LengthLimitedByteStringCompanion[A <: LengthLimitedByteString] {
 
   def tryCreate(str: ByteString, name: Option[String] = None): A =
     factoryMethod(str)(name)
+
+  def fromProtoPrimitive(
+      pvv: ProtocolVersionValidation,
+      field: String,
+      unvalidated: ProtoUnvalidatedByteString,
+  ): ParsingResult[A] =
+    ProtoValidation
+      .validateLength(
+        unvalidated,
+        field,
+        pvv,
+        ValidationParam(
+          ProtocolVersion.minimum ->
+            PositiveInt.tryCreate(maxLength)
+        ),
+      )
+      .flatMap(bytes =>
+        create(bytes, Some(field)).leftMap(err => InvariantViolation(Some(field), err))
+      )
 }

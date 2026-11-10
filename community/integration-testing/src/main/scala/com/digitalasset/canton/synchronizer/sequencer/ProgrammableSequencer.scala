@@ -41,7 +41,6 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.RegisterError
-import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.External
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.SequencerAdminStatus
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockOrderer
 import com.digitalasset.canton.synchronizer.sequencer.errors.{
@@ -649,16 +648,6 @@ object ProgrammableSequencer {
           database.copy(
             testingInterceptor = Some(createAndStoreProgrammableSequencer(instanceName))
           )
-        case external: External =>
-          val cfg = external
-            .focus(_.block.testingInterceptor)
-            .replace(Some(createAndStoreProgrammableSequencer(instanceName)))
-          // the reference sequencer
-          // As we are performing message reordering in the post processing stage,
-          // we need to avoid the reference sequencer to batch messages,
-          // as otherwise we might reverse the order of two messages that end up in the same
-          // batch for which we established a particular order.
-          cfg.focus(_.config).replace(external.config.focus(_.maxBlockSize).replace(1))
         case bft: SequencerConfig.BftSequencer =>
           bft
             .focus(_.block.testingInterceptor)

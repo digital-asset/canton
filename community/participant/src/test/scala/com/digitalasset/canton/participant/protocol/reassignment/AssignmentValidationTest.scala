@@ -101,6 +101,7 @@ final class AssignmentValidationTest
       submissionId = None,
       LedgerUserId.assertFromString("tests"),
       workflowId = None,
+      maxSequencingTime = ReassignmentDataHelpers.maxSequencingTimeFor(testedProtocolVersion),
     )
 
   private val invalidPackageId = LfPackageId.assertFromString("invalid-package-id")
@@ -165,6 +166,7 @@ final class AssignmentValidationTest
       view: FullAssignmentTree,
       recipients: Recipients = RecipientsTest.testInstance,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi = cryptoSnapshot,
+      isFreshOwnTimelyRequest: Boolean = true,
   ): ParsedReassignmentRequest[FullAssignmentTree] = {
     val signature = cryptoSnapshot
       .sign(
@@ -183,7 +185,7 @@ final class AssignmentValidationTest
       recipients,
       signature,
       None,
-      isFreshOwnTimelyRequest = true,
+      isFreshOwnTimelyRequest = isFreshOwnTimelyRequest,
       areContractsUnknown = false,
       Seq.empty,
       targetMediator,
@@ -251,6 +253,45 @@ final class AssignmentValidationTest
       validate(otherParticipant).isSuccessful.futureValueUS shouldBe true
     }
 
+    def validateReplayed(participantId: ParticipantId): AssignmentValidationResult =
+      assignmentValidation(participantId)
+        .perform(
+          unassignmentDataE = Right(unassignmentData),
+          activenessF = activenessF,
+        )(mkParsedRequest(assignmentRequest, isFreshOwnTimelyRequest = false))
+        .futureValueUS
+        .value
+
+    "report a replay if the request of the submitting participant is not fresh own timely" onlyRunWithOrGreaterThan ProtocolVersion.reassignmentReplayProtection in {
+      val res = validateReplayed(submittingParticipant)
+
+      res.commonValidationResult.replayCheckResult shouldBe defined
+      res.isSuccessful.futureValueUS shouldBe false
+    }
+
+    "not report a replay if the request of the submitting participant is fresh own timely" onlyRunWithOrGreaterThan ProtocolVersion.reassignmentReplayProtection in {
+      val res = assignmentValidation(submittingParticipant)
+        .perform(
+          unassignmentDataE = Right(unassignmentData),
+          activenessF = activenessF,
+        )(mkParsedRequest(assignmentRequest, isFreshOwnTimelyRequest = true))
+        .futureValueUS
+        .value
+
+      res.commonValidationResult.replayCheckResult shouldBe None
+      res.isSuccessful.futureValueUS shouldBe true
+    }
+
+    "not report a replay on a participant other than the submitting participant" onlyRunWithOrGreaterThan ProtocolVersion.reassignmentReplayProtection in {
+      validateReplayed(otherParticipant).commonValidationResult.replayCheckResult shouldBe None
+    }
+
+    "not report a replay before the replay protection for reassignments" onlyRunWhen (testedProtocolVersion < ProtocolVersion.reassignmentReplayProtection) in {
+      validateReplayed(
+        submittingParticipant
+      ).commonValidationResult.replayCheckResult shouldBe None
+    }
+
     "detect a submitter target timestamp that is after the assignment request timestamp" in {
       val futureTargetTimestamp = Target(CantonTimestamp.Epoch.plusSeconds(1))
       val helpers = reassignmentDataHelpers.copy(targetTimestamp = futureTargetTimestamp)
@@ -272,7 +313,7 @@ final class AssignmentValidationTest
         .futureValueUS
         .value
 
-      if (testedProtocolVersion <= ProtocolVersion.v36) {
+      if (testedProtocolVersion == ProtocolVersion.v36) {
         result.isSuccessful.futureValueUS shouldBe false
         result.reassigningParticipantValidationResult.errors should contain(
           TargetTimestampAfterAssignmentRequest(
@@ -434,7 +475,7 @@ final class AssignmentValidationTest
 
       val reassigningParticipantErrors =
         validate(otherParty).value.reassigningParticipantValidationResult.errors
-      if (testedProtocolVersion <= ProtocolVersion.v36)
+      if (testedProtocolVersion == ProtocolVersion.v36)
         reassigningParticipantErrors.loneElement shouldBe a[
           NonInitiatorSubmitsBeforeExclusivityTimeout
         ]

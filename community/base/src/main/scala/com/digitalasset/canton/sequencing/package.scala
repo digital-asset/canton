@@ -7,14 +7,15 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.SequencedEventError
 import com.digitalasset.canton.sequencing.protocol.{
+  AggregatedSignedContent,
   Batch,
   ClosedEnvelope,
   DecompressedSequencedEvent,
   Envelope,
   GenBatch,
-  SignedContent,
 }
 import com.digitalasset.canton.store.SequencedEventStore.{
+  ConnectionSequencedEvent,
   ProcessingSequencedEvent,
   SequencedEventWithTraceContext,
 }
@@ -65,7 +66,7 @@ package object sequencing {
     * [[OrdinarySerializedEvent]] instead.
     */
   type RawSignedContentEnvelopeBox[+Env <: Envelope[?]] =
-    SignedContent[DecompressedSequencedEvent[Env]]
+    AggregatedSignedContent[DecompressedSequencedEvent[Env]]
 
   /** A batch of traced protocol events (without a signature) with the assigned counter. The outer
     * `Traced` contains a trace context for the entire batch.
@@ -95,7 +96,10 @@ package object sequencing {
 
   type SequencedSerializedEvent = SequencedEventWithTraceContext[Batch[ClosedEnvelope]]
 
-  type MaybeCompressedSerializedEvent = SequencedEventWithTraceContext[GenBatch[ClosedEnvelope]]
+  /** Event received from a single sequencer connection, before aggregation. */
+  type ConnectionSerializedEvent = ConnectionSequencedEvent[Batch[ClosedEnvelope]]
+
+  type MaybeCompressedSerializedEvent = ConnectionSequencedEvent[GenBatch[ClosedEnvelope]]
 
   type OrdinarySerializedEvent = EnvelopeBox.OrdinarySequencedEventOf[ClosedEnvelope]
 
@@ -104,7 +108,7 @@ package object sequencing {
 
   type OrdinaryEventOrError = Either[SequencedEventError, OrdinarySerializedEvent]
 
-  type SequencedEventOrError = Either[SequencedEventError, SequencedSerializedEvent]
+  type SequencedEventOrError = Either[SequencedEventError, ConnectionSerializedEvent]
 
   /////////////////////////////////
   // Protocol events (deserialized)

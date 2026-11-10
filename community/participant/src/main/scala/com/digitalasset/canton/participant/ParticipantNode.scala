@@ -581,6 +581,7 @@ class ParticipantNodeBootstrap(
               parameters.commandProgressTracking,
               clock,
               metrics.phase,
+              metrics.ledgerApiServer.commands.completion,
               loggerFactory,
             )
           else CommandProgressTracker.NoOp

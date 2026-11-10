@@ -14,7 +14,6 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
   AuthorizationEvent,
-  AuthorizationLevel,
   GenericTopologyEvent,
   TopologyEvent,
 }
@@ -44,9 +43,8 @@ import org.scalatest.wordspec.AsyncWordSpec
   *
   * Terminology:
   *   - **Local Participant (`localParticipantId`)**: The specific participant node evaluating this
-  *     diff. This is critical for computing flags like `abortingOnboardingLocalParty`, which
-  *     explicitly track whether an interrupted onboarding process directly affects the node
-  *     currently running the code.
+  *     diff. This is critical for computing flags like `revokingLocalParty`, which explicitly track
+  *     whether a revocation directly affects the node currently running the code.
   *   - **Onboarding**: A transient state (`Onboarding` event has only been introduced in Protocol
   *     Version 35) indicating that a party has been granted an authorization on a participant, but
   *     their state is still synchronizing.
@@ -137,30 +135,6 @@ final class TopologyTransactionDiffTest
 
     topologyFactory.mkTrans[Replace, SynchronizerParametersState](trans = tx)
   }
-
-  /** Determines the expected authorization event when a participant mapping is added with an
-    * "onboarding" state flag.
-    *
-    * In PV35 and later, adding a participant with the onboarding flag set to true yields an
-    * explicit `Onboarding` topology event. However, in PV34 and earlier, the participant completely
-    * ignores the onboarding flag during state computation. Therefore, the transition falls back to
-    * `Added` event.
-    *
-    * @param partyId
-    *   The party being authorized.
-    * @param participantId
-    *   The participant hosting the party.
-    * @param permission
-    *   The base authorization level (e.g., Submission, Confirmation).
-    * @return
-    *   An `Onboarding` event for PV35+, or an `Added` event for PV34-.
-    */
-  private def expectedOnboardingEvent(
-      partyId: PartyId,
-      participantId: ParticipantId,
-      permission: AuthorizationLevel,
-  ): PartyToParticipantAuthorization =
-    PartyToParticipantAuthorization(partyId.toLf, participantId.toLf, Onboarding(permission))
 
   "TopologyTransactionDiff" should {
     val p1 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::participant1"))
@@ -312,7 +286,7 @@ final class TopologyTransactionDiffTest
       }
     }
 
-    "compute the abortingOnboardingLocalParty flag" should {
+    "compute the revokingLocalParty flag" should {
       val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::alice"))
       val Subm = (ParticipantPermission.Submission, false)
       val SubmOB = (ParticipantPermission.Submission, true)
@@ -339,16 +313,16 @@ final class TopologyTransactionDiffTest
           onboardingBeforeState,
           afterStateP1Revoked,
           p1,
-        ).value.abortingOnboardingLocalParty shouldBe true
+        ).value.revokingLocalParty shouldBe true
       }
 
-      "evaluate to false when the local participant revokes a party's mapping but the party was already fully active" in {
+      "evaluate to true when a party's authorization on the local participant is revoked while it is active" in {
         TopologyTransactionDiff(
           synchronizerId,
           activeBeforeState,
           afterStateP1Revoked,
           p1,
-        ).value.abortingOnboardingLocalParty shouldBe false
+        ).value.revokingLocalParty shouldBe true
       }
 
       "evaluate to false when an onboarding authorization is revoked, but not from the local participant" in {
@@ -357,7 +331,7 @@ final class TopologyTransactionDiffTest
           onboardingBeforeState,
           afterStateP1Revoked,
           p2,
-        ).value.abortingOnboardingLocalParty shouldBe false
+        ).value.revokingLocalParty shouldBe false
       }
 
       "return None when no party authorizations are changed or revoked on the local participant" in {
@@ -385,7 +359,7 @@ final class TopologyTransactionDiffTest
             )
           ),
           p1,
-        ).value.abortingOnboardingLocalParty shouldBe false
+        ).value.revokingLocalParty shouldBe false
       }
     }
 
@@ -413,11 +387,11 @@ final class TopologyTransactionDiffTest
           p1,
         )
         res.value.topologyEvents should contain theSameElementsAs Set(
-          expectedOnboardingEvent(alice, p2, Submission)
+          PartyToParticipantAuthorization(alice.toLf, p2.toLf, Onboarding(Submission))
         )
         res.value.onboardingLocalParty shouldBe false
         res.value.clearingOnboardingLocalParty shouldBe false
-        res.value.abortingOnboardingLocalParty shouldBe false
+        res.value.revokingLocalParty shouldBe false
       }
 
       "handle non-local clearing of onboarding" in {
@@ -433,7 +407,7 @@ final class TopologyTransactionDiffTest
         val d = res.value
         d.onboardingLocalParty shouldBe false
         d.clearingOnboardingLocalParty shouldBe false
-        d.abortingOnboardingLocalParty shouldBe false
+        d.revokingLocalParty shouldBe false
 
       }
 
@@ -448,7 +422,7 @@ final class TopologyTransactionDiffTest
         )
         res.value.onboardingLocalParty shouldBe false
         res.value.clearingOnboardingLocalParty shouldBe false
-        res.value.abortingOnboardingLocalParty shouldBe false
+        res.value.revokingLocalParty shouldBe false
       }
 
       "treat non-local transition from not onboarding to onboarding as no-op" in {
@@ -467,11 +441,11 @@ final class TopologyTransactionDiffTest
           p2,
         )
         res.value.topologyEvents should contain theSameElementsAs Set(
-          expectedOnboardingEvent(alice, p2, Submission)
+          PartyToParticipantAuthorization(alice.toLf, p2.toLf, Onboarding(Submission))
         )
         res.value.onboardingLocalParty shouldBe true
         res.value.clearingOnboardingLocalParty shouldBe false
-        res.value.abortingOnboardingLocalParty shouldBe false
+        res.value.revokingLocalParty shouldBe false
       }
 
       "handle local participant clearing of onboarding" in {
@@ -487,7 +461,7 @@ final class TopologyTransactionDiffTest
         val d = res.value
         d.onboardingLocalParty shouldBe false
         d.clearingOnboardingLocalParty shouldBe true
-        d.abortingOnboardingLocalParty shouldBe false
+        d.revokingLocalParty shouldBe false
       }
 
       "handle local participant onboarding removal considered removed" in {
@@ -502,7 +476,7 @@ final class TopologyTransactionDiffTest
         res.value.onboardingLocalParty shouldBe false
         res.value.clearingOnboardingLocalParty shouldBe false
         // Triggered because p2 (local) was revoked.
-        res.value.abortingOnboardingLocalParty shouldBe true
+        res.value.revokingLocalParty shouldBe true
       }
 
       "treat local participant transition from not onboarding to onboarding as no-op" in {
@@ -612,7 +586,7 @@ final class TopologyTransactionDiffTest
           p2,
         ).value
         diff.onboardingLocalParty shouldBe true
-        diff.abortingOnboardingLocalParty shouldBe false
+        diff.revokingLocalParty shouldBe false
       }
     }
 

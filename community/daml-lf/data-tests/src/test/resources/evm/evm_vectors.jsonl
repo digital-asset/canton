@@ -1,0 +1,241 @@
+{"opcode": "NOT_UINT256", "a": "0x0", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "NOT_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "NOT_UINT256", "a": "0x1", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"}
+{"opcode": "NOT_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "NOT_UINT256", "a": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x8000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "NOT_UINT256", "a": "0xff", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00"}
+{"opcode": "NOT_UINT256", "a": "0x1234", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffedcb"}
+{"opcode": "ADD_UINT256", "a": "0x0", "b": "0x0", "expected": "0x0"}
+{"opcode": "ADD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "ADD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x1", "expected": "0x0", "note": "wraps around"}
+{"opcode": "ADD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"}
+{"opcode": "ADD_UINT256", "a": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x1", "expected": "0x8000000000000000000000000000000000000000000000000000000000000000", "note": "crosses the signed boundary"}
+{"opcode": "ADD_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x0"}
+{"opcode": "ADD_UINT256", "a": "0x2", "b": "0x3", "expected": "0x5"}
+{"opcode": "ADD_UINT256", "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb", "b": "0x3", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"}
+{"opcode": "ADD_UINT256", "a": "0xde0b6b3a7640000", "b": "0xde0b6b3a7640000", "expected": "0x1bc16d674ec80000"}
+{"opcode": "SUB_UINT256", "a": "0x1", "b": "0x0", "expected": "0x1"}
+{"opcode": "SUB_UINT256", "a": "0x0", "b": "0x1", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "note": "underflow wraps around"}
+{"opcode": "SUB_UINT256", "a": "0x0", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1"}
+{"opcode": "SUB_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "SUB_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x1", "expected": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "SUB_UINT256", "a": "0xa", "b": "0x3", "expected": "0x7"}
+{"opcode": "SUB_UINT256", "a": "0x3", "b": "0xa", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff9"}
+{"opcode": "MUL_UINT256", "a": "0x0", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "MUL_UINT256", "a": "0x1", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "MUL_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1", "note": "(-1) * (-1)"}
+{"opcode": "MUL_UINT256", "a": "0x2", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x0"}
+{"opcode": "MUL_UINT256", "a": "0x2", "b": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"}
+{"opcode": "MUL_UINT256", "a": "0x100000000000000000000000000000000", "b": "0x100000000000000000000000000000000", "expected": "0x0", "note": "2^256 wraps to 0"}
+{"opcode": "MUL_UINT256", "a": "0x6", "b": "0x7", "expected": "0x2a"}
+{"opcode": "MUL_UINT256", "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd", "b": "0x4", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff4"}
+{"opcode": "MUL_UINT256", "a": "0x80000000000000000000000000000000", "b": "0x4", "expected": "0x200000000000000000000000000000000"}
+{"opcode": "DIV_UINT256", "a": "0x0", "b": "0x0", "expected": "0x0", "note": "division by zero yields 0"}
+{"opcode": "DIV_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0x0"}
+{"opcode": "DIV_UINT256", "a": "0x0", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "DIV_UINT256", "a": "0x1", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "DIV_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x1", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "DIV_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1"}
+{"opcode": "DIV_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x2", "expected": "0x4000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "DIV_UINT256", "a": "0xa", "b": "0x3", "expected": "0x3"}
+{"opcode": "DIV_UINT256", "a": "0x64", "b": "0xa", "expected": "0xa"}
+{"opcode": "SDIV_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0x0", "note": "division by zero yields 0"}
+{"opcode": "SDIV_UINT256", "a": "0x0", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "SDIV_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x1", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "SDIV_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1", "note": "-1 / -1"}
+{"opcode": "SDIV_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x1", "expected": "0x8000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "SDIV_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x8000000000000000000000000000000000000000000000000000000000000000", "note": "MIN / -1 overflows to MIN"}
+{"opcode": "SDIV_UINT256", "a": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x8000000000000000000000000000000000000000000000000000000000000001"}
+{"opcode": "SDIV_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x2", "expected": "0xc000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "SDIV_UINT256", "a": "0xa", "b": "0x3", "expected": "0x3"}
+{"opcode": "SDIV_UINT256", "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff6", "b": "0x3", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd", "note": "truncates toward zero"}
+{"opcode": "SDIV_UINT256", "a": "0xa", "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd"}
+{"opcode": "SDIV_UINT256", "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff6", "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd", "expected": "0x3"}
+{"opcode": "SDIV_UINT256", "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff9", "b": "0x2", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd"}
+{"opcode": "MOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0x0", "note": "modulo by zero yields 0"}
+{"opcode": "MOD_UINT256", "a": "0x0", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "MOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "MOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x2", "expected": "0x1"}
+{"opcode": "MOD_UINT256", "a": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "MOD_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1"}
+{"opcode": "MOD_UINT256", "a": "0xa", "b": "0x3", "expected": "0x1"}
+{"opcode": "MOD_UINT256", "a": "0x64", "b": "0x7", "expected": "0x2"}
+{"opcode": "SMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0x0", "note": "modulo by zero yields 0"}
+{"opcode": "SMOD_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0", "note": "MIN smod -1"}
+{"opcode": "SMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x2", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "note": "-1 smod 2 = -1"}
+{"opcode": "SMOD_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x3", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"}
+{"opcode": "SMOD_UINT256", "a": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "SMOD_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "SMOD_UINT256", "a": "0xa", "b": "0x3", "expected": "0x1"}
+{"opcode": "SMOD_UINT256", "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff6", "b": "0x3", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "note": "result has the sign of the dividend"}
+{"opcode": "SMOD_UINT256", "a": "0xa", "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd", "expected": "0x1"}
+{"opcode": "SMOD_UINT256", "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff6", "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "SMOD_UINT256", "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff9", "b": "0x2", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "EXP_UINT256", "a": "0x0", "b": "0x0", "expected": "0x1", "note": "0^0 = 1"}
+{"opcode": "EXP_UINT256", "a": "0x0", "b": "0x1", "expected": "0x0"}
+{"opcode": "EXP_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0x1"}
+{"opcode": "EXP_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x1", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "EXP_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x2", "expected": "0x1"}
+{"opcode": "EXP_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "note": "(-1)^odd"}
+{"opcode": "EXP_UINT256", "a": "0x1", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1"}
+{"opcode": "EXP_UINT256", "a": "0x2", "b": "0xff", "expected": "0x8000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "EXP_UINT256", "a": "0x2", "b": "0x100", "expected": "0x0", "note": "2^256 wraps to 0"}
+{"opcode": "EXP_UINT256", "a": "0x2", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "EXP_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x2", "expected": "0x0"}
+{"opcode": "EXP_UINT256", "a": "0x3", "b": "0x5", "expected": "0xf3"}
+{"opcode": "EXP_UINT256", "a": "0xa", "b": "0x12", "expected": "0xde0b6b3a7640000"}
+{"opcode": "EXP_UINT256", "a": "0x2", "b": "0x40", "expected": "0x10000000000000000"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x0", "b": "0x0", "expected": "0x0"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x0", "b": "0x7f", "expected": "0x7f"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x0", "b": "0x80", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff80", "note": "sign bit of byte 0 set"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x0", "b": "0xff", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x0", "b": "0x17f", "expected": "0x7f", "note": "upper bits are cleared"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x1", "b": "0x8000", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8000"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x1", "b": "0xff80", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff80"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x1e", "b": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x1e", "b": "0x80000000000000000000000000000000000000000000000000000000000000", "expected": "0xff80000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x1f", "b": "0x80", "expected": "0x80", "note": "index >= 31 is the identity"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x1f", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x8000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x20", "b": "0x80", "expected": "0x80"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x7fffffff", "b": "0x80", "expected": "0x80"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x10000000000000000", "b": "0x80", "expected": "0x80", "note": "index does not fit in an Int"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x80", "expected": "0x80"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x0", "b": "0x1234", "expected": "0x34"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x1", "b": "0x12345678", "expected": "0x5678"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x1", "b": "0xabcd", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffabcd"}
+{"opcode": "SIGNEXTEND_UINT256", "a": "0x3", "b": "0x80000000", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffff80000000"}
+{"opcode": "AND_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0x0"}
+{"opcode": "AND_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "AND_UINT256", "a": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x0"}
+{"opcode": "AND_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x8000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "AND_UINT256", "a": "0xf0f0", "b": "0xff00", "expected": "0xf000"}
+{"opcode": "AND_UINT256", "a": "0xc", "b": "0xa", "expected": "0x8"}
+{"opcode": "OR_UINT256", "a": "0x0", "b": "0x0", "expected": "0x0"}
+{"opcode": "OR_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "OR_UINT256", "a": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "OR_UINT256", "a": "0xf0f0", "b": "0xf0f", "expected": "0xffff"}
+{"opcode": "OR_UINT256", "a": "0xc", "b": "0xa", "expected": "0xe"}
+{"opcode": "XOR_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "XOR_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "XOR_UINT256", "a": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x8000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "XOR_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "XOR_UINT256", "a": "0xc", "b": "0xa", "expected": "0x6"}
+{"opcode": "XOR_UINT256", "a": "0xff00", "b": "0xff0", "expected": "0xf0f0"}
+{"opcode": "BYTE_UINT256", "a": "0x0", "b": "0x0", "expected": "0x0"}
+{"opcode": "BYTE_UINT256", "a": "0x0", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xff"}
+{"opcode": "BYTE_UINT256", "a": "0x1f", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xff"}
+{"opcode": "BYTE_UINT256", "a": "0x0", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x80", "note": "index 0 is the most significant byte"}
+{"opcode": "BYTE_UINT256", "a": "0x0", "b": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x7f"}
+{"opcode": "BYTE_UINT256", "a": "0x20", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0", "note": "index >= 32 yields 0"}
+{"opcode": "BYTE_UINT256", "a": "0x7fffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "BYTE_UINT256", "a": "0x10000000000000000", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0", "note": "index does not fit in an Int"}
+{"opcode": "BYTE_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "BYTE_UINT256", "a": "0x0", "b": "0x102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20", "expected": "0x1"}
+{"opcode": "BYTE_UINT256", "a": "0xf", "b": "0x102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20", "expected": "0x10"}
+{"opcode": "BYTE_UINT256", "a": "0x1f", "b": "0x102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20", "expected": "0x20"}
+{"opcode": "BYTE_UINT256", "a": "0x1f", "b": "0x1234", "expected": "0x34"}
+{"opcode": "BYTE_UINT256", "a": "0x1e", "b": "0x1234", "expected": "0x12"}
+{"opcode": "SHL_UINT256", "a": "0x1", "b": "0x0", "expected": "0x0"}
+{"opcode": "SHL_UINT256", "a": "0x0", "b": "0x1", "expected": "0x1"}
+{"opcode": "SHL_UINT256", "a": "0xff", "b": "0x1", "expected": "0x8000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "SHL_UINT256", "a": "0x100", "b": "0x1", "expected": "0x0", "note": "shift >= 256 yields 0"}
+{"opcode": "SHL_UINT256", "a": "0x1", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"}
+{"opcode": "SHL_UINT256", "a": "0xff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x8000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "SHL_UINT256", "a": "0x100", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "SHL_UINT256", "a": "0x7fffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "SHL_UINT256", "a": "0x10000000000000000", "b": "0x1", "expected": "0x0", "note": "shift does not fit in an Int"}
+{"opcode": "SHL_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "SHL_UINT256", "a": "0x4", "b": "0x3", "expected": "0x30"}
+{"opcode": "SHL_UINT256", "a": "0x8", "b": "0xff", "expected": "0xff00"}
+{"opcode": "SHL_UINT256", "a": "0x80", "b": "0x1", "expected": "0x100000000000000000000000000000000"}
+{"opcode": "SHR_UINT256", "a": "0x1", "b": "0x1", "expected": "0x0"}
+{"opcode": "SHR_UINT256", "a": "0x0", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "SHR_UINT256", "a": "0xff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1"}
+{"opcode": "SHR_UINT256", "a": "0x100", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0", "note": "shift >= 256 yields 0"}
+{"opcode": "SHR_UINT256", "a": "0x1", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x4000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "SHR_UINT256", "a": "0xff", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x1"}
+{"opcode": "SHR_UINT256", "a": "0x10000000000000000", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0", "note": "shift does not fit in an Int"}
+{"opcode": "SHR_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "SHR_UINT256", "a": "0x4", "b": "0x30", "expected": "0x3"}
+{"opcode": "SHR_UINT256", "a": "0x8", "b": "0xff00", "expected": "0xff"}
+{"opcode": "SHR_UINT256", "a": "0x64", "b": "0x100000000000000000000000000000000000000000000000000", "expected": "0x10000000000000000000000000"}
+{"opcode": "SAR_UINT256", "a": "0x0", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x8000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "SAR_UINT256", "a": "0x1", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "SAR_UINT256", "a": "0x100", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "note": "negative value shifted by >= 256 yields -1"}
+{"opcode": "SAR_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "SAR_UINT256", "a": "0x1", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0xc000000000000000000000000000000000000000000000000000000000000000"}
+{"opcode": "SAR_UINT256", "a": "0xff", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+{"opcode": "SAR_UINT256", "a": "0x10000000000000000", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "note": "shift does not fit in an Int"}
+{"opcode": "SAR_UINT256", "a": "0xfe", "b": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1"}
+{"opcode": "SAR_UINT256", "a": "0xff", "b": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "SAR_UINT256", "a": "0x100", "b": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "SAR_UINT256", "a": "0x100", "b": "0x1", "expected": "0x0"}
+{"opcode": "SAR_UINT256", "a": "0x4", "b": "0x20", "expected": "0x2"}
+{"opcode": "SAR_UINT256", "a": "0x4", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"}
+{"opcode": "SAR_UINT256", "a": "0x1", "b": "0x7", "expected": "0x3"}
+{"opcode": "SAR_UINT256", "a": "0x1", "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff9", "expected": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc", "note": "rounds toward negative infinity"}
+{"opcode": "SLT_UINT256", "a": "0x0", "b": "0x0", "expected": "0x0"}
+{"opcode": "SLT_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0x1", "note": "-1 < 0"}
+{"opcode": "SLT_UINT256", "a": "0x0", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "SLT_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "SLT_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x0"}
+{"opcode": "SLT_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1", "note": "MIN < MAX_SIGNED"}
+{"opcode": "SLT_UINT256", "a": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x0"}
+{"opcode": "SLT_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1"}
+{"opcode": "SLT_UINT256", "a": "0x1", "b": "0x2", "expected": "0x1"}
+{"opcode": "SLT_UINT256", "a": "0x2", "b": "0x1", "expected": "0x0"}
+{"opcode": "SLT_UINT256", "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb", "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd", "expected": "0x1"}
+{"opcode": "SLT_UINT256", "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd", "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb", "expected": "0x0"}
+{"opcode": "SGT_UINT256", "a": "0x0", "b": "0x0", "expected": "0x0"}
+{"opcode": "SGT_UINT256", "a": "0x0", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1", "note": "0 > -1"}
+{"opcode": "SGT_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0x0"}
+{"opcode": "SGT_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "SGT_UINT256", "a": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x1"}
+{"opcode": "SGT_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "SGT_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x1"}
+{"opcode": "SGT_UINT256", "a": "0x2", "b": "0x1", "expected": "0x1"}
+{"opcode": "SGT_UINT256", "a": "0x1", "b": "0x2", "expected": "0x0"}
+{"opcode": "SGT_UINT256", "a": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd", "b": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb", "expected": "0x1"}
+{"opcode": "ADDMOD_UINT256", "a": "0x1", "b": "0x2", "c": "0x0", "expected": "0x0", "note": "modulus 0 yields 0"}
+{"opcode": "ADDMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "c": "0x0", "expected": "0x0"}
+{"opcode": "ADDMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "c": "0x1", "expected": "0x0"}
+{"opcode": "ADDMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x1", "c": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1"}
+{"opcode": "ADDMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "c": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "ADDMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x1", "c": "0x3", "expected": "0x1", "note": "sum is not reduced mod 2^256 first"}
+{"opcode": "ADDMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x2", "c": "0x3", "expected": "0x2"}
+{"opcode": "ADDMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x1", "c": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x0"}
+{"opcode": "ADDMOD_UINT256", "a": "0xa", "b": "0xa", "c": "0x3", "expected": "0x2"}
+{"opcode": "ADDMOD_UINT256", "a": "0x5", "b": "0x7", "c": "0x4", "expected": "0x0"}
+{"opcode": "ADDMOD_UINT256", "a": "0x64", "b": "0x17", "c": "0x7", "expected": "0x4"}
+{"opcode": "MULMOD_UINT256", "a": "0x1", "b": "0x1", "c": "0x0", "expected": "0x0", "note": "modulus 0 yields 0"}
+{"opcode": "MULMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x1", "c": "0x1", "expected": "0x0"}
+{"opcode": "MULMOD_UINT256", "a": "0x0", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "c": "0x5", "expected": "0x0"}
+{"opcode": "MULMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x2", "c": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "MULMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "c": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "MULMOD_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "c": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe", "expected": "0x1"}
+{"opcode": "MULMOD_UINT256", "a": "0x100000000000000000000000000000000", "b": "0x100000000000000000000000000000000", "c": "0x3", "expected": "0x1", "note": "product is not reduced mod 2^256 first"}
+{"opcode": "MULMOD_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "b": "0x2", "c": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1"}
+{"opcode": "MULMOD_UINT256", "a": "0xa", "b": "0xa", "c": "0x3", "expected": "0x1"}
+{"opcode": "MULMOD_UINT256", "a": "0x6", "b": "0x7", "c": "0x5", "expected": "0x2"}
+{"opcode": "MULMOD_UINT256", "a": "0x7b", "b": "0x1c8", "c": "0x3e8", "expected": "0x58"}
+{"opcode": "LT_UINT256", "a": "0x0", "b": "0x0", "expected": "0x0"}
+{"opcode": "LT_UINT256", "a": "0x0", "b": "0x1", "expected": "0x1"}
+{"opcode": "LT_UINT256", "a": "0x1", "b": "0x0", "expected": "0x0"}
+{"opcode": "LT_UINT256", "a": "0x0", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1"}
+{"opcode": "LT_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0x0"}
+{"opcode": "LT_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "GT_UINT256", "a": "0x0", "b": "0x0", "expected": "0x0"}
+{"opcode": "GT_UINT256", "a": "0x1", "b": "0x0", "expected": "0x1"}
+{"opcode": "GT_UINT256", "a": "0x0", "b": "0x1", "expected": "0x0"}
+{"opcode": "GT_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0x1"}
+{"opcode": "GT_UINT256", "a": "0x0", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "GT_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "EQ_UINT256", "a": "0x0", "b": "0x0", "expected": "0x1"}
+{"opcode": "EQ_UINT256", "a": "0x1", "b": "0x1", "expected": "0x1"}
+{"opcode": "EQ_UINT256", "a": "0x0", "b": "0x1", "expected": "0x0"}
+{"opcode": "EQ_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x1"}
+{"opcode": "EQ_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "b": "0x0", "expected": "0x0"}
+{"opcode": "ISZERO_UINT256", "a": "0x0", "expected": "0x1"}
+{"opcode": "ISZERO_UINT256", "a": "0x1", "expected": "0x0"}
+{"opcode": "ISZERO_UINT256", "a": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "expected": "0x0"}
+{"opcode": "ISZERO_UINT256", "a": "0x8000000000000000000000000000000000000000000000000000000000000000", "expected": "0x0"}

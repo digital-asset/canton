@@ -168,12 +168,10 @@ object ConfigTransforms {
     * ProtocolVersion.v36.
     */
   lazy val disableOldAcsCommitmentProcessor: ConfigTransform =
-    if (BaseTest.testedProtocolVersion >= ProtocolVersion.v36) {
-      updateAllParticipantConfigs_(
-        _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
-          .replace(AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Always)
-      )
-    } else identity
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
+        .replace(AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Always)
+    )
 
   // TODO(#35107) remove after all tests work without this config transformation
   lazy val enableOldAcsCommitmentProcessor: ConfigTransform =
@@ -367,7 +365,7 @@ object ConfigTransforms {
               h2Config.focus(_.parameters.connectionTimeout).replace(newConnectionTimeout)
           }
         },
-        ConfigTransforms.setSigningKeysIfPV35OrHigher(
+        ConfigTransforms.setSigningKeys(
           if (sys.env.get("SESSION_SIGNING_KEYS_ENABLED").contains("true"))
             SessionSigningKeysConfig.enabled
           else SessionSigningKeysConfig.disabled
@@ -480,7 +478,7 @@ object ConfigTransforms {
 
   /** Use the given session signing keys config on all nodes with `nodeFilter(name)`.
     */
-  def setSigningKeysIfPV35OrHigher(
+  def setSigningKeys(
       sessionSigningKeysConfig: SessionSigningKeysConfig,
       nodeFilter: String => Boolean = _ => true,
   ): ConfigTransform =
@@ -537,7 +535,7 @@ object ConfigTransforms {
     )
 
     val disableSessionKeys =
-      ConfigTransforms.setSigningKeysIfPV35OrHigher(SessionSigningKeysConfig.disabled)
+      ConfigTransforms.setSigningKeys(SessionSigningKeysConfig.disabled)
 
     // Disable retries so that failed pings won't run forever
     val disablePingRetries = setPingRetries(false)
@@ -805,8 +803,6 @@ object ConfigTransforms {
       updateBlockSequencerConfig: BlockSequencerConfig => BlockSequencerConfig
   ): ConfigTransform = {
     def update: SequencerConfig => SequencerConfig = {
-      case x: SequencerConfig.External =>
-        x.focus(_.block).modify(updateBlockSequencerConfig)
       case x: SequencerConfig.BftSequencer =>
         x.focus(_.block).modify(updateBlockSequencerConfig)
       case x => x
@@ -1020,6 +1016,23 @@ object ConfigTransforms {
     )
   )
 
+  def enableAlphaAcsReplicationSupport(
+      participantsWithAcsReplicationInterceptor: Map[
+        String,
+        AlphaAcsReplicationConfig.TestInterceptor,
+      ] = Map.empty
+  ): Seq[ConfigTransform] = Seq(updateAllParticipantConfigs { case (name, config) =>
+    val testInterceptor = participantsWithAcsReplicationInterceptor.get(name)
+    config
+      .focus(_.parameters.alphaAcsReplicationSupport)
+      .replace(Some(AlphaAcsReplicationConfig(testInterceptor = testInterceptor)))
+  }) ++ Seq(
+    updateAllSequencerConfigs_(
+      _.focus(_.parameters.alphaSequencerChannelSupport)
+        .replace(Some(AlphaSequencerChannelConfig()))
+    )
+  )
+
   def setDelayLoggingThreshold(duration: config.NonNegativeFiniteDuration): ConfigTransform =
     _.focus(_.monitoring.logging.delayLoggingThreshold).replace(duration)
 
@@ -1049,7 +1062,7 @@ object ConfigTransforms {
     * ProtocolVersion.v37.
     */
   def enableMultiSynchronizerTopologyFeatureFlag: ConfigTransform =
-    if (BaseTest.testedProtocolVersion <= ProtocolVersion.v36) {
+    if (BaseTest.testedProtocolVersion == ProtocolVersion.v36) {
       { (cantonConfig: CantonConfig) =>
         cantonConfig.focus(_.parameters.enableAlphaStateViaConfig).replace(true)
       }.compose(

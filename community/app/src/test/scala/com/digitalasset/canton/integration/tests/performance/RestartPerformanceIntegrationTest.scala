@@ -55,7 +55,7 @@ abstract class RestartPerformanceIntegrationTest extends BasePerformanceIntegrat
         def progress(): Long =
           runnerP1
             .status()
-            .collectFirst { case MasterStatus(_, _, _, _, totalProposals, totalApprovals) =>
+            .collectFirst { case MasterStatus(_, _, _, _, totalProposals, totalApprovals, _) =>
               totalProposals + totalApprovals
             }
             .getOrElse(0)

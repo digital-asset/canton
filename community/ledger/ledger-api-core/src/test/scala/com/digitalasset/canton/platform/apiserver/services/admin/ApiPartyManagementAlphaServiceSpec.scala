@@ -13,6 +13,8 @@ import com.daml.ledger.api.v2.admin.party_management_alpha_service.{
 }
 import com.daml.ledger.api.v2.state_service.ParticipantPermission as ProtoParticipantPermission
 import com.digitalasset.base.error.ErrorsAssertions
+import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
@@ -33,7 +35,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 import org.slf4j.event.Level
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 import scala.util.{Failure, Success}
 
 /** Unit test the gRPC API layer for the Party Management Alpha Service
@@ -59,7 +61,7 @@ class ApiPartyManagementAlphaServiceSpec
   override def afterEach(): Unit =
     testTelemetrySetup.close()
 
-  private implicit val ec: ExecutionContext = directExecutionContext
+  private implicit val dec: DirectExecutionContext = directExecutionContext
 
   val ApiPartyManagementAlphaServiceSuppressionRule: SuppressionRule =
     SuppressionRule.LoggerNameContains("ApiPartyManagementAlphaService") &&
@@ -99,7 +101,7 @@ class ApiPartyManagementAlphaServiceSpec
     NonNegativeInt.tryCreate(maxSelfAllocatedParties),
     new PendingPartyAllocations(),
     loggerFactory,
-  )(ec, sizeLimits)
+  )(dec, sizeLimits)
 
   "ApiPartyManagementAlphaService" should {
 

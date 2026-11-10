@@ -5,7 +5,6 @@ package com.digitalasset.canton.config
 
 import com.daml.tls.TlsVersion.TlsVersion
 import com.daml.tls.{
-  OcspProperties,
   ServerAuthRequirementConfig,
   TlsClientCertificate,
   TlsInfo,
@@ -19,46 +18,15 @@ import com.digitalasset.canton.util.JarResourceUtils
 import io.grpc.MethodDescriptor.MethodType
 import io.grpc.ServiceDescriptor
 import io.grpc.netty.shaded.io.netty.handler.ssl.{OpenSslServerContext, SslContext}
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.security.Security
 import scala.jdk.CollectionConverters.*
 
-class ServerConfigTest extends AnyWordSpec with BeforeAndAfterEach with BaseTest {
-
-  private var systemProperties: Map[String, Option[String]] = Map.empty
-  private var ocspSecurityProperty: Option[String] = None
-
-  private val Enabled = "true"
-  private val Disabled = "false"
+class ServerConfigTest extends AnyWordSpec with BaseTest {
 
   private val unusedClientCert: PemString = PemString(
     "-----BEGIN CERTIFICATE-----\nunused\n-----END CERTIFICATE-----"
   )
-
-  override def beforeEach(): Unit = {
-    super.beforeEach()
-
-    systemProperties = List(
-      OcspProperties.CheckRevocationPropertySun,
-      OcspProperties.CheckRevocationPropertyIbm,
-    ).map(name => name -> Option(System.getProperty(name))).toMap
-
-    ocspSecurityProperty = Option(Security.getProperty(OcspProperties.EnableOcspProperty))
-  }
-
-  override def afterEach(): Unit = {
-    super.afterEach()
-    systemProperties.map { case (name, value) =>
-      value match {
-        case Some(v) => System.setProperty(name, v)
-        case None => System.clearProperty(name)
-      }
-    }
-
-    Security.setProperty(OcspProperties.EnableOcspProperty, ocspSecurityProperty.getOrElse("false"))
-  }
 
   "TlsServerConfig" should {
 
@@ -93,22 +61,6 @@ class ServerConfigTest extends AnyWordSpec with BeforeAndAfterEach with BaseTest
         )
       }
     }
-
-    "set OCSP JVM properties" in {
-      disableChecks()
-      verifyOcsp(Disabled)
-
-      TlsServerConfig(
-        certChainFile =
-          PemFile(ExistingFile.tryCreate(JarResourceUtils.resourceFile("tls/public-api.crt"))),
-        privateKeyFile =
-          PemFile(ExistingFile.tryCreate(JarResourceUtils.resourceFile("tls/public-api.pem"))),
-        enableCertRevocationChecking = true,
-      ).setJvmTlsProperties()
-
-      verifyOcsp(Enabled)
-    }
-
   }
 
   "AdminServerConfig.defaultStreamingRequestLimits" should {
@@ -172,17 +124,4 @@ class ServerConfigTest extends AnyWordSpec with BeforeAndAfterEach with BaseTest
       TlsInfo.fromSslContext(theContext).enabledProtocols
     }
   }
-
-  private def disableChecks(): Unit = {
-    System.setProperty(OcspProperties.CheckRevocationPropertySun, Disabled)
-    System.setProperty(OcspProperties.CheckRevocationPropertyIbm, Disabled)
-    Security.setProperty(OcspProperties.EnableOcspProperty, Disabled)
-  }
-
-  private def verifyOcsp(expectedValue: String) = {
-    System.getProperty(OcspProperties.CheckRevocationPropertySun) shouldBe expectedValue
-    System.getProperty(OcspProperties.CheckRevocationPropertyIbm) shouldBe expectedValue
-    Security.getProperty(OcspProperties.EnableOcspProperty) shouldBe expectedValue
-  }
-
 }

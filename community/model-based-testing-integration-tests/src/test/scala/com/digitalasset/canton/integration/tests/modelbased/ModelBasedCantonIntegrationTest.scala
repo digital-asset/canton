@@ -62,10 +62,7 @@ abstract class ModelBasedCantonIntegrationTest
   private val numPackages = 1
 
   private val generators =
-    new ConcreteGenerators(
-      contractKeys = true,
-      readOnlyRollbacks = true,
-    )
+    new ConcreteGenerators(contractKeys = true)
 
   "The canton interpreter" should {
     "produce projections consistent with the reference interpreter" in { implicit env =>

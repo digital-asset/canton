@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.EitherT
-import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution, RpcError}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
@@ -22,7 +21,7 @@ import com.digitalasset.canton.data.{
   ViewPosition,
 }
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.ReassignmentErrorGroup.SubmissionErrorGroup
-import com.digitalasset.canton.error.{CantonError, TransactionError}
+import com.digitalasset.canton.error.{CantonError, ReassignmentErrorImpl, TransactionError}
 import com.digitalasset.canton.ledger.participant.state.{
   ChangeId,
   CompletionInfo,
@@ -350,7 +349,6 @@ private[reassignment] trait ReassignmentProcessingSteps[
       traceContext: TraceContext
   ): (Option[SequencedEventUpdate], Option[PendingSubmissionId]) = {
     val rejection = Update.CommandRejected.FinalReason(error.rpcStatus())
-    val isSubmittingParticipant = submitterMetadata.submittingParticipant == participantId
 
     lazy val completionInfo = CompletionInfo(
       actAs = List(submitterMetadata.submitter),
@@ -360,7 +358,8 @@ private[reassignment] trait ReassignmentProcessingSteps[
       submissionId = submitterMetadata.submissionId,
       paidTrafficCost = trafficCost,
     )
-    val updateO = Option.when(isSubmittingParticipant)(
+    val isOwnSubmission = shouldEmitCompletion(submitterMetadata, freshOwnTimelyTx)
+    val updateO = Option.when(isOwnSubmission)(
       Update.SequencedCommandRejected(
         completionInfo = completionInfo,
         reasonTemplate = rejection,
@@ -371,7 +370,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
         traceContext = traceContext,
       )
     )
-    (updateO, rootHash.some)
+    (updateO, Option.when(isOwnSubmission)(rootHash))
   }
 
   override def createRejectionEvent(rejectionArgs: RejectionArgs)(implicit
@@ -379,10 +378,13 @@ private[reassignment] trait ReassignmentProcessingSteps[
   ): Either[ReassignmentProcessorError, Option[SequencedEventUpdate]] = {
 
     val RejectionArgs(pendingReassignment, errorDetails) = rejectionArgs
-    val isSubmittingParticipant =
-      pendingReassignment.submitterMetadata.submittingParticipant == participantId
 
-    val completionInfoO = Option.when(isSubmittingParticipant)(
+    val completionInfoO = Option.when(
+      shouldEmitCompletion(
+        pendingReassignment.submitterMetadata,
+        pendingReassignment.freshOwnTimelyTx,
+      )
+    )(
       CompletionInfo(
         actAs = List(pendingReassignment.submitterMetadata.submitter),
         userId = pendingReassignment.submitterMetadata.userId,
@@ -407,6 +409,23 @@ private[reassignment] trait ReassignmentProcessingSteps[
     )
     Right(updateO)
   }
+
+  /** Whether this participant emits the command completion of the request. No completion is emitted
+    * for a replayed request.
+    */
+  protected def shouldEmitCompletion(
+      submitterMetadata: ReassignmentSubmitterMetadata,
+      freshOwnTimelyTx: Boolean,
+  ): Boolean =
+    submitterMetadata.submittingParticipant == participantId &&
+      ReassignmentValidation
+        .checkReplayedReassignment(
+          participantId,
+          submitterMetadata,
+          protocolVersion.unwrap,
+          isFreshOwnTimelyRequest = freshOwnTimelyTx,
+        )
+        .isEmpty
 
   override def getSubmitterInformation(views: Seq[DecryptedView]): Option[ViewSubmitterMetadata] =
     views.map(_.submitterMetadata).headOption
@@ -532,9 +551,14 @@ private[reassignment] trait ReassignmentProcessingSteps[
           val activenessRejection =
             localRejectFromActivenessCheck(requestId, validationResult)
 
+          // As for transactions, a `Malformed` rejection ensures that this rejection or something at
+          // least as strong reaches the mediator.
+          val replayRejection = validationResult.commonValidationResult.replayCheckResult
+            .map(err => LocalRejectError.MalformedRejects.MalformedRequest.Reject(err.message))
+
           val localRejections =
             (modelConformanceRejection ++ activenessRejection.toList ++
-              authenticationRejection.toList ++ submitterCheckRejection ++ reassignmentIdRejection ++ failedValidationRejection)
+              authenticationRejection.toList ++ submitterCheckRejection ++ reassignmentIdRejection ++ failedValidationRejection ++ replayRejection.toList)
               .map { err =>
                 err.logWithContext()
                 err.toLocalReject(protocolVersion)
@@ -658,7 +682,7 @@ object ReassignmentProcessingSteps {
 
   private[reassignment] def registerWithTrafficEnforcement(
       trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
-      submitterMetadata: ReassignmentSubmitterMetadata,
+      submissionInfo: ReassignmentSubmissionInfo,
       accounting: SubmissionAccounting,
       trafficCost: Long,
       logger: TracedLogger,
@@ -669,13 +693,13 @@ object ReassignmentProcessingSteps {
     TrafficEnforcementBackend.registerIfEnabled(
       trafficEnforcementBackendO,
       ChangeId(
-        submitterMetadata.userId,
-        submitterMetadata.commandId,
+        submissionInfo.userId,
+        submissionInfo.commandId,
         // Not the routed transaction's actAs: TEA matches the reassignment completion by
         // change id, and its actAs is only the submitter.
-        Set(submitterMetadata.submitter),
+        Set(submissionInfo.submitter),
       ),
-      submitterMetadata.submissionId,
+      submissionInfo.submissionId,
       accounting,
       trafficCost,
     )(ErrorLoggingContext.fromTracedLogger(logger), ec)
@@ -716,6 +740,11 @@ object ReassignmentProcessingSteps {
     def requestSequencerCounter: SequencerCounter
 
     def submitterMetadata: ReassignmentSubmitterMetadata
+
+    /** The resolved status from
+      * [[com.digitalasset.canton.participant.protocol.SubmissionTracker.register]]
+      */
+    def freshOwnTimelyTx: Boolean
 
     /** Traffic cost of the (un)assignment event
       */
@@ -767,6 +796,29 @@ object ReassignmentProcessingSteps {
           with ReassignmentProcessorError {
         override def message: String = cause
       }
+    }
+
+    @Explanation(
+      """This error occurs when the reassignment was not sequenced within the pre-defined max sequencing time
+        |and has therefore timed out. The max sequencing time is derived from the submission time and the
+        |sequencer client parameter default-max-sequencing-time-offset.
+        |"""
+    )
+    @Resolution(
+      """Resubmit if the delay is caused by high load.
+        |Alternatively, the participant node operator can increase the sequencer client parameter default-max-sequencing-time-offset.
+        |"""
+    )
+    object TimeoutError
+        extends ErrorCode(
+          id = "REASSIGNMENT_NOT_SEQUENCED_TIMEOUT",
+          ErrorCategory.ContentionOnSharedResources,
+        ) {
+      final case class Error()
+          extends ReassignmentErrorImpl(
+            cause =
+              "Reassignment was not sequenced within the pre-defined max sequencing time and has therefore timed out"
+          )
     }
   }
 

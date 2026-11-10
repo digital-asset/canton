@@ -274,16 +274,21 @@ trait DbTeaTrafficStoreTest extends AsyncWordSpec with BaseTest with TeaTrafficS
             } yield ()).transactionally,
             "hold_table_lock",
           )
-          val store = newStore(databaseQueryTimeout = PositiveFiniteDuration.ofMillis(50))
+          val timedOutStore = newStore(databaseQueryTimeout = PositiveFiniteDuration.ofMillis(50))
+          // The check after the lock is released must not run under the 50 ms timeout too: on a
+          // loaded machine even this lookup can take longer and be cancelled.
+          val verificationStore = newStore()
 
           for {
             _ <- FutureUnlessShutdown.outcomeF(lockAcquired.future)
-            result <- store
+            result <- timedOutStore
               .insertCorrelation(fullPoolCorrelation)
               .value
               .thereafter(_ => releaseLock.trySuccess(()).discard)
             _ <- lockHeld
-            stored <- store.lookupCorrelation(fullPoolCorrelation.key).valueOrFail("lookup")
+            stored <- verificationStore
+              .lookupCorrelation(fullPoolCorrelation.key)
+              .valueOrFail("lookup")
           } yield {
             result.left.value shouldBe a[TrafficEnforcementErrors.TransientFailure.Reject]
             stored shouldBe None

@@ -189,7 +189,7 @@ trait TransactionConfirmationRequestFactoryTest
           transactionUuid: UUID,
           topologySnapshot: TopologySnapshot,
           contractOfId: ContractInstanceOfId,
-          _rbContext: RollbackContext,
+          _rbContext: RollbackScope,
           _absolutizer: ContractIdAbsolutizer,
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,

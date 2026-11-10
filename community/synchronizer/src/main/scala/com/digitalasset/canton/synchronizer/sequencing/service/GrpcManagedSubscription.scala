@@ -83,7 +83,7 @@ private[service] class GrpcManagedSubscription[T](
     val expireAt: Option[CantonTimestamp],
     override protected val timeouts: ProcessingTimeout,
     baseLoggerFactory: NamedLoggerFactory,
-    toSubscriptionResponse: SequencedSerializedEvent => T,
+    toSubscriptionResponse: ConnectionSerializedEvent => T,
 )(implicit ec: ExecutionContext)
     extends ManagedSubscription
     with NamedLogging {

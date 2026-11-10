@@ -13,6 +13,7 @@ import java.nio.file.{FileSystems, Files, Paths}
 import java.util.concurrent.TimeUnit
 import scala.jdk.CollectionConverters.*
 
+/** Superseded by [[CorpusBenchmark]]; kept until the nightly moves to a corpus (#36675). */
 @State(Scope.Benchmark)
 class ReplayBenchmark {
 

@@ -31,6 +31,7 @@ import java.io.BufferedInputStream
 import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
+/** Superseded by [[CorpusReplay]]; kept until the nightly moves to a corpus (#36675). */
 final case class TransactionSnapshot(
     transaction: SubmittedTx,
     participantId: Ref.ParticipantId,

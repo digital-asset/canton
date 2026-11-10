@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties.offpr
 
-import com.digitalasset.canton.admin.api.client.data.FlagNotSet
+import com.digitalasset.canton.admin.api.client.data.{FlagNotSet, FlagSet}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -201,6 +201,100 @@ final class ImportPartyAcsEdgeCasesIntegrationTest
         providedTargetLedgerEnd = Some(beforeActivationTargetOffset),
       )
       assertAcsAndContinuedOperation(target, expectedNumActiveContracts = 1)
+  }
+
+  /** Scenario: Carol is replicated to the target, offboarded from it, and replicated to it again.
+    *
+    * Goal: The second ACS import is checked against the second activation only. The target has
+    * processed events past the first activation, so checking against it would wrongly reject the
+    * import.
+    */
+  "ACS import succeeds when re-onboarding a party after offboarding it from the target" in {
+    implicit env =>
+      import env.*
+      val clock = env.environment.simClock.value
+
+      val carol =
+        source.parties.testing.enable("Carol", synchronizeParticipants = Seq(participant2))
+      IouSyntax.createIou(source)(carol, bob, 1.95).discard
+
+      replicateParty(clock, carol)
+
+      carol.topology.party_to_participant_mappings.propose_delta(
+        source,
+        removes = Seq(target.id),
+        store = daId,
+        mustFullyAuthorize = true,
+      )
+      eventually() {
+        target.topology.party_to_participant_mappings.list(
+          synchronizerId = daId,
+          filterParty = carol.filterString,
+          filterParticipant = target.id.filterString,
+        ) shouldBe empty
+      }
+
+      // The offboarding does not remove the party's contracts from the target.
+      val carolCids = target.ledger_api.state.acs
+        .of_party(carol)
+        .map(c => LfContractId.assertFromString(c.contractId))
+      carolCids should have size 1
+      target.synchronizers.disconnect_all()
+      target.repair.purge(daName, carolCids)
+      target.synchronizers.reconnect(daName)
+
+      replicateParty(clock, carol)
+
+      target.ledger_api.state.acs.of_party(carol) should have size 1
+  }
+
+  /** Scenario: Dave is replicated to the target, and the target clears the onboarding flag as
+    * documented: one call while the flag is set, then polling until the flag is cleared.
+    *
+    * Goal: No pending clearance record of Dave remains. The polling ends with a call after the flag
+    * is cleared, which writes the record again after the clearance has deleted it.
+    */
+  "Clearing the onboarding flag as documented leaves no pending clearance record" in {
+    implicit env =>
+      import env.*
+      val clock = env.environment.simClock.value
+
+      val dave =
+        source.parties.testing.enable("Dave", synchronizeParticipants = Seq(participant2))
+      IouSyntax.createIou(source)(dave, bob, 1.95).discard
+
+      val beforeActivationOffset = targetAuthorizesHosting(dave, daId, disconnectTarget = true)
+      source.parties.export_party_acs(
+        party = dave,
+        synchronizerId = daId,
+        targetParticipantId = target.id,
+        beginOffsetExclusive = beforeActivationOffset,
+        exportFilePath = acsSnapshotPath,
+      )
+      target.parties.import_party_acs(daId, Some(dave), acsSnapshotPath)
+      val targetLedgerEnd = target.ledger_api.state.end()
+      clock.advance(Duration.ofSeconds(30))
+      target.synchronizers.reconnect(daName)
+      source.health.ping(target)
+
+      def clearFlag() =
+        target.parties.clear_party_onboarding_flag(dave, daId.logical, targetLedgerEnd)
+
+      clearFlag() shouldBe a[FlagSet]
+      advanceTimeAndPing(clock, Duration.ofMinutes(2).plusSeconds(10), source, target)
+      // The polling of party_replication.rst
+      utils.retry_until_true {
+        clearFlag() match {
+          case FlagSet(_) => false
+          case FlagNotSet => true
+        }
+      }
+
+      target.repair.pending_operations.list(
+        filterOperationName = Some(OnboardingClearanceOperation.operationName.unwrap),
+        filterSynchronizer = Some(daId.logical),
+        filterOperationKey = Some(OnboardingClearanceOperation.operationKey(dave.partyId)),
+      ) shouldBe empty
   }
 }
 

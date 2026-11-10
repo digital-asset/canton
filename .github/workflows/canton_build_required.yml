@@ -244,8 +244,8 @@ jobs:
     needs: [pick_runner, compile]
     # Regenerates the size-config classes and compares them with the checked-in ones, so the result
     # depends only on the commit's sources. It is not rerun on release tags (the tagged commit was
-    # already checked on its branch).
-    if: github.ref_type != 'tag'
+    # already checked on its branch) nor in the merge queue (conflicts should be rare).
+    if: github.event_name != 'merge_group' && github.ref_type != 'tag'
     uses: ./.github/workflows/_size_config_up_to_date.yml
     secrets: inherit
     with:

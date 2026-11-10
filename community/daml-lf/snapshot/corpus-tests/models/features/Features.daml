@@ -1,0 +1,116 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- Engine features that touch different parts of the interpreter and the transaction.
+module Features where
+
+import DA.Numeric (div, mul)
+import DA.Crypto.Text (keccak256, toHex)
+import DA.Action (foldlA, when)
+import DA.Exception
+import DA.Map qualified as Map
+import DA.Set qualified as Set
+import DA.Text qualified as Text
+
+exception InsufficientFunds
+  with
+    needed : Int
+  where
+    message "insufficient funds: " <> show needed
+
+template Wallet
+  with
+    owner : Party
+    funds : Int
+  where
+    signatory owner
+
+    choice Pay : ContractId Wallet
+      with
+        amount : Int
+      controller owner
+      do
+        when (amount > funds) $ throw InsufficientFunds with needed = amount - funds
+        create this with funds = funds - amount
+
+    nonconsuming choice Check : ()
+      with
+        amount : Int
+      controller owner
+      do when (amount > funds) $ throw InsufficientFunds with needed = amount - funds
+
+template Worker
+  with
+    owner : Party
+    watcher : Party
+  where
+    signatory owner
+
+    -- the checks that fail are rolled back; a rollback may not undo side effects, so the check
+    -- inside the try is a nonconsuming exercise
+    nonconsuming choice PayAll : (ContractId Wallet, Int)
+      with
+        wallet : ContractId Wallet
+        amounts : [Int]
+      controller owner
+      do
+        let pay (w, failed) amount = do
+              ok <- try do
+                  exercise w Check with amount
+                  pure True
+                catch
+                  InsufficientFunds _ -> pure False
+              if ok
+                then do
+                  w' <- exercise w Pay with amount
+                  pure (w', failed)
+                else pure (w, failed + 1)
+        foldlA pay (wallet, 0) amounts
+
+    nonconsuming choice Observed : ()
+      observer watcher
+      controller owner
+      do pure ()
+
+    nonconsuming choice Hashes : Text
+      with
+        inputs : [Text]
+      controller owner
+      do pure $ Text.implode [Text.sha256 i <> keccak256 (toHex i) | i <- inputs]
+
+    nonconsuming choice Collections : (Int, Int)
+      with
+        n : Int
+      controller owner
+      do
+        let m = Map.fromList [(show i, i * i) | i <- [1 .. n]]
+            s = Set.fromList [i % 7 | i <- [1 .. n]]
+        pure (sum (Map.values m), Set.size s)
+
+    nonconsuming choice Precise : Numeric 37
+      with
+        steps : Int
+      controller owner
+      do
+        let x : Numeric 37 = 1.0000000000000000000000000000000000001
+            step acc _ = mul @37 acc x
+        pure $ foldl step 1.0 [1 .. steps]
+
+    nonconsuming choice Ratio : Numeric 10
+      with
+        a : Numeric 10
+        b : Numeric 10
+      controller owner
+      do pure (div @10 a b)
+
+    nonconsuming choice Now : Time
+      controller owner
+      do getTime
+
+    nonconsuming choice CreateFetchArchive : Int
+      controller owner
+      do
+        w <- create Wallet with owner; funds = 10
+        wallet <- fetch w
+        archive w
+        pure wallet.funds

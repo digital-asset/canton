@@ -24,6 +24,7 @@ import com.digitalasset.canton.validation.{
   ProtoValidation,
 }
 import com.digitalasset.canton.version.{
+  EmptyOptionExactlyUntilExclusive,
   HasProtocolVersionedWrapper,
   HasToByteString,
   ProtoVersion,
@@ -182,6 +183,9 @@ final case class UnassignmentCommonData private (
   @transient override protected lazy val companionObj: UnassignmentCommonData.type =
     UnassignmentCommonData
 
+  // Ensures the invariants hold
+  validateInstance().valueOr(err => throw new IllegalArgumentException(err))
+
   protected def toProtoV30: v30.UnassignmentCommonData =
     v30.UnassignmentCommonData(
       salt = Some(salt.toProtoV30),
@@ -190,6 +194,18 @@ final case class UnassignmentCommonData private (
       stakeholders = Some(stakeholders.toProtoV30),
       uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
       submitterMetadata = Some(submitterMetadata.toProtoV30),
+      reassigningParticipantUids =
+        reassigningParticipants.toSeq.map(p => p.uid.toProtoPrimitive.toProtoUnvalidated),
+    )
+
+  protected def toProtoV31: v31.UnassignmentCommonData =
+    v31.UnassignmentCommonData(
+      salt = Some(salt.toProtoV30),
+      sourcePhysicalSynchronizerId = sourceSynchronizerId.unwrap.toProtoPrimitive,
+      sourceMediatorGroup = sourceMediatorGroup.group.value,
+      stakeholders = Some(stakeholders.toProtoV30),
+      uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
+      submitterMetadata = Some(submitterMetadata.toProtoV31),
       reassigningParticipantUids =
         reassigningParticipants.toSeq.map(p => p.uid.toProtoPrimitive.toProtoUnvalidated),
     )
@@ -225,8 +241,26 @@ object UnassignmentCommonData
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.UnassignmentCommonData)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
-    )
+    ),
+    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.reassignmentReplayProtection)(
+      v31.UnassignmentCommonData
+    )(
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
+      _.toProtoV31,
+    ),
   )
+
+  private[data] val maxSequencingTimeInvariant = EmptyOptionExactlyUntilExclusive[
+    UnassignmentCommonData,
+    UnassignmentCommonData.type,
+    CantonTimestamp,
+  ](
+    _.submitterMetadata.maxSequencingTime,
+    "submitterMetadata.maxSequencingTime",
+    protocolVersionRepresentativeFor(ProtocolVersion.reassignmentReplayProtection),
+  )
+
+  override val invariants = Seq(maxSequencingTimeInvariant)
 
   def create(hashOps: HashOps)(
       salt: Salt,
@@ -265,6 +299,77 @@ object UnassignmentCommonData
     ) = unassignmentCommonDataP
 
     for {
+      submitterMetadata <- ProtoConverter
+        .required("submitter_metadata", submitterMetadataPO)
+        .flatMap(ReassignmentSubmitterMetadata.fromProtoV30(pvv, _))
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+      unassignmentCommonData <- fromProto(
+        pvv,
+        hashOps,
+        saltP,
+        sourceSynchronizerP,
+        stakeholdersP,
+        reassigningParticipantUidsP,
+        uuidP,
+        sourceMediatorGroupP,
+        submitterMetadata,
+        rpv,
+      )(bytes)
+    } yield unassignmentCommonData
+  }
+
+  private[this] def fromProtoV31(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      unassignmentCommonDataP: v31.UnassignmentCommonData,
+  )(
+      bytes: ByteString
+  ): ParsingResult[UnassignmentCommonData] = {
+    val v31.UnassignmentCommonData(
+      saltP,
+      sourceSynchronizerP,
+      stakeholdersP,
+      reassigningParticipantUidsP,
+      uuidP,
+      sourceMediatorGroupP,
+      submitterMetadataPO,
+    ) = unassignmentCommonDataP
+
+    for {
+      submitterMetadata <- ProtoConverter
+        .required("submitter_metadata", submitterMetadataPO)
+        .flatMap(ReassignmentSubmitterMetadata.fromProtoV31(pvv, _))
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
+      unassignmentCommonData <- fromProto(
+        pvv,
+        hashOps,
+        saltP,
+        sourceSynchronizerP,
+        stakeholdersP,
+        reassigningParticipantUidsP,
+        uuidP,
+        sourceMediatorGroupP,
+        submitterMetadata,
+        rpv,
+      )(bytes)
+    } yield unassignmentCommonData
+  }
+
+  private[this] def fromProto(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      saltP: Option[com.digitalasset.canton.crypto.v30.Salt],
+      sourceSynchronizerP: ProtoUnvalidatedString,
+      stakeholdersP: Option[v30.Stakeholders],
+      reassigningParticipantUidsP: ProtoUnvalidatedSeq[ProtoUnvalidatedString],
+      uuidP: ProtoUnvalidatedString,
+      sourceMediatorGroupP: Int,
+      submitterMetadata: ReassignmentSubmitterMetadata,
+      rpv: RepresentativeProtocolVersion[UnassignmentCommonData.type],
+  )(
+      bytes: ByteString
+  ): ParsingResult[UnassignmentCommonData] =
+    for {
       salt <- ProtoConverter.parseRequired(Salt.fromProtoV30, "salt", saltP)
       sourceSynchronizerId <- ProtoValidation
         .validateThen(
@@ -296,11 +401,6 @@ object UnassignmentCommonData
       uuid <- ProtoValidation.validateThen(uuidP, "uuid", pvv)(
         ProtoConverter.UuidConverter.fromProtoPrimitive
       )
-      submitterMetadata <- ProtoConverter
-        .required("submitter_metadata", submitterMetadataPO)
-        .flatMap(ReassignmentSubmitterMetadata.fromProtoV30(pvv, _))
-
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield UnassignmentCommonData(
       salt,
       sourceSynchronizerId,
@@ -310,7 +410,6 @@ object UnassignmentCommonData
       uuid,
       submitterMetadata,
     )(hashOps, rpv, Some(bytes))
-  }
 }
 
 /** Aggregates the data of an unassignment request that is only sent to the involved participants

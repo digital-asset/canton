@@ -208,6 +208,11 @@ sealed trait BftSynchronizerSequencerConnectionManipulationTest
         LogEntryOptionality.OptionalMany,
         _.warningMessage should include("Network error: TransportError"),
       ),
+      (
+        LogEntryOptionality.OptionalMany,
+        // A restarted BFT sequencer rejects its own acknowledgements until its P2P connections are established
+        _.errorMessage should include("periodic acknowledgement failed"),
+      ),
     )
   }
 }

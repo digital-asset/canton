@@ -8,9 +8,8 @@ import Triparty.Settle
 import Triparty.TriPartyAgreement
 import DA.List
 import DA.Foldable
-import DA.Either
 import DA.Optional
-import DA.Action (foldlA)
+import DA.Action
 
 computeObserverForNextStep : [Party] -> [Party] -> Party -> Party
 computeObserverForNextStep (agent :: _) _ _ = agent
@@ -54,36 +53,18 @@ template ForceAccept
   where
     signatory registry, forced
 
-    nonconsuming choice ForceAcceptTriPartyAgreement : Either (ContractId TriPartyAgreementProposal) (ContractId TriPartyAgreement)
+    nonconsuming choice ForceAcceptAccount : ContractId BootstrapUserAccount
       with
-        cid : ContractId TriPartyAgreementProposal
+        cid : ContractId BootstrapUserAccount
       controller registry
       do
-        exercise cid AcceptTriPartyAgreementProposal with auth = forced
-
-    nonconsuming choice ForceMint : ([ContractId Asset], ContractId Registry)
-      with
-        registryCid : ContractId Registry
-        requests : [ContractId MintRequest]
-      controller registry
-      do
-        exercise registryCid Mint with requests = requests
-
-    nonconsuming choice ForceCreateMintRequest : ContractId BootstrapAsset
-      with
-        request : MintRequest
-        force : ContractId ForceAccept
-        subregister: Party
-        subregisterCid: ContractId SubRegister
-      controller registry
-      do
-        create BootstrapAsset with registry = registry, request = request, force = force, subregister = subregister, subregisterCid = subregisterCid
+        exercise cid AddSignature with signer = forced
 
 
-type CashIssuerInfo = (Party, ContractId ForceAccept)
-type IssuerInfo = (Party, ContractId ForceAccept)
+type CashIssuerInfo = Party
+type IssuerInfo = Party
 type AgentInfo = (Party, ContractId ForceAccept)
-type SubregisterInfo = (Party, ContractId SubRegister)
+type SubregisterInfo = (Party, ContractId ForceAccept)
 type TakerInfo = (Party, ContractId ForceAccept)
 
 template PreBootstrap
@@ -97,6 +78,7 @@ template PreBootstrap
     numAgents : Int
     numAssetsPerIssuer : Int
     numAccountsPerIssuer: Int
+    capNumCounterparties : Int
   where
     signatory registry, (map fst subregisters)
 
@@ -107,20 +89,18 @@ template PreBootstrap
       do
         assertMsg "Cash issuer already added" (isNone cashIssuer)
         create Registry with registry = registry, issuer = cashIssuerParty, id = cashId, outstanding = 0.0
-        fa <- create ForceAccept with registry = registry, forced = cashIssuerParty
-        create this with cashIssuer = Some (cashIssuerParty, fa)
+        create this with cashIssuer = Some (cashIssuerParty)
 
     choice AddIssuer : ContractId PreBootstrap
       with
         issuer : Party
       controller issuer
       do
-        assertMsg "Issuer already added" (issuer `notElem` (map fst issuers))
+        assertMsg "Issuer already added" (issuer `notElem` (issuers))
         assertMsg "Already at capacity for issuers" (DA.List.length issuers < numAgents)
         let assetIds = computeAssetIds (DA.List.length issuers) numAssetsPerIssuer
         forA_ assetIds (\id -> create Registry with registry = registry, issuer = issuer, id = id, outstanding = 0.0)
-        fa <- create ForceAccept with registry = registry, forced = issuer
-        create this with issuers = issuers ++ [(issuer,fa)]
+        create this with issuers = issuers ++ [(issuer)]
 
     choice AddAgent : ContractId PreBootstrap
       with
@@ -140,7 +120,8 @@ template PreBootstrap
         assertMsg "Subregister already added" (subregister `notElem` (map (\x -> x._1) subregisters))
         assertMsg "Already at capacity for subregisters" (DA.List.length subregisters < numAgents)
         sb <- create SubRegister with registry = registry, subRegistry = subregister
-        create this with subregisters = subregisters ++ [(subregister, sb)]
+        fa <- create ForceAccept with registry = registry, forced = subregister
+        create this with subregisters = subregisters ++ [(subregister, fa)]
 
     choice AddTaker : ContractId PreBootstrap
       with
@@ -163,13 +144,18 @@ template PreBootstrap
         create Bootstrap with
           registry = registry
           cashIssuer = cashIssuerS
-          issuers = issuers
-          agents = agents
-          subregisters = subregisters
-          takers = takers
+          issuers = (sort issuers)
+          agents = (sortOn fst agents)
+          subregisters = (sortOn fst subregisters)
+          takers = (sortOn fst takers)
           numAssetsPerIssuer = numAssetsPerIssuer
           numAccountsPerIssuer = numAccountsPerIssuer
-          custodianIndex = 0
+          userIndex = 0
+          capNumCounterparties = capNumCounterparties
+
+capList : Int -> Int -> [a] -> [a]
+capList _ _ [] = []
+capList cap start xs = if cap <= DA.List.length xs then DA.List.take cap (DA.List.drop (start % DA.List.length xs) (xs ++ xs)) else xs
 
 template Bootstrap
   with
@@ -181,117 +167,140 @@ template Bootstrap
     takers : [TakerInfo]
     numAssetsPerIssuer : Int
     numAccountsPerIssuer: Int
-    custodianIndex : Int
+    userIndex : Int
+    capNumCounterparties : Int
   where
     signatory registry, (map fst subregisters)
 
-    choice AddCustodian : ()
+    choice AddUser : ContractId Bootstrap
       with
-        custodian : Party
-      controller custodian
+        user : Party
+      controller user
       do
         forA_ (map fst subregisters) $ \subregister -> do
-          create SettlementApp with registry = subregister, user = custodian
-        _ <- create this with custodianIndex = custodianIndex + 1
-        let iterateOver = crossProduct (zipWithIndex (zip3 subregisters agents takers)) (zipWithIndex issuers) [0..(numAccountsPerIssuer - 1)]
-        forA_ iterateOver (bootstrapCustodianAccount registry custodianIndex custodian numAssetsPerIssuer cashIssuer)
+          create SettlementApp with registry = subregister, user = user
+        _ <- create BootstrapUser with
+          user = user
+          registry = registry
+          cashIssuer = cashIssuer
+          issuers = issuers
+          agents = (capList capNumCounterparties userIndex agents)
+          subregisters = (capList capNumCounterparties userIndex subregisters)
+          takers = (capList capNumCounterparties userIndex takers)
+          numAssetsPerIssuer = numAssetsPerIssuer
+          numAccountsPerIssuer = numAccountsPerIssuer
+          userIndex = userIndex
+          batchOffset = 0
+        create this with userIndex = userIndex + 1
+
+template BootstrapUser
+  with
+    user : Party
+    registry : Party
+    cashIssuer : CashIssuerInfo
+    issuers : [IssuerInfo]
+    agents : [AgentInfo]
+    subregisters : [SubregisterInfo]
+    takers : [TakerInfo]
+    numAssetsPerIssuer : Int
+    numAccountsPerIssuer: Int
+    userIndex : Int
+    batchOffset : Int
+  where
+    signatory registry, (map fst subregisters), user
+
+    choice ProcessBatch : ()
+      with
+        count : Int
+      controller registry
+        do
+          assertMsg "Count must be positive" (count > 0)
+          let iterateOver = crossProduct (zipWithIndex (zip3 subregisters agents takers)) (zipWithIndex issuers) [0..(numAccountsPerIssuer - 1)]
+          let chunk = DA.List.take count (DA.List.drop batchOffset iterateOver)
+          DA.Action.when (DA.List.length iterateOver > batchOffset + count) $ do
+            create this with batchOffset = batchOffset + count
+            return ()
+          forA_ chunk (bootstrapUserAccount registry userIndex user numAssetsPerIssuer cashIssuer)
 
 
-bootstrapCustodianAccount: Party -> Int -> Party -> Int -> CashIssuerInfo -> (((SubregisterInfo, AgentInfo, TakerInfo), Int), (IssuerInfo, Int), Int) -> Update ()
-bootstrapCustodianAccount registry custodianIndex custodian numAssetsPerIssuer cashIssuer (((subregister, agent, taker), sIdx), (issuer, iIdx), accountIndex) = do
-  bca <- create BootstrapCustodianAccount with
+bootstrapUserAccount: Party -> Int -> Party -> Int -> CashIssuerInfo -> (((SubregisterInfo, AgentInfo, TakerInfo), Int), (IssuerInfo, Int), Int) -> Update ()
+bootstrapUserAccount registry userIndex user numAssetsPerIssuer cashIssuer (((subregister, agent, taker), sIdx), (issuer, iIdx), accountIndex) = do
+  let (subregisterParty, forceSubregister) = subregister
+  let (takerParty, forceTaker) = taker
+  let (agentParty, forceAgent) = agent
+  bca <- create BootstrapUserAccount with
     registry = registry
-    custodian = custodian
-    custodianIndex = custodianIndex
+    user = user
+    userIndex = userIndex
     numAssetsPerIssuer = numAssetsPerIssuer
     cashIssuer = cashIssuer
-    subregister = subregister
-    agent = agent
-    taker = taker
+    subregister = subregisterParty
+    agent = agentParty
+    taker = takerParty
     subregisterIndex = sIdx
     issuer = issuer
     issuerIndex = iIdx
     accountIndex = accountIndex
-  exercise bca ProcessBootstrap
+    signed = []
+  bcb <- exercise forceSubregister ForceAcceptAccount with cid = bca
+  bcc <- exercise forceTaker ForceAcceptAccount with cid = bcb
+  bcd <- exercise forceAgent ForceAcceptAccount with cid = bcc
   return ()
 
-template BootstrapAsset
+
+template BootstrapUserAccount
   with
     registry : Party
-    request : MintRequest
-    force : ContractId ForceAccept
-    subregister: Party
-    subregisterCid: ContractId SubRegister
-  where
-    signatory request.owner, registry
-
-    nonconsuming choice BatchApprove : ()
-      with
-        registryCid : ContractId Registry
-        other : [ContractId BootstrapAsset]
-      controller registry
-      do
-        foldlA (\acc item -> do
-          ret <- exercise item Approve with registryCid = acc
-          return (snd ret)) registryCid (self :: other)
-        return ()
-
-    choice Approve : (ContractId Asset, ContractId Registry)
-      with
-        registryCid : ContractId Registry
-      controller registry
-      do
-        -- create the mint request
-        mr <- create request
-        -- mint the asset
-        (assets, registryCid) <- exercise force ForceMint with registryCid = registryCid, requests = [mr]
-        -- transfer it to the subregister
-        reassigned <- exercise subregisterCid Reassign with assetCid = head assets, newRegister = subregister, owner = request.owner
-        return (reassigned, registryCid)
-
-template BootstrapCustodianAccount
-  with
-    registry : Party
-    custodian : Party
-    custodianIndex : Int
+    user : Party
+    userIndex : Int
     numAssetsPerIssuer : Int
-    cashIssuer : CashIssuerInfo
-    subregister : SubregisterInfo
-    agent : AgentInfo
-    taker : TakerInfo
+    cashIssuer : Party
+    subregister : Party
+    agent : Party
+    taker : Party
     subregisterIndex : Int
-    issuer : IssuerInfo
+    issuer : Party
     issuerIndex : Int
     accountIndex : Int
+    signed : [Party]
   where
-    signatory custodian, registry
+    signatory user, signed
+
+    choice AddSignature : ContractId BootstrapUserAccount
+      with
+        signer : Party
+      controller signer
+      do
+        create this with signed = signer :: signed
 
     choice ProcessBootstrap : ()
-      controller registry
+      controller user
       do
-        let accountId = mkAccountId custodianIndex subregisterIndex issuerIndex accountIndex
+        let accountId = mkAccountId userIndex subregisterIndex issuerIndex accountIndex
         let assetIds = computeAssetIds issuerIndex numAssetsPerIssuer
-        let (subregisterParty, subregisterCid) = subregister
-        let (takerParty, takerFA) = taker
-        let (agentParty, forceAgent) = agent
-        let (cashIssuerParty, forceCashIssuer) = cashIssuer
-        let (issuerParty, forceIssuer) = issuer
+
+        -- NOTE: this is a short cut. normally, the issuance would go through the
+        -- mint and reassignment workflow. however, this means we start on one node and slowly
+        -- start to ramp up the shards. but for the actual test, we want to be already
+        -- in the sharded state. therefore, we create the assets directly in the subregister
+        -- as a result, the "registry" will not show the correct amount. but c'est la vie!
+
+        let assetQty = 100.0
+        let numAssets = intToDecimal (DA.List.length assetIds)
+        let cashQty = (100.0 + numAssets) * assetQty * numAssets
+
         -- create asset requests for this account
         forA_ assetIds (\assetId -> do
-          let request = MintRequest with issuer = issuerParty, id = assetId, qty = 100.0, owner = custodian, account = accountId, viewer = custodian
-          create BootstrapAsset with registry = registry, request = request, force = forceIssuer, subregister = subregisterParty, subregisterCid = subregisterCid)
+          create Asset with registry = subregister, issuer = issuer, id = assetId, qty = assetQty, owner = user, account = accountId, viewer = user)
 
         -- create cash for this account (initially with asset taker), we put it here to so we don't have contention
         -- in the real world, the cash disclosure would need to be handled separately
-        let cashRequest = (MintRequest with issuer = cashIssuerParty, id = cashId, qty = 1000000.0, owner = takerParty, account = accountId, viewer = custodian)
-        exercise takerFA ForceCreateMintRequest with request = cashRequest, force = forceCashIssuer, subregister = subregisterParty, subregisterCid = subregisterCid
+        create Asset with registry = subregister, issuer = cashIssuer, id = cashId, qty = cashQty, owner = taker, account = accountId, viewer = user
 
         -- create an eligibility list for the assets
         let eligibility = map (\(assetId, index) -> (assetId, 100.0 + intToDecimal index)) (zipWithIndex assetIds)
-        -- create tri-party agreemnt
-        proposal <- create TriPartyAgreementProposal with agent = agentParty, collateralGiver = custodian, collateralTaker = takerParty, account = accountId, eligibility = eligibility, signed = []
-        proposal1 <- fromLeft proposal <$> exercise forceAgent ForceAcceptTriPartyAgreement with cid = proposal
-        exercise takerFA ForceAcceptTriPartyAgreement with cid = proposal1
+        -- create tri-party agreement
+        proposal <- create TriPartyAgreement with agent = agent, collateralGiver = user, collateralTaker = taker, account = accountId, eligibility = eligibility, amount = 0.0
         return ()
 
 

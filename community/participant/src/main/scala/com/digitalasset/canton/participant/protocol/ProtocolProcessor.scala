@@ -914,16 +914,35 @@ abstract class ProtocolProcessor[
                   } else {
                     // When the mediator `mediatorId` receives the root hash message,
                     // it will either lack the full informee tree or find the wrong mediator ID in it.
-                    // The submitting participant is malicious (unless the sequencer is), so it is not this participant
-                    // and therefore we don't have to output a completion event
+                    // A local submitter still needs a rejection completion for in-flight cleanup.
+                    // Other participants can wait for the mediator result and do not emit one.
                     logger.error(
                       s"Mediator $declaredMediator declared in views is not the recipient $mediator of the root hash message"
                     )
-                    EitherT
-                      .right[steps.RequestError](
-                        prepareForMediatorResultOfBadRequest(rc, sc, ts, publishUpdate)
+                    val amSubmitter = submitterMetadataO.exists(
+                      _.submissionTrackerData.exists(_.submittingParticipant == participantId)
+                    )
+                    if (amSubmitter) {
+                      // Emit a submitter rejection completion to ensure in-flight cleanup
+                      stopRequestProcessing(
+                        ts,
+                        rc,
+                        sc,
+                        requestDataHandle,
+                        submitterMetadataO,
+                        rootHash,
+                        freshOwnTimelyTxF,
+                        TransactionProcessor.SubmissionErrors.NoViewWithValidRecipients.Error(ts),
+                        publishUpdate,
+                        trafficCost,
                       )
-                      .thereafter(_ => requestDataHandle.complete(None))
+                    } else {
+                      EitherT
+                        .right[steps.RequestError](
+                          prepareForMediatorResultOfBadRequest(rc, sc, ts, publishUpdate)
+                        )
+                        .thereafter(_ => requestDataHandle.complete(None))
+                    }
                   }
 
                   for {
@@ -1553,7 +1572,7 @@ abstract class ProtocolProcessor[
 
   override def processResult(
       counter: SequencerCounter,
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
   )(implicit traceContext: TraceContext): HandlerResult = {
     val content = event.event.content
     val ts = content.timestamp
@@ -1585,7 +1604,7 @@ abstract class ProtocolProcessor[
 
   @VisibleForTesting
   private[protocol] def processResultInternal1(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       result: SignedProtocolMessage[ConfirmationResultMessage],
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1685,7 +1704,7 @@ abstract class ProtocolProcessor[
     * confirmation result. The inner `EitherT` corresponds to the subsequent async stage.
     */
   private[this] def processResultInternal2(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       result: SignedProtocolMessage[ConfirmationResultMessage],
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1805,7 +1824,7 @@ abstract class ProtocolProcessor[
   // Assigning the internal contract ids to the contracts requires that all the contracts are
   // already persisted in the contract store.
   private[this] def processResultInternal3(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1845,7 +1864,7 @@ abstract class ProtocolProcessor[
                 event,
                 verdict,
                 pendingRequestData,
-                steps.pendingSubmissions(ephemeral),
+                pendingSubmissionDataO,
                 crypto.pureCrypto,
               )
           } yield {

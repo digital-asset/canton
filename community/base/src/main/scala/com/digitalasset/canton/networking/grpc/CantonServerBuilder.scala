@@ -4,7 +4,12 @@
 package com.digitalasset.canton.networking.grpc
 
 import com.daml.tls.TlsServerConfig.logTlsProtocolsAndCipherSuites
-import com.daml.tls.{BaseServerTlsConfig, TlsConfig, TlsServerConfig}
+import com.daml.tls.{
+  BaseServerTlsConfig,
+  RevocationCheckingTrustManagerFactory,
+  TlsConfig,
+  TlsServerConfig,
+}
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -203,9 +208,13 @@ object CantonServerBuilder {
       logTlsProtocolAndCipherSuites: Boolean = false,
   ): SslContext = {
     val s1 = baseSslBuilder(config)
-    val s2 = config.trustCollectionFile.fold(s1)(trustCollection =>
-      s1.trustManager(trustCollection.pemStream)
-    )
+    val s2 =
+      if (config.checkClientCertRevocation)
+        s1.trustManager(RevocationCheckingTrustManagerFactory(config.trustCollectionFile))
+      else
+        config.trustCollectionFile.fold(s1)(trustCollection =>
+          s1.trustManager(trustCollection.pemStream)
+        )
     val s3 = s2.clientAuth(config.clientAuth.clientAuth)
     val sslContext = s3.build()
     if (logTlsProtocolAndCipherSuites)

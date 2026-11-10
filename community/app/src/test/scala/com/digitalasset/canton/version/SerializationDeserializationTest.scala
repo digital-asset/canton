@@ -180,25 +180,23 @@ final class SerializationDeserializationTest
         test(DynamicSynchronizerParameters, version)
         test(SequencingParameters, version)
 
-        if (version >= ProtocolVersion.v36) {
-          test(AcsCommitment, version)
-          testContext(
-            AcsCommitmentProtocolMessage,
-            AcsCommitmentDeserializationContext(testedSynchronizerLimits),
-            version,
-          )
+        test(AcsCommitment, version)
+        testContext(
+          AcsCommitmentProtocolMessage,
+          AcsCommitmentDeserializationContext(testedSynchronizerLimits),
+          version,
+        )
 
-          testContext(
-            AcsCommitmentSummary,
-            AcsCommitmentDeserializationContext(testedSynchronizerLimits),
-            version,
-          )
-          testContext(
-            AcsCommitmentSummaryProtocolMessage,
-            AcsCommitmentDeserializationContext(testedSynchronizerLimits),
-            version,
-          )
-        }
+        testContext(
+          AcsCommitmentSummary,
+          AcsCommitmentDeserializationContext(testedSynchronizerLimits),
+          version,
+        )
+        testContext(
+          AcsCommitmentSummaryProtocolMessage,
+          AcsCommitmentDeserializationContext(testedSynchronizerLimits),
+          version,
+        )
 
         test(LegacyAcsCommitmentProtocolMessage, version)
 
@@ -359,7 +357,8 @@ final class SerializationDeserializationTest
                   )
               ),
         )
-        test(SignedContent, version)
+        testContext(SignedContent, SignatureCountCheck.Strict, version)
+        test(AggregatedSignedContent, version)
         testContext(
           TransactionView,
           TransactionViewDeserializationContext(
@@ -638,7 +637,7 @@ final class SerializationDeserializationTest
       inside(
         recreateWith(
           None,
-          Some(CreatedContract.tryCreate(vDevContract, consumedInCore = false, rolledBack = false)),
+          Some(CreatedContract.tryCreate(vDevContract, consumedInCore = false)),
         )
       ) { case Left(err) =>
         err should include(

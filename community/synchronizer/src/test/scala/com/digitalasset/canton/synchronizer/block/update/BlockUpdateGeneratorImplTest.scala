@@ -16,15 +16,16 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.synchronizer.HasTopologyTransactionTestFactory
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.{Acknowledgment, Send}
-import com.digitalasset.canton.synchronizer.block.RawLedgerBlock.RawBlockEvent
 import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGenerator.{
   EndOfBlock,
   MaybeTopologyTickChunk,
   NextChunk,
 }
-import com.digitalasset.canton.synchronizer.block.{BlockEvents, LedgerBlockEvent, RawLedgerBlock}
+import com.digitalasset.canton.synchronizer.block.{BlockEvents, LedgerBlockEvent}
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
+import com.digitalasset.canton.synchronizer.sequencer.block.RawLedgerBlock
+import com.digitalasset.canton.synchronizer.sequencer.block.RawLedgerBlock.RawBlockEvent
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberValidator
 import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager

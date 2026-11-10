@@ -7,15 +7,12 @@ import com.digitalasset.canton.testing.modelbased.ast.{Concrete, Skeleton}
 import com.digitalasset.canton.testing.modelbased.genlib.Spaces
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver
 
-class ConcreteGenerators(
-    contractKeys: Boolean,
-    readOnlyRollbacks: Boolean,
-) {
+class ConcreteGenerators(contractKeys: Boolean) {
 
   import ConcreteGenerators.*
 
   private val skeletonEnumerator =
-    new SkeletonEnumerator(contractKeys, readOnlyRollbacks)
+    new SkeletonEnumerator(contractKeys)
 
   @scala.annotation.tailrec
   private def randomBigIntLessThan(n: BigInt): BigInt = {

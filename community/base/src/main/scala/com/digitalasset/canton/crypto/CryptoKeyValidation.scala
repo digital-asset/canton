@@ -29,7 +29,6 @@ import java.security.spec.{
 }
 import java.security.{
   AlgorithmParameters,
-  GeneralSecurityException,
   KeyFactory,
   PrivateKey as JPrivateKey,
   PublicKey as JPublicKey,
@@ -155,7 +154,7 @@ object CryptoKeyValidation {
       // validatePublicKeyFull returns false for invalid keys (does NOT throw),
       // so we must check the boolean return value explicitly.
       isValid <- Either
-        .catchOnly[GeneralSecurityException] {
+        .catchNonFatal {
           validatePublicKeyFull(rawKeyBytes, 0)
         }
         .leftMap(err =>
@@ -258,7 +257,7 @@ object CryptoKeyValidation {
 
       // Ensures the point lies on the elliptic curve defined by the given parameters.
       point <- Either
-        .catchOnly[GeneralSecurityException](curve.createPoint(x, y))
+        .catchNonFatal(curve.createPoint(x, y))
         .leftMap(err =>
           KeyParseAndValidateError(
             s"Failed to create point on curve '${ecKeySpec.jcaCurveName}': ${ThrowableUtil.messageWithStacktrace(err)}"

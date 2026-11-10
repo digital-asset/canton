@@ -256,6 +256,34 @@ class Engine(
   )(implicit
       traceContext: TraceContext
   ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
+    replayWithTransactionSeedAndCollectMetrics(
+      submitters,
+      tx,
+      ledgerEffectiveTime,
+      preparationTime,
+      crypto.Hash.deriveTransactionSeed(submissionSeed, participantId, preparationTime),
+      contractIdVersion,
+      interpretationConfig,
+      packageResolution,
+      metricPlugins,
+    )
+
+  /** Like `replay`, but with the transaction seed the contract IDs were derived from, e.g. as
+    * recorded in a transaction snapshot, instead of deriving it from a submission seed.
+    */
+  private[lf] def replayWithTransactionSeedAndCollectMetrics(
+      submitters: Set[Party],
+      tx: SubmittedTransaction,
+      ledgerEffectiveTime: Time.Timestamp,
+      preparationTime: Time.Timestamp,
+      transactionSeed: crypto.Hash,
+      contractIdVersion: ContractIdVersion,
+      interpretationConfig: InterpretationConfig,
+      packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
+      metricPlugins: Option[MetricPlugins] = None,
+  )(implicit
+      traceContext: TraceContext
+  ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
     for {
       commands <- preprocessor.translateTransactionRoots(tx)
       result <- executeCommands(
@@ -264,7 +292,7 @@ class Engine(
         commands = commands,
         ledgerTime = ledgerEffectiveTime,
         preparationTime = preparationTime,
-        seeding = Engine.initialSeeding(submissionSeed, participantId, preparationTime),
+        seeding = InitialSeeding.TransactionSeed(transactionSeed),
         contractIdVersion = contractIdVersion,
         interpretationConfig = interpretationConfig,
         packageResolution = packageResolution,
@@ -300,6 +328,7 @@ class Engine(
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
       interpretationConfig: InterpretationConfig,
+      packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       metricPlugins: Option[MetricPlugins] = None,
   )(implicit traceContext: TraceContext): Result[Unit] =
     validateAndCollectMetrics(
@@ -311,6 +340,7 @@ class Engine(
       submissionSeed,
       contractIdVersion,
       interpretationConfig,
+      packageResolution,
       metricPlugins,
     ).map(_ => ())
 
@@ -323,20 +353,47 @@ class Engine(
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
       interpretationConfig: InterpretationConfig,
+      packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
+      metricPlugins: Option[MetricPlugins] = None,
+  )(implicit traceContext: TraceContext): Result[Speedy.Metrics] =
+    validateWithTransactionSeedAndCollectMetrics(
+      submitters,
+      tx,
+      ledgerEffectiveTime,
+      preparationTime,
+      crypto.Hash.deriveTransactionSeed(submissionSeed, participantId, preparationTime),
+      contractIdVersion,
+      interpretationConfig,
+      packageResolution,
+      metricPlugins,
+    )
+
+  /** Like `validate`, but with the transaction seed instead of the submission seed; see
+    * `replayWithTransactionSeedAndCollectMetrics`.
+    */
+  private[lf] def validateWithTransactionSeedAndCollectMetrics(
+      submitters: Set[Party],
+      tx: SubmittedTransaction,
+      ledgerEffectiveTime: Time.Timestamp,
+      preparationTime: Time.Timestamp,
+      transactionSeed: crypto.Hash,
+      contractIdVersion: ContractIdVersion,
+      interpretationConfig: InterpretationConfig,
+      packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       metricPlugins: Option[MetricPlugins] = None,
   )(implicit traceContext: TraceContext): Result[Speedy.Metrics] =
     // reinterpret
     for {
-      result <- replayAndCollectMetrics(
+      result <- replayWithTransactionSeedAndCollectMetrics(
         submitters,
         tx,
         ledgerEffectiveTime,
-        participantId,
         preparationTime,
-        submissionSeed,
+        transactionSeed,
         contractIdVersion,
         interpretationConfig,
-        metricPlugins = metricPlugins,
+        packageResolution,
+        metricPlugins,
       )
       (rtx, _, metrics) = result
       validationResult <-

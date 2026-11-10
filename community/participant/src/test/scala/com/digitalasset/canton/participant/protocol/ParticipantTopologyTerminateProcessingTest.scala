@@ -920,8 +920,7 @@ final class ParticipantTopologyTerminateProcessingTest
       } yield {
         mappingCodeCaptor
           .getValue()
-          .value should contain theSameElementsAs ParticipantTopologyTerminateProcessing
-          .relevantMappingsForEffectiveStateChanges(testedProtocolVersion)
+          .value should contain theSameElementsAs ParticipantTopologyTerminateProcessing.relevantMappingsForEffectiveStateChanges
       }
     }
 

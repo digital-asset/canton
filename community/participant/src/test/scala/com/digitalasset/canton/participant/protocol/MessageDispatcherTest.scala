@@ -162,7 +162,7 @@ trait MessageDispatcherTest {
         when(
           processor.processResult(
             any[SequencerCounter],
-            any[WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]]],
+            any[WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]]],
           )(anyTraceContext)
         )
           .thenReturn(processingResultHandlerF)
@@ -327,8 +327,8 @@ trait MessageDispatcherTest {
 
   private def signEvent[Env <: Envelope[?]](
       event: DecompressedSequencedEvent[Env]
-  ): SignedContent[DecompressedSequencedEvent[Env]] =
-    SequencerTestUtils.sign(event)
+  ): AggregatedSignedContent[DecompressedSequencedEvent[Env]] =
+    SequencerTestUtils.aggregate(SequencerTestUtils.sign(event))
 
   private val dummySignature = SymbolicCrypto.emptySignature
 
@@ -439,9 +439,6 @@ trait MessageDispatcherTest {
     val legacyCommitment =
       SignedProtocolMessage.from(legacyRawCommitment, testedProtocolVersion, dummySignature)
 
-    // AcsCommitment is a PV36+ feature (PV35 uses LegacyAcsCommitment).
-    // Hardcoding v36 instead of testedProtocolVersion prevents AcsCommitmentProtocolMessage.create from
-    // attempting to serialize AcsCommitment under PV35, which throws an UnsupportedOperationException.
     val rawCommitment = AcsCommitment
       .create(
         psid,
@@ -450,7 +447,7 @@ trait MessageDispatcherTest {
         CommitmentPeriod
           .tryCreate(CantonTimestamp.ofEpochSecond(5), CantonTimestamp.ofEpochSecond(15)),
         Digest.hashDigest(ByteString.empty).getCryptographicEvidence,
-        ProtocolVersion.v36,
+        testedProtocolVersion,
       )
       .value
     val commitment = AcsCommitmentProtocolMessage
@@ -589,7 +586,7 @@ trait MessageDispatcherTest {
     def checkProcessResult(processor: AnyProcessor): Assertion = {
       verify(processor).processResult(
         any[SequencerCounter],
-        any[WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]]],
+        any[WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]]],
       )(anyTraceContext)
       succeed
     }

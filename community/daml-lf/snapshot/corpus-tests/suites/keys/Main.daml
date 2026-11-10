@@ -1,0 +1,52 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Main where
+
+import Daml.Script
+import Keys
+
+setup : Script (Party, ContractId Bank)
+setup = do
+  bank <- allocateParty "bank"
+  b <- submit bank $ createCmd Bank with bank
+  pure (bank, b)
+
+lookups : Script ()
+lookups = do
+  (bank, b) <- setup
+  owner <- allocateParty "owner"
+  opened <- submit bank $ exerciseCmd b OpenIfAbsent with owner; number = "1"
+  assert (opened /= None)
+  -- found this time
+  again <- submit bank $ exerciseCmd b OpenIfAbsent with owner; number = "1"
+  assert (again == None)
+  -- not found
+  exists <- submit bank $ exerciseCmd b Exists with number = "2"
+  assert (not exists)
+  pure ()
+
+transfers : Script ()
+transfers = do
+  (bank, b) <- setup
+  owner <- allocateParty "owner"
+  submit bank $ exerciseCmd b OpenIfAbsent with owner; number = "a"
+  submit bank $ exerciseCmd b OpenIfAbsent with owner; number = "b"
+  submit bank $ exerciseByKeyCmd @Account (bank, "a") Deposit with amount = 100
+  submit bank $ exerciseCmd b Transfer with from = "a"; to = "b"; amount = 30
+  balance <- submit bank $ exerciseCmd b Balance with number = "b"
+  assert (balance == 30)
+
+nonUnique : Script ()
+nonUnique = do
+  (bank, b) <- setup
+  owner <- allocateParty "owner"
+  submit bank $ createCmd Account with bank; owner; number = "x"; balance = 1
+  submit bank $ createCmd Account with bank; owner; number = "x"; balance = 2
+  submit bank $ createCmd Account with bank; owner; number = "x"; balance = 4
+  total <- submit bank $ exerciseCmd b TotalBalance with number = "x"
+  assert (total == 7)
+  two <- submit bank $ exerciseCmd b FirstTwo with number = "x"
+  assert (two == 2)
+  none <- submit bank $ exerciseCmd b TotalBalance with number = "y"
+  assert (none == 0)

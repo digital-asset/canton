@@ -10,10 +10,10 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.sequencing.OrdinaryProtocolEvent
 import com.digitalasset.canton.sequencing.protocol.{
+  AggregatedSignedContent,
   Batch,
   Deliver,
   MessageId,
-  SignedContent,
   TimeProof,
 }
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
@@ -49,7 +49,7 @@ class SynchronizerTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
   def timeProofEvent(ts: CantonTimestamp): OrdinaryProtocolEvent =
     OrdinarySequencedEvent(
       counter = SequencerCounter(0),
-      signedEvent = SignedContent(
+      signedEvent = AggregatedSignedContent(
         Deliver.create(
           None,
           ts,
@@ -60,7 +60,6 @@ class SynchronizerTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
           testedProtocolVersion,
         ),
         SymbolicCrypto.emptySignature,
-        None,
         testedProtocolVersion,
       ),
     )(traceContext)
@@ -69,7 +68,7 @@ class SynchronizerTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     // create a event which won't be flagged as a time proof
     val event = OrdinarySequencedEvent(
       counter = SequencerCounter(0),
-      signedEvent = SignedContent(
+      signedEvent = AggregatedSignedContent(
         Deliver.create(
           None,
           ts,
@@ -80,7 +79,6 @@ class SynchronizerTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
           testedProtocolVersion,
         ),
         SymbolicCrypto.emptySignature,
-        None,
         testedProtocolVersion,
       ),
     )(traceContext)

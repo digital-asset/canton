@@ -1,0 +1,30 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Main where
+
+import DA.Foldable (mapA_)
+import Daml.Script
+import Holding
+import Assets
+
+setup : Script (Party, [ContractId Holding])
+setup = do
+  owner <- allocateParty "owner"
+  cash <- submit owner $ createCmd Cash with owner; amount = 10.0
+  bond <- submit owner $ createCmd Bond with owner; face = 100.0; coupon = 5.0
+  pure (owner, [toInterfaceContractId cash, toInterfaceContractId bond])
+
+scale : Script ()
+scale = do
+  (owner, hs) <- setup
+  -- the interface choice is a root exercise of the transaction
+  mapA_ (\h -> submit owner $ exerciseCmd h Scale with factor = 2.0) hs
+
+total : Script ()
+total = do
+  (owner, hs) <- setup
+  amounts <- mapA (\h -> submit owner $ exerciseCmd h Amount) hs
+  -- fetches through the interface inside a template choice
+  t <- submit owner $ createAndExerciseCmd (Portfolio with owner) Total with holdings = hs
+  assert (t == sum amounts)

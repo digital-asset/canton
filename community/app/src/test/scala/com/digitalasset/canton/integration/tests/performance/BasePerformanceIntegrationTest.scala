@@ -19,7 +19,7 @@ import com.digitalasset.canton.performance.PartyRole.{
   Master,
   MasterDynamicConfig,
   Transfer,
-  TriPartyPassive,
+  TriPartyProvider,
   TriPartyUser,
 }
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
@@ -176,7 +176,7 @@ trait BasePerformanceIntegrationTestCommon
             case x: DvpTrader => x.focus(_.settings).replace(whackMe)
             case x: Transfer => x.focus(_.settings).replace(whackMe)
             case x: DvpIssuer => x
-            case x: TriPartyPassive => x
+            case x: TriPartyProvider => x
             case x: TriPartyUser => x.focus(_.settings).replace(whackMe)
           }
         case m => m

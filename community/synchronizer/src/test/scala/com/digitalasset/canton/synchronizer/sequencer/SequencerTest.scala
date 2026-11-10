@@ -19,7 +19,7 @@ import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.messages.{EnvelopeContent, UnsignedProtocolMessage}
 import com.digitalasset.canton.protocol.v32
 import com.digitalasset.canton.resource.MemoryStorage
-import com.digitalasset.canton.sequencing.SequencedSerializedEvent
+import com.digitalasset.canton.sequencing.ConnectionSerializedEvent
 import com.digitalasset.canton.sequencing.client.RequestSigner
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -150,7 +150,7 @@ class SequencerTest
         member: Member,
         limit: Int,
         startingTimestamp: Option[CantonTimestamp] = None,
-    ): FutureUnlessShutdown[Seq[SequencedSerializedEvent]] =
+    ): FutureUnlessShutdown[Seq[ConnectionSerializedEvent]] =
       FutureUnlessShutdown.outcomeF(
         valueOrFail(sequencer.readInternal(member, startingTimestamp).failOnShutdown)(
           s"read for $member"

@@ -40,6 +40,7 @@ import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
+import java.util.IdentityHashMap
 import scala.concurrent.ExecutionContext
 import scala.reflect.ClassTag
 
@@ -94,15 +95,34 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
       signature
     }
 
-  /** Computes a set of hash -> signature pairs for all signatures
+  /** Computes a set of hash -> signature pairs for all signatures.
+    *
+    * Multi-transaction signatures originating from the same protobuf entry share the same set of
+    * covered hashes. Since computing the combined hash requires sorting all covered hashes, it is
+    * computed only once per shared hash set instance. The cache is keyed by reference (identity),
+    * so that the hash set itself never needs to be hashed or compared.
     */
   def signaturesWithHash(
       hashOps: HashOps
-  ): Set[(Hash, TopologyTransactionSignature)] =
-    signatures
-      .map { signature =>
-        signature.computeHashForSignatureVerification(hashOps) -> signature
-      }
+  ): Set[(Hash, TopologyTransactionSignature)] = {
+    val combinedHashCache = new IdentityHashMap[NonEmpty[Set[TxHash]], Hash]()
+
+    signatures.map {
+      case multiTransactionSignature: MultiTransactionSignature =>
+        val combinedHash = combinedHashCache.computeIfAbsent(
+          multiTransactionSignature.transactionHashes,
+          transactionHashes =>
+            MultiTransactionSignature.computeCombinedHash(transactionHashes, hashOps),
+        )
+        combinedHash -> multiTransactionSignature
+      case singleTransactionSignature: SingleTransactionSignature =>
+        // Do not cache: computeHashForSignatureVerification is a direct O(1) field read.
+        // Looking it up in IdentityHashMap would add unnecessary overhead.
+        singleTransactionSignature.computeHashForSignatureVerification(
+          hashOps
+        ) -> singleTransactionSignature
+    }
+  }
 
   override protected def transactionLikeDelegate: TopologyTransactionLike[Op, M] = transaction
 
@@ -271,7 +291,7 @@ object SignedTopologyTransaction
       protocolVersion: ProtocolVersion,
   ): SignedTopologyTransaction[Op, M] = SignedTopologyTransaction(
     transaction = transaction,
-    signatures = TopologyTransactionSignature.distinctSignatures(signatures),
+    signatures = TopologyTransactionSignature.distinctTopologySignatures(signatures),
     isProposal = isProposal,
   )(protocolVersionRepresentativeFor(protocolVersion))
 
@@ -296,7 +316,7 @@ object SignedTopologyTransaction
   ): SignedTopologyTransaction[Op, M] =
     SignedTopologyTransaction(
       transaction = transaction,
-      signatures = TopologyTransactionSignature.distinctSignatures(
+      signatures = TopologyTransactionSignature.distinctTopologySignatures(
         signatures.map(SingleTransactionSignature(transaction.hash, _))
       ),
       isProposal = isProposal,
@@ -493,7 +513,7 @@ object SignedTopologyTransaction
       many signatures for the same key, leading to high validation time and memory usage.
       As a workaround, we discard duplicate signatures.
        */
-      allSignaturesWithoutDuplicates = TopologyTransactionSignature.distinctSignatures(
+      allSignaturesWithoutDuplicates = TopologyTransactionSignature.distinctTopologySignatures(
         allSignaturesWithDuplicates
       )
 

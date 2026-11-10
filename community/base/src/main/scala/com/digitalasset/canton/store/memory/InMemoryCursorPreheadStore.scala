@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.store.memory
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.TransactionalStoreUpdate
@@ -18,8 +18,7 @@ class InMemoryCursorPreheadStore[Discr](protected val loggerFactory: NamedLogger
     extends CursorPreheadStore[Discr]
     with NamedLogging {
 
-  override private[store] implicit val ec: ExecutionContext =
-    DirectExecutionContext(noTracingLogger)
+  override private[store] implicit val ec: ExecutionContext = directExecutionContext
 
   private val preheadRef = new AtomicReference[Option[CursorPrehead[Discr]]](None)
 

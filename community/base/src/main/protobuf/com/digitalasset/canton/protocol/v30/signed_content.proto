@@ -8,6 +8,11 @@ package com.digitalasset.canton.protocol.v30;
 import "com/digitalasset/canton/crypto/v30/crypto.proto";
 import "scalapb/scalapb.proto";
 
+// Content with signatures. Two Scala types use this message:
+// - SignedContent: content signed by a single member, with exactly one signature. The timestamp of
+//   the signing key is set on requests, never on sequenced events.
+// - AggregatedSignedContent: a sequenced event with the signatures of the sequencers it was received
+//   from, aggregated by the sequencer client. The timestamp of the signing key is never set.
 message SignedContent {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 

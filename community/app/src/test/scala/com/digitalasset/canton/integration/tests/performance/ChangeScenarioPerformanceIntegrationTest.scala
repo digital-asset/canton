@@ -102,8 +102,8 @@ sealed trait ChangeScenarioPerformanceIntegrationTest extends BasePerformanceInt
           masterParty
         )
       forAll(results.filter(_.data.role match {
-        case Role.ISSUER => false
-        case Role.TRADER => true
+        case Role.PROVIDER => false
+        case Role.USER => true
       }))(_.data.proposed shouldBe 50)
     }
 

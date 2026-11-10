@@ -349,7 +349,6 @@ private[platform] final case class ParallelIndexerSubscription[Batch](
         new PekkoSourceQueueToFutureQueue(
           sourceQueue = sourceQueue,
           sourceDone = sourceDone,
-          loggerFactory = loggerFactory,
         ),
     )
   }

@@ -9,16 +9,13 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
-import com.digitalasset.canton.data.{
-  CantonTimestamp,
-  DeduplicationPeriod,
-  ReassignmentSubmitterMetadata,
-}
+import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ReassignmentProcessorError
 import com.digitalasset.canton.participant.protocol.reassignment.{
   AssignmentProcessor,
+  ReassignmentSubmissionInfo,
   UnassignmentProcessingSteps,
   UnassignmentProcessor,
   UnassignmentProcessorError,
@@ -140,7 +137,7 @@ class TrafficCostEstimatorTest extends FixtureAnyWordSpec with BaseTest with Has
 
       when(
         assignmentProcessor.buildSubmissionBatchForCostEstimation(
-          any[ReassignmentSubmitterMetadata],
+          any[ReassignmentSubmissionInfo],
           any[Seq[ContractInstance]],
           any[Source[PhysicalSynchronizerId]],
           any[Source[TopologySnapshot]],
@@ -204,7 +201,7 @@ class TrafficCostEstimatorTest extends FixtureAnyWordSpec with BaseTest with Has
 
       when(
         assignmentProcessor.buildSubmissionBatchForCostEstimation(
-          any[ReassignmentSubmitterMetadata],
+          any[ReassignmentSubmissionInfo],
           any[Seq[ContractInstance]],
           any[Source[PhysicalSynchronizerId]],
           any[Source[TopologySnapshot]],
@@ -399,8 +396,8 @@ class TrafficCostEstimatorTest extends FixtureAnyWordSpec with BaseTest with Has
 
       param.value.contractIds shouldBe Seq(contractId)
       param.value.targetSynchronizer shouldBe Target(psid)
-      param.value.submitterMetadata.submitter shouldBe alice
-      param.value.submitterMetadata.submittingParticipant shouldBe participantId
+      param.value.submissionInfo.submitter shouldBe alice
+      param.value.submissionInfo.submittingParticipant shouldBe participantId
     }
 
   }
@@ -415,7 +412,7 @@ class TrafficCostEstimatorTest extends FixtureAnyWordSpec with BaseTest with Has
 
       estimateAssignment().value
 
-      val param = ArgCaptor[ReassignmentSubmitterMetadata]
+      val param = ArgCaptor[ReassignmentSubmissionInfo]
       val contracts = ArgCaptor[Seq[ContractInstance]]
       val sourceSynchronizer = ArgCaptor[Source[PhysicalSynchronizerId]]
       val sourceSnapshot = ArgCaptor[Source[TopologySnapshot]]

@@ -736,7 +736,12 @@ final class PartyReplicator(
       _ <- acsReplicator.replicateAcsAsync(
         replicationParams
           .into[AcsReplicationArguments]
-          .withFieldConst(_.timestamp, replicationAuthorization.onboardingAt.value)
+          .withFieldConst(
+            _.timestamp,
+            // Immediate successor to turn > exclusive onboarding topology ts to
+            // "asOf" timestamp.
+            replicationAuthorization.onboardingAt.value.immediateSuccessor,
+          )
           .withFieldConst(_.replicationDestination, AcsReplicationDestination.Persistence)
           .transform
       )

@@ -14,6 +14,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseProgrammableSequencer
 import com.digitalasset.canton.integration.tests.ledgerapi.submission.BaseInteractiveSubmissionTest.defaultConfirmingParticipant
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
@@ -83,6 +84,14 @@ final class TimeBasedInteractiveIntegrationTest
     Command.fromJavaProto(pass.create.commands.loneElement.toProtoCommand)
   }
 
+  // With the BFT sequencer, block timestamps lag the sim clock. Wait until the sequencer has observed
+  // the new time, so that subsequent requests are not sequenced with a pre-advance timestamp.
+  private def advanceClock(duration: Duration)(implicit env: FixtureParam): Unit = {
+    val simClock = env.environment.simClock.value
+    simClock.advance(duration)
+    TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(env.sequencer1).discard
+  }
+
   "Interactive submission" should {
     def createPassContract(implicit env: FixtureParam): (Pass.ContractId, DisclosedContract) = {
       val id = s"pass-${Random.nextLong()}"
@@ -135,7 +144,7 @@ final class TimeBasedInteractiveIntegrationTest
         aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)
       )
 
-      simClock.advance(oneDay)
+      advanceClock(oneDay)
       execAndWait(prepared, signatures).discard
     }
 
@@ -154,7 +163,6 @@ final class TimeBasedInteractiveIntegrationTest
     "accept execution requests withing the submission tolerance" in { implicit env =>
       import env.*
 
-      val simClock = env.environment.simClock.value
       val prepared = ppn.ledger_api.javaapi.interactive_submission.prepare(
         Seq(aliceE.partyId),
         Seq(
@@ -168,7 +176,7 @@ final class TimeBasedInteractiveIntegrationTest
       val signatures = Map(
         aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)
       )
-      simClock.advance(preparationTimeRecordTimeTolerance.dividedBy(2))
+      advanceClock(preparationTimeRecordTimeTolerance.dividedBy(2))
       execAndWait(prepared, signatures).discard
     }
 
@@ -224,7 +232,6 @@ final class TimeBasedInteractiveIntegrationTest
 
     "rejects execution requests outside the submission tolerance" in { implicit env =>
       import env.*
-      val simClock = env.environment.simClock.value
 
       val prepared = ppn.ledger_api.javaapi.interactive_submission.prepare(
         Seq(aliceE.partyId),
@@ -240,7 +247,7 @@ final class TimeBasedInteractiveIntegrationTest
         aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)
       )
 
-      simClock.advance(preparationTimeRecordTimeTolerance.multipliedBy(2))
+      advanceClock(preparationTimeRecordTimeTolerance.multipliedBy(2))
 
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         {
@@ -332,7 +339,7 @@ final class TimeBasedInteractiveIntegrationTest
         aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)
       )
 
-      simClock.advance(Duration.ofSeconds(10))
+      advanceClock(Duration.ofSeconds(10))
 
       val (submissionId, ledgerEnd) = exec(prepared, signatures, epn)
 

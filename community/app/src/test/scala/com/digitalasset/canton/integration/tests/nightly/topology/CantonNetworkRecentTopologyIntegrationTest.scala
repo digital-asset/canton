@@ -19,7 +19,7 @@ import com.digitalasset.canton.topology.processing.SequencedTime
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
 import com.digitalasset.canton.util.FutureUtil
 import com.google.cloud.storage.Storage.BlobListOption
-import com.google.cloud.storage.StorageOptions
+import com.google.cloud.storage.{Blob, StorageOptions}
 import io.circe.parser as circeParser
 import monocle.macros.syntax.lens.*
 import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStream
@@ -30,11 +30,15 @@ import org.apache.pekko.stream.scaladsl.Source
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import org.scalatest.time.{Minutes, Span}
 
-import java.io.{InputStream, PipedInputStream, PipedOutputStream}
+import java.io.{InputStream, OutputStream, PipedInputStream, PipedOutputStream}
+import java.nio.ByteBuffer
+import java.nio.channels.Channels
 import java.util.zip.GZIPInputStream
+import scala.annotation.tailrec
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
+import scala.util.{Try, Using}
 
 /** Try to deserialize and validate the topology state from CN as periodically exported on GCP.
   * Note: run `gcloud auth application-default login` before running this test locally for it to
@@ -46,7 +50,7 @@ trait CantonNetworkRecentTopologyIntegrationTest
 
   // We need very high timeouts here as the mainnet snapshot especially is huge
   // and takes very long to validate
-  private val timeout = 3.hours
+  private val timeout = 4.hours
 
   /** Name of the GCP bucket that contains the CN topology snapshots */
   private val bucketName = "cn-topology-snapshots"
@@ -69,6 +73,81 @@ trait CantonNetworkRecentTopologyIntegrationTest
           .replace(ReportingLevel.Ignore)
       )
 
+  // We fetch data in chunks and drop the GCS connection after chunk, since processing topology is much slower,
+  // than downloading the blob. Otherwise, GCS will reset long living http connections after 15-30 minutes, crashing the
+  // test with the `Connection reset` error.
+  def downloadAndProcessInChunks(
+      blob: Blob,
+      outputStream: OutputStream,
+      chunkSize: Int = 10 * 1024 * 1024,
+  ): Unit = {
+    val totalSize = blob.getSize
+    val writer = Channels.newChannel(outputStream)
+
+    @tailrec
+    def processNextChunk(currentPos: Long): Unit = {
+      logger.info(
+        s"Downloading chunk at position $currentPos of $totalSize bytes from blob ${blob.getName}"
+      )
+      if (currentPos >= totalSize) {
+        ()
+      } else {
+        val remaining = totalSize - currentPos
+        val actualChunkSize = if (remaining < chunkSize) remaining.toInt else chunkSize
+
+        val chunkBytesRead: Try[Int] = Using(blob.reader()) { reader =>
+          reader.seek(currentPos)
+          val buffer = ByteBuffer.allocate(actualChunkSize)
+
+          @tailrec
+          def fillBuffer(): Unit =
+            if (buffer.hasRemaining) {
+              val bytesRead = reader.read(buffer)
+              if (bytesRead != -1) fillBuffer()
+            }
+
+          fillBuffer()
+
+          buffer.flip()
+          writer.write(buffer)
+          buffer.limit()
+        }
+
+        if (chunkBytesRead.success.value > 0) {
+          processNextChunk(currentPos + chunkBytesRead.success.value)
+        } else {
+          ()
+        }
+      }
+    }
+
+    processNextChunk(0L)
+  }
+
+  private def findLatestOnboardingStateBlobName(): String = {
+    val prefix = s"$environmentName/sv-1/"
+
+    // List all blobs under the environment's sv-1/ prefix to discover snapshot folders.
+    val blobs = storage
+      .list(bucketName, BlobListOption.prefix(prefix))
+      .iterateAll()
+      .asScala
+      .toSeq
+
+    // Find the latest topology_snapshot folder by extracting folder names and sorting.
+    // Blob names look like: mainzrh/sv-1/topology_snapshot_2026-04-15T08:12:31.642741Z/onboarding-state
+    // If the file is compressed, it will be e.g. "onboarding-state.zst"
+    val onboardingStatePattern = s"$prefix(topology_snapshot_[^/]+)/onboarding-state.*".r
+    blobs
+      .flatMap(blob => onboardingStatePattern.findFirstMatchIn(blob.getName).map(_.matched))
+      .distinct
+      .sorted
+      .maxOption
+      .getOrElse(
+        fail(s"No topology snapshot folders found in bucket $bucketName under prefix $prefix")
+      )
+  }
+
   /** Download the latest onboarding-state file from the GCP bucket for [[environmentName]].
     *
     * Bucket structure:
@@ -84,30 +163,9 @@ trait CantonNetworkRecentTopologyIntegrationTest
     * max on the ISO timestamp), and download the `onboarding-state` blob into a local temporary
     * file.
     */
-  private def downloadLatestOnboardingState()(implicit
+  private def downloadLatestOnboardingState(onboardingStateBlobName: String)(implicit
       ec: ExecutionContext
   ): (InputStream, String) = {
-    val prefix = s"$environmentName/sv-1/"
-
-    // List all blobs under the environment's sv-1/ prefix to discover snapshot folders.
-    val blobs = storage
-      .list(bucketName, BlobListOption.prefix(prefix))
-      .iterateAll()
-      .asScala
-      .toSeq
-
-    // Find the latest topology_snapshot folder by extracting folder names and sorting.
-    // Blob names look like: mainzrh/sv-1/topology_snapshot_2026-04-15T08:12:31.642741Z/onboarding-state
-    // If the file is compressed, it will be e.g. "onboarding-state.zst"
-    val onboardingStatePattern = s"$prefix(topology_snapshot_[^/]+)/onboarding-state.*".r
-    val onboardingStateBlobName = blobs
-      .flatMap(blob => onboardingStatePattern.findFirstMatchIn(blob.getName).map(_.matched))
-      .distinct
-      .sorted
-      .maxOption
-      .getOrElse(
-        fail(s"No topology snapshot folders found in bucket $bucketName under prefix $prefix")
-      )
 
     val snapshotFolder =
       onboardingStateBlobName.substring(0, onboardingStateBlobName.lastIndexOf('/'))
@@ -126,7 +184,7 @@ trait CantonNetworkRecentTopologyIntegrationTest
     FutureUtil.doNotAwait(
       Future {
         try {
-          blob.downloadTo(out)
+          downloadAndProcessInChunks(blob, out)
         } finally out.close()
       },
       "Failed to download file from bucket",
@@ -179,12 +237,14 @@ trait CantonNetworkRecentTopologyIntegrationTest
   private var psid: PhysicalSynchronizerId = _
 
   "Canton node " can {
+    val latestOnboardingStateBlobName = findLatestOnboardingStateBlobName()
+
     def snapshotSource()(implicit
         env: TestConsoleEnvironment
     ): (PhysicalSynchronizerId, Source[GenericStoredTopologyTransaction, NotUsed]) = {
       import env.*
 
-      val (in, snapshotFolder) = downloadLatestOnboardingState()
+      val (in, snapshotFolder) = downloadLatestOnboardingState(latestOnboardingStateBlobName)
       val physicalSynchronizerId = downloadAndParseMetadata(snapshotFolder)
       val source = Source
         .unfold(in)(stream =>
@@ -253,6 +313,24 @@ trait CantonNetworkRecentTopologyIntegrationTest
         store12
           .findEssentialStateHashAtSequencedTime(SequencedTime.MaxValue)
           .futureValueUS(hashComputationPatience)
+
+      if (hash11 != hash12) {
+        // compare the store content hashes if the state hashes mismatch
+        val source11 =
+          store11.findEssentialStateAtSequencedTime(SequencedTime.MaxValue, includeRejected = true)
+        val source12 =
+          store12.findEssentialStateAtSequencedTime(SequencedTime.MaxValue, includeRejected = true)
+
+        val completeF = source11
+          .zip(source12)
+          .runForeach { case (tx11, tx12) =>
+            assert(
+              tx11.hash == tx12.hash,
+              s"Topology transactions differ between validated and non-validated stores: $tx11 vs $tx12",
+            )
+          }(materializer)
+        completeF.futureValue(hashComputationPatience)
+      }
 
       hash11 shouldBe hash12
     }

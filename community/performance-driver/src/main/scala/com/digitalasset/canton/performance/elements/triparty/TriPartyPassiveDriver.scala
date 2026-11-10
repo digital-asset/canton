@@ -10,7 +10,7 @@ import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.performance.Connectivity
-import com.digitalasset.canton.performance.PartyRole.TriPartyPassive
+import com.digitalasset.canton.performance.PartyRole.TriPartyProvider
 import com.digitalasset.canton.performance.elements.{DriverControl, ParticipantDriver}
 import com.digitalasset.canton.performance.model.java.orchestration.ParticipantFlag
 import com.digitalasset.canton.topology.SynchronizerId
@@ -22,7 +22,7 @@ class TriPartyPassiveDriver(
     connectivity: Connectivity,
     partyLf: LfPartyId,
     masterLf: LfPartyId,
-    role: TriPartyPassive,
+    role: TriPartyProvider,
     prefix: MetricName,
     metricsFactory: LabeledMetricsFactory,
     loggerFactory: NamedLoggerFactory,

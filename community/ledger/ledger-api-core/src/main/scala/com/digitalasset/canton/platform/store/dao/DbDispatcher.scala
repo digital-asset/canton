@@ -10,7 +10,7 @@ import com.daml.logging.entries.LoggingEntry
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.{DatabaseMetrics, Timed}
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.{ComponentHealthState, HealthStatus, ReportsHealth}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -117,7 +117,7 @@ private[dao] final class DbDispatcherOfStorage(
 ) extends DbDispatcher
     with ReportsHealth
     with NamedLogging {
-  private implicit val directEc: ExecutionContext = DirectExecutionContext(noTracingLogger)
+  private implicit val directExecutionContextImplicit: ExecutionContext = directExecutionContext
 
   /** consider using executeSqlUS if possible */
   override def executeSql[T](databaseMetrics: DatabaseMetrics)(

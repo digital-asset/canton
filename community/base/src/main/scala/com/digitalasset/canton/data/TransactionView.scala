@@ -14,7 +14,6 @@ import com.digitalasset.canton.data.ActionDescription.{
 import com.digitalasset.canton.data.TransactionView.{
   AllSubviewState,
   InvalidView,
-  NoKeyValidation,
   TransactionViewTreeOps,
   TransactionViewTreeOpsWithPosition,
   WithPath,
@@ -29,7 +28,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ErrorUtil, RoseTree}
 import com.digitalasset.canton.version.*
-import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError, checked}
+import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.google.common.annotations.VisibleForTesting
 import monocle.Lens
 import monocle.macros.GenLens
@@ -81,7 +80,7 @@ final case class TransactionView private (
       viewParticipantData.doBlind(blindingCommandPerNode), // O(1)
       subviews.doBlind(blindingCommandPerNode), // O(#subviews)
       representativeProtocolVersion,
-      validateKeys = NoKeyValidation,
+      validateKeys = false,
     )(hashOps)
 
   private[data] def tryBlindForTransactionViewTree(
@@ -96,7 +95,7 @@ final case class TransactionView private (
         viewParticipantData.blindFully,
         subviews.tryBlindForTransactionViewTree(viewPos),
         representativeProtocolVersion,
-        validateKeys = NoKeyValidation,
+        validateKeys = false,
       )(hashOps)
     }
   }
@@ -254,27 +253,13 @@ final case class TransactionView private (
       _ <- subviews.allUnblinded(hash =>
         s"Inputs and created contracts of view $viewHash can be computed only if all subviews are unblinded, but $hash is blinded"
       )
-
-      currentRollbackScope = vpd.rollbackContext.rollbackScope
       subviewInputsAndCreated <- subviews.unblindedElements.traverse { subview =>
         for {
-          subviewVpd <- subview.unblindViewParticipantData("Inputs and created contracts")
           created <- subview.createdContractsE
           inputs <- subview.inputContractsE
 
         } yield {
-          val subviewRollbackScope = subviewVpd.rollbackContext.rollbackScope
-          // If the subview sits under a Rollback node in the view's core,
-          // then the created contracts of the subview are all rolled back,
-          // and all consuming inputs become non-consuming inputs.
-          if (
-            checked(RollbackScope.tryRollbackEffects(subviewRollbackScope, currentRollbackScope))
-          ) {
-            (
-              inputs.fmap(_.copy(consumed = false)),
-              created.fmap(_.copy(rolledBack = true)),
-            )
-          } else (inputs, created)
+          (inputs, created)
         }
       }
 
@@ -426,7 +411,7 @@ object TransactionView
       viewParticipantData,
       subviews,
       protocolVersionRepresentativeFor(protocolVersion),
-      ValidateKeys(protocolVersion),
+      validateKeys = true,
     )(hashOps)
 
   private def createFromRepresentativePV(hashOps: HashOps)(
@@ -522,7 +507,7 @@ object TransactionView
         participantData,
         subViews,
         rpv,
-        ValidateKeys(expectedProtocolVersion),
+        validateKeys = true,
       ).leftMap(e =>
         ProtoDeserializationError.OtherError(s"Unable to create transaction views: $e")
       )
@@ -644,12 +629,6 @@ object TransactionView
   }
   private object AllSubviewState {
     def init[A](current: A): AllSubviewState[A] = AllSubviewState(List.empty, current)
-  }
-
-  private[data] val NoKeyValidation: Boolean = false
-  private[data] object ValidateKeys {
-    def apply(protocolVersion: ProtocolVersion): Boolean =
-      protocolVersion >= ProtocolVersion.v36
   }
 }
 

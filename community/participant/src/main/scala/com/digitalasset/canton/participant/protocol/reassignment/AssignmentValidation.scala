@@ -197,6 +197,12 @@ private[reassignment] class AssignmentValidation(
       submitterCheckResult = submitterCheckResult,
       reassignmentIdResult = reassignmentIdResult,
       multiSynchronizerFeatureFlagCheckResult = multiSynchronizerCheckResult,
+      replayCheckResult = ReassignmentValidation.checkReplayedReassignment(
+        participantId,
+        assignmentRequest.submitterMetadata,
+        assignmentRequest.targetSynchronizer.unwrap.protocolVersion,
+        isFreshOwnTimelyRequest = parsedRequest.isFreshOwnTimelyRequest,
+      ),
     )
   }
 

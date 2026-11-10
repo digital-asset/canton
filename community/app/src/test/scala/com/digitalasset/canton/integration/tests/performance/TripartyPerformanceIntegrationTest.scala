@@ -8,7 +8,7 @@ import com.digitalasset.canton.integration.EnvironmentDefinition
 import com.digitalasset.canton.performance.PartyRole.{
   Master,
   MasterDynamicConfig,
-  TriPartyPassive,
+  TriPartyProvider,
   TriPartyUser,
 }
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
@@ -54,17 +54,18 @@ class TripartyPerformanceIntegrationTest extends BasePerformanceIntegrationTestC
               2, // numAgents
               4, // numAssetsPerIssuer
               2, // numAccountsPerIssuer
+              100, // capNumCounterparties
             ),
           ),
           // quorum must be set precisely for this type of run
           // because we will move to trader prepare based on this number
-          quorumIssuers = 3 * 2 + 3,
+          quorumProviders = 3 * 2 + 3,
         ),
-        TriPartyPassive("cash-issuer", rateSettings),
-        TriPartyPassive("issuer-01", rateSettings),
-        TriPartyPassive("taker-01", rateSettings),
-        TriPartyPassive("agent-01", rateSettings),
-        TriPartyPassive("subregister-01", rateSettings),
+        TriPartyProvider("cash-issuer", rateSettings),
+        TriPartyProvider("issuer-01", rateSettings),
+        TriPartyProvider("taker-01", rateSettings),
+        TriPartyProvider("agent-01", rateSettings),
+        TriPartyProvider("subregister-01", rateSettings),
         TriPartyUser("user-01", rateSettings),
       ),
       ledger = toConnectivity(participant1),
@@ -75,10 +76,10 @@ class TripartyPerformanceIntegrationTest extends BasePerformanceIntegrationTestC
     val p2Config = PerformanceRunnerConfig(
       master = s"$Master",
       localRoles = Set(
-        TriPartyPassive("issuer-02", rateSettings),
-        TriPartyPassive("taker-02", rateSettings),
-        TriPartyPassive("agent-02", rateSettings),
-        TriPartyPassive("subregister-02", rateSettings),
+        TriPartyProvider("issuer-02", rateSettings),
+        TriPartyProvider("taker-02", rateSettings),
+        TriPartyProvider("agent-02", rateSettings),
+        TriPartyProvider("subregister-02", rateSettings),
         TriPartyUser("user-02", rateSettings),
       ),
       ledger = toConnectivity(participant2),

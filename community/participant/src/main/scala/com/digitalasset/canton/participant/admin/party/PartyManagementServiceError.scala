@@ -251,4 +251,47 @@ object PartyManagementServiceError extends PartyManagementServiceErrorGroup {
         with PartyManagementServiceError
   }
 
+  @Explanation(
+    "The party ACS could not be read remotely from the source participant on the synchronizer"
+  )
+  @Resolution("Refer to the cause for details.")
+  object GetRemoteAcsFailed
+      extends ErrorCode(
+        id = "GET_REMOTE_ACS_FAILED",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Error(
+        party: PartyId,
+        synchronizerId: SynchronizerId,
+        sourceParticipant: ParticipantId,
+        asOf: CantonTimestamp,
+        reason: String,
+    )(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause =
+            s"The remote ACS read via `get_remote_acs` for party $party on synchronizer $synchronizerId from source participant $sourceParticipant at $asOf failed with: $reason"
+        )
+        with PartyManagementServiceError
+  }
+
+  @Explanation(
+    "The party is not in hosting state `Freezing` on the local participant and the specified synchronizer"
+  )
+  @Resolution("Refer to the cause for details.")
+  object PartyNotInFreezingHostingState
+      extends ErrorCode(
+        id = "PARTY_NOT_IN_FREEZING_HOSTING_STATE",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Error(
+        party: PartyId,
+        synchronizerId: SynchronizerId,
+        participantId: ParticipantId,
+    )(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause =
+            s"Party $party is not in the `Freezing` hosting state on synchronizer $synchronizerId and participant $participantId"
+        )
+        with PartyManagementServiceError
+  }
 }

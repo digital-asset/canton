@@ -1,0 +1,40 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Main where
+
+import Daml.Script
+import Features
+
+setup : Script (Party, ContractId Worker)
+setup = do
+  owner <- allocateParty "owner"
+  watcher <- allocateParty "watcher"
+  w <- submit owner $ createCmd Worker with owner; watcher
+  pure (owner, w)
+
+rollbacks : Script ()
+rollbacks = do
+  (owner, w) <- setup
+  wallet <- submit owner $ createCmd Wallet with owner; funds = 100
+  (_, failed) <- submit owner $ exerciseCmd w PayAll with wallet; amounts = [30, 80, 20, 60, 10]
+  assert (failed == 2)
+
+uncaught : Script ()
+uncaught = do
+  (owner, _) <- setup
+  wallet <- submit owner $ createCmd Wallet with owner; funds = 1
+  -- fails, so records nothing for this submission
+  submitMustFail owner $ exerciseCmd wallet Pay with amount = 2
+
+builtins : Script ()
+builtins = do
+  (owner, w) <- setup
+  submit owner $ exerciseCmd w Observed
+  submit owner $ exerciseCmd w Hashes with inputs = ["a", "bb", "ccc"]
+  submit owner $ exerciseCmd w Collections with n = 500
+  submit owner $ exerciseCmd w Precise with steps = 200
+  submit owner $ exerciseCmd w Ratio with a = 22.0; b = 7.0
+  submit owner $ exerciseCmd w Now
+  submit owner $ exerciseCmd w CreateFetchArchive
+  pure ()

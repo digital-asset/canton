@@ -7,7 +7,7 @@ import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.integration.tests.sequencer.reference.ReferenceSequencerWithTrafficControlApiTestBase
+import com.digitalasset.canton.integration.tests.sequencer.base.SequencerWithTrafficControlApiTestBase
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.resource.DbStorage
@@ -32,7 +32,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import org.apache.pekko.stream.Materializer
 
 class BftOrderingSequencerWithTrafficControlApiTestPostgres
-    extends ReferenceSequencerWithTrafficControlApiTestBase
+    extends SequencerWithTrafficControlApiTestBase
     with PostgresTest {
 
   override def cleanDb(

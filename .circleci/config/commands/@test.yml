@@ -313,7 +313,7 @@ run_tests:
         # Test failures will be reported to datadog as part of cleanup_test_job.
         condition: << parameters.succeed_on_error >>
         steps:
-          - slack_red_main_with_volunteer
+          - slack_notify_failure_with_volunteer
 
 run_ordinary_tests:
   parameters:
@@ -411,7 +411,7 @@ run_test_coverage_test:
         name: Store coverage report as artifact (if any)
         path: coverage_report.tar.gz
         destination: coverage-report
-    - slack_red_main_with_volunteer # This is already called as part of run_tests. Need to call it again to catch failures in steps after run_tests.
+    - slack_notify_failure_with_volunteer # This is already called as part of run_tests. Need to call it again to catch failures in steps after run_tests.
 
 run_db_tests:
   parameters:
@@ -484,7 +484,7 @@ run_crash_recovery_tests:
     - when:
         condition: << parameters.succeed_on_error >>
         steps:
-          - slack_red_main_with_volunteer # This is already called as part of run_tests. Need to call it again to catch failures in clenaup_test_job.
+          - slack_notify_failure_with_volunteer # This is already called as part of run_tests. Need to call it again to catch failures in clenaup_test_job.
 
 run_variations_tests:
   parameters:

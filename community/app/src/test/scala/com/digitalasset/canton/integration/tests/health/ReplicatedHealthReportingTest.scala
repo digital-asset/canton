@@ -29,7 +29,7 @@ import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.participant.sync.{ConnectedSynchronizer, SyncEphemeralState}
 import com.digitalasset.canton.resource.DbStorage
-import com.digitalasset.canton.sequencing.SequencedSerializedEvent
+import com.digitalasset.canton.sequencing.ConnectionSerializedEvent
 import com.digitalasset.canton.sequencing.client.{DelayedSequencerClient, SequencerClient}
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -105,7 +105,6 @@ trait HealthReportingTestHelper
     registerPlugin(
       UseSharedStorage.forParticipants("participant1", Seq("participant2"), loggerFactory)
     )
-    // TODO(#16089): Should this test also test sequencer HA when it is available?
   }
 
   protected def bootstrapSynchronizer(
@@ -398,7 +397,7 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
           activeMediator.id.uid.toString,
         )
         .value
-        .setDelayPolicy { (_: SequencedSerializedEvent) =>
+        .setDelayPolicy { (_: ConnectionSerializedEvent) =>
           throw new RuntimeException("Testing the liveness of mediator")
         }
 

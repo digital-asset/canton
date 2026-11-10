@@ -177,6 +177,7 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 
 - The `Request-Timeout` header of JSON Ledger API requests now also accepts a time unit, for example `15s`. Values without a time unit are still interpreted as milliseconds.
 - Indexer pipeline now breaks up heavy transaction to evenly sized batches, where the 'size' is determined by the number of database operations.
+- The interactive submission endpoints `ExecuteSubmissionAndWait` and `ExecuteSubmissionAndWaitForTransaction` (gRPC and JSON Ledger API) now enforce `maximum-number-of-signatures-per-party`, rejecting requests with too many signatures per party, as `ExecuteSubmission` already did.
 - Reads and writes from the active contract journal now use a batch aggregator for efficiency.
 
 ### Ledger API
@@ -188,10 +189,18 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 - `PartyManagementService.ListKnownParties`: subsequent pages return the topology state seen when the first page was
   requested. Page tokens issued by another participant are rejected.
 
+### Multi-Sync
+- When contracts are automatically reassigned to allow command execution on a target synchronizer:
+  - The package used for contract validation on the target synchronizer will be a package-id bound to the contract in the transaction so is guaranteed to be valid and vetted.
+  - If a package bound to a contract in the transaction is vetted on the source synchronizer this will be used, otherwise the highest vetted version of the package will be used.
+
 ### All node operators
 
 - The console commands `keys.secret.download` and `keys.secret.download_to` no longer require the preview feature flag.
   Downloading a key pair from a node still requires `canton.parameters.enable-key-download = true` on that node.
+- The token generators shipped with Canton mint audience-based tokens: `ledger-api-auth generate-token` takes an
+  `--audience` or, mutually exclusively, a `--participantId` whose participant audience is used, and the Ledger API bench tool
+  takes `--user-based-authorization-audience` together with `--user-based-authorization-secret`.
 
 ### Participant node operators
 
@@ -200,6 +209,10 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
   commands in case that admin API auth differs from ledger API auth.
 
 ### Synchronizer operators
+
+- Sequencers reject submission requests and acknowledgements that carry more than one signature.
+  Such requests that are ordered anyway are discarded as invalid ledger events from protocol version 38 on.
+  On earlier protocol versions, only the last signature is kept after ordering, which is the one that was verified before.
 
 ## Security and Bug Fixes
 
@@ -237,7 +250,17 @@ fix is deployed on MainNet:
 - Minor bugfix to synchronization of `participants.parties.enable` which always timed out on a network
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
+- `enable-cert-revocation-checking` on a server TLS configuration (for example the Ledger API) now applies only to that server's TLS context.
+  It no longer sets the JVM-wide `com.sun.net.ssl.checkRevocation`, `com.ibm.jsse2.checkRevocation` and `ocsp.enable` properties, so other TLS connections in the same node are no longer affected.
+  Deployments that relied on this side effect to get revocation checking elsewhere must set these properties explicitly (for example with `-Dcom.sun.net.ssl.checkRevocation=true`).
+  The flag is now also honored by the JSON Ledger API (`http-ledger-api`) and the BFT orderer's peer-to-peer server endpoint.
 - Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
+- Fixed the JSON Ledger API failing every HTTPS connection when the Ledger API TLS configuration has no
+  `trust-collection-file`, which also affected plain server-side TLS with `client-auth` set to `none`.
+  If client authentication is enabled (`client-auth` set to `optional`, the default, or `require`) and no
+  `trust-collection-file` is configured, client certificates are now verified against the JVM default trust store,
+  consistent with the gRPC Ledger API and the documentation.
+  No configuration change is needed, and configurations with a `trust-collection-file` behave as before.
 
 ## Compatibility
 

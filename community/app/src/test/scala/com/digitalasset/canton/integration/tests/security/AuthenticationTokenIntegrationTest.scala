@@ -807,6 +807,10 @@ trait AuthenticationTokenIntegrationTest
         mayContain = Seq(
           _.errorMessage should include("Failed to establish subscription for"),
           _.warningMessage should include("PERMISSION_DENIED"),
+          // The leaver may re-subscribe while its removal is being processed and get permission denied
+          _.warningMessage should include(
+            "Permanently closing sequencer subscription due to permission denied"
+          ),
         ),
       ),
     )

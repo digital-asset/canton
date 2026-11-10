@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import com.digitalasset.canton.sequencing.SequencedSerializedEvent
+import com.digitalasset.canton.sequencing.ConnectionSerializedEvent
 import com.digitalasset.canton.sequencing.client.DelayedSequencerClient.{
   Immediate,
   SequencedEventDelayPolicy,
@@ -16,11 +16,11 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.Future
 
 trait DelaySequencedEvent {
-  def delay(event: SequencedSerializedEvent): Future[Unit]
+  def delay(event: ConnectionSerializedEvent): Future[Unit]
 }
 
 case object NoDelay extends DelaySequencedEvent {
-  override def delay(event: SequencedSerializedEvent): Future[Unit] = Future.unit
+  override def delay(event: ConnectionSerializedEvent): Future[Unit] = Future.unit
 }
 
 final case class DelayedSequencerClient(synchronizerId: PhysicalSynchronizerId, member: String)
@@ -32,7 +32,7 @@ final case class DelayedSequencerClient(synchronizerId: PhysicalSynchronizerId, 
   def setDelayPolicy(publishPolicy: SequencedEventDelayPolicy): Unit =
     onPublish.set(publishPolicy)
 
-  override def delay(event: SequencedSerializedEvent): Future[Unit] = {
+  override def delay(event: ConnectionSerializedEvent): Future[Unit] = {
     val temp = onPublish.get()
     temp(event).until
   }
@@ -60,7 +60,7 @@ object DelayedSequencerClient {
     clients.putIfAbsent((environmentId, synchronizerId, member), delayedLog).getOrElse(delayedLog)
   }
 
-  trait SequencedEventDelayPolicy extends (SequencedSerializedEvent => DelaySequencerClient)
+  trait SequencedEventDelayPolicy extends (ConnectionSerializedEvent => DelaySequencerClient)
 
   sealed trait DelaySequencerClient {
     val until: Future[Unit]

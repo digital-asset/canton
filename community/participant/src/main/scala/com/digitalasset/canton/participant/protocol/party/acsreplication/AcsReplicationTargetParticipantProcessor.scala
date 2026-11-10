@@ -172,12 +172,13 @@ class AcsReplicationTargetParticipantProcessor(
             )
             deltaAcsDigest = acsDigestHelper.computeDeltaDigest(validatedContracts)
             acsDigestHashWithDelta = acsDigestHelper.computeUnionHash(deltaAcsDigest)
-            checkpoint <- acsReplicationContractHandler.handleValidatedContracts(
-              validatedContracts,
+            checkpoint <- acsReplicationContractHandler.handleContracts(
+              contracts,
               AcsTransferCheckpoint(
                 replicationProgress.processedContractCount,
                 replicationProgress.nextPersistenceCounter,
               ),
+              psid.logical,
             )
             _ <- replicationProgressState.updateAcsReplicationProgress(
               requestId,
@@ -204,6 +205,7 @@ class AcsReplicationTargetParticipantProcessor(
           if (logger.underlying.isDebugEnabled()) {
             logger.debug(s"Received AcsDigest $acsDigest with signature $signature")
           }
+
           for {
             _ <- EitherT.fromEither[FutureUnlessShutdown](verifyAcsDigest(acsDigest))
             _ <- EitherTUtil.ifThenET(!config.disableAcsDigestSourceSignatureValidation)(

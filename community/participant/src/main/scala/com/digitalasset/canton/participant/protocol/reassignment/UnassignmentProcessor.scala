@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.EitherT
-import cats.syntax.bifunctor.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -38,7 +37,8 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
-class UnassignmentProcessor(
+class UnassignmentProcessor private (
+    private val unassignmentSteps: UnassignmentProcessingSteps,
     synchronizerId: Source[PhysicalSynchronizerId],
     override val participantId: ParticipantId,
     staticSynchronizerParameters: Source[StaticSynchronizerParameters],
@@ -91,11 +91,72 @@ class UnassignmentProcessor(
       futureSupervisor,
       promiseFactory,
     ) {
+  def this(
+      synchronizerId: Source[PhysicalSynchronizerId],
+      participantId: ParticipantId,
+      staticSynchronizerParameters: Source[StaticSynchronizerParameters],
+      reassignmentCoordination: ReassignmentCoordination,
+      inFlightSubmissionSynchronizerTracker: InFlightSubmissionSynchronizerTracker,
+      ephemeral: SyncEphemeralState,
+      synchronizerCrypto: SynchronizerCryptoClient,
+      contractValidator: ContractValidator,
+      seedGenerator: SeedGenerator,
+      sequencerClient: SequencerClient,
+      clock: Clock,
+      timeouts: ProcessingTimeout,
+      sourceProtocolVersion: Source[ProtocolVersion],
+      reassignmentMetrics: ReassignmentMetrics,
+      participantNodeParameters: ParticipantNodeParameters,
+      loggerFactory: NamedLoggerFactory,
+      futureSupervisor: FutureSupervisor,
+      testingConfig: TestingConfigInternal,
+      promiseFactory: PromiseUnlessShutdownFactory,
+      trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
+      packageMetadataView: PackageMetadataView,
+  )(implicit ec: ExecutionContext) = this(
+    new UnassignmentProcessingSteps(
+      synchronizerId,
+      participantId,
+      reassignmentCoordination,
+      synchronizerCrypto,
+      seedGenerator,
+      staticSynchronizerParameters,
+      contractValidator,
+      clock,
+      sourceProtocolVersion,
+      reassignmentMetrics,
+      participantNodeParameters,
+      packageMetadataView,
+      loggerFactory,
+    ),
+    synchronizerId,
+    participantId,
+    staticSynchronizerParameters,
+    reassignmentCoordination,
+    inFlightSubmissionSynchronizerTracker,
+    ephemeral,
+    synchronizerCrypto,
+    contractValidator,
+    seedGenerator,
+    sequencerClient,
+    clock,
+    timeouts,
+    sourceProtocolVersion,
+    reassignmentMetrics,
+    participantNodeParameters,
+    loggerFactory,
+    futureSupervisor,
+    testingConfig,
+    promiseFactory,
+    trafficEnforcementBackendO,
+    packageMetadataView,
+  )
+
   override protected def metricsContextForSubmissionParam(
       submissionParam: UnassignmentProcessingSteps.SubmissionParam
   ): MetricsContext =
     MetricsContext(
-      "user-id" -> submissionParam.submitterMetadata.userId,
+      "user-id" -> submissionParam.submissionInfo.userId,
       "type" -> "unassignment",
     )
 
@@ -107,7 +168,7 @@ class UnassignmentProcessor(
   ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
     ReassignmentProcessingSteps.registerWithTrafficEnforcement(
       trafficEnforcementBackendO,
-      submissionParam.submitterMetadata,
+      submissionParam.submissionInfo,
       submissionParam.accounting,
       trafficCost,
       logger,
@@ -120,26 +181,13 @@ class UnassignmentProcessor(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Batch[DefaultOpenEnvelope]] =
-    steps
-      .createSubmission(
+    unassignmentSteps
+      .buildSubmissionData(
         submissionParam,
         mediator,
         ephemeral,
         recentSnapshot,
         sequencerClient.generateMaxSequencingTime,
       )
-      .flatMap { case (submission, _pendingSubmissionData) =>
-        submission match {
-          case submission: steps.UntrackedSubmission =>
-            EitherT.pure[FutureUnlessShutdown, ReassignmentProcessorError](submission.batch)
-          case _illegal => // Unassignments are always untracked
-            EitherT
-              .leftT[FutureUnlessShutdown, Batch[DefaultOpenEnvelope]](
-                UnassignmentProcessorError.AutomaticAssignmentError(
-                  s"Unexpected submission type ${_illegal.getClass.getSimpleName} for unassignement"
-                )
-              )
-              .leftWiden[ReassignmentProcessorError]
-        }
-      }
+      .map(data => Batch.of(unassignmentSteps.protocolVersion.unwrap, data.messages*))
 }

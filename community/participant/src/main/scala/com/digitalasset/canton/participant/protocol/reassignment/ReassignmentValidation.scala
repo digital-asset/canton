@@ -37,6 +37,24 @@ import scala.math.Ordered.orderingToOrdered
 
 object ReassignmentValidation {
 
+  /** On the submitting participant, check that the request is fresh, own and timely according to
+    * the submission tracker:
+    *   - fresh: no other request with the same root hash was registered before
+    *   - own: the request declares this participant as the submitting participant
+    *   - timely: the request was sequenced before its max sequencing time
+    */
+  def checkReplayedReassignment(
+      participantId: ParticipantId,
+      submitterMetadata: ReassignmentSubmitterMetadata,
+      protocolVersion: ProtocolVersion,
+      isFreshOwnTimelyRequest: Boolean,
+  ): Option[ReassignmentValidationError] =
+    Option.when(
+      submitterMetadata.submittingParticipant == participantId &&
+        protocolVersion >= ProtocolVersion.reassignmentReplayProtection &&
+        !isFreshOwnTimelyRequest
+    )(ReassignmentValidationError.ReplayedReassignment)
+
   /**   - check if the submitter is a stakeholder
     *   - check if the submitter is hosted on the participant
     */

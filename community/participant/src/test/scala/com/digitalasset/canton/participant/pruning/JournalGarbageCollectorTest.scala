@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.pruning
 
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -32,8 +33,7 @@ class JournalGarbageCollectorTest extends BaseTestWordSpec with HasExecutionCont
       }
     }
 
-    override protected implicit def executionContext: ExecutionContext =
-      JournalGarbageCollectorTest.this.directExecutionContext
+    override protected implicit def executionContext: ExecutionContext = directExecutionContext
 
     override protected def loggerFactory: NamedLoggerFactory =
       JournalGarbageCollectorTest.this.loggerFactory

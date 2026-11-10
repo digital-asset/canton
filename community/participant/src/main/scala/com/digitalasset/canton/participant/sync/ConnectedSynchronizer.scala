@@ -14,7 +14,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.data.{CantonTimestamp, ReassignmentSubmitterMetadata}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.{
   AtomicHealthComponent,
   CloseableHealthComponent,
@@ -33,10 +33,7 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
-import com.digitalasset.canton.participant.commitment.{
-  ReceivedAcsCommitmentValidator,
-  ReceivedAcsCommitmentValidatorImpl,
-}
+import com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentValidatorImpl
 import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.event.{AcsChangeListener, RecordTime}
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
@@ -129,11 +126,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.version.{
-  InterpretationConfig,
-  ParticipantProtocolFeatureFlags,
-  ProtocolVersion,
-}
+import com.digitalasset.canton.version.{InterpretationConfig, ParticipantProtocolFeatureFlags}
 import com.digitalasset.daml.lf.engine.Engine
 import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status
@@ -437,17 +430,14 @@ class ConnectedSynchronizer(
   )
 
   private val messageDispatcher: MessageDispatcher = {
-    val receivedAcsCommitmentValidator =
-      if (staticSynchronizerParameters.protocolVersion >= ProtocolVersion.v36)
-        new ReceivedAcsCommitmentValidatorImpl(
-          psid,
-          participantId,
-          synchronizerCrypto,
-          metrics.commitments,
-          validationParallelism = parameters.acsCommitments.receivedCommitmentValidationParallelism,
-          loggerFactory,
-        )
-      else ReceivedAcsCommitmentValidator.Noop
+    val receivedAcsCommitmentValidator = new ReceivedAcsCommitmentValidatorImpl(
+      psid,
+      participantId,
+      synchronizerCrypto,
+      metrics.commitments,
+      validationParallelism = parameters.acsCommitments.receivedCommitmentValidationParallelism,
+      loggerFactory,
+    )
 
     messageDispatcherFactory.create(
       psid,
@@ -1177,13 +1167,58 @@ class ConnectedSynchronizer(
         )
     }
 
-  override def submitUnassignments(
-      submitterMetadata: ReassignmentSubmitterMetadata,
+  def submitAutoUnassignments(
+      submissionInfo: ReassignmentSubmissionInfo,
+      validatedContractIds: Map[LfContractId, Set[LfPackageId]],
+      targetSynchronizer: Target[PhysicalSynchronizerId],
+      sourceTopology: Source[TopologySnapshot],
+      accounting: SubmissionAccounting,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, ReassignmentProcessorError, FutureUnlessShutdown[
+    UnassignmentProcessingSteps.SubmissionResult
+  ]] = submitUnassignmentsInternal(
+    submissionInfo,
+    validatedContractIds.keys.toSeq,
+    targetSynchronizer,
+    sourceTopology,
+    overrideSourceValidationPkgIds = Source(Map.empty),
+    overrideTargetValidationPkgIds = Target(Map.empty),
+    validatedContractPackageIds = validatedContractIds,
+    accounting,
+  )
+
+  def submitManualUnassignments(
+      submissionInfo: ReassignmentSubmissionInfo,
       contractIds: Seq[LfContractId],
       targetSynchronizer: Target[PhysicalSynchronizerId],
       sourceTopology: Source[TopologySnapshot],
       overrideSourceValidationPkgIds: Source[Map[LfContractId, LfPackageId]],
       overrideTargetValidationPkgIds: Target[Map[LfContractId, LfPackageId]],
+      accounting: SubmissionAccounting,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, ReassignmentProcessorError, FutureUnlessShutdown[
+    UnassignmentProcessingSteps.SubmissionResult
+  ]] = submitUnassignmentsInternal(
+    submissionInfo,
+    contractIds,
+    targetSynchronizer,
+    sourceTopology,
+    overrideSourceValidationPkgIds,
+    overrideTargetValidationPkgIds,
+    validatedContractPackageIds = Map.empty,
+    accounting,
+  )
+
+  private def submitUnassignmentsInternal(
+      submissionInfo: ReassignmentSubmissionInfo,
+      contractIds: Seq[LfContractId],
+      targetSynchronizer: Target[PhysicalSynchronizerId],
+      sourceTopology: Source[TopologySnapshot],
+      overrideSourceValidationPkgIds: Source[Map[LfContractId, LfPackageId]],
+      overrideTargetValidationPkgIds: Target[Map[LfContractId, LfPackageId]],
+      validatedContractPackageIds: Map[LfContractId, Set[LfPackageId]],
       accounting: SubmissionAccounting,
   )(implicit
       traceContext: TraceContext
@@ -1210,11 +1245,12 @@ class ConnectedSynchronizer(
           .submit(
             UnassignmentProcessingSteps
               .SubmissionParam(
-                submitterMetadata,
+                submissionInfo,
                 contractIds,
                 targetSynchronizer,
                 overrideSourceValidationPkgIds = overrideSourceValidationPkgIds,
                 overrideTargetValidationPkgIds = overrideTargetValidationPkgIds,
+                validatedContractPackageIds = validatedContractPackageIds,
                 accounting = accounting,
               ),
             sourceTopology.unwrap,
@@ -1222,7 +1258,7 @@ class ConnectedSynchronizer(
     }
 
   override def submitAssignments(
-      submitterMetadata: ReassignmentSubmitterMetadata,
+      submissionInfo: ReassignmentSubmissionInfo,
       reassignmentId: ReassignmentId,
       targetTopology: Target[TopologySnapshot],
       accounting: SubmissionAccounting,
@@ -1248,7 +1284,7 @@ class ConnectedSynchronizer(
         assignmentProcessor
           .submit(
             AssignmentProcessingSteps
-              .SubmissionParam(submitterMetadata, reassignmentId, accounting),
+              .SubmissionParam(submissionInfo, reassignmentId, accounting),
             targetTopology.unwrap,
           )
     }

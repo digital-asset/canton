@@ -130,6 +130,23 @@ object Cli {
       .action((secret, config) => config.copy(authorizationTokenSecret = Some(secret)))
       .discard
 
+    opt[String]("user-based-authorization-audience")
+      .optional()
+      .text(
+        "The audience (aud claim) of the authorization tokens, as configured by target-audience on the participant. " +
+          "Required together with --user-based-authorization-secret."
+      )
+      .action((audience, config) => config.copy(authorizationTokenAudience = Some(audience)))
+      .discard
+
+    checkConfig(c =>
+      Either.cond(
+        c.authorizationTokenSecret.isDefined == c.authorizationTokenAudience.isDefined,
+        (),
+        "--user-based-authorization-secret and --user-based-authorization-audience must be given together",
+      )
+    ).discard
+
     opt[Seq[String]]("client-cert")
       .optional()
       .text(

@@ -1,5 +1,13 @@
 # Canton XFER Test
 
+## Purpose
+
+Normally, the canton performance runner is used in various test scenarios to create
+high, inconvenient load. The xfer test suite is using the test harness in order to allow
+testing Canton for scale.
+
+Two test runners exist: vanilla asset transfer and tri-party substitution workflow.
+
 ## Building and pushing images
 
 To build images locally and push to the da-images/playground test registry, run the following command:

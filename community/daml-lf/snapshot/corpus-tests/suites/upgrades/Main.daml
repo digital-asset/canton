@@ -1,0 +1,57 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- Contracts of one version used through the other. Commands resolve to the newest vetted version,
+-- so v2 is unvetted while v1 should be used.
+module Main where
+
+import Daml.Script
+-- package vetting is only exposed here
+import Daml.Script.Internal (PackageName (..), unvetPackages, vetPackages)
+import V1.Asset qualified as V1
+import V2.Asset qualified as V2
+
+v2 : PackageName
+v2 = PackageName "corpus-upgrades-model" "2.0.0"
+
+setup : Script (Party, Party)
+setup = do
+  issuer <- allocateParty "issuer"
+  owner <- allocateParty "owner"
+  pure (issuer, owner)
+
+v1Only : Script ()
+v1Only = do
+  (issuer, owner) <- setup
+  unvetPackages [v2]
+  cid <- submit issuer $ createCmd V1.Asset with issuer; owner; amount = 10
+  _ <- submit issuer $ exerciseCmd cid V1.Split with part = 3
+  vetPackages [v2]
+
+v1ContractV2Choice : Script ()
+v1ContractV2Choice = do
+  (issuer, owner) <- setup
+  unvetPackages [v2]
+  cid <- submit issuer $ createCmd V1.Asset with issuer; owner; amount = 10
+  vetPackages [v2]
+  -- the v2 choice on a v1 contract upgrades it
+  _ <- submit issuer $ exerciseCmd (coerceContractId @V1.Asset @V2.Asset cid) V2.Annotate with text = "hi"
+  pure ()
+
+v1ContractV2Split : Script ()
+v1ContractV2Split = do
+  (issuer, owner) <- setup
+  unvetPackages [v2]
+  cid <- submit issuer $ createCmd V1.Asset with issuer; owner; amount = 10
+  vetPackages [v2]
+  _ <- submit issuer $ exerciseCmd (coerceContractId @V1.Asset @V2.Asset cid) V2.Split with part = 3
+  pure ()
+
+v2ContractV1Choice : Script ()
+v2ContractV1Choice = do
+  (issuer, owner) <- setup
+  cid <- submit issuer $ createCmd V2.Asset with issuer; owner; amount = 10; note = None
+  -- a v2 contract without the new field downgrades
+  unvetPackages [v2]
+  _ <- submit issuer $ exerciseCmd (coerceContractId @V2.Asset @V1.Asset cid) V1.Split with part = 4
+  vetPackages [v2]

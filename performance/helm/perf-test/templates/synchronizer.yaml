@@ -1,0 +1,201 @@
+# get synchronizer count from values, default to 1
+{{- $count := $.Values.synchronizer.podCount | default 1 | int }}
+
+# loop through to create the statefulsets and services
+{{- range $index, $e := until $count }}
+
+# set the current index and incrementing sync port (10001, 10002, etc.)
+{{- $x := add $index 1 }}
+
+# pull global db credentials
+{{- $pgUser := $.Values.postgres.user }}
+{{- $pgPassword := $.Values.postgres.password }}
+{{- $pgDatabase := $.Values.postgres.database }}
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "{{ $.Release.Name }}-synchronizer{{ $x }}"
+  labels:
+    app: "synchronizer{{ $x }}"
+spec:
+  serviceName: "synchronizer{{ $x }}"
+  replicas: 1
+  # tells k8s what to do with the auto-generated pvcs
+  persistentVolumeClaimRetentionPolicy:
+    # delete the pvc when 'helm uninstall' destroys the statefulset
+    whenDeleted: Delete
+    # keep the pvc if we just scale replicas down to 0 (safer for testing)
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app: "synchronizer{{ $x }}"
+  template:
+    metadata:
+      labels:
+        app: "synchronizer{{ $x }}"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "10013"
+    spec:
+      containers:
+        # synchronizer container
+        - name: synchronizer
+          resources:
+            limits:
+              cpu: {{ $.Values.synchronizer.resources.cpu | quote }}
+              memory: {{ $.Values.synchronizer.resources.memory | quote }}
+            requests:
+              cpu: {{ $.Values.synchronizer.resources.cpu | quote }}
+              memory: {{ $.Values.synchronizer.resources.memory | quote }}
+          image: "{{ $.Values.image.repo }}/canton-perf-synchronizer:{{ $.Values.image.tag }}"
+          ports:
+            - name: med-admin
+              containerPort: 10001
+            - name: seq-admin
+              containerPort: 10002
+            - name: seq-public
+              containerPort: 10003
+          env:
+            - name: JAVA_OPTS
+              value: -XX:MaxRAMPercentage=75.0
+            - name: POSTGRES_HOST
+              value: "127.0.0.1"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_USER
+              value: {{ $pgUser | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ $pgPassword | quote }}
+            - name: LOG_LEVEL_STDOUT
+              value: {{ $.Values.logLevel | quote }}
+            - name: LOG_LEVEL_CANTON
+              value: {{ $.Values.logLevel | quote }}
+            - name: ADDITIONAL_CONFIG_GC_LOGGING
+              value: canton.monitoring.logging.jvm-gc.enabled=true
+
+        # postgres container
+        - name: postgres
+          image: "{{ $.Values.postgres.image }}"
+          resources:
+            limits:
+              cpu: {{ $.Values.postgres.resources.cpu | quote }}
+              memory: {{ $.Values.postgres.resources.memory | quote }}
+            requests:
+              cpu: {{ $.Values.postgres.resources.cpu | quote }}
+              memory: {{ $.Values.postgres.resources.memory | quote }}
+          ports:
+            - name: postgres
+              # forcing to integer
+              containerPort: {{ $.Values.postgres.port | int }}
+          args:
+            - -c
+            - max_connections=200
+            - -c
+            - shared_buffers=10GB
+            - -c
+            - effective_cache_size=9GB
+            - -c
+            - maintenance_work_mem=768MB
+            - -c
+            - checkpoint_completion_target=0.9
+            - -c
+            - wal_buffers=16MB
+            - -c
+            - default_statistics_target=100
+            - -c
+            - random_page_cost=1.1
+            - -c
+            - effective_io_concurrency=200
+            - -c
+            - work_mem=15123kB
+            - -c
+            - huge_pages=off
+            - -c
+            - min_wal_size=2GB
+            - -c
+            - max_wal_size=8GB
+            - -c
+            - max_worker_processes=8
+            - -c
+            - max_parallel_workers_per_gather=4
+            - -c
+            - max_parallel_workers=8
+            - -c
+            - max_parallel_maintenance_workers=4
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_HOST_AUTH_METHOD
+              value: trust
+            - name: POSTGRES_USER
+              value: {{ $pgUser | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ $pgPassword | quote }}
+            - name: POSTGRES_DB
+              value: {{ $pgDatabase | quote }}
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+            - name: init-script
+              mountPath: /docker-entrypoint-initdb.d/init.sh
+              subPath: init.sh
+
+      volumes:
+        - name: init-script
+          configMap:
+            name: {{ $.Release.Name }}-synchronizer-init
+  # auto-generate the pvc for the database
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        storageClassName: premium-rwo
+        resources:
+          requests:
+            storage: 500Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # static service name for routing
+  name: "synchronizer{{ $x }}"
+  labels:
+    app: "synchronizer{{ $x }}"
+spec:
+  type: ClusterIP
+  selector:
+    app: "synchronizer{{ $x }}"
+  ports:
+    # map the dynamic sync port
+    - name: med-admin
+      # forcing to integer
+      port: 10001
+      targetPort: med-admin
+      protocol: TCP
+
+    - name: seq-admin
+      # forcing to integer
+      port: 10002
+      targetPort: seq-admin
+      protocol: TCP
+
+    - name: seq-public
+      # forcing to integer
+      port: 10003
+      targetPort: seq-public
+      protocol: TCP
+
+    # map the standard postgres port
+    - name: postgres
+      # forcing to integer
+      port: {{ $.Values.postgres.port | int }}
+      targetPort: postgres
+      protocol: TCP
+
+# end the synchronizer loop
+{{- end }}

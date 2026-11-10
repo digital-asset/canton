@@ -64,6 +64,9 @@ import scala.util.chaining.scalaUtilChainingOps
   *     participant TP.
   *   - Test that TP-side conflict detection properly handles concurrent contract archives and
   *     unassignments of contracts before they are replicated to the target participant.
+  *   - Test that replication completes when each TP request is larger than the SP's ACS queue. The
+  *     two batch sizes are configured on different participants, so neither operator can rule this
+  *     out.
   *
   * Setup:
   *   - 2 participants, a source and a target participant to perform party replication
@@ -246,6 +249,15 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           timeouts,
         ).tap(_.add(initialStatus).value.futureValueUS.value)
 
+      // The SP's ACS queue holds 20 contracts, fewer than each TP request of 21. So the SP serves
+      // each request in two parts: the 20 contracts of its full queue, then the single remaining
+      // contract.
+      val sourceConfig = AlphaAcsReplicationSourceConfig(
+        acsBatchSize = PositiveInt.tryCreate(10),
+        acsReaderMaxQueueSize = PositiveInt.tryCreate(20),
+      )
+      val targetConfig = AlphaAcsReplicationTargetConfig(acsBatchSize = PositiveInt.tryCreate(21))
+
       val agreedAt = env.environment.clock.now
       val sourceProcessor = asyncExec("Initialize SP processor")(
         AcsReplicationSourceParticipantProcessor.initialize(
@@ -260,7 +272,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           inMemoryAcsReplicationStateManager(sourceParticipant.id),
           noOpProgressAndCompletionCallback,
           noOpProgressAndCompletionCallback2,
-          AlphaAcsReplicationSourceConfig(),
+          sourceConfig,
           sourceParticipant.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore,
           futureSupervisor,
           exitOnFatalFailures = false,
@@ -306,7 +318,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           noOpProgressAndCompletionCallback,
           noOpProgressAndCompletionCallback2,
           acsTransferContractHandler,
-          AlphaAcsReplicationTargetConfig(),
+          targetConfig,
           futureSupervisor,
           exitOnFatalFailures = false,
           timeouts,
@@ -403,9 +415,11 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       canTargetParticipantProceed = true
       targetProcessor.progressAcsReplication()
 
-      eventually(timeUntilSuccess = 2.minute) {
-        sourceProcessor.hasChannelCompleted shouldBe true
-        targetProcessor.hasChannelCompleted shouldBe true
+      clue("SP and TP complete although each TP request exceeds the SP's queue") {
+        eventually(timeUntilSuccess = 2.minute) {
+          sourceProcessor.hasChannelCompleted shouldBe true
+          targetProcessor.hasChannelCompleted shouldBe true
+        }
       }
 
       logger.info("Sequencer channel based party replication processing completed on SP and TP")

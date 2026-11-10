@@ -37,7 +37,7 @@ trait SessionSigningKeysIntegrationTest
   protected lazy val nodesWithSessionSigningKeysDisabled: Set[String] = Set.empty
 
   override protected def otherConfigTransforms: Seq[ConfigTransform] = Seq(
-    ConfigTransforms.setSigningKeysIfPV35OrHigher(
+    ConfigTransforms.setSigningKeys(
       SessionSigningKeysConfig.enabled,
       nodeFilter = name => !nodesWithSessionSigningKeysDisabled.contains(name),
     )

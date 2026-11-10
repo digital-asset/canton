@@ -101,8 +101,6 @@ final class CantonOrderingTopologyProviderTest
               "leader selection policy in dynamic",
               "leader selection policy expected to be used",
             ),
-            // In pv=34 we use value in config if exists or default
-            // In pv>34 we use value from sequencing parameters if exists or default
             (None, None, DefaultSegmentLength, None, None, DefaultLeaderSelectionPolicyConfig),
             (
               None,

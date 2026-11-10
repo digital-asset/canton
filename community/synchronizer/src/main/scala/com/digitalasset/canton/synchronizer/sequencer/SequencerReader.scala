@@ -32,8 +32,8 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
-import com.digitalasset.canton.sequencing.{GroupAddressResolver, SequencedSerializedEvent}
-import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
+import com.digitalasset.canton.sequencing.{ConnectionSerializedEvent, GroupAddressResolver}
+import com.digitalasset.canton.store.SequencedEventStore.ConnectionSequencedEvent
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SequencerReader.ReadState
@@ -365,7 +365,7 @@ class SequencerReader(
 
     private def signValidatedEvent(
         unsignedEventData: UnsignedEventData
-    ): EitherT[FutureUnlessShutdown, SequencedEventError, SequencedSerializedEvent] = {
+    ): EitherT[FutureUnlessShutdown, SequencedEventError, ConnectionSerializedEvent] = {
       val UnsignedEventData(
         event,
         topologySnapshotO,
@@ -692,7 +692,7 @@ class SequencerReader(
     )(implicit traceContext: TraceContext): EitherT[
       FutureUnlessShutdown,
       SequencerSubscriptionError.TombstoneEncountered.Error,
-      SequencedSerializedEvent,
+      ConnectionSerializedEvent,
     ] =
       for {
         signedEvent <- SignedContent
@@ -721,7 +721,7 @@ class SequencerReader(
             case err =>
               throw new IllegalStateException(s"Signing failed with an unexpected error: $err")
           }
-      } yield SequencedEventWithTraceContext(signedEvent)(traceContext)
+      } yield ConnectionSequencedEvent(signedEvent)(traceContext)
 
     private def trafficReceiptForNonSequencerSender(
         senderMemberId: SequencerMemberId,

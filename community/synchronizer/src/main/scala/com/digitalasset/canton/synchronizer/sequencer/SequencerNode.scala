@@ -645,8 +645,7 @@ class SequencerNodeBootstrap(
             loggerFactory,
           )
 
-          // TODO(#29474): Using the latest sequenced event for initializing the topology client's head is a BUG.
-          //  However, currently, BFT sequencers are getting stuck on restart without this, see the issue for details.
+          // TODO(#29474)
           _ <- sequencerFactory match {
             case _: BftSequencerFactory =>
               EitherT.right[String](

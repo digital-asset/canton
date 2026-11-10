@@ -469,6 +469,7 @@ private[lf] final class PhaseOne(
           case BShiftNumeric => SBShiftNumeric
           case BInt64ToNumeric => SBInt64ToNumeric
           case BTextToNumeric => SBTextToNumeric
+          case BTextToContractId => SBTextToContractId
           case BNumericToInt64 => SBNumericToInt64
           case BNumericToBigNumeric => SBNumericToBigNumeric
           case BBigNumericToNumeric => SBBigNumericToNumeric

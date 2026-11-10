@@ -128,6 +128,20 @@ service PartyManagementService {
   // - An 'onboarding=true' mapping must exist for the party on this participant.
   // - The participant must be connected to the requested synchronizer.
   rpc ClearPartyOnboardingFlag(ClearPartyOnboardingFlagRequest) returns (ClearPartyOnboardingFlagResponse);
+
+  // Remotely reads a party's ACS from a specified source participant and synchronizer as of the
+  // specified time and returns the ACS to the caller.
+  //
+  // The output file of this endpoint can be used as input of the ImportPartyAcs endpoint.
+  rpc GetRemoteAcs(GetRemoteAcsRequest) returns (stream GetRemoteAcsResponse);
+
+  // Hybrid party replication endpoint.
+  //
+  // Determines the point in time at which the specified party freezing state has started to
+  // become effective on the local participant and specified synchronizer.
+  //
+  // The party must still be in the freezing state for the command to return the freezing timestamp.
+  rpc GetPartyFreezingTime(GetPartyFreezingTimeRequest) returns (GetPartyFreezingTimeResponse);
 }
 
 message AddPartyAsyncRequest {
@@ -595,4 +609,58 @@ message ClearPartyOnboardingFlagResponse {
   // computed "latest decision deadline", which is the maximum of all `validUntil + decisionTimeout`
   // from the synchronizer's parameter history, ensuring all past in-flight transactions are finalized.
   optional google.protobuf.Timestamp earliest_retry_timestamp = 2;
+}
+
+// Retrieves the ACS for a given party from a specified source participant via the local participant,
+// returning the ACS to the caller.
+//
+// This request will fail if the party does not list the target participant as a hosting participant
+// at the specified `as_of` time.
+message GetRemoteAcsRequest {
+  // The identifier of the party whose ACS is being read. This party must already be active on the
+  // local target participant for the remote ACS read to succeed.
+  // Required
+  string party_id = 1;
+
+  // The identifier of the synchronizer managing the contracts to be read.
+  // Scopes the ACS retrieval to contracts assigned to this synchronizer.
+  // Required
+  string synchronizer_id = 2;
+
+  // The unique identifier of the source participant from which to read the party's ACS.
+  // Required
+  string source_participant_uid = 3;
+
+  // The timestamp at which the ACS is read.
+  // Required
+  google.protobuf.Timestamp as_of = 4;
+}
+
+message GetRemoteAcsResponse {
+  // A chunk of the ACS snapshot. This response is streamed, with each message containing a portion of the
+  // complete ACS data. The raw binary data within each chunk consists of Ledger API active contract messages,
+  // specifically wrapped in `v30.active_contract.ActiveContract` messages. However, a single chunk does not
+  // necessarily contain exactly one complete message.
+  // This field will be populated in each streamed response.
+  // Required
+  bytes chunk = 1;
+}
+
+message GetPartyFreezingTimeRequest {
+  // The identifier of the party whose freezing starting time of the local participant is retrieved.
+  // Required
+  string party_id = 1;
+
+  // The identifier of the synchronizer in which to look for the party topology hosting state.
+  // Required
+  string synchronizer_id = 2;
+}
+
+message GetPartyFreezingTimeResponse {
+  // The timestamp at which the party started being in the freezing state.
+  //
+  // Note that the timestamp is one microsecond later that the PartyToParticipant topology
+  // valid_from value which is exclusive.
+  // Required
+  google.protobuf.Timestamp timestamp = 1;
 }

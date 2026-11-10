@@ -15,6 +15,8 @@ on:
       # The release/ tests assert against the real dependabot config, so a drift there
       # should re-run them.
       - '.github/dependabot.yml'
+      # scripts/ci/test_nightly_job_names.py checks the nightly job names.
+      - '.github/workflows/canton_nightly.yml'
       - '.github/workflows/lint_and_test_py_scripts.yml'
       # Re-run when the pinned toolchain changes, so a broken ruff/pytest env is caught here.
       - 'shell.nix'

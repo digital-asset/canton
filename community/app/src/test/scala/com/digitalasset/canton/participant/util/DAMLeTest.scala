@@ -31,6 +31,7 @@ import com.digitalasset.canton.{
   LfCommand,
   LfPartyId,
 }
+import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party}
 import com.digitalasset.daml.lf.engine
 import com.digitalasset.daml.lf.engine.EngineLoggingConfig
@@ -235,13 +236,19 @@ class DAMLeTest
         },
       ).value.map { actual =>
         inside(actual) {
-          // TODO(#23876) - improve error matching once non-Dev errors are used
           case Left(
                 DAMLe.EngineError(
-                  engine.Error.Interpretation(engine.Error.Interpretation.DamlException(e), _)
+                  engine.Error.Interpretation(
+                    engine.Error.Interpretation.DamlException(
+                      lf.interpretation.Error.Upgrade(
+                        af: lf.interpretation.Error.Upgrade.AuthenticationFailed
+                      )
+                    ),
+                    _,
+                  )
                 )
               ) =>
-            succeed
+            af.msg shouldBe "failed to authenticate contract"
         }
       }
     }

@@ -60,8 +60,8 @@ import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissio
   SubmissionAlreadyInFlight,
   TimeoutTooLow,
 }
+import com.digitalasset.canton.participant.protocol.submission.SubmissionTrackingData.CauseWithTemplate
 import com.digitalasset.canton.participant.protocol.submission.TransactionConfirmationRequestFactory.*
-import com.digitalasset.canton.participant.protocol.submission.TransactionSubmissionTrackingData.CauseWithTemplate
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractInstanceOfId,
   ContractLookupError,
@@ -372,7 +372,7 @@ class TransactionProcessingSteps(
     ): TransactionSubmissionTrackingData =
       TransactionSubmissionTrackingData.create(
         completionInfo,
-        TransactionSubmissionTrackingData.CauseWithTemplate(error),
+        SubmissionTrackingData.CauseWithTemplate(error),
         psid,
         transactionHash = submitterInfo.transactionHash,
       )
@@ -392,8 +392,8 @@ class TransactionProcessingSteps(
       def causeWithTemplate(
           message: String,
           reason: TransactionConfirmationRequestCreationError,
-      ): TransactionSubmissionTrackingData.CauseWithTemplate =
-        TransactionSubmissionTrackingData.CauseWithTemplate(
+      ): SubmissionTrackingData.CauseWithTemplate =
+        SubmissionTrackingData.CauseWithTemplate(
           SubmissionErrors.MalformedRequest.Error(message, reason)
         )
 
@@ -402,7 +402,7 @@ class TransactionProcessingSteps(
           .parTraverse(rawSubmitter =>
             EitherT
               .fromEither[FutureUnlessShutdown](LfPartyId.fromString(rawSubmitter))
-              .leftMap[TransactionSubmissionTrackingData.RejectionCause](msg =>
+              .leftMap[SubmissionTrackingData.RejectionCause](msg =>
                 causeWithTemplate(msg, MalformedSubmitter(rawSubmitter))
               )
           )
@@ -426,12 +426,12 @@ class TransactionProcessingSteps(
               protocolVersion,
               protocolLimits,
             )
-            .leftMap[TransactionSubmissionTrackingData.RejectionCause] {
+            .leftMap[SubmissionTrackingData.RejectionCause] {
               case TransactionTreeFactoryError(UnknownPackageError(unknownTo)) =>
-                TransactionSubmissionTrackingData
+                SubmissionTrackingData
                   .CauseWithTemplate(SubmissionErrors.PackageNotVettedByRecipients.Error(unknownTo))
               case TransactionTreeFactoryError(ContractLookupError(contractId, _)) =>
-                TransactionSubmissionTrackingData
+                SubmissionTrackingData
                   .CauseWithTemplate(SubmissionErrors.UnknownContractSynchronizer.Error(contractId))
               case creationError =>
                 causeWithTemplate("Transaction confirmation request creation failed", creationError)
@@ -439,7 +439,7 @@ class TransactionProcessingSteps(
         )
         _ = logger.debug(s"Generated requestUuid=${request.informeeMessage.requestUuid}")
         batch <- EitherT
-          .right[TransactionSubmissionTrackingData.RejectionCause](
+          .right[SubmissionTrackingData.RejectionCause](
             request.asBatch(recentSnapshot.ipsSnapshot)
           )
       } yield {
@@ -469,7 +469,7 @@ class TransactionProcessingSteps(
       }
 
       def mkError(
-          rejectionCause: TransactionSubmissionTrackingData.RejectionCause
+          rejectionCause: SubmissionTrackingData.RejectionCause
       ): Success[Outcome[Either[SubmissionTrackingData, PreparedBatch]]] = {
         val trackingData = TransactionSubmissionTrackingData.create(
           // At this stage we're still preparing the batch to be sent,
@@ -488,7 +488,7 @@ class TransactionProcessingSteps(
         case Success(Outcome(Left(rejectionCause))) => mkError(rejectionCause)
         case Success(AbortedDueToShutdown) => Success(AbortedDueToShutdown)
         case Failure(exception) =>
-          val rejectionCause = TransactionSubmissionTrackingData.CauseWithTemplate(
+          val rejectionCause = SubmissionTrackingData.CauseWithTemplate(
             SyncServiceInjectionError.InjectionFailure.Failure(exception)
           )
           mkError(rejectionCause)
@@ -500,7 +500,7 @@ class TransactionProcessingSteps(
         // Since we're timing out, we have to assume here the event has not been ordered and therefore
         // no traffic was charged
         submitterInfo.toCompletionInfo(NonNegativeLong.zero).copy(optDeduplicationPeriod = None),
-        TransactionSubmissionTrackingData.TimeoutCause,
+        SubmissionTrackingData.TimeoutCause,
         psid,
         transactionHash = submitterInfo.transactionHash,
       )
@@ -1448,10 +1448,10 @@ class TransactionProcessingSteps(
     } yield commitAndContractsAndEvent
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       pendingRequestData: RequestType#PendingRequestData,
-      pendingSubmissionMap: PendingSubmissions,
+      pendingSubmissionDataO: Option[PendingSubmissionData],
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext

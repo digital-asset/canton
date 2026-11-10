@@ -29,7 +29,10 @@ object SubscriptionResponse {
       _ignoredTraceContext,
     ) = responseP
     for {
-      signedContent <- SignedContent.fromByteString(protocolVersion, signedSequencedEvent)
+      signedContent <- SignedContent.fromByteString(
+        protocolVersion,
+        SignatureCountCheck.ByProtocolVersion,
+      )(signedSequencedEvent)
       signedSequencedEvent <- signedContent.deserializeContent(
         SequencedEvent.fromByteStringCompressed(
           ProtocolVersionValidation.PV(protocolVersion),

@@ -376,6 +376,19 @@ final class ProtobufCompatibilityReaderTest
   private def removalOfPv34(majorMinor: (Int, Int)): Seq[String] =
     if (Ordering[(Int, Int)].lt(majorMinor, (3, 7))) removalOfPv34Changes else Seq.empty
 
+  private val reassignmentSubmissionTrackingChanges = Seq(
+    // reassignment added to the SubmissionTrackingData oneof in 3.8; participant-local storage, older binaries cannot read reassignment entries
+    """com/digitalasset/canton/participant/protocol/v30/submission_tracking.proto:Previously present field "2" with name "reassignment" on message "SubmissionTrackingData" was deleted.""",
+    // RejectionCause moved to a top-level message shared by transactions and reassignments; the wire format is unchanged
+    """com/digitalasset/canton/participant/protocol/v30/submission_tracking.proto:Field "2" with name "rejection_cause" on message "TransactionSubmissionTrackingData" changed type from "com.digitalasset.canton.participant.protocol.v30.TransactionSubmissionTrackingData.RejectionCause" to "com.digitalasset.canton.participant.protocol.v30.RejectionCause".""",
+    """com/digitalasset/canton/participant/protocol/v30/submission_tracking.proto:Field "2" with name "rejection_cause" on message "TransactionSubmissionTrackingData" changed type from "com.digitalasset.canton.participant.protocol.v30.RejectionCause" to "com.digitalasset.canton.participant.protocol.v30.TransactionSubmissionTrackingData.RejectionCause".""",
+  )
+
+  // Reassignment submission tracking data is added in 3.8
+  private def reassignmentSubmissionTracking(majorMinor: (Int, Int)): Seq[String] =
+    if (Ordering[(Int, Int)].lt(majorMinor, (3, 8))) reassignmentSubmissionTrackingChanges
+    else Seq.empty
+
   "protobuf" should {
 
     val current = ReleaseVersion.current
@@ -416,7 +429,8 @@ final class ProtobufCompatibilityReaderTest
                 majorMinor,
                 Nil,
               ) ++ googleProtobufBreakingChanges(majorMinor) ++ removalOfPv34(majorMinor) ++
-                transactionProtoMovedToSnapshot(majorMinor)
+                transactionProtoMovedToSnapshot(majorMinor) ++
+                reassignmentSubmissionTracking(majorMinor)
 
             val unacceptableBreakages = errorOutput.filter(!acceptedBreakingChanges.contains(_))
             if (unacceptableBreakages.nonEmpty) {

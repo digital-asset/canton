@@ -10,7 +10,6 @@ import com.digitalasset.canton.config.{
   NonNegativeFiniteDuration,
   PositiveDurationSeconds,
   PositiveFiniteDuration,
-  StorageConfig,
 }
 import com.digitalasset.canton.sequencer.admin.v30 as adminProto
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -31,7 +30,6 @@ import com.digitalasset.canton.synchronizer.sequencer.DatabaseSequencerConfig.{
   TestingInterceptor,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
-import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.ReferenceSequencerDriver
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.nonempty.NonEmpty
 import pureconfig.generic.semiauto.{deriveReader, deriveWriter}
@@ -54,12 +52,6 @@ object SequencerConfig {
     override def highAvailabilityEnabled: Boolean = highAvailability.exists(_.isEnabled)
   }
 
-  // TODO(#29603): remove this option once the reference sequencer is no longer used
-  final case class External(
-      block: BlockSequencerConfig,
-      config: ReferenceSequencerDriver.Config[StorageConfig],
-  ) extends SequencerConfig
-
   final case class BftSequencer(
       // To avoid having to include an empty "block" node if defaults are fine
       block: BlockSequencerConfig = BlockSequencerConfig(),
@@ -67,11 +59,7 @@ object SequencerConfig {
       config: BftBlockOrdererConfig = BftBlockOrdererConfig(),
   ) extends SequencerConfig
 
-  def default: SequencerConfig =
-    External(
-      BlockSequencerConfig(),
-      ReferenceSequencerDriver.Config(storage = StorageConfig.Memory()),
-    )
+  def default: SequencerConfig = BftSequencer()
 
   final case class DeprecatedSequencerConfig(sequencerType: String) extends SequencerConfig
 

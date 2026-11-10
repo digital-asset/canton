@@ -12,21 +12,25 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationTopologyWorkflow.{
   TopologyTransactionInfo,
-  partyToParticipantTopologyHeadO,
+  partyToParticipantTopologyAsOfO,
 }
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer
-import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TopologyStore}
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
+  HostingParticipant,
   PartyToParticipant,
   TopologyChangeOp,
   TopologyMapping,
 }
+import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.nonempty.NonEmpty
+import org.apache.pekko.stream.Materializer
+import org.apache.pekko.stream.scaladsl.{Sink, Source}
 
 import scala.concurrent.ExecutionContext
 
@@ -41,29 +45,30 @@ class AcsReplicationTopologyWorkflow(
 ) extends FlagCloseable
     with NamedLogging {
 
-  private[party] def partyToParticipantTopologyHead(
+  private[party] def partyToParticipantTopologyAsOf(
       partyId: PartyId,
+      asOf: CantonTimestamp,
       topologyStore: TopologyStore[SynchronizerStore],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, StoredTopologyTransaction[Replace, PartyToParticipant]] =
     EitherT(
-      partyToParticipantTopologyHeadO(partyId, topologyStore).map(
+      partyToParticipantTopologyAsOfO(partyId, asOf, topologyStore).map(
         _.toRight(
-          s"Party $partyId not hosted on synchronizer ${topologyStore.storeId.psid}"
+          s"Party $partyId not hosted on synchronizer ${topologyStore.storeId.psid} as of $asOf"
         )
       )
     )
 
-  /** Verifies that party-to-participant topology mapping exists, contains both target and source
-    * participant and that the target participant has the onboarding flag set.
+  /** Verifies that party-to-participant topology mapping exists at the ACS replication timestamp
+    * and contains both target and source participants.
     * @param params
     *   party replication parameters
     * @param connectedSynchronizer
     *   active synchronizer, used for topology store access
     * @return
-    *   effective time, onboarding flag and serial of the onboarding topology transaction or None if
-    *   not yet authorized
+    *   effective time and hosting state of the target participant or None if the party is not yet
+    *   authorized
     */
   private[party] def verifyAuthorizedTopology(
       params: AcsReplicationStatus.AcsReplicationParameters,
@@ -75,7 +80,11 @@ class AcsReplicationTopologyWorkflow(
       PartyReplicationTopologyWorkflow.SynchronizerTopologyContext(connectedSynchronizer)
     for {
       partyToParticipantTopologyTransactionO <- EitherT(
-        partyToParticipantTopologyHeadO(params.partyId, topologyContext.topologyStore).map(txO =>
+        partyToParticipantTopologyAsOfO(
+          params.partyId,
+          params.timestamp,
+          topologyContext.topologyStore,
+        ).map(txO =>
           Either.cond(
             txO.exists(
               _.mapping.participants.exists(_.participantId == params.sourceParticipantId)
@@ -93,7 +102,7 @@ class AcsReplicationTopologyWorkflow(
         partyToParticipantTopologyPartyAdded.validFrom,
         partyToParticipantTopologyPartyAdded.transaction.mapping.participants
           .find(_.participantId == params.targetParticipantId)
-          .exists(_.onboarding),
+          .map(_.state),
       )
     }
   }
@@ -130,30 +139,76 @@ class AcsReplicationTopologyWorkflow(
 object AcsReplicationTopologyWorkflow {
   final case class TopologyTransactionInfo(
       validFrom: EffectiveTime,
-      isOnboarding: Boolean,
+      hostingStateO: Option[HostingState],
   )
 
-  /** The party's current mapping, or its current proposal if `proposal` is set. Filters by the uid
-    * only: with a namespace filter, the store also returns the mappings of other parties of that
-    * namespace.
+  /** The party's mapping as of the specified timestamp. Filters by the uid only: with a namespace
+    * filter, the store also returns the mappings of other parties of that namespace.
     */
-  private[party] def partyToParticipantTopologyHeadO(
+  private[party] def partyToParticipantTopologyAsOfO(
       partyId: PartyId,
+      asOf: CantonTimestamp,
       topologyStore: TopologyStore[SynchronizerStore],
-      proposal: Boolean = false,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
   ): FutureUnlessShutdown[Option[StoredTopologyTransaction[Replace, PartyToParticipant]]] =
-    // TODO(#25766): add topology client endpoint
     topologyStore
       .findPositiveTransactions(
-        asOf = CantonTimestamp.MaxValue,
+        asOf = asOf,
         asOfInclusive = false,
-        isProposal = proposal,
+        isProposal = false,
         types = Seq(TopologyMapping.Code.PartyToParticipant),
         filterUid = Some(NonEmpty(Seq, partyId.uid)),
         filterNamespace = None,
       )
       .map(_.collectOfMapping[PartyToParticipant].result.headOption)
+
+  /** Locates the effective time of the PartyToParticipant transaction that first matches the
+    * hosting state if it exists as long as all the subsequent PTP transactions match the expected
+    * hosting state.
+    */
+  private[admin] def partyToParticipantHostingStateValidFrom(
+      partyId: PartyId,
+      participantId: ParticipantId,
+      hostingState: HostingState,
+      topologyStore: TopologyStore[SynchronizerStore],
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+      materializer: Materializer,
+  ): FutureUnlessShutdown[Option[EffectiveTime]] = {
+
+    def doesHostingStateMatch(
+        ptp: StoredTopologyTransaction[TopologyChangeOp, PartyToParticipant]
+    ): Boolean = ptp.mapping.participants.exists { case HostingParticipant(pid, _, state) =>
+      pid == participantId && state == hostingState
+    }
+
+    val source = Source
+      .unfoldAsync(CantonTimestamp.MaxValue) { asOf =>
+        topologyStore
+          .findPositiveTransactions(
+            asOf = asOf,
+            asOfInclusive = false,
+            isProposal = false,
+            types = Seq(TopologyMapping.Code.PartyToParticipant),
+            filterUid = Some(NonEmpty(Seq, partyId.uid)),
+            filterNamespace = None,
+            pagination = None,
+          )
+          .failOnShutdownToAbortException("partyToParticipantHostingStateValidFrom interrupted")
+          .map(
+            _.collectOfMapping[PartyToParticipant].result.headOption
+              .map(tx => (tx.validFrom.value, tx))
+          )
+      }
+
+    val f = source
+      .takeWhile(doesHostingStateMatch(_))
+      .runWith(Sink.lastOption)
+      .map(_.map(_.validFrom.immediateSuccessor))
+
+    FutureUnlessShutdown.recoverFromAbortException(f)
+  }
 }

@@ -75,6 +75,7 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
   TransactionSubmitted,
 }
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ReassignmentProcessorError
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentSubmissionInfo
 import com.digitalasset.canton.participant.protocol.submission.PartyVettingMapComputation
 import com.digitalasset.canton.participant.protocol.submission.routing.{
   AdmissibleSynchronizersComputation,
@@ -695,10 +696,8 @@ class CantonSyncService(
         // TODO(#25385):: Consider moving before SyncService, so that the result of command interpretation
         //                      is already sanity checked wrt Canton TX normalization rules
         wfTransaction <- EitherT.fromEither[FutureUnlessShutdown](
-          // Use PathRollbackContextFactory by as we do not currently know the protocol version and
-          // PathRollbackContextFactory has stricter checking than NoPathRollbackContextFactory.
           WellFormedTransaction
-            .check(transaction, metadata, WithoutSuffixes, PathRollbackContextFactory)
+            .check(transaction, metadata, WithoutSuffixes)
             .leftMap(RoutingInternalError.IllformedTransaction.apply)
             .leftWiden[TransactionError]
         )
@@ -1976,8 +1975,8 @@ class CantonSyncService(
               doReassignment(
                 psid = sourcePsid.unwrap
               ) { case (sourceSynchronizer, sourceTopology) =>
-                sourceSynchronizer.submitUnassignments(
-                  submitterMetadata = ReassignmentSubmitterMetadata(
+                sourceSynchronizer.submitManualUnassignments(
+                  submissionInfo = ReassignmentSubmissionInfo(
                     submitter = submitter,
                     userId = userId,
                     submittingParticipant = participantId,
@@ -2004,7 +2003,7 @@ class CantonSyncService(
                 psid = targetPsid
               ) { case (targetSynchronizer, targetTopology) =>
                 targetSynchronizer.submitAssignments(
-                  submitterMetadata = ReassignmentSubmitterMetadata(
+                  submissionInfo = ReassignmentSubmissionInfo(
                     submitter = submitter,
                     userId = userId,
                     submittingParticipant = participantId,

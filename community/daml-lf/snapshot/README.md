@@ -434,3 +434,72 @@ where:
 * `<profile directory>` is the directory where the profiling output
   will be written.
 
+
+# Corpus
+
+A corpus is a directory of self-contained transaction recordings, replayable without DARs or
+earlier transactions (see `Corpus.scala` and `CorpusManifest` in `snapshot.proto`):
+
+    manifest.json           suites -> tests -> number of units, and where each suite was recorded from
+    packages/<pkgId>.dalf   every package a unit uses, once
+    suites/<suite>.bin      the transaction entries (units) of a suite, grouped by test in manifest order
+
+A suite is a DAR of Daml Script tests, a test is one script and a unit one transaction it submitted.
+
+Record one with `scripts/record-corpus.sh`, inside the nix-shell:
+
+    scripts/record-corpus.sh cn-apps main /tmp/corpus
+
+This builds the test DARs of the source (`scripts/sources/cn-apps.sh`), runs every script on the IDE
+ledger with canton's pinned daml-script and adds the suites to the corpus. Recording is
+deterministic: the same source and daml-script give the same corpus. To record the tests of another
+repository, add a source script next to `cn-apps.sh` and pass the same `CORPUS_DIR` to add its suites
+to the same corpus. A `WORK_DIR` you set must be empty, or pass `--clean` to empty it first.
+
+`canton-tests` is a source in this repository: `corpus-tests/` holds small Daml packages whose scripts
+cover what recording and replay must handle (contract keys, upgrades, interfaces, rollbacks and
+scripts of unusual shapes). Each package under `corpus-tests/suites/` is a suite. `CantonTestsCorpus`
+records them in the tests, and `CantonTestsCorpusTest` checks the corpus still covers all of it.
+
+    scripts/record-corpus.sh canton-tests . /tmp/corpus
+## Replaying and benchmarking a corpus
+
+`CorpusReplay` replays every unit of a corpus and checks it gives the recorded transaction:
+
+    sbt "daml-lf-snapshot/runMain com.digitalasset.daml.lf.testing.snapshot.CorpusReplay /tmp/corpus"
+
+`CorpusBenchmark` times the replay on a warmed-up engine with all packages loaded. One operation
+replays every selected unit once. `select` is a comma-separated list of `<suite>/<test>` prefixes,
+empty for the whole corpus:
+
+    sbt "daml-lf-snapshot/Jmh/run CorpusBenchmark -p corpus=/tmp/corpus \
+      -p select=cn-apps/utility-commercials-tests-v0-0.0.1/ -rf json -rff result.json"
+
+Before timing anything, the setup checks that every selected unit replays to its recorded
+transaction. JMH's `-wi`, `-i` and `-f` override the warmup iterations, measurement iterations and
+forks.
+
+## Comparing two commits
+
+`scripts/ab.sh` answers "is my branch faster or slower than X?". Run it inside the nix-shell, on a
+clean working tree:
+
+    scripts/ab.sh                          # HEAD vs where it split off origin/main
+    scripts/ab.sh --theirs main --corpus /tmp/corpus
+    scripts/ab.sh --corpus /tmp/canton-tests /tmp/cn-apps
+
+Ours is `HEAD` and theirs a commit (by default where `HEAD` split off `origin/main`). Each side is
+built in its own git worktree, kept in `~/.cache/canton-ab` so that later builds are incremental,
+and runs its own `CorpusBenchmark` on the same corpora. By default that's canton-tests, recorded on
+first use and cached until its sources or the daml-script version change. With several corpora, a
+side's run replays each of them in turn and its time is the sum, so a corpus weighs by how long it
+takes to replay; the report also compares each corpus on its own.
+
+The runs alternate between the sides (`--rounds`, 5 by default), so drift on the machine affects
+both alike, and `AbReport` compares them round by round: the time of ours relative to theirs, with a
+95% confidence interval. Node counts must be equal on both sides. The report starts with every
+number the runs recorded (score, error, each iteration and the counts) and only then gives the
+analysis, so you can always check or redo it. `--margin PCT` lists results whose whole interval lies
+within ±PCT% as ignored, by name; by default nothing is ignored. The report, the raw JMH results and
+the logs are in the work directory printed at the start (`--work-dir` or `$WORK_DIR` to choose it).
+`--build-only` builds both sides and stops, e.g. to check that they compile.

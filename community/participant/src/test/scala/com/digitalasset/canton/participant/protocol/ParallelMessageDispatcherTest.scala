@@ -22,7 +22,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.{BaseTest, HasExecutorService}
 import org.scalatest.wordspec.AnyWordSpec
 
-class ParallelMessageDispatcherTest
+final class ParallelMessageDispatcherTest
     extends AnyWordSpec
     with HasExecutorService
     with BaseTest

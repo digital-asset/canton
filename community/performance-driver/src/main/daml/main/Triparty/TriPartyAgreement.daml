@@ -15,9 +15,6 @@ data Substitution = Substitution with oldAssetId : Text, oldQty : Decimal, newAs
 computeCashMovement : [Substitution] -> [(Text, Decimal)] -> Decimal
 computeCashMovement substitutions eligibility = sum (map (\sub -> lookupMtm sub.newAssetId eligibility * sub.newQty - lookupMtm sub.oldAssetId eligibility * sub.oldQty) substitutions)
 
-cashAccount : Text 
-cashAccount = "cash-account"
-
 cashId : Text 
 cashId = "cash"
 

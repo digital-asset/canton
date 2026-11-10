@@ -16,6 +16,7 @@ import com.digitalasset.canton.sequencing.traffic.EventCostCalculator.{
   EventCostDetails,
 }
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAnyWordSpec}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
@@ -135,11 +136,60 @@ class EventCostCalculatorTest
       PositiveInt.tryCreate(5000),
       Map.empty,
       baseEventCost = baseCost,
+      testedProtocolVersion,
     ) shouldBe EventCostDetails(
       costMultiplier = PositiveInt.tryCreate(5000),
       groupToMembersSize = Map.empty,
-      envelopes = Map(envelope -> expectedEnvelopeCost),
+      envelopes = List(envelope -> expectedEnvelopeCost),
       eventCost = NonNegativeLong.tryCreate(expectedEnvelopeCost.finalCost + baseCost.value),
+    )
+  }
+
+  "count calculate costs correctly for multiple, equal envelopes (i37753)" in {
+    val bytes = 42
+    val envelope = ClosedUncompressedEnvelope.create(
+      ByteString.copyFrom(Array.fill(bytes)(1.toByte)),
+      Recipients.cc(recipient1, recipient2),
+      Seq.empty,
+      testedProtocolVersion,
+    )
+
+    val repeated = 5
+    val envelopes = Seq.fill(repeated)(envelope)
+
+    val batch = Batch.fromClosed(
+      testedProtocolVersion,
+      envelopes *,
+    )
+
+    // Expected cost is dependent on protocol version, since we need the change to be tied to
+    // a version upgrade (37 -> 38).
+    val expectedCost = NonNegativeLong.tryCreate(
+      if (testedProtocolVersion <= ProtocolVersion.v37) {
+        bytes.toLong
+      } else {
+        bytes.toLong * repeated
+      }
+    )
+
+    new EventCostCalculator(loggerFactory).computeEventCost(
+      batch,
+      PositiveInt.one,
+      Map.empty,
+      baseEventCost = NonNegativeLong.zero,
+      testedProtocolVersion,
+    ) shouldBe EventCostDetails(
+      costMultiplier = PositiveInt.one,
+      groupToMembersSize = Map.empty,
+      envelopes = List.fill(repeated)(
+        envelope -> EnvelopeCostDetails(
+          writeCost = bytes.toLong,
+          readCost = 0L,
+          finalCost = bytes.toLong,
+          recipients = envelope.recipients.allRecipients.toSeq,
+        )
+      ),
+      eventCost = expectedCost,
     )
   }
 }

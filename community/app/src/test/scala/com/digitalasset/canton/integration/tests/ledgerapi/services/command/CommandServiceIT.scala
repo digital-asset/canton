@@ -7,6 +7,7 @@ import com.daml.ledger.api.v2.command_service.CommandServiceGrpc
 import com.daml.ledger.api.v2.command_submission_service.CommandSubmissionServiceGrpc
 import com.daml.ledger.api.v2.commands.CreateCommand
 import com.daml.ledger.api.v2.value.{Record, RecordField, Value}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.AuthServiceConfig.Wildcard
 import com.digitalasset.canton.config.{CantonConfig, ClockConfig}
 import com.digitalasset.canton.console.LocalParticipantReference

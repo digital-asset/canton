@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -54,7 +54,7 @@ class InMemorySynchronizerConnectionConfigStore(
 ) extends SynchronizerConnectionConfigStore
     with NamedLogging {
 
-  protected implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
+  protected implicit val ec: ExecutionContext = directExecutionContext
   private val lock = new Mutex()
 
   private val configuredSynchronizerMap = TrieMap[

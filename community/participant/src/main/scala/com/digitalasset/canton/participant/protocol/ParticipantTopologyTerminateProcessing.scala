@@ -46,7 +46,6 @@ import com.digitalasset.canton.topology.transaction.TopologyMapping
 import com.digitalasset.canton.topology.{ConfiguredPhysicalSynchronizerId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, SequencerCounter, topology}
 import com.digitalasset.nonempty.NonEmpty
 
@@ -59,22 +58,15 @@ object ParticipantTopologyTerminateProcessing {
       event: Update.TopologyTransactionEffective,
       onboardingLocallyHostedParty: Boolean,
       clearingOnboardingLocallyHostedParty: Boolean,
-      abortingOnboardingLocallyHostedParty: Boolean,
+      revokingLocallyHostedParty: Boolean,
   )
 
-  def relevantMappingsForEffectiveStateChanges(pv: ProtocolVersion): Seq[TopologyMapping.Code] =
-    if (pv >= ProtocolVersion.v36)
-      Seq(
-        TopologyMapping.Code.PartyToParticipant,
-        TopologyMapping.Code.SynchronizerTrustCertificate,
-        TopologyMapping.Code.SynchronizerParametersState,
-      )
-    else
-      Seq(
-        TopologyMapping.Code.PartyToParticipant,
-        TopologyMapping.Code.SynchronizerTrustCertificate,
-      )
-
+  lazy val relevantMappingsForEffectiveStateChanges: Seq[TopologyMapping.Code] =
+    Seq(
+      TopologyMapping.Code.PartyToParticipant,
+      TopologyMapping.Code.SynchronizerTrustCertificate,
+      TopologyMapping.Code.SynchronizerParametersState,
+    )
 }
 
 class ParticipantTopologyTerminateProcessing(
@@ -96,10 +88,6 @@ class ParticipantTopologyTerminateProcessing(
 
   private val psid = store.storeId.psid
 
-  private val mappingsForEffectiveStateChanges = relevantMappingsForEffectiveStateChanges(
-    store.protocolVersion
-  )
-
   override def terminate(
       sc: SequencerCounter,
       sequencedTime: SequencedTime,
@@ -117,7 +105,7 @@ class ParticipantTopologyTerminateProcessing(
         effectiveStateChanges <- store.findEffectiveStateChanges(
           fromEffectiveInclusive = effectiveTime.value,
           onlyAtEffective = true,
-          filterTypes = Some(mappingsForEffectiveStateChanges),
+          filterTypes = Some(relevantMappingsForEffectiveStateChanges),
         )
         _ = if (effectiveStateChanges.sizeIs > 1)
           logger.error(
@@ -148,7 +136,9 @@ class ParticipantTopologyTerminateProcessing(
     *
     * When a party is onboarded, it records a pending operation and schedules a clearance task. When
     * the party is finally added (onboarding flag cleared), it removes the pending operation from
-    * the store. When a party is revoked (offboarded), it cleans up any aborted operations.
+    * the store. When a party is revoked (offboarded), it removes any pending operation, also one
+    * that `clear_party_onboarding_flag` records after the flag is cleared, so that a later import
+    * of the party can record its own.
     */
   private def processPartyHostingEvents(eventInfo: EventInfo)(implicit
       traceContext: TraceContext,
@@ -157,7 +147,7 @@ class ParticipantTopologyTerminateProcessing(
 
     val requiresProcessing = eventInfo.onboardingLocallyHostedParty ||
       eventInfo.clearingOnboardingLocallyHostedParty ||
-      eventInfo.abortingOnboardingLocallyHostedParty
+      eventInfo.revokingLocallyHostedParty
 
     if (requiresProcessing) {
       // Pre-filter: We only care about PartyToParticipantAuthorization on the local participant
@@ -411,7 +401,7 @@ class ParticipantTopologyTerminateProcessing(
       outstandingEffectiveChanges <- store.findEffectiveStateChanges(
         fromEffectiveInclusive = initialRecordTime,
         onlyAtEffective = false,
-        filterTypes = Some(mappingsForEffectiveStateChanges),
+        filterTypes = Some(relevantMappingsForEffectiveStateChanges),
       )
       eventFromEffectiveChangeWithInitializationTraceContext =
         (effectiveChange: EffectiveStateChange) =>
@@ -538,7 +528,7 @@ class ParticipantTopologyTerminateProcessing(
           ),
           onboardingLocallyHostedParty = onboardingLocalParty,
           clearingOnboardingLocallyHostedParty = clearingOnboardingLocalParty,
-          abortingOnboardingLocallyHostedParty = revokingLocalParty,
+          revokingLocallyHostedParty = revokingLocalParty,
         )
     }
 }

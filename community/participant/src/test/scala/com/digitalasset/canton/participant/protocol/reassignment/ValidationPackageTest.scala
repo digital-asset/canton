@@ -99,9 +99,10 @@ class ValidationPackageTest
       snapshot: TopologySnapshot,
       overrides: Map[LfContractId, LfPackageId] = Map.empty,
       metadata: PackageMetadata = packageMetadata,
+      validatedContractPackageIds: Map[LfContractId, Set[LfPackageId]] = Map.empty,
   ): Either[ReassignmentProcessingSteps.ReassignmentProcessorError, LfPackageId] =
     ValidationPackage
-      .choose(contract, Source(overrides), Source(snapshot), metadata)
+      .choose(contract, Source(overrides), Source(snapshot), metadata, validatedContractPackageIds)
       .value
       .futureValueUS
 
@@ -121,6 +122,19 @@ class ValidationPackageTest
         )
       )
       choose(snapshot) shouldBe Right(pkgIdV3)
+    }
+
+    "return the highest validated vetted package" in {
+      val snapshot = snapshotWith(
+        Map(
+          p1 -> unbounded(pkgIdV1, pkgIdV2, pkgIdV3),
+          p2 -> unbounded(pkgIdV1, pkgIdV2, pkgIdV3),
+        )
+      )
+      choose(
+        snapshot,
+        validatedContractPackageIds = Map(contractId -> Set(pkgIdV1, pkgIdV2)),
+      ) shouldBe Right(pkgIdV2)
     }
 
     "ignore packages that are not valid at the snapshot timestamp" in {

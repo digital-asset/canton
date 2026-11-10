@@ -653,6 +653,22 @@ private[lf] object SBuiltinFun {
     }
   }
 
+  final case object SBTextToContractId extends SBuiltinPure(1) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SOptional = {
+      val arg0 = getSText(args, 0)
+
+      machine.updateGasBudget(_.BTextToContractId.cost(arg0))
+
+      V.ContractId.fromString(arg0) match {
+        case Right(coid) if coid.isAbsolute => SOptional(Some(SContractId(coid)))
+        case _ => SV.None
+      }
+    }
+  }
+
   final case object SBSHA256Text extends SBuiltinPure(1) {
     override private[speedy] def executePure(args: ArraySeq[SValue], machine: Machine[?]): SText = {
 

@@ -1786,6 +1786,11 @@ private[lf] object DecodeV2 {
       BuiltinFunctionInfo(TEXT_TO_PARTY, BTextToParty),
       BuiltinFunctionInfo(TEXT_TO_INT64, BTextToInt64),
       BuiltinFunctionInfo(TEXT_TO_NUMERIC, BTextToNumeric),
+      BuiltinFunctionInfo(
+        TEXT_TO_CONTRACT_ID,
+        BTextToContractId,
+        minVersion = LV.featureTextToContractId.versionRange.min,
+      ),
       BuiltinFunctionInfo(TEXT_TO_CODE_POINTS, BTextToCodePoints),
       BuiltinFunctionInfo(SHA256_TEXT, BSHA256Text),
       BuiltinFunctionInfo(SHA256_HEX, BSHA256Hex),

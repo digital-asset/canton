@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.checked
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.{
   DbLockedConnectionConfig,
@@ -836,7 +837,7 @@ object DbLockedConnection {
           // Set an explicit network timeout on the main connection as we do not run any (long) user queries on that connection
           if (isMainConnection)
             connection.setNetworkTimeout(
-              Threading.directExecutionContext(logger),
+              directExecutionContext,
               connectionConfig.healthCheckTimeout.duration.toMillis.toInt,
             )
 

@@ -339,6 +339,11 @@ object ProtocolVersion {
   lazy val transparencyAndCiphertextId: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
     dev
 
+  // TODO(#37444) Remove this once we have a protocol version that supports replay protection for reassignments
+  lazy val reassignmentReplayProtection
+      : ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
+    dev
+
   /*
   Ensure the list of alpha versions is not empty (required for some tests)
   Very high value that is almost the dev version.

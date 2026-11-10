@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.data.memory
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.digitalasset.canton.logging.NoLogging
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.SimulationEnv
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.future.SimulationFuture
 
@@ -18,5 +17,5 @@ class SimulationBftOrdererPruningSchedulerStore
 
   override def close(): Unit = ()
 
-  override implicit def ec: ExecutionContext = DirectExecutionContext(NoLogging.noTracingLogger)
+  override implicit def ec: ExecutionContext = directExecutionContext
 }

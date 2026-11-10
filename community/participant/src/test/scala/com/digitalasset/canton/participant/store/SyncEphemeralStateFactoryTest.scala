@@ -14,7 +14,7 @@ import com.digitalasset.canton.participant.protocol.{
 }
 import com.digitalasset.canton.participant.store.memory.InMemoryRequestJournalStore
 import com.digitalasset.canton.participant.sync.SyncEphemeralStateFactory
-import com.digitalasset.canton.sequencing.protocol.SignedContent
+import com.digitalasset.canton.sequencing.protocol.AggregatedSignedContent
 import com.digitalasset.canton.sequencing.{SequencedSerializedEvent, SequencerTestUtils}
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
 import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
@@ -46,10 +46,9 @@ final class SyncEphemeralStateFactoryTest
       synchronizerId: PhysicalSynchronizerId
   )(timestamp: CantonTimestamp): SequencedSerializedEvent =
     SequencedEventWithTraceContext(
-      SignedContent(
+      AggregatedSignedContent(
         SequencerTestUtils.mockDeliver(timestamp, synchronizerId = synchronizerId),
         SymbolicCrypto.emptySignature,
-        None,
         testedProtocolVersion,
       )
     )(

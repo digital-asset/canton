@@ -68,7 +68,8 @@ object CommandProgressTrackerConfig {
 class CommandProgressTrackerImpl(
     config: CommandProgressTrackerConfig,
     clock: Clock,
-    metrics: Timer,
+    phaseMetrics: Timer,
+    completionMetrics: Timer,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends CommandProgressTracker
@@ -126,7 +127,7 @@ class CommandProgressTrackerImpl(
             cmd.synchronizerId.map(c => ("synchronizer" -> c.uid.identifier.str)).toList ++ Seq(
               "phase" -> stage.description
             )
-          metrics.update(TimeUnit.NANOSECONDS.toMillis(cur - prevTime), TimeUnit.MILLISECONDS)(
+          phaseMetrics.update(TimeUnit.NANOSECONDS.toMillis(cur - prevTime), TimeUnit.MILLISECONDS)(
             MetricsContext(context.toMap)
           )
         }
@@ -143,6 +144,7 @@ class CommandProgressTrackerImpl(
       }
 
     def failedSync(err: StatusRuntimeException): Unit = {
+      recordCompletionMetric("sync-failure")
       val tmp =
         com.google.rpc.status.Status.fromJavaProto(io.grpc.protobuf.StatusProto.fromThrowable(err))
       processSyncErr(tmp)
@@ -155,7 +157,8 @@ class CommandProgressTrackerImpl(
 
     def failedAsync(
         status: Option[com.google.rpc.status.Status]
-    ): Unit =
+    ): Unit = {
+      recordCompletionMetric("async-failure")
       // no need to remove from pending as it will be removed separately
       updateWithStatus(
         status.getOrElse(
@@ -163,8 +166,19 @@ class CommandProgressTrackerImpl(
         ),
         CommandState.COMMAND_STATE_FAILED,
       )
+    }
+
+    private def recordCompletionMetric(completionType: String): Unit = {
+      val currentStatus = this.status.get()
+      val duration = clock.now - currentStatus.started
+      val context =
+        (currentStatus.synchronizerId.map(c => ("synchronizer", c.uid.identifier.str)).toList ++
+          List(("completionType", completionType))).toMap
+      completionMetrics.update(duration)(MetricsContext(context))
+    }
 
     def succeeded(): Unit = {
+      recordCompletionMetric("success")
       recordProgress(Phase7b_indexing)
       updateWithStatus(CompletionFromTransaction.OkStatus, CommandState.COMMAND_STATE_SUCCEEDED)
     }

@@ -9,7 +9,6 @@ import com.digitalasset.canton.data.{
   CantonTimestamp,
   ExternalCallKey,
   ParticipantTransactionView,
-  PathRollbackContextFactory,
   TransactionView,
   ViewConfirmationParameters,
   ViewParticipantData,
@@ -651,7 +650,6 @@ final class ExternalCallProtocolIntegrationTest
         example.versionedSuffixedTransaction,
         example.metadata,
         WellFormedTransaction.WithSuffixesAndMerged,
-        PathRollbackContextFactory,
       ),
       unmergedTransactionsWithoutTopLevelRollbackNodes = Seq.empty,
     )

@@ -1,0 +1,21 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- An interface, in its own package as upgrades require; implemented in corpus-interfaces-model.
+module Holding where
+
+data HoldingView = HoldingView with owner : Party; amount : Decimal
+
+interface Holding where
+  viewtype HoldingView
+  setAmount : Decimal -> Update (ContractId Holding)
+
+  choice Scale : ContractId Holding
+    with
+      factor : Decimal
+    controller (view this).owner
+    do setAmount this ((view this).amount * factor)
+
+  nonconsuming choice Amount : Decimal
+    controller (view this).owner
+    do pure (view this).amount

@@ -277,6 +277,9 @@ class MaliciousParticipantNode(
     val commonDataSalt = Salt.tryDeriveSalt(seed, 0, pureCrypto)
     val viewSalt = Salt.tryDeriveSalt(seed, 1, pureCrypto)
 
+    val now = sequencerClient().clock.now
+    val maxSequencingTime = sequencerClient().generateMaxSequencingTime(now)
+
     val submitterMetadata = ReassignmentSubmitterMetadata(
       submitter,
       submittingParticipant,
@@ -285,6 +288,9 @@ class MaliciousParticipantNode(
       // Hard-coding our default user id to make sure that submissions and subscriptions use the same value
       UserId.assertFromString(LedgerApiCommands.defaultUserId),
       None,
+      maxSequencingTime = Option.when(
+        targetSynchronizer.unwrap.protocolVersion >= ProtocolVersion.reassignmentReplayProtection
+      )(maxSequencingTime),
     )
 
     val commonData = AssignmentCommonData
@@ -323,8 +329,6 @@ class MaliciousParticipantNode(
         )
 
         rootHash = fullTree.rootHash
-        now = sequencerClient().clock.now
-        maxSequencingTime = sequencerClient().generateMaxSequencingTime(now)
 
         submittingParticipantSignature <- cryptoSnapshot
           .sign(

@@ -148,7 +148,7 @@ final case class SubmissionRequest private (
     *     [[com.digitalasset.canton.sequencing.protocol.ClosedUncompressedEnvelope.bytes]] are
     *     interpreted.
     *   - The [[sender]] and the [[messageId]], as they are specific to the sender of a particular
-    *     submission request (except if the aggregation rule is SenderDedup starting with PV35)
+    *     submission request (except if the aggregation rule is SenderDedup)
     *   - The [[isConfirmationRequest]] flag because it is irrelevant for delivery or aggregation
     */
   def aggregationId(

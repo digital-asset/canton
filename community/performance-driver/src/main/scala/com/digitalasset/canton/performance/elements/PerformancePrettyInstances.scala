@@ -14,8 +14,8 @@ object PerformancePrettyInstances {
   implicit val prettyTestRun: Pretty[M.orchestration.TestRun] =
     prettyOfClass(
       param("mode", _.mode.toString.unquoted),
-      param("issuers", _.issuers.asScala.toSeq.map(_.singleQuoted)),
-      param("traders", _.traders.asScala.toSeq.map(_.singleQuoted)),
+      param("providers", _.providers.asScala.toSeq.map(_.singleQuoted)),
+      param("users", _.users.asScala.toSeq.map(_.singleQuoted)),
       param("master", _.master.singleQuoted),
       param("totalCycles", _.totalCycles),
       param("reportFrequency", _.reportFrequency),

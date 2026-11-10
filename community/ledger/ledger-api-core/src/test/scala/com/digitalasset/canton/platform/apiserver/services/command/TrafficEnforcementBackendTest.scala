@@ -14,7 +14,6 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.ChangeId
 import com.digitalasset.canton.ledger.participant.state.SyncService.CostEstimateWithReassignments
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.platform.apiserver.client.RichTrafficServiceClient
 import com.digitalasset.canton.platform.apiserver.services.metrics.{
@@ -40,7 +39,7 @@ import com.digitalasset.canton.{
 }
 import com.digitalasset.daml.lf.data.Ref
 import com.google.rpc.status.Status as RpcStatus
-import io.grpc.Status
+import io.grpc.{Status, StatusRuntimeException}
 import org.mockito.captor.ArgCaptor
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -57,16 +56,22 @@ class TrafficEnforcementBackendTest
   private val alice = LfPartyId.assertFromString("Alice")
   private val bob = LfPartyId.assertFromString("Bob")
 
-  val parentName = MetricName("test")
-  val noOpMetrics = new TrafficEnforcementMetrics(
-    inventory = new TrafficEnforcementInventory(parentName)(new HistogramInventory()),
+  private val changeId = ChangeId(
+    Ref.UserId.assertFromString("user"),
+    Ref.CommandId.assertFromString("command"),
+    Set(alice),
+  )
+  private val submissionId = Ref.SubmissionId.assertFromString("submission")
+
+  private val noOpMetrics = new TrafficEnforcementMetrics(
+    inventory = new TrafficEnforcementInventory(MetricName("test"))(new HistogramInventory()),
     metricsFactory = NoOpMetricsFactory,
   )(MetricsContext.Empty)
 
   private def newBackend(
-      enforceCostOnSubmissions: Boolean,
-      rejectMultiPartySubmissions: Boolean,
       trafficServiceClient: RichTrafficServiceClient,
+      enforceCostOnSubmissions: Boolean = true,
+      rejectMultiPartySubmissions: Boolean = true,
       allowSubmissionsOnDegradation: Boolean = false,
       estimateMultiplier: Double = 1.0,
   ): TrafficEnforcementBackend =
@@ -84,95 +89,73 @@ class TrafficEnforcementBackendTest
 
   private def checkEstimatedCost(
       backend: TrafficEnforcementBackend,
-      actAs: Seq[LfPartyId],
-      trafficCost: Long,
+      actAs: Seq[LfPartyId] = Seq(alice),
+      trafficCost: Long = 10L,
   ) =
     backend.checkEstimatedCost(
       SubmissionAccounting.forSubmitter(None, actAs.toSet, adminParty),
       CostEstimateWithReassignments(NonNegativeLong.tryCreate(trafficCost), Seq.empty),
     )
 
+  private def accountClient(
+      result: Either[GrpcError, GetAccountResponse]
+  ): RichTrafficServiceClient = {
+    val client = mock[RichTrafficServiceClient]
+    when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
+      .thenReturn(EitherT.fromEither[FutureUnlessShutdown](result))
+      .discard
+    client
+  }
+
+  private def withBalance(balance: Long): Either[GrpcError, GetAccountResponse] =
+    Right(GetAccountResponse(accountId = alice, balance = balance))
+
+  private def trafficServiceError(request: String, error: StatusRuntimeException): GrpcError =
+    GrpcError(request, "traffic-service", error)
+
+  private def lookupFailure(error: StatusRuntimeException): Either[GrpcError, GetAccountResponse] =
+    Left(trafficServiceError("get-account", error))
+
   "checkEstimatedCost" should {
 
     "succeed when the singleton actAs party's account has sufficient balance" in {
-      val client = mock[RichTrafficServiceClient]
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
-        .thenReturn(
-          EitherT.rightT[FutureUnlessShutdown, GrpcError](
-            GetAccountResponse(accountId = alice, balance = 10L)
-          )
-        )
-      val backend =
-        newBackend(
-          enforceCostOnSubmissions = true,
-          rejectMultiPartySubmissions = true,
-          trafficServiceClient = client,
-        )
+      val backend = newBackend(trafficServiceClient = accountClient(withBalance(10L)))
 
-      checkEstimatedCost(backend, actAs = Seq(alice), trafficCost = 10L).value.map { result =>
-        result shouldBe Right(())
-      }
+      checkEstimatedCost(backend).value.map(_ shouldBe Right(()))
     }
 
     "reject when the singleton actAs party's account has insufficient balance" in {
-      val client = mock[RichTrafficServiceClient]
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
-        .thenReturn(
-          EitherT.rightT[FutureUnlessShutdown, GrpcError](
-            GetAccountResponse(accountId = alice, balance = 5L)
-          )
-        )
-      val backend =
-        newBackend(
-          enforceCostOnSubmissions = true,
-          rejectMultiPartySubmissions = true,
-          trafficServiceClient = client,
-        )
+      val backend = newBackend(trafficServiceClient = accountClient(withBalance(5L)))
 
-      checkEstimatedCost(backend, actAs = Seq(alice), trafficCost = 10L).value.map {
-        case Left(err) =>
-          err.code.id shouldBe "TRAFFIC_ACCOUNT_VALIDATION_FAILED"
-          err.cause should include regex raw"Insufficient balance \(5\) for estimated traffic cost \(10\) for account $alice"
-          err.context should contain allOf (
-            "account_id" -> alice,
-            "balance" -> "5",
-            "traffic_cost" -> "10",
-          )
-          // Check that the values actually survive the round-trip
-          val decoded = DecodedCantonError
-            .fromStatusRuntimeException(err.asGrpcError)
-            .fold(decodeErr => fail(s"expected a decodable status, got $decodeErr"), identity)
-          decoded.context should contain allOf (
-            "account_id" -> alice,
-            "balance" -> "5",
-            "traffic_cost" -> "10",
-          )
-        case Right(_) => fail("expected the submission to be rejected")
+      checkEstimatedCost(backend).value.map { result =>
+        val err = result.left.value
+        err.code.id shouldBe "TRAFFIC_ACCOUNT_VALIDATION_FAILED"
+        err.cause should include regex raw"Insufficient balance \(5\) for estimated traffic cost \(10\) for account $alice"
+        // Check that the values actually survive the round-trip
+        DecodedCantonError
+          .fromStatusRuntimeException(err.asGrpcError)
+          .value
+          .context should contain allOf (
+          "account_id" -> alice,
+          "balance" -> "5",
+          "traffic_cost" -> "10",
+        )
       }
     }
 
     "check the estimate times the multiplier, rounded up" in {
-      val client = mock[RichTrafficServiceClient]
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
-        .thenReturn(
-          EitherT.rightT[FutureUnlessShutdown, GrpcError](
-            GetAccountResponse(accountId = alice, balance = 13L)
+      def check(balance: Long) =
+        checkEstimatedCost(
+          newBackend(
+            trafficServiceClient = accountClient(withBalance(balance)),
+            estimateMultiplier = 1.5,
           ),
-          EitherT.rightT[FutureUnlessShutdown, GrpcError](
-            GetAccountResponse(accountId = alice, balance = 14L)
-          ),
-        )
-      val backend =
-        newBackend(
-          enforceCostOnSubmissions = true,
-          rejectMultiPartySubmissions = true,
-          trafficServiceClient = client,
-          estimateMultiplier = 1.5,
-        )
+          trafficCost = 9L,
+        ).value
 
       for {
-        rejected <- checkEstimatedCost(backend, actAs = Seq(alice), trafficCost = 9L).value
-        accepted <- checkEstimatedCost(backend, actAs = Seq(alice), trafficCost = 9L).value
+        rejected <- check(balance = 13L)
+        accepted <- check(balance = 14L)
       } yield {
         inside(rejected) { case Left(err) =>
           err.context should contain("traffic_cost" -> "14")
@@ -184,8 +167,6 @@ class TrafficEnforcementBackendTest
     "scale with exact decimal rounding, capped at Long.MaxValue" in {
       def scale(cost: Long, multiplier: Double): Long =
         newBackend(
-          enforceCostOnSubmissions = true,
-          rejectMultiPartySubmissions = true,
           trafficServiceClient = mock[RichTrafficServiceClient],
           estimateMultiplier = multiplier,
         ).scaleEstimate(cost)
@@ -195,37 +176,16 @@ class TrafficEnforcementBackendTest
       scale(Long.MaxValue, 2.0) shouldBe Long.MaxValue
     }
 
-    "reject a non-singleton actAs submission when configured to, without looking up an account" in {
-      val client = mock[RichTrafficServiceClient]
-      val backend =
-        newBackend(
-          enforceCostOnSubmissions = true,
-          rejectMultiPartySubmissions = true,
-          trafficServiceClient = client,
-        )
+    Seq(true, false).foreach { enforce =>
+      s"reject a non-singleton actAs submission when configured to, without looking up an account (cost enforcement: $enforce)" in {
+        val client = mock[RichTrafficServiceClient]
+        val backend =
+          newBackend(trafficServiceClient = client, enforceCostOnSubmissions = enforce)
 
-      checkEstimatedCost(backend, actAs = Seq(alice, bob), trafficCost = 10L).value.map {
-        case Left(err) =>
+        checkEstimatedCost(backend, actAs = Seq(alice, bob)).value.map { result =>
           verifyZeroInteractions(client)
-          err.code.id shouldBe "TRAFFIC_MULTI_PARTY_SUBMISSION_REJECTED"
-        case Right(_) => fail("expected the submission to be rejected")
-      }
-    }
-
-    "reject a non-singleton actAs submission when configured to, even when cost enforcement is disabled overall" in {
-      val client = mock[RichTrafficServiceClient]
-      val backend =
-        newBackend(
-          enforceCostOnSubmissions = false,
-          rejectMultiPartySubmissions = true,
-          trafficServiceClient = client,
-        )
-
-      checkEstimatedCost(backend, actAs = Seq(alice, bob), trafficCost = 10L).value.map {
-        case Left(err) =>
-          verifyZeroInteractions(client)
-          err.code.id shouldBe "TRAFFIC_MULTI_PARTY_SUBMISSION_REJECTED"
-        case Right(_) => fail("expected the submission to be rejected")
+          result.left.value.code.id shouldBe "TRAFFIC_MULTI_PARTY_SUBMISSION_REJECTED"
+        }
       }
     }
 
@@ -233,170 +193,82 @@ class TrafficEnforcementBackendTest
       val client = mock[RichTrafficServiceClient]
       val backend =
         newBackend(
+          trafficServiceClient = client,
           enforceCostOnSubmissions = false,
           rejectMultiPartySubmissions = false,
-          trafficServiceClient = client,
         )
 
-      checkEstimatedCost(backend, actAs = Seq(alice), trafficCost = 10L).value.map { result =>
+      checkEstimatedCost(backend).value.map { result =>
         verifyZeroInteractions(client)
         result shouldBe Right(())
       }
     }
 
-    "return a failed account lookup as a Left preserving the original error id" in {
-      implicit val errorLoggingContext: ErrorLoggingContext =
-        ErrorLoggingContext.fromTracedLogger(logger)
-      val client = mock[RichTrafficServiceClient]
-      val grpcError = GrpcError(
-        request = "get-account",
-        serverName = "traffic-service",
-        e = TrafficEnforcementErrors.TransientFailure
-          .Reject(new RuntimeException("db down"))
-          .asGrpcError,
-      )
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
-        .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
-      val backend =
-        newBackend(
-          enforceCostOnSubmissions = true,
-          rejectMultiPartySubmissions = true,
-          trafficServiceClient = client,
+    val transientFailure = TrafficEnforcementErrors.TransientFailure
+      .Reject(new RuntimeException("db down"))
+      .asGrpcError
+    val refusal = ProtoDeserializationError.ProtoDeserializationFailure
+      .Wrap(ProtoDeserializationError.OtherError("malformed account id"))
+      .asGrpcError
+
+    Seq(
+      "a TEA transient failure" -> transientFailure,
+      "a bare DEADLINE_EXCEEDED, which is not a client cancellation" ->
+        Status.DEADLINE_EXCEEDED.asRuntimeException(),
+    ).foreach { case (name, error) =>
+      s"degrade a failed account lookup when configured to, allowing the submission to proceed: $name" in {
+        val backend = newBackend(
+          trafficServiceClient = accountClient(lookupFailure(error)),
+          allowSubmissionsOnDegradation = true,
         )
 
-      checkEstimatedCost(backend, actAs = Seq(alice), trafficCost = 10L).value.map {
-        _.left.value.code.id shouldBe "TRAFFIC_TRANSIENT_FAILURE"
+        loggerFactory.assertLogs(
+          checkEstimatedCost(backend).value.map(_ shouldBe Right(())),
+          _.warningMessage should include("degrading"),
+        )
       }
     }
 
-    "return a bare transport failure normalized to a participant-owned error" in {
-      val client = mock[RichTrafficServiceClient]
-      val grpcError =
-        GrpcError("get-account", "traffic-service", Status.UNAVAILABLE.asRuntimeException())
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
-        .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
-      val backend =
-        newBackend(
-          enforceCostOnSubmissions = true,
-          rejectMultiPartySubmissions = true,
-          trafficServiceClient = client,
+    Seq(
+      ("preserve a TEA error id", transientFailure, false, "TRAFFIC_TRANSIENT_FAILURE"),
+      (
+        "normalize a bare transport failure to a participant-owned error",
+        Status.UNAVAILABLE.asRuntimeException(),
+        false,
+        "SERVICE_NOT_RUNNING",
+      ),
+      (
+        "never degrade a bare CANCELLED, an explicit client cancellation",
+        Status.CANCELLED.asRuntimeException(),
+        true,
+        "REQUEST_TIME_OUT",
+      ),
+      (
+        "never degrade a refusal, the traffic service already answered",
+        refusal,
+        true,
+        "PROTO_DESERIALIZATION_FAILURE",
+      ),
+    ).foreach { case (name, error, degrade, expectedId) =>
+      s"return a failed account lookup as a Left: $name" in {
+        val backend = newBackend(
+          trafficServiceClient = accountClient(lookupFailure(error)),
+          allowSubmissionsOnDegradation = degrade,
         )
 
-      checkEstimatedCost(backend, actAs = Seq(alice), trafficCost = 10L).value.map {
-        _.left.value.code.id shouldBe "SERVICE_NOT_RUNNING"
-      }
-    }
-
-    "degrade an ordinary failed account lookup when configured to, allowing the submission to proceed" in {
-      val client = mock[RichTrafficServiceClient]
-      val grpcError = GrpcError(
-        request = "get-account",
-        serverName = "traffic-service",
-        e = TrafficEnforcementErrors.TransientFailure
-          .Reject(new RuntimeException("db down"))
-          .asGrpcError,
-      )
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
-        .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
-      val backend =
-        newBackend(
-          enforceCostOnSubmissions = true,
-          rejectMultiPartySubmissions = true,
-          trafficServiceClient = client,
-          allowSubmissionsOnDegradation = true,
-        )
-
-      loggerFactory.assertLogs(
-        checkEstimatedCost(backend, actAs = Seq(alice), trafficCost = 10L).value.map { result =>
-          result shouldBe Right(())
-        },
-        _.warningMessage should include("degrading"),
-      )
-    }
-
-    "degrade a bare DEADLINE_EXCEEDED account lookup failure, since it is not a client cancellation" in {
-      val client = mock[RichTrafficServiceClient]
-      val grpcError =
-        GrpcError("get-account", "traffic-service", Status.DEADLINE_EXCEEDED.asRuntimeException())
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
-        .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
-      val backend =
-        newBackend(
-          enforceCostOnSubmissions = true,
-          rejectMultiPartySubmissions = true,
-          trafficServiceClient = client,
-          allowSubmissionsOnDegradation = true,
-        )
-
-      loggerFactory.assertLogs(
-        checkEstimatedCost(backend, actAs = Seq(alice), trafficCost = 10L).value.map { result =>
-          result shouldBe Right(())
-        },
-        _.warningMessage should include("degrading"),
-      )
-    }
-
-    "never degrade a bare CANCELLED account lookup failure, an explicit client cancellation" in {
-      val client = mock[RichTrafficServiceClient]
-      val grpcError =
-        GrpcError("get-account", "traffic-service", Status.CANCELLED.asRuntimeException())
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
-        .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
-      val backend =
-        newBackend(
-          enforceCostOnSubmissions = true,
-          rejectMultiPartySubmissions = true,
-          trafficServiceClient = client,
-          allowSubmissionsOnDegradation = true,
-        )
-
-      checkEstimatedCost(backend, actAs = Seq(alice), trafficCost = 10L).value.map {
-        _.left.value.code.id shouldBe "REQUEST_TIME_OUT"
-      }
-    }
-
-    "never degrade a refusal even when degradation is allowed, the traffic service already answered" in {
-      implicit val errorLoggingContext: ErrorLoggingContext =
-        ErrorLoggingContext.fromTracedLogger(logger)
-      val client = mock[RichTrafficServiceClient]
-      val grpcError = GrpcError(
-        request = "get-account",
-        serverName = "traffic-service",
-        e = ProtoDeserializationError.ProtoDeserializationFailure
-          .Wrap(ProtoDeserializationError.OtherError("malformed account id"))
-          .asGrpcError,
-      )
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
-        .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
-      val backend =
-        newBackend(
-          enforceCostOnSubmissions = true,
-          rejectMultiPartySubmissions = true,
-          trafficServiceClient = client,
-          allowSubmissionsOnDegradation = true,
-        )
-
-      checkEstimatedCost(backend, actAs = Seq(alice), trafficCost = 10L).value.map {
-        _.left.value.code.id shouldBe "PROTO_DESERIALIZATION_FAILURE"
+        checkEstimatedCost(backend).value.map(_.left.value.code.id shouldBe expectedId)
       }
     }
 
     "never degrade a bare PERMISSION_DENIED account lookup failure, a deterministic refusal" in {
-      val client = mock[RichTrafficServiceClient]
-      val grpcError =
-        GrpcError("get-account", "traffic-service", Status.PERMISSION_DENIED.asRuntimeException())
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
-        .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
-      val backend =
-        newBackend(
-          enforceCostOnSubmissions = true,
-          rejectMultiPartySubmissions = true,
-          trafficServiceClient = client,
-          allowSubmissionsOnDegradation = true,
-        )
+      val backend = newBackend(
+        trafficServiceClient =
+          accountClient(lookupFailure(Status.PERMISSION_DENIED.asRuntimeException())),
+        allowSubmissionsOnDegradation = true,
+      )
 
       loggerFactory.assertLogs(
-        checkEstimatedCost(backend, actAs = Seq(alice), trafficCost = 10L).value.map {
+        checkEstimatedCost(backend).value.map {
           _.left.value.asGrpcError.getStatus.getCode shouldBe Status.Code.INTERNAL
         },
         _.errorMessage should include("Error in submitting request to traffic service"),
@@ -408,9 +280,8 @@ class TrafficEnforcementBackendTest
 
     def checksBalance(enforce: Boolean, accounting: SubmissionAccounting): Boolean =
       newBackend(
-        enforceCostOnSubmissions = enforce,
-        rejectMultiPartySubmissions = true,
         trafficServiceClient = mock[RichTrafficServiceClient],
+        enforceCostOnSubmissions = enforce,
       ).checksBalance(accounting)
 
     "be true only for a charged account when enforcement is on" in {
@@ -433,16 +304,6 @@ class TrafficEnforcementBackendTest
   }
 
   "registerSubmission" should {
-
-    implicit val errorLoggingContext: ErrorLoggingContext =
-      ErrorLoggingContext.fromTracedLogger(logger)
-
-    val changeId = ChangeId(
-      Ref.UserId.assertFromString("user"),
-      Ref.CommandId.assertFromString("command"),
-      Set(alice),
-    )
-    val submissionId = Ref.SubmissionId.assertFromString("submission")
 
     def info(
         actAs: Set[LfPartyId],
@@ -491,9 +352,9 @@ class TrafficEnforcementBackendTest
             val client = mock[RichTrafficServiceClient]
             stubRegistration(client, Right(RegisterSubmissionResponse()))
             val backend = newBackend(
+              trafficServiceClient = client,
               enforceCostOnSubmissions = enforce,
               rejectMultiPartySubmissions = false,
-              trafficServiceClient = client,
             )
 
             backend
@@ -513,16 +374,24 @@ class TrafficEnforcementBackendTest
         .map(_ => succeed)
     }
 
+    "reject a send without an account when configured to, without calling TEA" in {
+      val client = mock[RichTrafficServiceClient]
+      val backend = newBackend(trafficServiceClient = client)
+
+      backend.registerSubmission(info(Set(alice, bob)), trafficCost = 10L).value.map { result =>
+        verifyZeroInteractions(client)
+        result.left.value.code.id shouldBe "TRAFFIC_MULTI_PARTY_SUBMISSION_REJECTED"
+      }
+    }
+
     "pass a TEA rejection through unchanged, even when degradation is allowed" in {
       val rejection = TrafficEnforcementErrors.InsufficientBalance.Reject(alice, 5L, 10L)
       val client = mock[RichTrafficServiceClient]
       stubRegistration(
         client,
-        Left(GrpcError("register-submission", "traffic-service", rejection.asGrpcError)),
+        Left(trafficServiceError("register-submission", rejection.asGrpcError)),
       )
       val backend = newBackend(
-        enforceCostOnSubmissions = true,
-        rejectMultiPartySubmissions = false,
         trafficServiceClient = client,
         allowSubmissionsOnDegradation = true,
       )
@@ -555,12 +424,11 @@ class TrafficEnforcementBackendTest
           val client = mock[RichTrafficServiceClient]
           stubRegistration(
             client,
-            Left(GrpcError("register-submission", "traffic-service", status.asRuntimeException())),
+            Left(trafficServiceError("register-submission", status.asRuntimeException())),
           )
           val backend = newBackend(
-            enforceCostOnSubmissions = enforce,
-            rejectMultiPartySubmissions = false,
             trafficServiceClient = client,
+            enforceCostOnSubmissions = enforce,
             allowSubmissionsOnDegradation = degrade,
           )
 
@@ -578,15 +446,6 @@ class TrafficEnforcementBackendTest
 
   "registerIfEnabled" should {
 
-    implicit val errorLoggingContext: ErrorLoggingContext =
-      ErrorLoggingContext.fromTracedLogger(logger)
-
-    val changeId = ChangeId(
-      Ref.UserId.assertFromString("user"),
-      Ref.CommandId.assertFromString("command"),
-      Set(alice),
-    )
-    val submissionId = Ref.SubmissionId.assertFromString("submission")
     val accounting = SubmissionAccounting.forSubmitter(None, Set(alice), adminParty)
 
     def register(

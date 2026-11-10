@@ -12,7 +12,6 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransform,
   ConfigTransforms,
-  EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
 }
@@ -379,34 +378,3 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
   }
 
 }
-
-trait SequencerNodePruningIntegrationTest extends SequencerPruningIntegrationTest {
-  override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1
-      .addConfigTransforms(
-        reduceSequencerClientAcknowledgementInterval,
-        reduceSequencerAcknowledgementConflateWindow,
-        increaseParticipant3AcknowledgementInterval,
-        ConfigTransforms.useStaticTime,
-        setupSequencerConfig,
-      )
-      .withSetup { implicit env =>
-        import env.*
-
-        participant1.synchronizers.connect_local(sequencer1, alias = daName)
-        participant2.synchronizers.connect_local(sequencer1, alias = daName)
-      }
-
-  private val setupSequencerConfig: ConfigTransform =
-    ConfigTransforms.updateSequencerConfig("sequencer1") { config =>
-      config
-        .focus(_.sequencer)
-        .replace(dbSequencerConfig)
-    }
-}
-
-// TODO(#16089): Currently this test cannot work due to the issue. This is why it's commented out.
-//class SequencerNodePruningIntegrationTestH2 extends SequencerNodePruningIntegrationTest {
-//  // The synchronizer config by default uses in-memory, so the synchronizer id doesn't survive a synchronizer restart
-//  registerPlugin(new UseH2(loggerFactory))
-//}

@@ -167,7 +167,10 @@ final class AssignmentProcessingStepsTest
   private lazy val initialReassignmentCounter: ReassignmentCounter = ReassignmentCounter.One
 
   private def submitterInfo(submitter: LfPartyId): ReassignmentSubmitterMetadata =
-    ReassignmentSubmitterMetadata(
+    submissionInfo(submitter).toSubmitterMetadata(CantonTimestamp.MaxValue, testedProtocolVersion)
+
+  private def submissionInfo(submitter: LfPartyId): ReassignmentSubmissionInfo =
+    ReassignmentSubmissionInfo(
       submitter,
       participant,
       LedgerCommandId.assertFromString("assignment-processing-steps-command-id"),
@@ -337,7 +340,7 @@ final class AssignmentProcessingStepsTest
       } yield ()
 
     val submissionParam = SubmissionParam(
-      submitterInfo(party1),
+      submissionInfo(party1),
       unassignmentData.reassignmentId,
       SubmissionAccounting.NoAccount,
     )
@@ -421,7 +424,7 @@ final class AssignmentProcessingStepsTest
 
     "fail when submitting party is not a stakeholder" in {
       val submissionParam2 = SubmissionParam(
-        submitterInfo(party2),
+        submissionInfo(party2),
         unassignmentData.reassignmentId,
         SubmissionAccounting.NoAccount,
       )
@@ -464,7 +467,7 @@ final class AssignmentProcessingStepsTest
         contract,
       )
       val submissionParam2 = SubmissionParam(
-        submitterInfo(party3),
+        submissionInfo(party3),
         unassignmentData2.reassignmentId,
         SubmissionAccounting.NoAccount,
       )
@@ -926,6 +929,7 @@ final class AssignmentProcessingStepsTest
     val rootHash = mock[RootHash]
     when(rootHash.asLedgerTransactionId).thenReturn(LedgerTransactionId.fromString("id1"))
     val pendingRequestData = AssignmentProcessingSteps.PendingAssignment(
+      freshOwnTimelyTx = true,
       RequestId(CantonTimestamp.Epoch),
       RequestCounter(1),
       SequencerCounter(1),
@@ -951,6 +955,7 @@ final class AssignmentProcessingStepsTest
           submitterCheckResult = None,
           reassignmentIdResult = None,
           multiSynchronizerFeatureFlagCheckResult = None,
+          replayCheckResult = None,
         ),
         reassigningParticipantValidationResult =
           ReassigningParticipantValidationResult(errors = Seq.empty),
@@ -977,11 +982,11 @@ final class AssignmentProcessingStepsTest
           assignmentProcessingSteps
             .getCommitSetAndContractsToBeStoredAndEventFactory(
               NoOpeningErrors(
-                SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
+                AggregatedSignedContent(mockDeliver, Signature.noSignature, testedProtocolVersion)
               ),
               Verdict.Approve.create(testedProtocolVersion),
               pendingRequestData,
-              state.pendingAssignmentSubmissions,
+              None,
               crypto.pureCrypto,
             )
             .failOnShutdown
@@ -999,13 +1004,17 @@ final class AssignmentProcessingStepsTest
               assignmentProcessingSteps
                 .getCommitSetAndContractsToBeStoredAndEventFactory(
                   NoOpeningErrors(
-                    SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
+                    AggregatedSignedContent(
+                      mockDeliver,
+                      Signature.noSignature,
+                      testedProtocolVersion,
+                    )
                   ),
                   Verdict.Approve.create(testedProtocolVersion),
                   // request used MediatorGroupIndex.zero
                   pendingRequestData
                     .copy(mediator = MediatorGroupRecipient(MediatorGroupIndex.one)),
-                  state.pendingAssignmentSubmissions,
+                  None,
                   crypto.pureCrypto,
                 )
                 .failOnShutdown
@@ -1037,11 +1046,11 @@ final class AssignmentProcessingStepsTest
             assignmentProcessingSteps
               .getCommitSetAndContractsToBeStoredAndEventFactory(
                 NoOpeningErrors(
-                  SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
+                  AggregatedSignedContent(mockDeliver, Signature.noSignature, testedProtocolVersion)
                 ),
                 Verdict.Approve.create(testedProtocolVersion),
                 failingAssignmentValidation,
-                state.pendingAssignmentSubmissions,
+                None,
                 crypto.pureCrypto,
               )
               .failOnShutdown
@@ -1061,11 +1070,11 @@ final class AssignmentProcessingStepsTest
         result <- steps
           .getCommitSetAndContractsToBeStoredAndEventFactory(
             NoOpeningErrors(
-              SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
+              AggregatedSignedContent(mockDeliver, Signature.noSignature, testedProtocolVersion)
             ),
             Verdict.Approve.create(testedProtocolVersion),
             pendingAssignment,
-            state.pendingAssignmentSubmissions,
+            None,
             crypto.pureCrypto,
           )
           .value
@@ -1182,11 +1191,11 @@ final class AssignmentProcessingStepsTest
             assignmentProcessingSteps
               .getCommitSetAndContractsToBeStoredAndEventFactory(
                 NoOpeningErrors(
-                  SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
+                  AggregatedSignedContent(mockDeliver, Signature.noSignature, testedProtocolVersion)
                 ),
                 Verdict.Approve.create(testedProtocolVersion),
                 reassigningParticipantData,
-                state.pendingAssignmentSubmissions,
+                None,
                 crypto.pureCrypto,
               )
               .failOnShutdown
@@ -1204,11 +1213,11 @@ final class AssignmentProcessingStepsTest
             assignmentProcessingSteps
               .getCommitSetAndContractsToBeStoredAndEventFactory(
                 NoOpeningErrors(
-                  SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
+                  AggregatedSignedContent(mockDeliver, Signature.noSignature, testedProtocolVersion)
                 ),
                 Verdict.Approve.create(testedProtocolVersion),
                 pendingRequestData,
-                state.pendingAssignmentSubmissions,
+                None,
                 crypto.pureCrypto,
               )
               .failOnShutdown
@@ -1236,6 +1245,29 @@ final class AssignmentProcessingStepsTest
       inside(updateO) { case Some(rejected: Update.SequencedCommandRejected) =>
         rejected.completionInfo.submissionId shouldBe Some(submissionId)
       }
+    }
+
+    def rejectedCommandUpdate(freshOwnTimelyTx: Boolean) = {
+      val ts = CantonTimestamp.Epoch
+      assignmentProcessingSteps
+        .eventAndSubmissionIdForRejectedCommand(
+          ts,
+          SequencerCounter(0),
+          submitterInfo(party1),
+          TestHash.dummyRootHash,
+          freshOwnTimelyTx,
+          TransactionProcessor.SubmissionErrors.NoViewWithValidRecipients.Error(ts),
+          NonNegativeLong.zero,
+        )
+        ._1
+    }
+
+    "not report a completion if the request is not fresh own timely" onlyRunWithOrGreaterThan ProtocolVersion.reassignmentReplayProtection in {
+      rejectedCommandUpdate(freshOwnTimelyTx = false) shouldBe None
+    }
+
+    "report a completion before the replay protection for reassignments even if the request is not fresh own timely" onlyRunWhen (testedProtocolVersion < ProtocolVersion.reassignmentReplayProtection) in {
+      rejectedCommandUpdate(freshOwnTimelyTx = false) shouldBe defined
     }
   }
 

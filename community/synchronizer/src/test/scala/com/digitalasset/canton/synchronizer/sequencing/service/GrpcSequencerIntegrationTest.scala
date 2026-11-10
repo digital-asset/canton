@@ -580,10 +580,9 @@ class GrpcSequencerIntegrationTest
         // We need an event in the event store otherwise the factory will skip the traffic state call
         val now = clock.now
         val dummyEvent = SequencedEventWithTraceContext(
-          SignedContent(
+          AggregatedSignedContent(
             SequencerTestUtils.mockDeliver(now, synchronizerId = synchronizerId),
             SymbolicCrypto.emptySignature,
-            None,
             testedProtocolVersion,
           )
         )(

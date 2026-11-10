@@ -1090,10 +1090,10 @@ object Hash {
       .addString(submitter)
       .build
 
-  def hashAssignmentReassignmentId(reassignmentId: Ref.HexString): Hash =
-    // Ok to enable upgradeFriendlyUnsafe, as addString does not have known security limitations.
+  def hashAssignmentReassignmentId(reassignmentId: Bytes): Hash =
+    // Ok to enable upgradeFriendlyUnsafe, as addBytes does not have known security limitations.
     builder(Purpose.AssignmentReassignmentId, noCid2String, upgradeFriendlyUnsafe = true)
-      .addString(reassignmentId)
+      .addBytes(reassignmentId, s"${reassignmentId.toHexString} (reassignmentId)")
       .build
 
   def deriveTransactionSeed(

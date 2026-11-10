@@ -1,0 +1,12 @@
+packages:
+- ./models/keys
+- ./models/upgrades-v1
+- ./models/upgrades-v2
+- ./models/holding
+- ./models/interfaces
+- ./models/features
+- ./suites/keys
+- ./suites/upgrades
+- ./suites/interfaces
+- ./suites/features
+- ./suites/structure

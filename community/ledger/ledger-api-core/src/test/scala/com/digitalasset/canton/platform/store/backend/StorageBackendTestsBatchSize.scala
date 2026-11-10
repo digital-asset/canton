@@ -42,13 +42,12 @@ private[backend] trait StorageBackendTestsBatchSize
     val dtos: Vector[DbDto] = prepareExercises(numOfDtos, numOfInformees)
     dtos.size shouldBe (numOfDtos * (numOfInformees + 1))
     executeSql(backend.parameter.initializeParameters(someIdentityParams))
-    val directEc = DirectExecutionContext(noTracingLogger)
     val startTime = System.currentTimeMillis()
     tryWithConnections(1) {
       case List(connection) =>
         connection.setAutoCommit(false)
         connection.setNetworkTimeout(
-          directEc,
+          DirectExecutionContext.directExecutionContext,
           20 * 1000, // 20 seconds, the original limit causing the Sev1
         )
         try {

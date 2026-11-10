@@ -227,8 +227,7 @@ trait InFlightAggregationTestHelper {
 
     // note, we simulate here the rejection of a bogus request.
     // the purpose of the test though is just to check that aggregation works across sequencer
-    // switches. but with pv35 we only allow aggregations for sequencers and mediators, which
-    // limits the types of messages we can send.
+    // switches.
     val resultMessage = ConfirmationResultMessage.create(
       env.sequencers.all.headOption.value.physical_synchronizer_id,
       TransactionViewType,

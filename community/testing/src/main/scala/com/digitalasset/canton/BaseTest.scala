@@ -11,7 +11,8 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.Hashing
 import com.daml.metrics.OpenTelemetryOnDemandMetricsReader
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
-import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor, Threading}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
+import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCryptoProvider
@@ -138,12 +139,6 @@ trait TestEssentials extends ScalatestEssentials with NamedLogging {
     SLF4JBridgeHandler.removeHandlersForRootLogger()
     SLF4JBridgeHandler.install()
   }
-
-  /** Execution context for running "quick" computations. As there are many implementations of
-    * DirectExecutionContext, this is provided as a convenience field, so that tests don't have to
-    * deal with imports.
-    */
-  lazy val directExecutionContext: ExecutionContext = DirectExecutionContext(noTracingLogger)
 
   implicit def enrichSuppressingLogger(
       loggerFactory: SuppressingLogger
@@ -763,7 +758,7 @@ object BaseTest extends EitherValues {
             fail(s"An exception of type $c was expected, but no exception was thrown.")
           case Failure(c(t)) => Success(assertion(t))
           case Failure(t) => fail(s"Exception has wrong type. Expected type: $c.", t)
-        }(loggerFactory.directExecutionContext),
+        }(directExecutionContext),
         loggerFactory.checkLogsInternalError(assertion),
       )
 
@@ -782,7 +777,7 @@ object BaseTest extends EitherValues {
               fail(s"An exception of type $c was expected, but instead a value was returned: $x")
             case Failure(c(t)) => Success(UnlessShutdown.Outcome(assertion(t)))
             case Failure(t) => fail(s"Exception has wrong type. Expected type: $c.", t)
-          }(loggerFactory.directExecutionContext),
+          }(directExecutionContext),
           loggerFactory.checkLogsInternalError(assertion),
         )
       } yield ()

@@ -8,16 +8,16 @@ import cats.data.{NonEmptyChain, Validated}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.data.RollbackContextFactory
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.protocol.WellFormedTransaction.Stage
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, ErrorUtil, LfTransactionUtil}
-import com.digitalasset.daml.lf.data.ImmArray
+import com.digitalasset.canton.{LfPackageId, LfPartyId}
+import com.digitalasset.daml.lf.data.{ImmArray, Relation}
 import com.digitalasset.daml.lf.transaction.SerializationVersion
 import com.digitalasset.daml.lf.value.{Value, ValueCoder}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import monocle.macros.syntax.lens.*
 
@@ -80,6 +80,27 @@ final case class WellFormedTransaction[+S <: Stage] private[protocol] (
       (adjustedTx, adjustedMetadata)
     }
   }
+
+  /** Packages against which contracts are bound, and thus validated */
+  def validatedContractPackageIds: Map[LfContractId, Set[LfPackageId]] =
+    tx.nodes.values
+      .foldLeft(Relation.empty[LfContractId, LfPackageId]) {
+        case (relation: Relation[LfContractId, LfPackageId], node) =>
+          node match {
+            case node: LfNodeCreate =>
+              Relation.update(relation, node.coid, node.templateId.packageId)
+            case node: LfNodeExercises =>
+              Relation.update(relation, node.targetCoid, node.templateId.packageId)
+            case node: LfNodeFetch =>
+              Relation.update(relation, node.coid, node.templateId.packageId)
+            case node: LfNodeQueryByKey =>
+              Relation.union(relation, Relation.from(node.cids.map(_ -> node.templateId.packageId)))
+            case _ =>
+              relation
+          }
+      }
+      .flatMap { case (cid, pkgIds) => NonEmpty.from(pkgIds).map(cid -> _) }
+
 }
 
 object WellFormedTransaction {
@@ -137,7 +158,6 @@ object WellFormedTransaction {
       tx: LfVersionedTransaction,
       metadata: TransactionMetadata,
       stage: S,
-      contextFactory: RollbackContextFactory,
   ): Either[String, WellFormedTransaction[S]] = {
 
     val result = for {
@@ -146,7 +166,7 @@ object WellFormedTransaction {
       _ <- checkNonNegativeNodeIds(normalizedTx)
       _ <- checkSeeds(normalizedTx, normalizedMetadata.seeds)
       _ <- checkByKeyNodes(normalizedTx)
-      _ <- contextFactory.checkCreatedContracts(normalizedTx)
+      _ <- checkCreatedContracts(normalizedTx)
       _ <- checkSuffixes(normalizedTx, stage)
       _ <- checkFetchActors(normalizedTx)
       _ <- checkSignatoriesAndStakeholders(normalizedTx)
@@ -459,9 +479,8 @@ object WellFormedTransaction {
       lfTransaction: LfVersionedTransaction,
       metadata: TransactionMetadata,
       state: S,
-      rollbackContextFactory: RollbackContextFactory,
   ): WellFormedTransaction[S] =
-    check(lfTransaction, metadata, state, rollbackContextFactory)
+    check(lfTransaction, metadata, state)
       .valueOr(err => throw new IllegalArgumentException(err))
 
   /** For security testing only. DO NOT USE IN PRODUCTION!
@@ -491,9 +510,6 @@ object WellFormedTransaction {
     *      collapsed, i.e. no rollback node normalization occurs, and root-level rollback nodes are
     *      not collapsed with or turned into a root-level rollback scope.
     *
-    * @param transactionsWithRollbackScopes
-    *   wrapped transaction that may need to have selected nodes be projected out depending on
-    *   locally hosted, onboarding informees
     * @param hostedOnboardingParties
     *   the set of hosted parties at the request-id time of the transaction with onboarding parties
     *   broken out separately
@@ -615,4 +631,62 @@ object WellFormedTransaction {
           WellFormedTransaction[WithAbsoluteSuffixes](normalizedTx, normalizedMetadata),
         )
     }
+
+  // Checks that created contracts are not forward referenced inside the transaction.
+  private[protocol] def checkCreatedContracts(
+      tx: LfVersionedTransaction
+  ): Checked[Nothing, String, Unit] = {
+    val referenced = mutable.Map.empty[LfContractId, LfNodeId]
+    val created = mutable.Map.empty[LfContractId, LfNodeId]
+
+    def addReference(nodeId: LfNodeId)(
+        refId: LfContractId
+    ): Unit =
+      referenced += (refId -> nodeId)
+
+    def addReferencesByLfValue(nodeId: LfNodeId, refIds: LazyList[LfContractId]): Unit =
+      refIds.foreach(addReference(nodeId))
+
+    LfTransactionUtil
+      .foldExecutionOrderM(tx.transaction, ())(exerciseBegin = { (nodeId, nodeExercise, _) =>
+        val argRefs = nodeExercise.chosenValue.cids
+        addReference(nodeId)(nodeExercise.targetCoid)
+        addReferencesByLfValue(nodeId, argRefs.to(LazyList))
+        Checked.unit[Nothing, String]
+      })(leaf = {
+        case (nodeId, nf: LfNodeFetch, _) =>
+          addReference(nodeId)(nf.coid)
+          Checked.unit
+
+        case (nodeId, lookup: LfNodeQueryByKey, _) =>
+          lookup.result.traverse_ { cid =>
+            addReference(nodeId)(cid)
+            Checked.unit
+          }
+        case (nodeId, nc: LfNodeCreate, _) =>
+          val argRefs = nc.arg.cids
+          addReferencesByLfValue(nodeId, argRefs.to(LazyList))
+          for {
+            _ <- referenced.get(nc.coid).traverse_ { otherNodeId =>
+              Checked.continue(
+                s"Contract id ${nc.coid.coid} created in node $nodeId is referenced before in $otherNodeId"
+              )
+            }
+            _ <- created.put(nc.coid, nodeId).traverse_ { otherNodeId =>
+              Checked.continue(
+                s"Contract id ${nc.coid.coid} is created in nodes $otherNodeId and $nodeId"
+              )
+            }
+          } yield ()
+      })(exerciseEnd = { (nodeId, ne, _) =>
+        val resultRefs = ne.exerciseResult.map(_.cids).getOrElse(Set.empty)
+        addReferencesByLfValue(nodeId, resultRefs.to(LazyList))
+        Checked.unit
+      })(
+        rollbackBegin = { (_, _, _) => Checked.unit }
+      )(
+        rollbackEnd = { (_, _, _) => Checked.unit }
+      )
+  }
+
 }

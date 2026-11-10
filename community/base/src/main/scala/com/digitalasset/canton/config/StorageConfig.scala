@@ -154,6 +154,8 @@ final case class BatchingConfig(
     inFlightAggregationsQueryInterval: Option[PositiveFiniteDuration] =
       BatchingConfig.defaultInFlightAggregationsQueryInterval,
     contractStoreAggregator: BatchAggregatorConfig = BatchingConfig.defaultContractStoreAggregator,
+    contractJournalAggregator: BatchAggregatorConfig =
+      BatchingConfig.defaultContractJournalAggregator,
     mediatorFetchFinalizedResponsesAggregator: BatchAggregatorConfig =
       BatchingConfig.defaultAggregator,
     mediatorStoreFinalizedResponsesAggregator: BatchAggregatorConfig =
@@ -177,6 +179,11 @@ object BatchingConfig {
   private val defaultAggregator: BatchAggregatorConfig.Batching =
     BatchAggregatorConfig.Batching()
   private val defaultInFlightAggregationsQueryInterval: Option[PositiveFiniteDuration] = None
+  private val defaultContractJournalAggregator: BatchAggregatorConfig.Batching =
+    BatchAggregatorConfig.Batching(
+      maximumInFlight = PositiveNumeric.tryCreate(2),
+      maximumBatchSize = PositiveNumeric.tryCreate(1000),
+    )
   private val defaultContractStoreAggregator: BatchAggregatorConfig.Batching =
     BatchAggregatorConfig.Batching(
       maximumInFlight = PositiveNumeric.tryCreate(5),

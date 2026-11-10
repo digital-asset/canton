@@ -11,6 +11,7 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.base.error.RpcError
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{
@@ -23,9 +24,13 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, NotInserted}
-import com.digitalasset.canton.data.{CantonTimestamp, SubmissionTrackerData}
+import com.digitalasset.canton.data.{CantonTimestamp, Offset, SubmissionTrackerData}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
+import com.digitalasset.canton.ledger.participant.state.{
+  CompletionInfo,
+  SequencedEventUpdate,
+  Update,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   DefaultPromiseUnlessShutdownFactory,
@@ -64,6 +69,7 @@ import com.digitalasset.canton.participant.{
   DefaultParticipantStateValues,
   ParticipantNodeParameters,
 }
+import com.digitalasset.canton.platform.indexer.parallel.PostPublishData
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
@@ -107,7 +113,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.ExecutionContext
+import scala.concurrent.Promise
 import scala.language.implicitConversions
 
 class ProtocolProcessorTest
@@ -251,6 +257,142 @@ class ProtocolProcessorTest
   private def waitForAsyncResult(asyncResult: AsyncResult[UnthrottledAsync]) =
     asyncResult.unwrap.flatMap(_.future).futureValueUS
 
+  private def checkMismatchedMediatorSubmissionCleanup(isReceipt: Boolean): Assertion = {
+    val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
+    val publishedPostPublishDataP = Promise[Option[PostPublishData]]()
+
+    // Capture the completion emitted when the invalid request is terminated, then feed it through
+    //  the same post-publication tracker that deletes completed in-flight submissions.
+    val publishUpdate = new PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate] {
+      override def apply(eventO: Option[SequencedEventUpdate]): Unit =
+        publishedPostPublishDataP.trySuccess(
+          eventO.flatMap(
+            PostPublishData.from(_, Offset.tryFromLong(1), requestId.unwrap)
+          )
+        )
+    }
+
+    // viewMessage's mediator defaults to group 0.
+    //  The mediator argument below is the root-hash message recipient, group 1,
+    //  so processRequestInternal takes the mediator-mismatch branch.
+    val otherMediatorGroup = MediatorGroupRecipient(MediatorGroupIndex.one)
+    val requestBatch = RequestAndRootHashMessage(
+      NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion)),
+      rootHashMessage,
+      otherMediatorGroup,
+      isReceipt = isReceipt,
+    )
+
+    // TestProcessingSteps does not construct transaction rejections, so provide the completion
+    //  that the production transaction steps would create for this local submitter.
+    val rejectionError =
+      TransactionProcessor.SubmissionErrors.NoViewWithValidRecipients.Error(requestId.unwrap)
+    val rejectionEvent = Update.SequencedCommandRejected(
+      completionInfo = CompletionInfo(
+        List.empty,
+        changeId.userId,
+        changeId.commandId,
+        None,
+        Some(subId),
+        paidTrafficCost = NonNegativeLong.zero,
+      ),
+      reasonTemplate = Update.CommandRejected.FinalReason(rejectionError.rpcStatus()),
+      synchronizerId = psid.logical,
+      recordTime = requestId.unwrap,
+      isTransaction = true,
+      transactionHash = None,
+      traceContext = TraceContext.empty,
+    )
+
+    testProcessingSteps(
+      submissionDataForTrackerO = Some(
+        SubmissionTrackerData(
+          submittingParticipant = participant,
+          maxSequencingTime = requestId.unwrap.plusSeconds(10),
+        )
+      ),
+      overrideInFlightSubmissionStoreO = Some(inFlightSubmissionStore),
+      rejectedCommandEventO = Some(rejectionEvent),
+    ) { case (sut, _persistent, ephemeral, _) =>
+      val synchronizerTracker = ephemeral.inFlightSubmissionSynchronizerTracker
+      val publicationTracker = new InFlightSubmissionTracker(
+        Eval.now(inFlightSubmissionStore),
+        new NoCommandDeduplicator(),
+        loggerFactory,
+      )
+      val deduplicationPeriod = DeduplicationDuration(Duration.ofSeconds(10))
+
+      // Seed the tracked submission before delivering its receipt or preplay.
+      synchronizerTracker
+        .register(unsequencedSubmission, deduplicationPeriod)
+        .valueOrFailShutdown("register submission")
+        .futureValue
+        .isRight shouldBe true
+
+      // Receipts are observed by message ID here; processRequest observes preplays by root hash.
+      if (isReceipt) {
+        synchronizerTracker
+          .observeSequencing(
+            Map(unsequencedSubmission.messageId -> SequencedSubmission(requestId.unwrap))
+          )
+          .futureValueUS
+      }
+
+      loggerFactory.assertLogs(
+        {
+          val asyncRes = sut
+            .processRequest(
+              requestId.unwrap,
+              rc,
+              requestSc,
+              requestBatch,
+              publishUpdate,
+              NonNegativeLong.zero,
+            )
+            .onShutdown(fail())
+            .futureValue
+          waitForAsyncResult(asyncRes)
+        },
+        _.errorMessage should include(
+          s"Mediator ${MediatorGroupRecipient(MediatorGroupIndex.zero)} declared in views is not the recipient $otherMediatorGroup of the root hash message"
+        ),
+      )
+
+      // Both paths must leave the row sequenced until its rejection completion is published.
+      inFlightSubmissionStore
+        .lookup(changeIdHash)
+        .value
+        .futureValueUS
+        .value
+        .sequencingInfo shouldBe SequencedSubmission(requestId.unwrap)
+      inFlightSubmissionStore
+        .lookupEarliest(psid.logical)
+        .futureValueUS shouldBe Some(requestId.unwrap)
+
+      // The bad request is terminated at its immediate successor, publishing the rejection above.
+      ephemeral.requestTracker.tick(requestSc + 1, requestId.unwrap.immediateSuccessor)
+      val postPublishData = publishedPostPublishDataP.future.futureValue.getOrElse(
+        fail("Expected the local submitter rejection to publish a completion")
+      )
+      publicationTracker.processPublications(Seq(postPublishData)).futureValueUS
+
+      // Completion publication releases the pruning watermark
+      //  and permits resubmission with the same change ID.
+      inFlightSubmissionStore.lookup(changeIdHash).value.futureValueUS shouldBe None
+      inFlightSubmissionStore.lookupEarliest(psid.logical).futureValueUS shouldBe None
+
+      synchronizerTracker
+        .register(
+          unsequencedSubmission.copy(messageUuid = UUID.randomUUID()),
+          deduplicationPeriod,
+        )
+        .valueOrFailShutdown("resubmit change ID")
+        .futureValue
+        .isRight shouldBe true
+    }
+    succeed
+  }
+
   private def testProcessingSteps(
       overrideConstructedPendingRequestDataO: Option[TestPendingRequestData] = None,
       startingPoints: ProcessingStartingPoints = ProcessingStartingPoints.default,
@@ -262,6 +404,7 @@ class ProtocolProcessorTest
       ] = None,
       submissionDataForTrackerO: Option[SubmissionTrackerData] = None,
       overrideInFlightSubmissionStoreO: Option[InFlightSubmissionStore] = None,
+      rejectedCommandEventO: Option[SequencedEventUpdate] = None,
   )(
       test: (
           (TestInstance, SyncPersistentState, SyncEphemeralState, ParticipantNodeEphemeralState)
@@ -277,6 +420,7 @@ class ProtocolProcessorTest
         overrideInFlightSubmissionSynchronizerTrackerO,
       submissionDataForTrackerO = submissionDataForTrackerO,
       overrideInFlightSubmissionStoreO = overrideInFlightSubmissionStoreO,
+      rejectedCommandEventO = rejectedCommandEventO,
     )
     test((sut, persistent, ephemeral, node))
     LifeCycle.close(sut)(logger)
@@ -293,6 +437,7 @@ class ProtocolProcessorTest
       ],
       submissionDataForTrackerO: Option[SubmissionTrackerData],
       overrideInFlightSubmissionStoreO: Option[InFlightSubmissionStore],
+      rejectedCommandEventO: Option[SequencedEventUpdate],
   ): (
       TestInstance,
       SyncPersistentState,
@@ -423,6 +568,7 @@ class ProtocolProcessorTest
       overrideConstructedPendingRequestDataO,
       informeesOfView = _ => Set(party.toLf),
       submissionDataForTrackerO = submissionDataForTrackerO,
+      rejectedCommandEventO = rejectedCommandEventO,
     )
 
     val sut: ProtocolProcessor[
@@ -441,7 +587,7 @@ class ProtocolProcessorTest
         loggerFactory,
         FutureSupervisor.Noop,
         FlagCloseable.withCloseContext(logger, timeouts),
-      )(directExecutionContext: ExecutionContext) {
+      )(directExecutionContext) {
         override def testingConfig: TestingConfigInternal =
           TestingConfigInternal()
 
@@ -516,7 +662,7 @@ class ProtocolProcessorTest
           Some(subId),
           paidTrafficCost = NonNegativeLong.zero,
         ),
-        TransactionSubmissionTrackingData.TimeoutCause,
+        SubmissionTrackingData.TimeoutCause,
         psid,
         transactionHash = None,
       ),
@@ -907,6 +1053,14 @@ class ProtocolProcessorTest
 
     }
 
+    "clear the in-flight submission after a mismatched-mediator receipt" in {
+      checkMismatchedMediatorSubmissionCleanup(isReceipt = true)
+    }
+
+    "clear the in-flight submission after a mismatched-mediator preplay" in {
+      checkMismatchedMediatorSubmissionCleanup(isReceipt = false)
+    }
+
     "check that the mediator is active" taggedAs {
       authenticityAttack(
         threat = "the mediator in the common metadata is not active",
@@ -1236,10 +1390,9 @@ class ProtocolProcessorTest
       sut
         .processResultInternal1(
           NoOpeningErrors(
-            SignedContent(
+            AggregatedSignedContent(
               mock[Deliver[Batch[DefaultOpenEnvelope]]],
               Signature.noSignature,
-              None,
               testedProtocolVersion,
             )
           ),

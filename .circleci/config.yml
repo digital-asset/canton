@@ -164,7 +164,7 @@ commands:
     cleanup_build_job:
         steps:
             - store_track_cpu_and_memory
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     cleanup_test_job:
         parameters:
             collect_postgres_query_stats:
@@ -666,7 +666,7 @@ commands:
             - when:
                 condition: << parameters.succeed_on_error >>
                 steps:
-                    - slack_red_main_with_volunteer
+                    - slack_notify_failure_with_volunteer
     run_db_tests:
         parameters:
             db_name:
@@ -799,7 +799,7 @@ commands:
                 destination: coverage-report
                 name: Store coverage report as artifact (if any)
                 path: coverage_report.tar.gz
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     run_tests:
         parameters:
             collect_postgres_query_stats:
@@ -891,7 +891,7 @@ commands:
             - when:
                 condition: << parameters.succeed_on_error >>
                 steps:
-                    - slack_red_main_with_volunteer
+                    - slack_notify_failure_with_volunteer
     run_variations_tests:
         parameters:
             exclude_unstable_tests:
@@ -1075,7 +1075,7 @@ commands:
                     docker buildx create --name ci-builder --driver docker-container --use
                     docker buildx inspect --bootstrap
                 name: Enable QEMU emulation
-    slack_red_main_with_volunteer:
+    slack_notify_failure_with_volunteer:
         parameters:
             fixed_volunteer:
                 default: ""
@@ -1758,7 +1758,7 @@ jobs:
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.benchmarks
                 num_parallel_tasks: "1"
             - post_benchmark_metrics
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     benchmark_transaction_snapshot:
         executor: canton-xlarge-docker-with-postgres
         parameters:
@@ -1832,7 +1832,7 @@ jobs:
                 name: Store log directory as artifacts (if any)
                 path: log
             - post_transaction_snapshot_metrics
-            - slack_red_main_with_volunteer:
+            - slack_notify_failure_with_volunteer:
                 fixed_volunteer: U03K3A3UAGY
     blackduck:
         executor: canton-large-docker
@@ -1889,7 +1889,7 @@ jobs:
             - setup_remote_docker
             - build_and_publish_docker_base_image:
                 nightly_release: << parameters.is_nightly_workflow >>
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     build_docs:
         executor: canton-xlarge-docker-with-postgres
         steps:
@@ -1921,7 +1921,7 @@ jobs:
                     - snippet_json_data
                 root: docs-open/target
             - cleanup_test_job
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     build_scaladoc:
         executor: canton-large-docker
         steps:
@@ -1955,7 +1955,7 @@ jobs:
                       .ci/nix-exec amm .circleci/todo-script/src/checkTodos.sc
                     fi
                 name: Run the todo checker
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     compile:
         executor: canton-xlarge-docker
         steps:
@@ -2004,7 +2004,7 @@ jobs:
                 message: '*[canton/main]* Upgrade DAML'
                 pr_url: $PR_URL
                 to_version: $NEWEST_DAML_VERSION
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     external_parties_test:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 12
@@ -2085,7 +2085,7 @@ jobs:
                     .ci/nix-exec ./scripts/ci/publish-data-continuity-dumps-to-s3.sh
                 name: Upload data continuity dumps to S3
             - cleanup_test_job
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     generate_transaction_snapshot:
         executor: canton-xlarge-docker-with-postgres
         parameters:
@@ -2137,7 +2137,7 @@ jobs:
                 command: |
                     echo $GCLOUD_DAML_LF_SERVICE_ACCOUNT | gcloud auth activate-service-account --key-file=-
                     gcloud storage cp --recursive "$SNAPSHOT_DIR" "gs://daml-lf-snapshot-data"
-            - slack_red_main_with_volunteer:
+            - slack_notify_failure_with_volunteer:
                 fixed_volunteer: U03K3A3UAGY
     ledger_api_compatibility_test:
         executor: canton-xlarge-docker-with-postgres
@@ -2170,7 +2170,7 @@ jobs:
                 num_test_buckets: ""
                 report_to_datadog: false
                 timeout: 120m
-            - slack_red_main_with_volunteer:
+            - slack_notify_failure_with_volunteer:
                 fixed_volunteer: U03NCGBFCDP
     model_based_test:
         executor: canton-xlarge-docker-with-postgres
@@ -2187,7 +2187,7 @@ jobs:
                 num_test_buckets: ""
                 report_to_datadog: false
                 timeout: 120m
-            - slack_red_main_with_volunteer:
+            - slack_notify_failure_with_volunteer:
                 fixed_volunteer: U05KX5V7KJN
     nightly_cn_topology_snapshot_test_only:
         executor: canton-2xlarge-docker-with-postgres
@@ -2200,7 +2200,7 @@ jobs:
                 num_parallel_tasks: "1"
                 num_test_buckets: "4"
                 timeout: 240m
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     nightly_integration_test:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         parameters:
@@ -2232,7 +2232,7 @@ jobs:
                 num_parallel_tasks: "1"
                 num_test_buckets: "2"
                 timeout: 60m
-            - slack_red_main_with_volunteer:
+            - slack_notify_failure_with_volunteer:
                 fixed_volunteer: U04S25SG9D5
     nightly_integration_test_sequencer_only:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
@@ -2277,7 +2277,7 @@ jobs:
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.UpgradesMatrixIntegration
                 report_to_datadog: false
                 timeout: 120m
-            - slack_red_main_with_volunteer:
+            - slack_notify_failure_with_volunteer:
                 fixed_volunteer: U03HCPABC9M
     package_community:
         executor: canton-large-docker
@@ -2383,7 +2383,7 @@ jobs:
             - checkout_and_restore_caches
             - execute_sbt_command:
                 cmd: protobufContinuityCheck
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     protocol_continuity_test_all:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 12
@@ -2435,7 +2435,7 @@ jobs:
             - slack/notify:
                 message: Open-source PR to be merged at https://github.com/digital-asset/canton/pulls/canton-machine
                 webhook: $SLACK_WEBHOOK_TEAM_CANTON_INTERNAL
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     publish_libraries:
         environment:
             GOOGLE_ARTIFACT_REGISTRY: europe-maven.pkg.dev/da-images/public-maven-unstable
@@ -2453,7 +2453,7 @@ jobs:
             - track_cpu_and_memory
             - publish_libs_to_google_artifact_registry
             - publish_libs_to_maven_central
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     publish_release:
         environment:
             OCI_REGISTRY: europe-docker.pkg.dev
@@ -2494,7 +2494,7 @@ jobs:
             - run:
                 command: nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "scripts/ci/publish-to-github.sh"
                 name: Publish to GitHub releases
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     release_test:
         executor: canton-xlarge-docker-with-postgres
         parameters:
@@ -2520,7 +2520,7 @@ jobs:
                 filter: ""
                 num_parallel_tasks: "1"
                 num_test_buckets: ""
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     run_propose_script:
         executor: canton-xlarge-docker-on-cci
         parameters:
@@ -2543,7 +2543,7 @@ jobs:
                     nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "./release/propose.sh << parameters.script_argument >>"
                 name: Invoke propose.sh script for release step
                 no_output_timeout: 60m
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     scalafix:
         description: run scalafix command in order to organize imports.
         executor: canton-large-docker
@@ -2552,7 +2552,7 @@ jobs:
             - execute_sbt_command:
                 cmd: scalafixCheck
             - save_sbt_cache
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     sequential_test:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 16
@@ -2605,7 +2605,7 @@ jobs:
             - check_number_of_successes:
                 job_name: << parameters.stability_crash_recovery_test_name >>
                 min_successes: 8
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     stability_sequential_test:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 72
@@ -2681,7 +2681,7 @@ jobs:
                     diff shell.nix /tmp/shell.nix || exit 1
                     diff -r nix /tmp/nix || exit 1
                 name: Check that Nix definitions are up to date
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     tag_new_releases:
         executor: canton-small-docker
         steps:
@@ -2691,7 +2691,7 @@ jobs:
             - run:
                 command: release/tag-new-releases.sh
                 name: Tag new releases
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     test:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 12
@@ -2722,7 +2722,7 @@ jobs:
                 num_parallel_tasks: "1"
                 num_test_buckets: "8"
                 timeout: 1h
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     test_docker_images:
         executor: canton-large-docker-on-cci
         steps:
@@ -2741,7 +2741,7 @@ jobs:
                 destination: docker-ping-test-logs
                 path: docker/canton/tests/ping/ci-artifacts/compose-logs
                 when: always
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     test_flake_fix_many_times:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         parallelism: << parameters.parallel_runners >>
@@ -2797,7 +2797,7 @@ jobs:
                 name: Copy log files so we preserve them as build artefacts
                 when: always
             - cleanup_test_job
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     test_ping_arm:
         executor: medium-arm-machine
         steps:
@@ -2813,7 +2813,7 @@ jobs:
                 destination: log
                 name: Store test logs as artifacts (if any)
                 path: log
-            - slack_red_main_with_volunteer
+            - slack_notify_failure_with_volunteer
     test_ping_windows:
         executor: medium-windows-machine
         steps:

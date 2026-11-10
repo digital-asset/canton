@@ -86,7 +86,7 @@ private[reassignment] class AssignmentProcessingSteps(
   override def requestKind: String = "Assignment"
 
   override def submissionDescription(param: SubmissionParam): String =
-    s"Submitter ${param.submitterMetadata.submitter}, reassignmentId ${param.reassignmentId}"
+    s"Submitter ${param.submissionInfo.submitter}, reassignmentId ${param.reassignmentId}"
 
   override def explicitMediatorGroup(param: SubmissionParam): Option[MediatorGroupIndex] = None
 
@@ -115,7 +115,7 @@ private[reassignment] class AssignmentProcessingSteps(
 
   def buildSubmissionData(
       reassignmentId: ReassignmentId,
-      submitterMetadata: ReassignmentSubmitterMetadata,
+      submissionInfo: ReassignmentSubmissionInfo,
       contractsBatch: ContractsReassignmentBatch,
       sourceSynchronizer: Source[PhysicalSynchronizerId],
       mediator: MediatorGroupRecipient,
@@ -150,13 +150,19 @@ private[reassignment] class AssignmentProcessingSteps(
 
     val assignmentUuid = seedGenerator.generateUuid()
     val seed = seedGenerator.generateSaltSeed()
+
+    // For a `ReassignmentsSubmission`, we use `clock.now` + `defaultMaxSequencingTimeOffset`
+    // to generate the max sequencing time and determine a valid session signing key to use.
+    val now = clock.now
+    val maxSequencingTime = generateMaxSequencingTime(now)
+
     for {
       fullTree <- EitherT.fromEither[FutureUnlessShutdown](
         makeFullAssignmentTree(
           pureCrypto,
           seed,
           reassignmentId,
-          submitterMetadata,
+          submissionInfo.toSubmitterMetadata(maxSequencingTime, protocolVersion.unwrap),
           contractsBatch,
           sourceSynchronizer,
           psid,
@@ -170,10 +176,6 @@ private[reassignment] class AssignmentProcessingSteps(
 
       rootHash = fullTree.rootHash
 
-      // For a `ReassignmentsSubmission`, we use `clock.now` + `defaultMaxSequencingTimeOffset`
-      // to generate the max sequencing time and determine a valid session signing key to use.
-      now = clock.now
-      maxSequencingTime = generateMaxSequencingTime(now)
       signingTimestampOverrides = SigningTimestampOverrides(
         approximateTimestamp = now,
         validityPeriodEnd = Some(maxSequencingTime),
@@ -278,12 +280,12 @@ private[reassignment] class AssignmentProcessingSteps(
     (Submission, PendingSubmissionData),
   ] = {
     val SubmissionParam(
-      submitterMetadata,
+      submissionInfo,
       reassignmentId,
       _,
     ) = submissionParam
     val topologySnapshot = Target(recentSnapshot.ipsSnapshot)
-    val submitter = submitterMetadata.submitter
+    val submitter = submissionInfo.submitter
 
     for {
       unassignmentData <- ephemeralState.reassignmentLookup
@@ -315,7 +317,7 @@ private[reassignment] class AssignmentProcessingSteps(
 
       submissionData <- buildSubmissionData(
         reassignmentId = reassignmentId,
-        submitterMetadata = submitterMetadata,
+        submissionInfo = submissionInfo,
         contractsBatch = unassignmentData.contractsBatch,
         sourceSynchronizer = sourceSynchronizer,
         mediator = mediator,
@@ -522,6 +524,7 @@ private[reassignment] class AssignmentProcessingSteps(
 
       // construct pending data and response
       val entry = PendingAssignment(
+        parsedRequest.isFreshOwnTimelyRequest,
         parsedRequest.requestId,
         parsedRequest.rc,
         parsedRequest.sc,
@@ -549,10 +552,10 @@ private[reassignment] class AssignmentProcessingSteps(
   }
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       pendingRequestData: PendingAssignment,
-      pendingSubmissionMap: PendingSubmissions,
+      pendingSubmissionDataO: Option[PendingSubmissionData],
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext
@@ -562,6 +565,7 @@ private[reassignment] class AssignmentProcessingSteps(
     CommitAndStoreContractsAndPublishEvent,
   ] = {
     val PendingAssignment(
+      freshOwnTimelyTx,
       requestId,
       _requestCounter,
       _requestSequencerCounter,
@@ -678,7 +682,7 @@ private[reassignment] class AssignmentProcessingSteps(
               )
             update = assignmentValidationResult.createReassignmentAccepted(
               psid.map(_.logical),
-              participantId,
+              shouldEmitCompletion(assignmentValidationResult.submitterMetadata, freshOwnTimelyTx),
               requestId.unwrap,
               trafficCost,
               storedInReassignmentStore = storedInReassignmentStore,
@@ -753,16 +757,17 @@ object AssignmentProcessingSteps {
   )
 
   final case class SubmissionParam(
-      submitterMetadata: ReassignmentSubmitterMetadata,
+      submissionInfo: ReassignmentSubmissionInfo,
       reassignmentId: ReassignmentId,
       accounting: SubmissionAccounting,
   ) {
-    val submitterLf: LfPartyId = submitterMetadata.submitter
+    val submitterLf: LfPartyId = submissionInfo.submitter
   }
 
   final case class SubmissionResult(assignmentCompletionF: Future[com.google.rpc.status.Status])
 
   final case class PendingAssignment(
+      override val freshOwnTimelyTx: Boolean,
       override val requestId: RequestId,
       override val requestCounter: RequestCounter,
       override val requestSequencerCounter: SequencerCounter,

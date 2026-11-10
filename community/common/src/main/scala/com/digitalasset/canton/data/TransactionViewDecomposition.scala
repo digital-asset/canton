@@ -17,7 +17,7 @@ import scala.annotation.tailrec
 sealed trait TransactionViewDecomposition extends Product with Serializable with PrettyPrinting {
   def lfNode: LfActionNode
   def nodeId: LfNodeId
-  def rbContext: RollbackContext
+  def rbScope: RollbackScope
 }
 
 object TransactionViewDecomposition {
@@ -44,7 +44,7 @@ object TransactionViewDecomposition {
       rootSeed: Option[LfHash],
       override val nodeId: LfNodeId,
       tailNodes: Seq[TransactionViewDecomposition],
-      override val rbContext: RollbackContext,
+      override val rbScope: RollbackScope,
   ) extends TransactionViewDecomposition {
 
     override def lfNode: LfActionNode = rootNode
@@ -63,7 +63,7 @@ object TransactionViewDecomposition {
 
     /** All nodes of this view, i.e. core nodes and subviews, in execution order */
     def allNodes: NonEmpty[Seq[TransactionViewDecomposition]] =
-      NonEmpty(Seq, SameView(rootNode, nodeId, rbContext), tailNodes*)
+      NonEmpty(Seq, SameView(rootNode, nodeId, rbScope), tailNodes*)
 
     def childViews: Seq[NewView] = tailNodes.collect { case v: NewView => v }
 
@@ -71,7 +71,7 @@ object TransactionViewDecomposition {
       param("root node template", _.rootNode.templateId),
       param("view confirmation parameters", _.viewConfirmationParameters),
       param("node ID", _.nodeId),
-      param("in rollback", _.rbContext.inRollback),
+      param("in rollback", _.rbScope.inRollback),
       param("tail nodes", _.tailNodes),
     )
   }
@@ -82,13 +82,13 @@ object TransactionViewDecomposition {
   final case class SameView(
       lfNode: LfActionNode,
       override val nodeId: LfNodeId,
-      override val rbContext: RollbackContext,
+      override val rbScope: RollbackScope,
   ) extends TransactionViewDecomposition {
 
     override protected def pretty: Pretty[SameView] = prettyOfClass(
       param("lf node template", _.lfNode.templateId),
       param("node ID", _.nodeId),
-      param("in rollback", _.rbContext.inRollback),
+      param("in rollback", _.rbScope.inRollback),
     )
   }
 

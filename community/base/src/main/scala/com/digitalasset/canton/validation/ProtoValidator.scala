@@ -47,7 +47,6 @@ object ProtoValidator {
         value: String,
         pv: ProtocolVersion,
         field: Option[String],
-    ): ParsingResult[String] =
-      if (pv >= ProtocolVersion.v36) validateAlways(value, field) else Right(value)
+    ): ParsingResult[String] = validateAlways(value, field)
   }
 }
