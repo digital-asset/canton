@@ -7,11 +7,17 @@ on:
         description: GitHub Actions runner label
         required: true
         type: string
+      docs_only_smoke_test:
+        description: Test the docs-only decision on the draft stacked on PR 716
+        type: boolean
+        default: false
     outputs:
       should-skip:
         value: ${{ jobs.setup_and_skip_check.outputs.should-skip }}
       docs-only:
         value: ${{ jobs.setup_and_skip_check.outputs.docs-only }}
+      docs-only-smoke-test:
+        value: ${{ jobs.setup_and_skip_check.outputs.docs-only-smoke-test }}
 
 jobs:
   setup_and_skip_check:
@@ -20,6 +26,7 @@ jobs:
     outputs:
       should-skip: ${{ steps.skip_check.outputs.should-skip }}
       docs-only: ${{ steps.docs_only.outputs.docs-only }}
+      docs-only-smoke-test: ${{ steps.docs_only.outputs.docs-only-smoke-test }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -31,7 +38,7 @@ jobs:
             shell.nix
             nix/
           sparse-checkout-cone-mode: false
-          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+          fetch-depth: ${{ case(inputs.docs_only_smoke_test, 4, github.event_name == 'pull_request', 2, 1) }}
       - name: Detect release notes and contributor docs-only changes
         id: docs_only
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
@@ -40,12 +47,22 @@ jobs:
         env:
           MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          DOCS_ONLY_SMOKE_TEST: ${{ inputs.docs_only_smoke_test }}
         shell: bash
         run: |
           if [[ "$GITHUB_EVENT_NAME" == 'pull_request' ]]; then
             # Checkout uses GitHub's synthetic merge commit for a PR.
             test "$(git rev-parse --verify HEAD^2)" = "${PR_HEAD:?}"
             base=$(git rev-parse --verify HEAD^1)
+            if [[ "$DOCS_ONLY_SMOKE_TEST" == 'true' ]]; then
+              # The smoke draft stacks this test harness and one docs commit
+              # on top of the exact implementation already tested in PR 716.
+              test "$base" = '4eab7a047040bb61798b66abde794c8cb27f7746'
+              test "$(git rev-parse --verify HEAD^2~2)" = '6a03fd06cf669804916c3c4b0ec7ba67f5dc9e74'
+              base=$(git rev-parse --verify HEAD^2^1)
+              echo "docs-only-smoke-test=true" >> "$GITHUB_OUTPUT"
+              echo "Docs-only smoke test comparison base: $base"
+            fi
           else
             # Compare the entire queue candidate, including any earlier PRs.
             base=${MERGE_GROUP_BASE:?}

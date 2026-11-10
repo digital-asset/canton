@@ -62,6 +62,15 @@ jobs:
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+      docs_only_smoke_test: >-
+        ${{
+          github.repository == 'digital-asset/canton' &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.draft &&
+          github.event.pull_request.head.repo.full_name == 'monaddle-too/canton' &&
+          github.event.pull_request.head.ref == 'codex/docs-only-ci-live-test' &&
+          github.event.pull_request.base.ref == 'main'
+        }}
 
   static_tests:
     name: Static Tests
@@ -530,17 +539,14 @@ jobs:
             import sys
 
             needs = json.loads(os.environ["NEEDS_JSON"])
+            setup_outputs = needs.get("setup_and_validation", {}).get("outputs", {})
 
             # The `skip ci` label short-circuits every other job in this workflow to
             # "skipped" via setup_and_validation's should-skip output, which the
             # failure check below would otherwise treat as a pass. Fail here instead,
             # so a skip-ci'd PR can only merge through an explicit branch-protection
             # bypass rather than a silently green required check.
-            should_skip = (
-                needs.get("setup_and_validation", {}).get("outputs", {}).get("should-skip")
-                == "true"
-            )
-            if should_skip:
+            if setup_outputs.get("should-skip") == "true":
                 print(
                     "The 'skip ci' label is set, so required jobs did not run. "
                     "Failing this check intentionally: merging requires a branch-protection bypass."
@@ -557,6 +563,13 @@ jobs:
                 print("The following jobs did not complete successfully:")
                 for job_name, result in failed_or_interrupted.items():
                     print(f" - {job_name}: {result}")
+                sys.exit(1)
+
+            if setup_outputs.get("docs-only-smoke-test") == "true":
+                assert setup_outputs.get("docs-only") == "true", "Expected a docs-only decision"
+                for job_name in ("static_tests", "compile"):
+                    assert needs[job_name]["result"] == "skipped", f"Expected {job_name} to skip"
+                print("Docs-only smoke test passed. This test draft is intentionally blocked from merging.")
                 sys.exit(1)
 
             print("All required canton_build_required jobs either succeeded or were skipped.")
