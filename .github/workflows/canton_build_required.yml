@@ -21,8 +21,9 @@ on:
 
 # On main and release-line branches, each run gets a unique concurrency group (based on run_id),
 # so runs never cancel or wait for each other.
-# A PR push or conversion to draft supersedes older work. A promotion or full-suite request
-# queues behind the active run so that completed draft results are available to the planner.
+# A PR push or conversion to draft cancels the active CI run for that PR.
+# A promotion or full-suite request queues behind the active run so that completed draft
+# results are available to the planner.
 concurrency:
   group: >-
     ${{
