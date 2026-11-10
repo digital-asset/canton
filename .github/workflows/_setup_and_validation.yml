@@ -10,6 +10,8 @@ on:
     outputs:
       should-skip:
         value: ${{ jobs.setup_and_skip_check.outputs.should-skip }}
+      docs-only:
+        value: ${{ jobs.setup_and_skip_check.outputs.docs-only }}
 
 jobs:
   setup_and_skip_check:
@@ -17,6 +19,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     outputs:
       should-skip: ${{ steps.skip_check.outputs.should-skip }}
+      docs-only: ${{ steps.docs_only.outputs.docs-only }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -28,7 +31,31 @@ jobs:
             shell.nix
             nix/
           sparse-checkout-cone-mode: false
-          fetch-depth: 1
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+      - name: Detect release notes and contributor docs-only changes
+        id: docs_only
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        # An unavailable comparison should fall back to full CI.
+        continue-on-error: true
+        env:
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == 'pull_request' ]]; then
+            # Checkout uses GitHub's synthetic merge commit for a PR.
+            test "$(git rev-parse --verify HEAD^2)" = "${PR_HEAD:?}"
+            base=$(git rev-parse --verify HEAD^1)
+          else
+            # Compare the entire queue candidate, including any earlier PRs.
+            base=${MERGE_GROUP_BASE:?}
+            if ! git cat-file -e "$base^{commit}"; then
+              git fetch --no-tags --depth=1 --filter=blob:none origin "$base"
+            fi
+          fi
+          docs_only=$(python3 scripts/ci/is_docs_only.py "$base")
+          echo "docs-only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "Docs-only changes: $docs_only"
       - name: Nix Warmup
         uses: ./.github/actions/nix/nix_warmup
       - name: Check whether build should be aborted due to `skip ci` label on PR
