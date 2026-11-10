@@ -94,33 +94,48 @@ object OpenTelemetryViews extends LazyLogging {
           val configs = histogramConfigs ++ Seq(timeHistograms, byteHistograms).map {
             case (name, buckets) => HistogramDefinition(name, buckets)
           }
-          // for each known histogram, register a view
-          histogramInventory
+          val items = histogramInventory
             .registered()
             .filter(item => histogramFilter.includeMetric(item.info))
+          val inventoryNames = items.map(_.name.toString).toSet
+          // for each known histogram, register a view
+          items
             .flatMap { item =>
+              // A timer appends its unit to the metric name, so the name a timer has in the
+              // inventory is not the name of its instrument. The inventory does not say which
+              // items are timers, so register a view for both names, unless the second name is
+              // itself an item. An item is either a timer or a histogram, so only one of the two
+              // names exists as an instrument and no instrument ends up with two views.
+              val timerName = OpenTelemetryTimer.instrumentName(item.name)
+              val names =
+                if (inventoryNames.contains(timerName.toString)) Seq(item.name)
+                else Seq(item.name, timerName)
+              names.map((item, _))
+            }
+            .flatMap { case (item, instrumentName) =>
               // find the histogram configs that matches the name
               // there might be multiple views for the same instrument
               val instrumentConfigs = configs
-                .filter(_.matches(item.name))
-                .groupBy(_.viewName.getOrElse(item.name.toString))
+                .filter(config => config.matches(item.name) || config.matches(instrumentName))
+                .groupBy(_.viewName.getOrElse(instrumentName.toString))
                 .toSeq
                 .flatMap { case (_, allMatchingDefinitions) =>
-                  allMatchingDefinitions.headOption.map(first => (item, first))
+                  allMatchingDefinitions.headOption.map(first => (item, instrumentName, first))
                 }
               if (instrumentConfigs.nonEmpty) instrumentConfigs
               else
                 Seq(
                   (
                     item,
-                    HistogramDefinition(item.name, HistogramDefinition.Buckets(Seq.empty)),
+                    instrumentName,
+                    HistogramDefinition(instrumentName, HistogramDefinition.Buckets(Seq.empty)),
                   )
                 )
             }
-            .foldLeft(builder) { case (builder, (item, definition)) =>
-              logger.debug(s"Registering view $definition for item $item")
+            .foldLeft(builder) { case (builder, (item, instrumentName, definition)) =>
+              logger.debug(s"Registering view $definition for instrument $instrumentName")
               builder.registerView(
-                histogramSelectorByName(item.name),
+                histogramSelectorByName(instrumentName),
                 explicitHistogramBucketsView(
                   item.summary,
                   definition.aggregation,
