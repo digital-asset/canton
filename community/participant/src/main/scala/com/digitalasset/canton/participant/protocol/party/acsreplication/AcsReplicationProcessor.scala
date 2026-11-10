@@ -8,7 +8,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor
 import com.digitalasset.canton.participant.protocol.party.PartyReplicationProcessorStore
 import com.digitalasset.canton.participant.store
 import com.digitalasset.canton.sequencing.client.channel.SequencerChannelProtocolProcessor
@@ -42,7 +42,7 @@ trait AcsReplicationProcessor extends SequencerChannelProtocolProcessor {
   @VisibleForTesting
   private[party] def isExecutionQueueEmpty: Boolean = executionQueue.isEmpty
 
-  protected def testOnlyInterceptor: PartyReplicationTestInterceptor
+  protected def testOnlyInterceptor: AcsReplicationTestInterceptor
 
   protected def replicationProgressState: store.AcsReplicationProgress
   protected def onError: String => Unit

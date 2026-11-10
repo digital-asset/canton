@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.admin.party.acsreplication
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Hash
@@ -20,7 +20,7 @@ import com.digitalasset.canton.lifecycle.{
   LifeCycle,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStage.*
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.{
@@ -38,7 +38,7 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplica
   AcsReplicationArguments,
   AcsReplicationRequestId,
 }
-import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
+import com.digitalasset.canton.participant.config.AlphaAcsReplicationConfig
 import com.digitalasset.canton.participant.protocol.party.AcsReplicationContractHandlerFactory
 import com.digitalasset.canton.participant.protocol.party.acsreplication.{
   AcsReplicationProcessor,
@@ -57,6 +57,7 @@ import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.{TimeQuery, TopologyStore}
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
@@ -65,6 +66,7 @@ import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.stream.Materializer
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
+import scala.annotation.tailrec
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.chaining.scalaUtilChainingOps
@@ -78,8 +80,7 @@ final class AcsReplicator(
     syncService: CantonSyncService,
     internalIndexService: InternalIndexService,
     clock: Clock,
-    // TODO(#36539) replace with an AcsReplicator-specific config class (ACS replication could be allowed but not OnPR)
-    config: AlphaOnlinePartyReplicationConfig,
+    config: AlphaAcsReplicationConfig,
     storage: Storage,
     acsReplicationContractHandlerFactory: AcsReplicationContractHandlerFactory,
     futureSupervisor: FutureSupervisor,
@@ -125,7 +126,7 @@ final class AcsReplicator(
 
   private val damlAdminWorkflowO = new SingleUseCell[AcsReplicationAdminWorkflow]
 
-  private[party] val testInterceptorO: Option[PartyReplicationTestInterceptor] =
+  private[party] val testInterceptorO: Option[AcsReplicationTestInterceptor] =
     config.testInterceptor.map(_())
 
   /** Validates ACS replication arguments and propose party ACS replication via the provided admin
@@ -144,7 +145,6 @@ final class AcsReplicator(
           synchronizerId,
           sourceParticipantId,
           timestamp,
-          participantPermission,
           replicationDestination,
         ) = args
 
@@ -154,6 +154,7 @@ final class AcsReplicator(
           for {
             _ <- ensurePartyHostedBySourceAndTargetParticipant(
               partyId,
+              timestamp,
               sourceParticipantId,
               participantId,
               syncPersistentState.topologyStore,
@@ -173,7 +174,7 @@ final class AcsReplicator(
           )
           _ <- EitherT.fromEither[FutureUnlessShutdown](
             damlAdminWorkflowO.get.toRight(
-              "The ACS replication requires the `unsafe_sequencer_channel_support` configuration flag to be true"
+              "The ACS replication requires `alpha-acs-replication-support` to be configured"
             )
           )
           connectedSynchronizer <-
@@ -205,6 +206,48 @@ final class AcsReplicator(
       },
       s"replicate ACS of party ${args.partyId} on ${args.synchronizerId}",
     )
+
+  /** Wait until get_remote_acs-based ACS replication completes successfully or fails.
+    */
+  private[admin] def awaitRemoteAcsReadCompletion(
+      requestId: AcsReplicationRequestId
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val context = io.grpc.Context.current().withCancellation()
+    val hasCompleted = true
+    @tailrec
+    def awaitDoneOrFailed(): Either[String, Unit] =
+      getAcsReplicationStatus(requestId) match {
+        case None => Left(s"Cannot locate remote read $requestId")
+        case Some(AcsReplicationStatus(_, _, _, _, _, Some(AcsReplicationFailed(error)))) =>
+          Left(error)
+        case Some(AcsReplicationStatus(_, _, _, _, `hasCompleted`, _)) =>
+          Right(())
+        case Some(_) if context.isCancelled =>
+          val msg = "gRPC request is cancelled, not waiting for remote read result anymore"
+          logger.info(msg)
+          Left(msg)
+        case Some(_) if isClosing =>
+          val msg = "AcsReplicator is closing, not waiting for remote read result anymore"
+          logger.info(msg)
+          Left(msg)
+        case Some(status) =>
+          logger.debug(s"Remote read has not yet completed: $status")
+          Threading.sleep(progressSchedulingInterval.duration.toMillis)
+          awaitDoneOrFailed()
+      }
+
+    val resultE = awaitDoneOrFailed()
+
+    // Close the stream after success or failure.
+    getAcsReplicationStatus(requestId)
+      .map(_.params.acsReplicationDestination)
+      .collect { case AcsReplicationParameters.AcsReplicationDestination.OutputStream(out) =>
+        out.close()
+      }
+      .discard
+
+    EitherT.fromEither[FutureUnlessShutdown](resultE)
+  }
 
   /** Activates progress scheduling once a new ACS replication request is received unless already
     * active.
@@ -370,24 +413,20 @@ final class AcsReplicator(
                   acsReplicationStateManager,
                   recordSequencerChannelError(requestId, traceContext),
                   markDisconnected(requestId)(_, _),
+                  config.source,
                   syncService.participantNodePersistentState.value.ledgerApiStore,
                   futureSupervisor,
                   exitOnFatalFailures,
                   timeouts,
                   loggerFactory,
-                  testInterceptorO.getOrElse(PartyReplicationTestInterceptor.AlwaysProceed),
+                  testInterceptorO.getOrElse(AcsReplicationTestInterceptor.AlwaysProceed),
                 )
                 .map((_: AcsReplicationProcessor, params.targetParticipantId, noSessionKey))
             } else if (participantId == params.targetParticipantId) {
               for {
-                acsReplicationDestination <- EitherT.cond[FutureUnlessShutdown](
-                  params.acsReplicationDestination == AcsReplicationDestination.Persistence,
-                  params.acsReplicationDestination,
-                  s"Only AcsReplicationDestination.Persistence is supported but received ${params.acsReplicationDestination}",
-                )
                 acsReplicationContractHandler <- EitherT.fromEither[FutureUnlessShutdown](
                   acsReplicationContractHandlerFactory.create(
-                    acsReplicationDestination,
+                    params.acsReplicationDestination,
                     requestId,
                     params.partyId,
                     params.timestamp,
@@ -417,7 +456,7 @@ final class AcsReplicator(
                     exitOnFatalFailures,
                     timeouts,
                     contextualLoggerFactory,
-                    testInterceptorO.getOrElse(PartyReplicationTestInterceptor.AlwaysProceed),
+                    testInterceptorO.getOrElse(AcsReplicationTestInterceptor.AlwaysProceed),
                   ): AcsReplicationProcessor,
                   params.sourceParticipantId,
                   ownsSessionKey,
@@ -566,7 +605,10 @@ final class AcsReplicator(
           )
           // To be sure the authorization has become effective, wait until the topology change is visible via the ledger api
           _ <- topologyTransactionInfo match {
-            case Some(TopologyTransactionInfo(EffectiveTime(replicationTimestamp), _, _)) =>
+            case Some(TopologyTransactionInfo(EffectiveTime(_), Some(HostingState.Freezing))) =>
+              // Don't expect to see freezing via the LAPI
+              EitherT.rightT[FutureUnlessShutdown, String](())
+            case Some(TopologyTransactionInfo(EffectiveTime(replicationTimestamp), _)) =>
               val operation = s"observe ${params.partyId} topology transaction via ledger api"
               val retryCounter = new AtomicInteger(0)
               retryUntilLocalStoreUpdatedInExpectedState(operation)(
@@ -608,17 +650,16 @@ final class AcsReplicator(
               s"Onboarding topology for party replication $requestId and party ${params.partyId} not yet authorized."
             )
             EitherTUtil.unitUS[String]
-          } { case TopologyTransactionInfo(validFrom, onboardingFlag, serial) =>
+          } { case TopologyTransactionInfo(validFrom, hostingStateO) =>
             logger.info(
-              s"ACS replication $requestId topology of party ${params.partyId} authorized with effective time $validFrom and onboarding flag $onboardingFlag"
+              s"ACS replication $requestId topology of party ${params.partyId} authorized with effective time $validFrom and hosting state $hostingStateO"
             )
             acsReplicationStateManager.update_(
               requestId,
               _.setTopologyTransaction(
                 PartyToParticipantTopologyTransaction(
                   validFrom,
-                  onboardingFlag,
-                  serial,
+                  hostingStateO.contains(HostingState.Onboarding),
                 )
               ),
             )
@@ -713,7 +754,7 @@ final class AcsReplicator(
     for {
       adminWorkflow <- EitherT.fromEither[FutureUnlessShutdown](
         damlAdminWorkflowO.get.toRight(
-          "ACS replication requires the `unsafe_sequencer_channel_support` configuration flag to be true"
+          "ACS replication requires `alpha-acs-replication-support` to be configured"
         )
       )
       connectedSynchronizer <-
@@ -741,7 +782,6 @@ final class AcsReplicator(
         replicationParams.sourceParticipantId,
         sequencerCandidates,
         replicationParams.timestamp,
-        replicationParams.participantPermission,
       )
       _ <- acsReplicationStateManager.update_(
         replicationParams.requestId,
@@ -1003,15 +1043,14 @@ final class AcsReplicator(
     }
   }
 
-  /** Checks that the party is
-    *   - hosted by the source and target participant
-    *   - serial matches head authorized topology
+  /** Checks that the party is hosted by the source and target participant at the asOf timestamp.
     *
     * Called at target participant when starting the ACS replication and at source participant when
     * processing the ACS replication Daml proposal.
     */
   private def ensurePartyHostedBySourceAndTargetParticipant(
       partyId: PartyId,
+      asOf: CantonTimestamp,
       sourceParticipantId: ParticipantId,
       targetParticipantId: ParticipantId,
       topologyStore: TopologyStore[SynchronizerStore],
@@ -1022,8 +1061,9 @@ final class AcsReplicator(
         (),
         s"Source and target participants $targetParticipantId cannot match",
       )
-      partyToParticipantTopologyHeadTx <- topologyWorkflow.partyToParticipantTopologyHead(
+      partyToParticipantTopologyHeadTx <- topologyWorkflow.partyToParticipantTopologyAsOf(
         partyId,
+        asOf,
         topologyStore,
       )
       participantsOfParty = partyToParticipantTopologyHeadTx.mapping.participants.map(
@@ -1194,8 +1234,6 @@ final class AcsReplicator(
         sourceParticipantId = args.sourceParticipantId,
         targetParticipantId = participantId,
         timestamp = args.timestamp,
-        // TODO(#36539) remove permission once using AcsReplicationStatus
-        participantPermission = args.participantPermission,
         acsReplicationDestination = args.replicationDestination,
       ),
       protocolVersion,
@@ -1219,8 +1257,6 @@ final class AcsReplicator(
         sourceParticipantId = participantId,
         targetParticipantId = proposalParams.targetParticipantId,
         timestamp = proposalParams.timestamp,
-        // TODO(#36539) remove permission once using AcsReplicationStatus
-        participantPermission = proposalParams.participantPermission,
       ),
       protocolVersion,
       agreementStatus,
@@ -1308,8 +1344,7 @@ final class AcsReplicator(
         synchronizerId,
         targetParticipantId,
         sequencerIdsProposed,
-        _,
-        _,
+        timestamp,
       ) = proposal
       for {
         _ <- EitherT.fromEither[FutureUnlessShutdown](
@@ -1354,6 +1389,7 @@ final class AcsReplicator(
         syncPersistentState = connectedSynchronizer.synchronizerHandle.syncPersistentState
         _ <- ensurePartyHostedBySourceAndTargetParticipant(
           partyId,
+          timestamp,
           participantId,
           targetParticipantId,
           syncPersistentState.topologyStore,
@@ -1573,7 +1609,6 @@ object AcsReplicator {
       synchronizerId: SynchronizerId,
       sourceParticipantId: ParticipantId,
       timestamp: CantonTimestamp,
-      participantPermission: ParticipantPermission,
       replicationDestination: AcsReplicationDestination,
   )
 

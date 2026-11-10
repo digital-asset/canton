@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
+import cats.syntax.either.*
 import com.digitalasset.canton.Generators.nonEmptyListGen
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -20,19 +21,21 @@ final case class GeneratorsVerdict(
     Arbitrary(
       Gen.const {
         val status = com.google.rpc.status.Status(com.google.rpc.Code.CANCELLED_VALUE)
-        Verdict.MediatorReject.tryCreate(status, isMalformed = false, protocolVersion)
+        Verdict.MediatorReject
+          .create(status, isMalformed = false, protocolVersion)
+          .valueOr(err => throw new IllegalStateException(err))
       }
     )
 
   private val verdictApproveArb: Arbitrary[Verdict.Approve] = Arbitrary(
-    Gen.const(Verdict.protocolVersionRepresentativeFor(protocolVersion)).map(Verdict.Approve())
+    Gen.const(Verdict.Approve.create(protocolVersion))
   )
 
   private implicit val participantRejectArb: Arbitrary[Verdict.ParticipantReject] = Arbitrary(
     nonEmptyListGen[(Set[LfPartyId], ParticipantId, LocalReject)](
       participantRejectReasonArb
     ).map { reasons =>
-      Verdict.ParticipantReject(reasons)(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+      Verdict.ParticipantReject.create(reasons, protocolVersion)
     }
   )
 

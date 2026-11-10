@@ -15,7 +15,8 @@ import com.daml.ledger.api.v2.transaction_filter.EventFormat
 import com.daml.ledger.javaapi.data.codegen.ContractId
 import com.daml.ledger.javaapi.data.{Command, Identifier, CreatedEvent as JavaCreatedEvent}
 import com.digitalasset.base.error.utils.DecodedCantonError
-import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
@@ -323,7 +324,6 @@ object PingService {
     }
 
     private val acs = TrieMap[ContractIdS, ContractWithExpiry]()
-    private val directEc = DirectExecutionContext(noTracingLogger)
 
     override private[admin] def processTransaction(tx: Transaction): Unit = {
       implicit val traceContext: TraceContext =
@@ -785,7 +785,7 @@ object PingService {
                 _.promise
                   .trySuccess(Failure("Internal error due to exception"))
               )
-        }(directEc) // parasitic to avoid shutdown issues
+        }(directExecutionContext) // parasitic to avoid shutdown issues
 
       }
 

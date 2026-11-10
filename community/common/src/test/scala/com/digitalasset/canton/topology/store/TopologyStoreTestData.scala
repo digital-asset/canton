@@ -5,7 +5,7 @@ package com.digitalasset.canton.topology.store
 
 import cats.syntax.option.*
 import com.digitalasset.canton.BaseTest.*
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.SigningPublicKey
@@ -60,7 +60,7 @@ class TopologyStoreTestData(
             .sign(tx.hash.hash, keyId, usage)(TraceContext.empty)
             .value
             .onShutdown(fail("shutdown"))(
-              DirectExecutionContext(loggerFactory.getLogger(this.getClass))
+              directExecutionContext
             )
             .futureValue
             .getOrElse(fail(s"error"))

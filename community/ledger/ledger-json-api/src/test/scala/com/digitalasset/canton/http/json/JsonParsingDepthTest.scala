@@ -3,14 +3,13 @@
 
 package com.digitalasset.canton.http.json
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.http.json.v2.{
   CirceToUJson,
   MockSchemaProcessor,
   MockTranscodePackageIdResolver,
   ProtocolConverters,
 }
-import com.typesafe.scalalogging.Logger
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpecLike
@@ -28,7 +27,7 @@ class JsonParsingDepthTest extends AnyWordSpecLike with Matchers with EitherValu
 
   private def arr(levels: Int): String = ("[" * levels) + ("]" * levels)
 
-  private implicit val ec: ExecutionContext = DirectExecutionContext(Logger(getClass))
+  private implicit val ec: ExecutionContext = directExecutionContext
   private val converters =
     new ProtocolConverters(new MockSchemaProcessor(), new MockTranscodePackageIdResolver())
 

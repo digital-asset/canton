@@ -8,9 +8,11 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.damltests.java.universal.UniversalContract
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
+  PostgresDumpRestore,
   UseBftSequencer,
   UsePostgres,
   UseProgrammableSequencer,
@@ -42,6 +44,7 @@ import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.canton.{BaseTest, config}
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.LoneElement.*
+import org.scalatest.OptionValues.*
 import org.scalatest.matchers.should.Matchers.*
 
 import scala.jdk.CollectionConverters.*
@@ -68,9 +71,11 @@ import scala.jdk.CollectionConverters.*
   *     backward, not the order of the forward moves: a participant may skip states, e.g. move from
   *     Nominated straight to Onboarding without a freeze. The admin endpoints of the replication
   *     enforce the order; the cases write the mapping directly.
-  *   - The remote ACS read and the import of its snapshot are simulated with the repair service: SP
-  *     exports the party's ACS as of t_F + 1µs, where t_F is the effective time of the target's
-  *     freeze, and the disconnected target imports it in Validation mode.
+  *   - The remote ACS read, which runs only on the dev protocol version so far, is simulated with
+  *     the repair service: SP exports the party's ACS as of t_F + 1µs, where t_F is the effective
+  *     time of the target's freeze. The disconnected target imports it in Validation mode: with the
+  *     party ACS import in the cases where it then moves on its own, with the repair service
+  *     otherwise.
   *
   * Registers the plugins of `test` on construction.
   */
@@ -78,7 +83,8 @@ private[hypr] final class PartyFreezeIntegrationTestSetup(
     test: CommunityIntegrationTest with SharedEnvironment with HasProgrammableSequencer
 ) {
 
-  test.registerPlugin(new UsePostgres(test.loggerFactory))
+  private val postgres = new UsePostgres(test.loggerFactory)
+  test.registerPlugin(postgres)
   test.registerPlugin(
     new UseBftSequencer(
       test.loggerFactory,
@@ -133,6 +139,10 @@ private[hypr] final class PartyFreezeIntegrationTestSetup(
   private var betaRef: LocalParticipantReference = _
   private var cpRef: LocalParticipantReference = _
   private var bobRef: Party = _
+
+  /** Backs up and restores the database of a node. */
+  lazy val postgresDumpRestore: PostgresDumpRestore =
+    PostgresDumpRestore(postgres, forceLocal = false)
 
   def sp: LocalParticipantReference = spRef
   def da: LocalParticipantReference = daRef
@@ -242,6 +252,33 @@ private[hypr] final class PartyFreezeIntegrationTestSetup(
       )
       .discard
 
+  /** `submitter` exercises the consuming choice `Replace` on `contractId`, which archives it and
+    * creates a contract with `submitter` as its only signatory and actor.
+    */
+  def replace(
+      participant: LocalParticipantReference,
+      submitter: Party,
+      synchronizerId: PhysicalSynchronizerId,
+      contractId: UniversalContract.ContractId,
+  ): Unit =
+    participant.ledger_api.javaapi.commands
+      .submit(
+        Seq(submitter),
+        contractId
+          .exerciseReplace(
+            List.empty[String].asJava,
+            List(submitter.toProtoPrimitive).asJava,
+            List.empty[String].asJava,
+            List(submitter.toProtoPrimitive).asJava,
+            List.empty[String].asJava,
+          )
+          .commands
+          .asScala
+          .toSeq,
+        synchronizerId = Some(synchronizerId.logical),
+      )
+      .discard
+
   def unassign(
       party: Party,
       contractId: UniversalContract.ContractId,
@@ -321,6 +358,35 @@ private[hypr] final class PartyFreezeIntegrationTestSetup(
       Request.ApprovedBy(Set(sp.id, target.id)),
     )
     scenario.assertCommitmentsMatchAmongHosts()
+  }
+
+  /** Expects each of `targets` to move its own entry to `state`, in any order, signed by itself.
+    *
+    * @return
+    *   The effective time of the last move.
+    */
+  def expectMovedOnTheirOwn(
+      scenario: PartyFreezeScenario,
+      targets: Seq[LocalParticipantReference],
+      state: HostingState,
+      threshold: PositiveInt,
+  )(implicit env: TestConsoleEnvironment): CantonTimestamp = {
+    import env.*
+    val expected = targets.foldLeft(scenario.entries)((entries, target) =>
+      entries.updated(target.id, Entry(Confirmation, state))
+    )
+    val lastMover = BaseTest.eventually() {
+      val current = sp.topology.party_to_participant_mappings
+        .list(daId, filterParty = scenario.party.filterString)
+        .loneElement
+      current.item.participants
+        .map(host => host.participantId -> Entry(host.permission, host.state))
+        .toMap shouldBe expected
+      targets
+        .find(target => current.context.signedBy.contains(target.id.namespace.fingerprint))
+        .value
+    }
+    scenario.expectWritten(expected, threshold, signers = Seq(lastMover))
   }
 
   /** Expects SP to be the only host of the party, with nothing else changed by the step. */

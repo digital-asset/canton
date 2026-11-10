@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.mediator.store
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
@@ -36,12 +36,9 @@ private[mediator] trait MediatorStateInitialization { self: NamedLogging =>
       ),
       "The store most not be initialized more than once!",
     )
-    implicit val directExecutionContext: DirectExecutionContext = DirectExecutionContext(
-      noTracingLogger
-    )
     doInitialize(firstEventTs).map(_ =>
       initialized.set(MediatorStateInitialization.State.Initialized)
-    )
+    )(directExecutionContext)
   }
 
   /** Populate in-memory caches and delete all data with `requestTime` greater than or equal to

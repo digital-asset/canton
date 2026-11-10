@@ -27,7 +27,7 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
-import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
+import com.digitalasset.canton.participant.party.AcsReplicationTestInterceptorImpl
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.LostSequencerSubscription
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
@@ -85,7 +85,7 @@ sealed trait OnlinePartyReplicationNetworkDisruptionsTest
   // Use the test interceptor to block OnPR after replication has started, but before the disruption
   // has been fixed.
   private def createSourceParticipantTestInterceptor() =
-    PartyReplicationTestInterceptorImpl.sourceParticipantProceedsIf { stateSP =>
+    AcsReplicationTestInterceptorImpl.sourceParticipantProceedsIf { stateSP =>
       // Once OnPR has been paused, wait until the disruption has been lifted unblocking OnPR.
       val result =
         if (hasOnPRBeenDisruptedOrPaused) hasDisruptionBeenFixed
@@ -141,7 +141,6 @@ sealed trait OnlinePartyReplicationNetworkDisruptionsTest
               "participant1" -> (() => createSourceParticipantTestInterceptor()),
               "participant2" -> (() => createSourceParticipantTestInterceptor()),
             ),
-            enableUnsafeSequencerChannelSupport = true,
             pauseIndexer = false,
           ))*
       )

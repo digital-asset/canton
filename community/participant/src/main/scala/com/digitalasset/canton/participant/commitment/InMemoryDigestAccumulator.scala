@@ -7,7 +7,7 @@ import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.*
@@ -82,8 +82,6 @@ class InMemoryDigestAccumulator(
     extends DigestAccumulator
     with NamedLogging {
   import InMemoryDigestAccumulator.*
-
-  private val directExecutionContext: ExecutionContext = DirectExecutionContext(noTracingLogger)
 
   private[this] val digests
       : scala.collection.concurrent.Map[DigestIdentifier, CountingAccumulatingDigest] =

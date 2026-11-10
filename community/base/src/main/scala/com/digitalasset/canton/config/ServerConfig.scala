@@ -205,6 +205,7 @@ object AdminServerConfig {
         TopologyManagerReadServiceGrpc.METHOD_SEQUENCER_LSU_STATE.getFullMethodName,
         ParticipantRepairServiceGrpc.METHOD_EXPORT_ACS.getFullMethodName,
         PartyManagementServiceGrpc.METHOD_EXPORT_PARTY_ACS.getFullMethodName,
+        PartyManagementServiceGrpc.METHOD_GET_REMOTE_ACS.getFullMethodName,
         ParticipantInspectionServiceGrpc.METHOD_OPEN_COMMITMENT.getFullMethodName,
         ParticipantInspectionServiceGrpc.METHOD_INSPECT_COMMITMENT_CONTRACTS.getFullMethodName,
         StatusServiceGrpc.METHOD_HEALTH_DUMP.getFullMethodName,

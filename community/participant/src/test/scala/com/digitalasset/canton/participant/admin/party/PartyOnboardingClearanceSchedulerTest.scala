@@ -6,11 +6,16 @@ package com.digitalasset.canton.participant.admin.party
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.Hash
+import com.digitalasset.canton.config.{
+  NonNegativeFiniteDuration,
+  SynchronizerTimeTrackerConfig,
+  TopologyConfig,
+}
+import com.digitalasset.canton.crypto.{Fingerprint, Hash}
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle, UnlessShutdown}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, SuppressionRule}
 import com.digitalasset.canton.participant.admin.data.{
   FlagNotSet,
   FlagSet,
@@ -18,20 +23,32 @@ import com.digitalasset.canton.participant.admin.data.{
 }
 import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow.AuthorizeClearanceError
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
+import com.digitalasset.canton.protocol.TestSynchronizerParameters
 import com.digitalasset.canton.store.PendingOperation
 import com.digitalasset.canton.store.memory.InMemoryPendingOperationStore
-import com.digitalasset.canton.time.SynchronizerTimeTracker
+import com.digitalasset.canton.time.{MockTimeRequestSubmitter, SimClock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
+  StoreBasedSynchronizerTopologyClient,
   SynchronizerTopologyClientWithInit,
   TopologySnapshotLoader,
 }
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreTestData}
+import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
+import com.digitalasset.canton.topology.store.{
+  NoPackageDependencies,
+  StoredTopologyTransactions,
+  TopologyStore,
+  TopologyStoreTestData,
+  ValidatedTopologyTransaction,
+}
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtoVersion
+import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
@@ -42,10 +59,12 @@ import com.digitalasset.nonempty.NonEmpty
 import org.mockito.ArgumentMatchers.eq as isEq
 import org.mockito.MockitoSugar
 import org.scalatest.wordspec.AsyncWordSpec
+import org.slf4j.event.Level
 
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Future, Promise}
+import scala.jdk.CollectionConverters.*
 
 class PartyOnboardingClearanceSchedulerTest
     extends AsyncWordSpec
@@ -154,6 +173,25 @@ class PartyOnboardingClearanceSchedulerTest
       synchronizer = psid.logical,
     )
 
+    // No time observed yet, so a FlagSet response means the clearance is not yet safe
+    when(mockTimeTracker.latestTime).thenReturn(None)
+    // No mapping for the party, so a FlagNotSet response keeps the pending clearance record
+    when(
+      mockTopologyStore.findPositiveTransactions(
+        any[CantonTimestamp],
+        any[Boolean],
+        any[Boolean],
+        any[Seq[TopologyMapping.Code]],
+        any[Option[NonEmpty[Seq[UniqueIdentifier]]]],
+        any[Option[NonEmpty[Seq[Namespace]]]],
+        any[Option[(Option[UniqueIdentifier], Int)]],
+      )(any[TraceContext])
+    ).thenReturn(
+      FutureUnlessShutdown.pure(
+        StoredTopologyTransactions[TopologyChangeOp.Replace, TopologyMapping](Seq.empty)
+      )
+    )
+
     // Setup topology mocks to return "No LSU Announced" by default to keep existing tests green.
     // Explicitly typed as Option.empty to satisfy the invariant FutureUnlessShutdown Mockito macro.
     when(mockTopologyClient.currentSnapshotApproximation(any[TraceContext]))
@@ -200,6 +238,186 @@ class PartyOnboardingClearanceSchedulerTest
       .value
       .failOnShutdown
       .map(_ => fixture)
+  }
+
+  /** A scheduler whose time tracker, workflow and topology client are real, so that tests exercise
+    * their actual notions of when the clearance is safe. Only the topology manager is a mock: it
+    * records each proposed mapping, rejects the first `rejectedProposals` of them, and makes the
+    * others effective in the topology store. It rejects them at sequencing, or with `rejectLocally`
+    * itself, for their serial.
+    *
+    * The topology store holds the synchronizer parameters and the party's mapping with this
+    * participant Onboarding at `onboardingEffectiveAt`, as observed by the time tracker. The
+    * pending clearance record is in `records`.
+    */
+  private class ClearanceWithRealTopology(rejectedProposals: Int, rejectLocally: Boolean = false) {
+    private val fixture = new PartyOnboardingClearanceSchedulerTestFixture
+    val records = fixture.inMemoryStore
+    private val clock = new SimClock(loggerFactory = loggerFactory)
+    val tracker = new SynchronizerTimeTracker(
+      SynchronizerTimeTrackerConfig(),
+      clock,
+      new MockTimeRequestSubmitter,
+      timeouts,
+      loggerFactory,
+    )
+    private val store = new InMemoryTopologyStore(
+      SynchronizerStore(psid),
+      predecessor = None,
+      testedProtocolVersion,
+      loggerFactory,
+      timeouts,
+    )
+    private val client = new StoreBasedSynchronizerTopologyClient(
+      clock,
+      store = store,
+      packageDependencyResolver = NoPackageDependencies,
+      topologyConfig = TopologyConfig(),
+      timeouts = timeouts,
+      futureSupervisor = futureSupervisor,
+      loggerFactory = loggerFactory,
+      staticSynchronizerParameters = defaultStaticSynchronizerParameters,
+    )
+    private val manager = mock[SynchronizerTopologyManager]
+    val proposed = new ConcurrentLinkedQueue[TopologyMapping]()
+    private val onboardingAt = onboardingEffectiveAt.value
+
+    when(manager.managerVersion).thenReturn(TopologyManager.PV(testedProtocolVersion))
+    when(
+      manager.proposeAndAuthorize(
+        any[TopologyChangeOp],
+        any[TopologyMapping],
+        any[Option[PositiveInt]],
+        any[Seq[Fingerprint]],
+        any[Seq[Namespace]],
+        any[ProtocolVersion],
+        any[Boolean],
+        any[ForceFlags],
+        any[Option[NonNegativeFiniteDuration]],
+      )(any[TraceContext])
+    ).thenAnswer[
+      TopologyChangeOp,
+      TopologyMapping,
+      Option[PositiveInt],
+      Seq[Fingerprint],
+      Seq[Namespace],
+      ProtocolVersion,
+      Boolean,
+      ForceFlags,
+      Option[NonNegativeFiniteDuration],
+    ] { case (_, mapping, serial, _, _, _, _, _, _) =>
+      proposed.add(mapping)
+      val signedTx = testData.makeSignedTx(mapping, serial = serial.value)(testData.p1Key)
+      val rejected = proposed.size <= rejectedProposals
+      if (rejected && rejectLocally)
+        EitherT.leftT[FutureUnlessShutdown, GenericSignedTopologyTransaction](
+          TopologyManagerError.SerialMismatch.Failure(
+            actual = serial,
+            expected = serial.map(s => PositiveInt.tryCreate(s.value + 1)),
+          )(ErrorLoggingContext.forClass(loggerFactory, getClass)): TopologyManagerError
+        )
+      else {
+        val effective =
+          if (rejected) FutureUnlessShutdown.unit
+          else addToStore(onboardingAt.plusSeconds(proposed.size.toLong), signedTx)
+        EitherT.right[TopologyManagerError](
+          effective.map(_ => signedTx: GenericSignedTopologyTransaction)
+        )
+      }
+    }
+
+    private def addToStore(ts: CantonTimestamp, signedTx: GenericSignedTopologyTransaction) =
+      store.update(
+        SequencedTime(ts),
+        EffectiveTime(ts),
+        removals = Map(signedTx.mapping.uniqueKey -> (Some(signedTx.serial), Set.empty)),
+        additions = Seq(ValidatedTopologyTransaction(signedTx)),
+      )
+
+    def mapping(state: HostingState): PartyToParticipant = PartyToParticipant.tryCreate(
+      partyId,
+      PositiveInt.one,
+      Seq(
+        HostingParticipant(testData.p2Id, ParticipantPermission.Submission),
+        HostingParticipant(participantId, ParticipantPermission.Confirmation, state),
+      ),
+    )
+
+    private val workflowContext = new PartyReplicationTopologyWorkflow.TopologyWorkflowContext {
+      override def psid: PhysicalSynchronizerId = PartyOnboardingClearanceSchedulerTest.this.psid
+      override val workflow: PartyReplicationTopologyWorkflow =
+        new PartyReplicationTopologyWorkflow(participantId, timeouts, loggerFactory)
+      override def synchronizerContext
+          : Option[PartyReplicationTopologyWorkflow.SynchronizerTopologyContext] =
+        Some(new PartyReplicationTopologyWorkflow.SynchronizerTopologyContext {
+          override def topologyClient = client
+          override def topologyManager = manager
+          override def topologyStore = store
+          override def timeTracker = tracker
+        })
+    }
+
+    /** Sets up the topology state, and starts a scheduler with a pending clearance record.
+      *
+      * @param observeOnboarding
+      *   whether the time tracker has observed the onboarding
+      */
+    def start(observeOnboarding: Boolean = true): Future[OnboardingClearanceScheduler] = {
+      val scheduler = new OnboardingClearanceScheduler(
+        participantId,
+        workflowContext,
+        loggerFactory,
+        records,
+        timeouts,
+        retryInitialDelay = 1.millisecond,
+        retryMaxDelay = 5.milliseconds,
+      )
+      (for {
+        _ <- records.insert(fixture.pendingOp).value
+        _ <- addToStore(
+          onboardingAt.minusSeconds(1),
+          testData.makeSignedTx(
+            SynchronizerParametersState(psid.logical, TestSynchronizerParameters.defaultDynamic)
+          )(testData.p1Key),
+        )
+        _ <- addToStore(
+          onboardingAt,
+          testData.makeSignedTx(mapping(HostingState.Onboarding))(testData.p1Key),
+        )
+        _ <- client.observed(
+          SequencedTime(onboardingAt),
+          EffectiveTime(onboardingAt),
+          SequencerCounter.Genesis,
+          Seq.empty,
+        )
+      } yield {
+        if (observeOnboarding) tracker.subscriptionResumesAfter(onboardingAt)
+        scheduler
+      }).failOnShutdown
+    }
+
+    /** Makes this participant Active for the party, as a clearance by another node would. */
+    def activate(): Future[Unit] =
+      addToStore(
+        onboardingAt.plusSeconds(1),
+        testData.makeSignedTx(mapping(HostingState.Active), serial = PositiveInt.two)(
+          testData.p1Key
+        ),
+      ).failOnShutdown
+
+    def hasRecord: Future[Boolean] =
+      records
+        .get(
+          psid.logical,
+          OnboardingClearanceOperation.operationKey(partyId),
+          OnboardingClearanceOperation.operationName,
+        )
+        .value
+        .map(_.isDefined)
+        .failOnShutdown
+
+    def close(scheduler: OnboardingClearanceScheduler): Unit =
+      LifeCycle.close(scheduler, client, tracker)(logger)
   }
 
   "PartyOnboardingClearanceScheduler" when {
@@ -298,7 +516,9 @@ class PartyOnboardingClearanceSchedulerTest
 
               // Ensure the background task was successfully scheduled for the new time
               fixture.scheduler.pendingClearances.size shouldBe 1
-              verify(fixture.mockTimeTracker, times(1)).awaitTick(isEq(expectedSafeTime))(
+              verify(fixture.mockTimeTracker, times(1)).awaitTick(
+                isEq(expectedSafeTime.immediateSuccessor)
+              )(
                 any[TraceContext]
               )
               succeed
@@ -343,7 +563,9 @@ class PartyOnboardingClearanceSchedulerTest
               fixture.scheduler
                 .pendingClearances(partyId)
                 .earliestClearanceTime shouldBe lsuSafeTime
-              verify(fixture.mockTimeTracker, times(1)).awaitTick(isEq(lsuSafeTime))(
+              verify(fixture.mockTimeTracker, times(1)).awaitTick(
+                isEq(lsuSafeTime.immediateSuccessor)
+              )(
                 any[TraceContext]
               )
 
@@ -359,7 +581,9 @@ class PartyOnboardingClearanceSchedulerTest
                   fixture.scheduler
                     .pendingClearances(partyId)
                     .earliestClearanceTime shouldBe newSafeTime
-                  verify(fixture.mockTimeTracker, times(1)).awaitTick(isEq(newSafeTime))(
+                  verify(fixture.mockTimeTracker, times(1)).awaitTick(
+                    isEq(newSafeTime.immediateSuccessor)
+                  )(
                     any[TraceContext]
                   )
                   succeed
@@ -384,6 +608,38 @@ class PartyOnboardingClearanceSchedulerTest
               )
               succeed
             }
+        }
+      }
+
+      "keep the pending clearance record if no time has been observed" in {
+        val topology = new ClearanceWithRealTopology(rejectedProposals = 0)
+        topology.start(observeOnboarding = false).flatMap { scheduler =>
+          (for {
+            status <- scheduler
+              .requestClearance(partyId, onboardingEffectiveAt)
+              .valueOrFailShutdown("request the clearance")
+            hasRecord <- topology.hasRecord
+          } yield {
+            // The flag is set, but the workflow reports it as not set before observing a time
+            status shouldBe FlagNotSet
+            hasRecord shouldBe true
+          }).thereafter(_ => topology.close(scheduler))
+        }
+      }
+
+      "delete the pending clearance record if the flag is already cleared" in {
+        val topology = new ClearanceWithRealTopology(rejectedProposals = 0)
+        topology.start().flatMap { scheduler =>
+          (for {
+            _ <- topology.activate()
+            status <- scheduler
+              .requestClearance(partyId, onboardingEffectiveAt)
+              .valueOrFailShutdown("request the clearance")
+            hasRecord <- topology.hasRecord
+          } yield {
+            status shouldBe FlagNotSet
+            hasRecord shouldBe false
+          }).thereafter(_ => topology.close(scheduler))
         }
       }
 
@@ -474,6 +730,20 @@ class PartyOnboardingClearanceSchedulerTest
         }
       }
 
+      "delete a pending clearance record left behind once the flag is cleared" in {
+        // E.g. written by a clearance request after the flag was cleared, and found on reconnect
+        val topology = new ClearanceWithRealTopology(rejectedProposals = 0)
+        topology.start().flatMap { scheduler =>
+          topology
+            .activate()
+            .map { _ =>
+              scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
+              eventually()(topology.hasRecord.futureValue shouldBe false)
+            }
+            .thereafter(_ => topology.close(scheduler))
+        }
+      }
+
       "treat an announced LSU as a transient error and silently retry until cancelled" in {
         createFixture().map { fixture =>
           val successor = SynchronizerSuccessor(psid.opaque, CantonTimestamp.now())
@@ -502,6 +772,35 @@ class PartyOnboardingClearanceSchedulerTest
             fixture.fakeWorkflow.calls.size shouldBe 1
             fixture.scheduler.pendingClearances.size shouldBe 1
           }
+        }
+      }
+
+      "log the waits for an announced LSU below WARN, also after many retries" in {
+        createFixture().map { fixture =>
+          val announced = FutureUnlessShutdown.pure(
+            Option(
+              (SynchronizerSuccessor(psid.opaque, CantonTimestamp.now()), onboardingEffectiveAt)
+            )
+          )
+          // More attempts than the backoff makes before it complains at WARN about a retry
+          when(fixture.mockSnapshot.announcedLsu()(any[TraceContext]))
+            .thenReturn(announced, Seq.fill(11)(announced)*)
+            .andThen(
+              FutureUnlessShutdown.pure(Option.empty[(SynchronizerSuccessor, EffectiveTime)])
+            )
+          fixture.fakeWorkflow.addResponse(FlagSet(earliestClearanceTime))
+          when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(Some(Promise[Unit]().future))
+
+          loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+            {
+              fixture.scheduler.requestClearanceInBackground(partyId, onboardingEffectiveAt)
+              eventually() {
+                fixture.fakeWorkflow.calls.size shouldBe 1
+              }
+            },
+            _ shouldBe empty,
+          )
         }
       }
 
@@ -624,11 +923,9 @@ class PartyOnboardingClearanceSchedulerTest
           val tickPromise = Promise[Unit]()
 
           when(
-            fixture.mockTimeTracker.awaitTick(
-              isEq(
-                task.earliestClearanceTime
-              ) // NOTE: Trigger awaits the *exact* earliestClearanceTime now
-            )(any[TraceContext])
+            fixture.mockTimeTracker.awaitTick(isEq(task.earliestClearanceTime.immediateSuccessor))(
+              any[TraceContext]
+            )
           ).thenReturn(Some(tickPromise.future))
 
           // Initial setup response
@@ -653,10 +950,77 @@ class PartyOnboardingClearanceSchedulerTest
                 fixture.fakeWorkflow.calls.poll() shouldBe (partyId, onboardingEffectiveAt)
                 fixture.scheduler.pendingClearances.size shouldBe 1
                 verify(fixture.mockTimeTracker, times(1))
-                  .awaitTick(isEq(task.earliestClearanceTime))(any[TraceContext])
+                  .awaitTick(isEq(task.earliestClearanceTime.immediateSuccessor))(any[TraceContext])
                 succeed
               }
             }
+        }
+      }
+
+      "clear the flag when the first time observed at or after the safe time is the safe time itself" in {
+        val topology = new ClearanceWithRealTopology(rejectedProposals = 0)
+        topology.start().flatMap { scheduler =>
+          scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("request the clearance")
+            .map { status =>
+              val safeTime = inside(status) { case FlagSet(safeTime) => safeTime }
+
+              topology.tracker.subscriptionResumesAfter(safeTime)
+              // The decision deadline has been reached but not passed, so the clearance is not safe
+              always(durationOfSuccess = 200.millis) {
+                topology.proposed shouldBe empty
+              }
+
+              topology.tracker.subscriptionResumesAfter(safeTime.plusSeconds(1))
+              eventually() {
+                topology.proposed.asScala.toSeq shouldBe Seq(topology.mapping(HostingState.Active))
+              }
+            }
+            .thereafter(_ => topology.close(scheduler))
+        }
+      }
+
+      "propose the clearance again if its proposal is rejected" in {
+        // E.g. because another participant's change of the mapping takes the serial first
+        val topology = new ClearanceWithRealTopology(rejectedProposals = 1)
+        topology.start().flatMap { scheduler =>
+          scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("request the clearance")
+            .map { status =>
+              val safeTime = inside(status) { case FlagSet(safeTime) => safeTime }
+              topology.tracker.subscriptionResumesAfter(safeTime.plusSeconds(1))
+              eventually() {
+                topology.proposed.asScala.toSeq shouldBe
+                  Seq.fill(2)(topology.mapping(HostingState.Active))
+              }
+            }
+            .thereafter(_ => topology.close(scheduler))
+        }
+      }
+
+      "log a proposal rejected for its serial below WARN and propose it again" in {
+        // The topology manager rejects it if another change of the mapping took the serial first
+        val topology = new ClearanceWithRealTopology(rejectedProposals = 1, rejectLocally = true)
+        topology.start().flatMap { scheduler =>
+          scheduler
+            .requestClearance(partyId, onboardingEffectiveAt)
+            .valueOrFailShutdown("request the clearance")
+            .map { status =>
+              val safeTime = inside(status) { case FlagSet(safeTime) => safeTime }
+              loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+                {
+                  topology.tracker.subscriptionResumesAfter(safeTime.plusSeconds(1))
+                  eventually() {
+                    topology.proposed.asScala.toSeq shouldBe
+                      Seq.fill(2)(topology.mapping(HostingState.Active))
+                  }
+                },
+                _ shouldBe empty,
+              )
+            }
+            .thereafter(_ => topology.close(scheduler))
         }
       }
 
@@ -668,9 +1032,13 @@ class PartyOnboardingClearanceSchedulerTest
           val tickPromise1 = Promise[Unit]() // Stale trigger
           val tickPromise2 = Promise[Unit]() // New trigger
 
-          when(fixture.mockTimeTracker.awaitTick(isEq(oldTime))(any[TraceContext]))
+          when(
+            fixture.mockTimeTracker.awaitTick(isEq(oldTime.immediateSuccessor))(any[TraceContext])
+          )
             .thenReturn(Some(tickPromise1.future))
-          when(fixture.mockTimeTracker.awaitTick(isEq(newTime))(any[TraceContext]))
+          when(
+            fixture.mockTimeTracker.awaitTick(isEq(newTime.immediateSuccessor))(any[TraceContext])
+          )
             .thenReturn(Some(tickPromise2.future))
 
           // Initial setup response creates the task at oldTime

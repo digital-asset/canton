@@ -12,7 +12,7 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.base.error.ErrorCategory
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.LedgerParticipantId
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
@@ -103,8 +103,6 @@ abstract class AcsCommitmentSender(
 
   private val pipelineShutdownHandle: AtomicReference[Option[(KillSwitch, Future[Done])]] =
     new AtomicReference(None)
-
-  private val directExecutionContext: ExecutionContext = DirectExecutionContext(noTracingLogger)
 
   /** First determines the latest available reconciliation interval tick checkpoint and sends ACS
     * commitments for all reconciliationtick checkpoints after the send watermark up to including

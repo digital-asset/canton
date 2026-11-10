@@ -10,10 +10,13 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.participant.GeneratorsParticipant
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
-import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.acsreplication.{
   AcsReplicationSourceParticipantMessage,
   AcsReplicationTargetParticipantMessage,
+}
+import com.digitalasset.canton.participant.protocol.party.{
+  FreezingToOnboardingOperation,
+  OnboardingClearanceOperation,
 }
 import com.digitalasset.canton.participant.protocol.submission.SubmissionTrackingData
 import com.digitalasset.canton.participant.synchronizer.{
@@ -150,6 +153,9 @@ final class SerializationDeserializationTest
         test(PendingLsuOperation, version)
         test(PendingOnboardingTransactions, version)
         test(OnboardingClearanceOperation, version)
+        if (version >= ProtocolVersion.v37) {
+          test(FreezingToOnboardingOperation, version)
+        }
 
         test(AcknowledgeRequest, version)
         test(AggregationRule, version)

@@ -12,8 +12,12 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
-import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
+import com.digitalasset.canton.participant.protocol.party.FreezingToOnboardingOperation.PendingFreezingToOnboardingStore
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
+import com.digitalasset.canton.participant.protocol.party.{
+  FreezingToOnboardingOperation,
+  OnboardingClearanceOperation,
+}
 import com.digitalasset.canton.participant.store.{
   AcsCommitmentPeriodStore,
   AcsCommitmentSenderWatermarkStore,
@@ -117,6 +121,9 @@ class InMemoryLogicalSyncPersistentState(
   override val pendingOnboardingClearanceStore: PendingOnboardingClearanceStore =
     new InMemoryPendingOperationStore(OnboardingClearanceOperation, loggerFactory)
 
+  override val pendingFreezingToOnboardingStore: PendingFreezingToOnboardingStore =
+    new InMemoryPendingOperationStore(FreezingToOnboardingOperation, loggerFactory)
+
   override val partyReplicationIndexingStoreIfOnPREnabled
       : Option[InMemoryPartyReplicationIndexingStore] =
     parameters.alphaOnlinePartyReplicationSupport.map(cfg =>
@@ -132,6 +139,7 @@ class InMemoryLogicalSyncPersistentState(
       acsDigestStore,
       acsCommitmentPeriodStore,
       pendingOnboardingClearanceStore,
+      pendingFreezingToOnboardingStore,
     )(logger)
 }
 

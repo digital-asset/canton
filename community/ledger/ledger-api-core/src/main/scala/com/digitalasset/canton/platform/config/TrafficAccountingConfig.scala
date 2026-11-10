@@ -6,7 +6,12 @@ package com.digitalasset.canton.platform.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
+import com.digitalasset.canton.config.TopologyConfigConverters.*
 import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmptyUtil.instances.*
+import pureconfig.generic.semiauto.{deriveReader, deriveWriter}
+import pureconfig.{ConfigReader, ConfigWriter}
 
 /** Base configuration for the user traffic enforcement in the participant node. Currently, only the
   * internal, in-process server variant is supported, allowing for later an external TEA server to
@@ -44,7 +49,19 @@ final case class TrafficAccountingConfig(
     allowSubmissionsOnDegradation: Boolean = false,
     trafficEnforcementServer: TrafficEnforcementServerConfig =
       TrafficEnforcementServerConfig.Internal(),
-)
+) {
+
+  /** Returns true if traffic accounting and DamlCredit top-up is enabled.
+    */
+  def damlTopUpEnabled: Boolean =
+    enabled && (trafficEnforcementServer match {
+      case internal: TrafficEnforcementServerConfig.Internal =>
+        internal.topUp match {
+          case TopUpConfig.Disabled => false
+          case _: TopUpConfig.DamlCredit => true
+        }
+    })
+}
 
 sealed trait TrafficEnforcementServerConfig
 
@@ -64,12 +81,15 @@ object TrafficEnforcementServerConfig {
     *   Total per-call budget for the `GetAccount` RPC, covering the client's retries around
     *   `databaseQueryTimeout`. Must be strictly greater than `databaseQueryTimeout`, so a timed-out
     *   query still leaves room for a retry.
+    * @param topUp
+    *   How traffic top-ups are ingested. Disabled by default.
     */
   final case class Internal(
       inProcessTeaServerName: String = "TeaGrpcInProcServer",
       projection: ProjectionConfig = ProjectionConfig(),
       databaseQueryTimeout: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(1),
       accountLookupTimeout: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(20),
+      topUp: TopUpConfig = TopUpConfig.Disabled,
   ) extends TrafficEnforcementServerConfig {
     require(
       databaseQueryTimeout.underlying.toMillis > 0,
@@ -99,14 +119,6 @@ object TrafficEnforcementServerConfig {
     *   the first ever time the TEA is started it will have no prior offset to start its completion
     *   stream from. By default, it will start at ledgerEnd. Use this config to override the offset
     *   at which it will start.
-    * @param initialTopUpOffsetBeginExclusive
-    *   the first ever time the TEA is started it will have no prior offset to start its top-up
-    *   stream from. By default, it will start from the current participant pruned up to offset. Use
-    *   this config to override the offset at which it will start.
-    * @param topUpPaymasters
-    *   parties whose TrafficPurchaser contracts are trusted: only top-ups made on a contract signed
-    *   by one of them are credited. The parties must be hosted on this participant. Top-up
-    *   ingestion is disabled when empty.
     */
   final case class ProjectionConfig(
       maxHandlerRetries: PositiveInt = PositiveInt.MaxValue,
@@ -116,7 +128,45 @@ object TrafficEnforcementServerConfig {
       projectionRestartRandomFactor: Double = 0.2d,
       projectionMaxRestarts: Int = Int.MaxValue,
       initialCompletionOffsetBeginExclusive: Option[Long] = None,
-      initialTopUpOffsetBeginExclusive: Option[Long] = None,
-      topUpPaymasters: Set[PartyId] = Set.empty,
   )
+}
+
+/** How the traffic enforcement server ingests traffic top-ups. */
+sealed trait TopUpConfig extends Product with Serializable
+
+object TopUpConfig {
+
+  /** No top-ups are ingested. Accounts can only be credited through the TEA API. */
+  case object Disabled extends TopUpConfig {
+    lazy implicit val configReader: ConfigReader[Disabled.type] = deriveReader
+    lazy implicit val configWriter: ConfigWriter[Disabled.type] = deriveWriter
+  }
+
+  /** Top-ups are ingested from exercises of the `PublishCredit` choice of the
+    * `TrafficCreditReporter` interface in the `canton-api-traffic-credit-v1` Daml package. The
+    * participant uploads that package before it starts ingesting top-ups and vets it on every
+    * synchronizer it connects to. With `parameters.admin-workflow.auto-load-dar` disabled, the
+    * operator has to upload and vet it instead.
+    *
+    * @param paymasters
+    *   parties whose credits are trusted: only credits published with the authority of one of these
+    *   parties, as the paymaster of the issuing contract, are ingested. The parties must be hosted
+    *   on this participant.
+    * @param initialOffsetBeginExclusive
+    *   the first ever time the TEA is started it will have no prior offset to start its top-up
+    *   stream from. By default, it will start from the current participant pruned up to offset. Use
+    *   this config to override the offset at which it will start.
+    */
+  final case class DamlCredit(
+      paymasters: NonEmpty[Set[PartyId]],
+      initialOffsetBeginExclusive: Option[Long] = None,
+  ) extends TopUpConfig
+
+  object DamlCredit {
+    lazy implicit val configReader: ConfigReader[DamlCredit] = deriveReader
+    lazy implicit val configWriter: ConfigWriter[DamlCredit] = deriveWriter
+  }
+
+  lazy implicit val configReader: ConfigReader[TopUpConfig] = deriveReader
+  lazy implicit val configWriter: ConfigWriter[TopUpConfig] = deriveWriter
 }

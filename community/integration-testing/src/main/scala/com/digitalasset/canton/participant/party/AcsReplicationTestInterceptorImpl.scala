@@ -3,34 +3,34 @@
 
 package com.digitalasset.canton.participant.party
 
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.protocol.party.SourceParticipantStore
 import com.digitalasset.canton.tracing.TraceContext
 
-class PartyReplicationTestInterceptorImpl extends PartyReplicationTestInterceptor {
+class AcsReplicationTestInterceptorImpl extends AcsReplicationTestInterceptor {
 
   override def onSourceParticipantProgress(store: SourceParticipantStore)(implicit
       traceContext: TraceContext
-  ): PartyReplicationTestInterceptor.ProceedOrWait = PartyReplicationTestInterceptor.Proceed
+  ): AcsReplicationTestInterceptor.ProceedOrWait = AcsReplicationTestInterceptor.Proceed
 
   override def onTargetParticipantProgress(progress: AcsReplicationStatus.AcsReplicationProgress)(
       implicit traceContext: TraceContext
-  ): PartyReplicationTestInterceptor.ProceedOrWait = PartyReplicationTestInterceptor.Proceed
+  ): AcsReplicationTestInterceptor.ProceedOrWait = AcsReplicationTestInterceptor.Proceed
 }
 
-object PartyReplicationTestInterceptorImpl {
+object AcsReplicationTestInterceptorImpl {
 
   /** Create a test interceptor that proceeds iff the given condition is true (based on the contents
     * of the source participant store).
     */
   def sourceParticipantProceedsIf(
       canProceed: SourceParticipantStore => Boolean
-  ): PartyReplicationTestInterceptorImpl =
-    new PartyReplicationTestInterceptorImpl {
+  ): AcsReplicationTestInterceptorImpl =
+    new AcsReplicationTestInterceptorImpl {
       override def onSourceParticipantProgress(store: SourceParticipantStore)(implicit
           traceContext: TraceContext
-      ): PartyReplicationTestInterceptor.ProceedOrWait = proceedIf(canProceed(store))
+      ): AcsReplicationTestInterceptor.ProceedOrWait = proceedIf(canProceed(store))
     }
 
   /** Create a test interceptor that proceeds iff the given condition is true (based on the contents
@@ -38,30 +38,30 @@ object PartyReplicationTestInterceptorImpl {
     */
   def targetParticipantProceedsIf(
       canProceed: AcsReplicationStatus.AcsReplicationProgress => Boolean
-  ): PartyReplicationTestInterceptorImpl =
-    new PartyReplicationTestInterceptorImpl {
+  ): AcsReplicationTestInterceptorImpl =
+    new AcsReplicationTestInterceptorImpl {
       override def onTargetParticipantProgress(
           progress: AcsReplicationStatus.AcsReplicationProgress
       )(implicit
           traceContext: TraceContext
-      ): PartyReplicationTestInterceptor.ProceedOrWait = proceedIf(canProceed(progress))
+      ): AcsReplicationTestInterceptor.ProceedOrWait = proceedIf(canProceed(progress))
     }
 
   /** Create a test interceptor that proceeds or waits by evaluating the given function (based on
     * the contents of the target participant store).
     */
   def targetParticipantEvaluates(
-      evaluate: AcsReplicationStatus.AcsReplicationProgress => PartyReplicationTestInterceptor.ProceedOrWait
-  ): PartyReplicationTestInterceptorImpl =
-    new PartyReplicationTestInterceptorImpl {
+      evaluate: AcsReplicationStatus.AcsReplicationProgress => AcsReplicationTestInterceptor.ProceedOrWait
+  ): AcsReplicationTestInterceptorImpl =
+    new AcsReplicationTestInterceptorImpl {
       override def onTargetParticipantProgress(
           progress: AcsReplicationStatus.AcsReplicationProgress
       )(implicit
           traceContext: TraceContext
-      ): PartyReplicationTestInterceptor.ProceedOrWait = evaluate(progress)
+      ): AcsReplicationTestInterceptor.ProceedOrWait = evaluate(progress)
     }
 
-  private def proceedIf(canProceed: Boolean): PartyReplicationTestInterceptor.ProceedOrWait =
-    if (canProceed) PartyReplicationTestInterceptor.Proceed
-    else PartyReplicationTestInterceptor.Wait
+  private def proceedIf(canProceed: Boolean): AcsReplicationTestInterceptor.ProceedOrWait =
+    if (canProceed) AcsReplicationTestInterceptor.Proceed
+    else AcsReplicationTestInterceptor.Wait
 }

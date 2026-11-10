@@ -74,8 +74,6 @@ private[bftordering] object Miscellaneous {
 
   def objId(obj: Any): Int = System.identityHashCode(obj)
 
-  def objIdC(obj: Any): String = s"[${obj.getClass.getName}@${objId(obj)}]"
-
   final case class ResultWithLogs[T](
       result: T,
       logs: (Level, () => String)*

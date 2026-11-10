@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.http.json.v2
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.typesafe.scalalogging.Logger
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import io.circe.Json
 import org.scalacheck.{Gen, Shrink}
 import org.scalatest.matchers.should.Matchers
@@ -74,7 +73,7 @@ class CirceToUJsonTest extends AnyWordSpec with Matchers with ScalaCheckDrivenPr
     }
 
     "be enforced by ProtocolConverters.fromCirce" in {
-      implicit val ec: ExecutionContext = DirectExecutionContext(Logger(getClass))
+      implicit val ec: ExecutionContext = directExecutionContext
       val converters =
         new ProtocolConverters(new MockSchemaProcessor(), new MockTranscodePackageIdResolver())
       noException should be thrownBy converters.fromCirce(nestedArray(CirceToUJson.DefaultMaxDepth))

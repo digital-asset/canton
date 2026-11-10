@@ -6,7 +6,7 @@
   - **Flaky/nightly alert** (`alert_slack.py`), when the same test fails on several consecutive commits on a tracked branch:
     - a **flaky streak** pings the **Flaky Canton** rotation (three people),
     - a **broken nightly** pings the **CI rota**.
-  - **Red-main alert** (`slack_red_main_with_volunteer`), when a **build or infrastructure** job fails on `main`: it pings the rota mapped to that job, so a red **blackduck** job pings the **Release & Blackduck** rota and everything else pings the **CI rota**. Test-job failures are deliberately excluded here, since they are covered by the flaky/nightly alert above. Which jobs count as tests is set in [`notify_job_classification.yml`](notify_job_classification.yml), kept in sync with the workflow by `check_canton_build_required_gate.py`.
+  - **Red-main alert** (`slack_notify_failure_with_volunteer`), when a **build or infrastructure** job fails on `main`: it pings the rota mapped to that job, so a red **blackduck** job pings the **Release & Blackduck** rota and everything else pings the **CI rota**. Test-job failures are deliberately excluded here, since they are covered by the flaky/nightly alert above. Which jobs count as tests is set in [`notify_job_classification.yml`](notify_job_classification.yml), kept in sync with the workflow by `check_canton_build_required_gate.py`.
 - **Fallback when the lookup fails.** If the sheet cannot be read (`GCLOUD_SHEETS_SA_KEY` unset, the service account is not a Viewer), nobody is on rota that week, or the name has no Slack ID in `roster_people.json`, the alert @-mentions `fallback_pool` from `roster_people.json` instead of pinging no one.
 - **Weekly Slack topics.** A separate scheduled workflow, `update_rota_topics.yml`, runs every Monday and rewrites the team channel topics from the same rota sheet, so each channel topic always names the current on-duty person.
 - **Upcoming-shift reminders.** Another scheduled workflow, `remind_upcoming_rota.yml`, runs every Monday and privately DMs the people who start a rota shift about a month (28 days) out, so they get a heads-up in time to arrange a swap.
@@ -67,7 +67,7 @@ flowchart TD
     M -->|no| M2["Flaky test alert<br/>@ Flaky Canton rota"]
 ```
 
-The separate red-main alert (`slack_red_main_with_volunteer`) is not shown here. It pings per failing job rather than per streak, and covers build and infrastructure failures. See the TLDR for how the two alerts divide the work.
+The separate red-main alert (`slack_notify_failure_with_volunteer`) is not shown here. It pings per failing job rather than per streak, and covers build and infrastructure failures. See the TLDR for how the two alerts divide the work.
 
 ### What do we check?
 
@@ -115,7 +115,7 @@ When the streak fires, the issue is labelled `broken-nightly` and `alert_slack.p
 
 Two caveats:
 
-- Only jobs prefixed `nightly_`, or explicitly listed in `NIGHTLY_JOBS_WITHOUT_PREFIX` (currently just `toxiproxy_test_slow`), take this path. Other jobs that run solely in the nightly workflow but are neither prefixed nor listed (for example `postgres_conformance_test`, `test_with_java17`, `external_parties_test`, `protocol_continuity_test_all`) fall back to the consecutive-commit check, which effectively never fires at nightly cadence, so they get no confirmed broken-nightly signal. They still open a tracking issue and still trigger the per-run `slack_red_main_with_volunteer` ping on `main`, so their failures are not silent, they just miss the dedicated escalation. A prefix-less nightly job that should get the escalation needs adding to `NIGHTLY_JOBS_WITHOUT_PREFIX` in `flaky_common.py`.
+- Only jobs prefixed `nightly_`, or explicitly listed in `NIGHTLY_JOBS_WITHOUT_PREFIX` (currently just `toxiproxy_test_slow`), take this path. Other jobs that run solely in the nightly workflow but are neither prefixed nor listed (for example `postgres_conformance_test`, `test_with_java17`, `external_parties_test`, `protocol_continuity_test_all`) fall back to the consecutive-commit check, which effectively never fires at nightly cadence, so they get no confirmed broken-nightly signal. They still open a tracking issue and still trigger the per-run `slack_notify_failure_with_volunteer` ping on `main`, so their failures are not silent, they just miss the dedicated escalation. A prefix-less nightly job that should get the escalation needs adding to `NIGHTLY_JOBS_WITHOUT_PREFIX` in `flaky_common.py`.
 - On a very low-commit branch, where fewer than 3 distinct commits span the nightly window, `nightly_streak` cannot assemble 3 commits and does not fire.
 
 ### Issue lifecycle

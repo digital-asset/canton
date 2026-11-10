@@ -29,12 +29,11 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.{
   AcsReplicationAdminWorkflow,
   AcsReplicator,
 }
-import com.digitalasset.canton.participant.config.{
-  AlphaOnlinePartyReplicationConfig,
-  ParticipantNodeConfig,
-}
+import com.digitalasset.canton.participant.config.{AlphaAcsReplicationConfig, ParticipantNodeConfig}
 import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.tea.daml.java.canton.api.traffic.creditv1.TrafficCreditReporter
+import com.digitalasset.canton.tea.ingestion.TeaCreditIngestionService
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.TopologyManagerError.{
@@ -133,7 +132,7 @@ class AdminWorkflowServices(
     acsReplicatorO
       .collect {
         case acsReplicator
-            if isAcsReplicationWorkflowLoaded(parameters.alphaOnlinePartyReplicationSupport) =>
+            if isAcsReplicationWorkflowLoaded(parameters.alphaAcsReplicationSupport) =>
           createService(
             "acs-replication-management",
             // TODO(#20637): Don't resubscribe if the ledger api has been pruned as that would mean missing updates that
@@ -211,7 +210,7 @@ class AdminWorkflowServices(
           partReplicationWorkflowLoaded <-
             if (
               AdminWorkflowServices.isAcsReplicationWorkflowLoaded(
-                config.parameters.alphaOnlinePartyReplicationSupport
+                config.parameters.alphaAcsReplicationSupport
               )
             ) {
               isLoaded(AdminWorkflowServices.AcsReplicationDarResourceFileName)
@@ -245,7 +244,7 @@ class AdminWorkflowServices(
           _ <-
             if (
               AdminWorkflowServices.isAcsReplicationWorkflowLoaded(
-                config.parameters.alphaOnlinePartyReplicationSupport
+                config.parameters.alphaAcsReplicationSupport
               )
             ) {
               load(AdminWorkflowServices.AcsReplicationDarResourceFileName)
@@ -275,21 +274,8 @@ class AdminWorkflowServices(
     */
   private def loadDamlArchiveResource(darName: String)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, IllegalStateException, Unit] = {
-    val bytes =
-      withResource(AdminWorkflowServices.getDarInputStream(darName))(ByteString.readFrom)
-    AdminWorkflowServices.handleDamlErrorDuringPackageLoading(darName)(
-      packageService
-        .upload(
-          darBytes = bytes,
-          description = Some("System package"),
-          submissionIdO = None,
-          vettingInfo = None,
-          expectedMainPackageId = None,
-        )
-        .void
-    )
-  }
+  ): EitherT[FutureUnlessShutdown, IllegalStateException, Unit] =
+    AdminWorkflowServices.uploadBuiltInDar(packageService, darName)
 
   private def createLedgerClient(
       userId: String
@@ -382,7 +368,8 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
     "canton-builtin-admin-workflow-acs-replication-alpha"
   private val AcsReplicationDarResourceFileName: String =
     s"dar/$AcsReplicationDarResourceName.dar"
-  val AdminWorkflowNames: Set[String] = Set(PingDarResourceName, AcsReplicationDarResourceName)
+  val AdminWorkflowNames: Set[String] =
+    Set(PingDarResourceName, AcsReplicationDarResourceName, TrafficCreditReporter.PACKAGE_NAME)
 
   private def getDarInputStream(resourceName: String): InputStream =
     Option(
@@ -401,6 +388,48 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
       .valueOr(err =>
         throw new IllegalStateException(s"Unable to load admin workflow packages: $err")
       )
+
+  /** Uploads a DAR from the classpath as a system package. Does NOT vet the DAR. */
+  private def uploadBuiltInDar(packageService: PackageService, darName: String)(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      loggingContext: ErrorLoggingContext,
+  ): EitherT[FutureUnlessShutdown, IllegalStateException, Unit] = {
+    val bytes = withResource(getDarInputStream(darName))(ByteString.readFrom)
+    handleDamlErrorDuringPackageLoading(darName)(
+      packageService
+        .upload(
+          darBytes = bytes,
+          description = Some("System package"),
+          submissionIdO = None,
+          vettingInfo = None,
+          expectedMainPackageId = None,
+        )
+        .void
+    )
+  }
+
+  /** Whether all packages of the canton-api-traffic-credit-v1 DAR are registered with the
+    * participant.
+    */
+  private[participant] def isTrafficCreditDarRegistered(packageService: PackageService)(implicit
+      loggingContext: ErrorLoggingContext
+  ): Boolean =
+    TrafficCreditPackages.keySet.subsetOf(
+      packageService.getPackageMetadataView.getSnapshot.packages.keySet
+    )
+
+  /** Uploads the canton-api-traffic-credit-v1 DAR read by the traffic enforcement top-up ingestion,
+    * unless all its packages are already registered with the participant. Does NOT vet the DAR.
+    */
+  private[participant] def uploadTrafficCreditDarUnlessRegistered(packageService: PackageService)(
+      implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      loggingContext: ErrorLoggingContext,
+  ): EitherT[FutureUnlessShutdown, IllegalStateException, Unit] =
+    if (isTrafficCreditDarRegistered(packageService)) EitherTUtil.unitUS
+    else uploadBuiltInDar(packageService, TeaCreditIngestionService.DarResourceFileName)
 
   private[participant] def handleDamlErrorDuringPackageLoading(adminWorkflow: String)(
       res: EitherT[FutureUnlessShutdown, RpcError, Unit]
@@ -427,18 +456,20 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
           Left(new IllegalStateException(CantonError.stringFromContext(err)))
       }
 
-  // The ACS replication admin workflow is only loaded when online party replication is enabled
-  // in sequencer channel mode.
+  // The ACS replication admin workflow is only loaded when ACS replication is enabled.
   private[participant] def isAcsReplicationWorkflowLoaded(
-      config: Option[AlphaOnlinePartyReplicationConfig]
-  ): Boolean = config.exists(_.unsafeSequencerChannelSupport)
+      config: Option[AlphaAcsReplicationConfig]
+  ): Boolean = config.nonEmpty
 
   lazy val PingPackages: Map[PackageId, Ast.Package] = getDarPackages(PingDarResourceFileName)
   lazy val AcsReplicationPackages: Map[PackageId, Ast.Package] = getDarPackages(
     AcsReplicationDarResourceFileName
   )
+  lazy val TrafficCreditPackages: Map[PackageId, Ast.Package] = getDarPackages(
+    TeaCreditIngestionService.DarResourceFileName
+  )
   lazy val AllBuiltInPackages: Map[PackageId, Ast.Package] =
-    PingPackages ++ AcsReplicationPackages
+    PingPackages ++ AcsReplicationPackages ++ TrafficCreditPackages
 
   @Explanation(
     """This error indicates that the admin workflow package could not be vetted. The admin workflows is

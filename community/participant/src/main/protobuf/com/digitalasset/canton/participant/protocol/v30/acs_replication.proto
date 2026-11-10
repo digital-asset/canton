@@ -7,7 +7,6 @@ package com.digitalasset.canton.participant.protocol.v30;
 
 import "com/digitalasset/canton/admin/participant/v30/active_contract.proto";
 import "com/digitalasset/canton/crypto/v30/crypto.proto";
-import "com/digitalasset/canton/protocol/v30/topology.proto";
 import "scalapb/scalapb.proto";
 
 // Describes the various pieces of state of an ACS  replication.
@@ -36,8 +35,7 @@ message AcsReplicationStatus {
     string source_participant_uid = 4;
     string target_participant_uid = 5;
     optional uint64 timestamp = 6;
-    com.digitalasset.canton.protocol.v30.Enums.ParticipantPermission participant_permission = 7;
-    AcsReplicationDestination acs_replication_destination = 8;
+    AcsReplicationDestination acs_replication_destination = 7;
   }
 
   // Sequencer channel agreement hasn't been proposed by target participant yet.
@@ -117,10 +115,6 @@ message AcsReplicationStatus {
     // Whether the party is in the onboarding stage on the target participant.
     // required
     bool is_onboarding = 2;
-
-    // Serial number of the last topology transaction
-    // that contains party-to-participant mapping for both source and target participant.
-    uint32 topology_serial = 3;
   }
 
   // Static ACS replication parameters.

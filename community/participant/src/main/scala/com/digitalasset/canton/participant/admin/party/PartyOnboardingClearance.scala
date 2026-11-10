@@ -9,14 +9,17 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.admin.data.{
   FlagNotSet,
   FlagSet,
   PartyOnboardingFlagStatus,
 }
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow.AuthorizeClearanceError
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow.{
+  AuthorizeClearanceError,
+  partyToParticipantTopologyHeadO,
+}
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.topology.*
@@ -25,6 +28,7 @@ import com.digitalasset.canton.topology.processing.{
   SequencedTime,
   TopologyTransactionProcessingSubscriber,
 }
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.{PartyToParticipant, TopologyChangeOp}
 import com.digitalasset.canton.tracing.TraceContext
@@ -137,7 +141,7 @@ class OnboardingClearanceScheduler(
         .map {
           case None =>
             logger.info(
-              s"Aborting onboarding flag clearance because no pending onboarding clearance record found for $partyId."
+              s"Stopping the onboarding flag clearance for $partyId: its pending clearance record is gone, as the flag is cleared or this participant no longer hosts the party."
             )
             // Actively remove the task as requested
             pendingClearances.remove(partyId).discard
@@ -171,7 +175,8 @@ class OnboardingClearanceScheduler(
     * @return
     *   A `FutureUnlessShutdown` yielding:
     *   - `Right(FlagNotSet)` if the flag is or was already cleared.
-    *   - `Right(FlagSet(safeTime))` if the flag is set and clearance is scheduled for `safeTime`.
+    *   - `Right(FlagSet(safeTime))` if the flag is set and clearance is scheduled for the first
+    *     time after `safeTime`.
     *   - `Left(String)` if a precondition fails or an authorization error occurs.
     *
     * @note
@@ -218,14 +223,7 @@ class OnboardingClearanceScheduler(
         case None =>
           for {
             _ <- ensureClearanceRecordExists(partyId).leftMap(_.message)
-            res <- topologyWorkflow
-              .authorizeClearingOnboardingFlag(
-                partyId,
-                participantId,
-                onboardingEffectiveAt,
-                context,
-              )
-              .leftMap(_.message)
+            res <- authorizeClearance(partyId, onboardingEffectiveAt, context).leftMap(_.message)
           } yield res
       }
     } yield {
@@ -367,23 +365,24 @@ class OnboardingClearanceScheduler(
           ensureClearanceRecordExists(partyId)
       }
 
-      outcome <- topologyWorkflow
-        .authorizeClearingOnboardingFlag(
-          partyId,
-          participantId,
-          onboardingEffectiveAt,
-          context,
-        )
+      outcome <- authorizeClearance(partyId, onboardingEffectiveAt, context)
         .leftMap(err =>
           OnboardingClearanceScheduler.ClearanceAttemptError
             .WorkflowError(err): OnboardingClearanceScheduler.ClearanceAttemptError
         )
-    } yield outcome
+    } yield (outcome, context.timeTracker.latestTime)
 
     attempt
-      .map { outcome =>
-        // Success: Handle outcome and map to Right(()) to break the retry loop
+      .subflatMap { case (outcome, latestTime) =>
         handleClearanceSuccess(partyId, onboardingEffectiveAt, outcome)
+        outcome match {
+          // Past the safe time, the workflow has proposed the clearance. Another change of the
+          // party's mapping can take its serial first and get it rejected, so attempt again until
+          // the flag is cleared.
+          case FlagSet(safeTime) if latestTime.exists(_ > safeTime) =>
+            Left(OnboardingClearanceScheduler.ClearanceAttemptError.AwaitingClearance(safeTime))
+          case _ => Right(())
+        }
       }
       .recover {
         case err @ OnboardingClearanceScheduler.ClearanceAttemptError.WorkflowError(
@@ -399,7 +398,8 @@ class OnboardingClearanceScheduler(
           ()
       }
       .leftMap {
-        case err @ OnboardingClearanceScheduler.ClearanceAttemptError.LsuAnnounced(_) =>
+        case err @ (_: OnboardingClearanceScheduler.ClearanceAttemptError.LsuAnnounced |
+            _: OnboardingClearanceScheduler.ClearanceAttemptError.AwaitingClearance) =>
           // Return the pure marker so our ExceptionRetryPolicy catches it and silences the loop log
           err
         case err =>
@@ -408,6 +408,45 @@ class OnboardingClearanceScheduler(
           err // Transient error: Trigger retry normally
       }
   }
+
+  /** Asks the workflow to clear the party's onboarding flag. Once this participant is active for
+    * the party, also deletes the party's pending clearance record: clearing the flag deletes it,
+    * but a clearance requested afterwards writes it again. `FlagNotSet` alone does not show that
+    * the flag is cleared, as the workflow also returns it before observing a synchronizer time.
+    */
+  private def authorizeClearance(
+      partyId: PartyId,
+      onboardingEffectiveAt: EffectiveTime,
+      context: PartyReplicationTopologyWorkflow.SynchronizerTopologyContext,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, AuthorizeClearanceError, PartyOnboardingFlagStatus] =
+    for {
+      outcome <- topologyWorkflow.authorizeClearingOnboardingFlag(
+        partyId,
+        participantId,
+        onboardingEffectiveAt,
+        context,
+      )
+      _ <- EitherT.liftF[FutureUnlessShutdown, AuthorizeClearanceError, Unit](
+        if (outcome == FlagNotSet)
+          partyToParticipantTopologyHeadO(partyId, context.topologyStore).flatMap { headO =>
+            val isActive = headO.exists(
+              _.mapping.participants.exists(p =>
+                p.participantId == participantId && p.state == HostingState.Active
+              )
+            )
+            if (isActive)
+              pendingClearancesStore.delete(
+                psid.logical,
+                OnboardingClearanceOperation.operationKey(partyId),
+                OnboardingClearanceOperation.operationName,
+              )
+            else FutureUnlessShutdown.unit
+          }
+        else FutureUnlessShutdown.unit
+      )
+    } yield outcome
 
   /** Centralized handling of successful clearance outcomes. */
   private def handleClearanceSuccess(
@@ -460,8 +499,11 @@ class OnboardingClearanceScheduler(
         )
 
       case Right(context) =>
-        // The trigger relies strictly on the earliestClearanceTime provided by the task.
-        val triggerTime = task.earliestClearanceTime
+        // The clearance is safe only once a time after earliestClearanceTime has been observed
+        // (PartyReplicationTopologyWorkflow.authorizeClearingOnboardingFlag). An attempt at
+        // earliestClearanceTime itself would report the same time again, which schedules no
+        // further trigger.
+        val triggerTime = task.earliestClearanceTime.immediateSuccessor
 
         val tickFuture =
           context.timeTracker.awaitTick(triggerTime).getOrElse {
@@ -633,10 +675,14 @@ object OnboardingClearanceScheduler {
     final case class SynchronizerNotAvailable(reason: String) extends ClearanceAttemptError {
       override def message: String = reason
     }
+    final case class AwaitingClearance(safeTime: CantonTimestamp) extends ClearanceAttemptError {
+      override def message: String =
+        s"Awaiting the clearance proposed after the safe time $safeTime"
+    }
   }
 
-  /** Custom retry policy that delegates to the default, but suppresses log spam for normal LSU
-    * background operations.
+  /** Custom retry policy that delegates to the default, but suppresses log spam for the expected
+    * waits: for an announced LSU, and for a proposed clearance to become effective.
     */
   val ClearanceExceptionRetryPolicy: ExceptionRetryPolicy = new ExceptionRetryPolicy {
     override protected def determineExceptionErrorKind(
@@ -646,7 +692,13 @@ object OnboardingClearanceScheduler {
       ErrorKind.UnknownErrorKind
 
     override def retryLogLevel(outcome: Try[Any]): Option[Level] = outcome match {
-      case Success(Left(ClearanceAttemptError.LsuAnnounced(_))) =>
+      case Success(
+            UnlessShutdown.Outcome(
+              Left(
+                _: ClearanceAttemptError.LsuAnnounced | _: ClearanceAttemptError.AwaitingClearance
+              )
+            )
+          ) =>
         // By returning TRACE/DEBUG here, we instruct Canton's RetryWithDelay engine
         // to not emit the "Retrying after X delay" INFO/WARN messages for this expected condition.
         Some(Level.DEBUG)

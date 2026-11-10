@@ -28,7 +28,7 @@ import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-class ContractKeyMismatchSpec
+class ContractKeyHashMismatchSpec
     extends AnyWordSpec
     with Matchers
     with Inside
@@ -191,7 +191,7 @@ class ContractKeyMismatchSpec
   private def run(
       cmd: ApiCommand,
       declaredKey: GlobalKeyWithMaintainers,
-      errorOnContractKeyMismatch: Boolean,
+      errorOnContractKeyHashMismatch: Boolean,
   ) = {
     val inst = contract(declaredKey)
     newEngine()
@@ -203,8 +203,8 @@ class ContractKeyMismatchSpec
         participantId = participantId,
         submissionSeed = submissionSeed,
         contractIdVersion = ContractIdVersion.V1,
-        interpretationConfig =
-          InterpretationConfig.Dev.copy(errorOnContractKeyMismatch = errorOnContractKeyMismatch),
+        interpretationConfig = InterpretationConfig.Dev
+          .copy(errorOnContractKeyHashMismatch = errorOnContractKeyHashMismatch),
         prefetchKeys = Seq.empty,
       )
       // The key handler always returns the contract under test, whatever the key being asked.
@@ -221,10 +221,10 @@ class ContractKeyMismatchSpec
   private def expectValidationFailed(
       cmd: ApiCommand,
       declaredKey: GlobalKeyWithMaintainers,
-      errorOnContractKeyMismatch: Boolean,
+      errorOnContractKeyHashMismatch: Boolean,
       expectedMsg: String,
   ) =
-    inside(run(cmd, declaredKey, errorOnContractKeyMismatch)) {
+    inside(run(cmd, declaredKey, errorOnContractKeyHashMismatch)) {
       case Left(
             IErr(IErr.DamlException(IE.Upgrade(validationFailed: IE.Upgrade.ValidationFailed)), _)
           ) =>
@@ -234,42 +234,48 @@ class ContractKeyMismatchSpec
         validationFailed.msg should include(expectedMsg)
     }
 
-  List(true, false).foreach { errorOnContractKeyMismatch =>
-    s"errorOnContractKeyMismatch = $errorOnContractKeyMismatch" when {
+  List(true, false).foreach { errorOnContractKeyHashMismatch =>
+    s"errorOnContractKeyHashMismatch = $errorOnContractKeyHashMismatch" when {
       operations.foreach { case (operation, cmd) =>
         operation should {
 
           "accept a correct key" in {
-            inside(run(cmd, correctKey, errorOnContractKeyMismatch)) { case Right((_, meta)) =>
+            inside(run(cmd, correctKey, errorOnContractKeyHashMismatch)) { case Right((_, meta)) =>
               meta.contractKeyMismatches shouldBe empty
             }
           }
 
-          if (errorOnContractKeyMismatch)
+          if (errorOnContractKeyHashMismatch)
             "reject a wrong key hash" in {
-              inside(run(cmd, wrongHashKey, errorOnContractKeyMismatch)) {
+              inside(run(cmd, wrongHashKey, errorOnContractKeyHashMismatch)) {
                 case Left(
                       IErr(
                         IErr.DamlException(
-                          IE.Dev(_, IE.Dev.ContractKeyMismatchError(`cid`, srcKey, recomputedKey))
+                          IE.Upgrade(error: IE.Upgrade.ValidationFailed)
                         ),
                         _,
                       )
                     ) =>
-                  srcKey.map(_.globalKey.hash) shouldBe Some(wrongHashKey.globalKey.hash)
-                  recomputedKey.map(_.globalKey.hash) shouldBe Some(correctKey.globalKey.hash)
+                  error.coid shouldBe cid
+                  error.originalKeyOpt.map(_.globalKey.hash) shouldBe Some(
+                    wrongHashKey.globalKey.hash
+                  )
+                  error.recomputedKeyOpt.map(_.globalKey.hash) shouldBe Some(
+                    correctKey.globalKey.hash
+                  )
               }
             }
           else if (operation.contains("by-key"))
             "crash on a wrong key hash" in {
-              inside(run(cmd, wrongHashKey, errorOnContractKeyMismatch)) {
+              inside(run(cmd, wrongHashKey, errorOnContractKeyHashMismatch)) {
                 case Left(IErr(IErr.Internal(_, _, _), _)) =>
               }
             }
           else
             "accept and record a wrong key hash" in {
-              inside(run(cmd, wrongHashKey, errorOnContractKeyMismatch)) { case Right((_, meta)) =>
-                meta.contractKeyMismatches.keySet shouldBe Set(cid)
+              inside(run(cmd, wrongHashKey, errorOnContractKeyHashMismatch)) {
+                case Right((_, meta)) =>
+                  meta.contractKeyMismatches.keySet shouldBe Set(cid)
               }
             }
 
@@ -277,7 +283,7 @@ class ContractKeyMismatchSpec
             expectValidationFailed(
               cmd,
               wrongValueKey,
-              errorOnContractKeyMismatch,
+              errorOnContractKeyHashMismatch,
               "key value mismatch",
             )
           }
@@ -286,7 +292,7 @@ class ContractKeyMismatchSpec
             expectValidationFailed(
               cmd,
               wrongMaintainersKey,
-              errorOnContractKeyMismatch,
+              errorOnContractKeyHashMismatch,
               "key maintainers mismatch",
             )
           }

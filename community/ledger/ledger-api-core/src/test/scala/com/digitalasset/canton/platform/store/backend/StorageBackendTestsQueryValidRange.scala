@@ -4,6 +4,8 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.daml.logging.entries.LoggingEntries
+import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, SuppressionRule}
 import com.digitalasset.canton.platform.store.backend.StorageBackendTestValues.{
@@ -17,7 +19,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.slf4j.event.Level
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
 private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with StorageBackendSpec {
   this: AnyFlatSpec =>
@@ -25,7 +27,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   implicit val loggingContextWithTrace: LoggingContextWithTrace =
     new LoggingContextWithTrace(LoggingEntries.empty, TraceContext.empty)
 
-  implicit val ec: ExecutionContext = directExecutionContext
+  implicit val dec: DirectExecutionContext = directExecutionContext
 
   behavior of "QueryValidRange.withRangeNotPruned"
 

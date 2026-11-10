@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.dao.events
 
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
@@ -127,9 +127,6 @@ private[platform] object BufferedUpdateReader {
   )(implicit
       executionContext: ExecutionContext
   ): BufferedUpdateReader = {
-    val directEC = DirectExecutionContext(
-      loggerFactory.getLogger(BufferedUpdateReader.getClass)
-    )
 
     val updatesStreamReader =
       new BufferedStreamsReader[InternalUpdateFormat, UpdateResponse](
@@ -187,7 +184,7 @@ private[platform] object BufferedUpdateReader {
           )(
             loggingContext,
             ErrorLoggingContext(loggerFactory.getTracedLogger(getClass), loggingContext),
-            directEC,
+            directExecutionContext,
           ),
       )
 

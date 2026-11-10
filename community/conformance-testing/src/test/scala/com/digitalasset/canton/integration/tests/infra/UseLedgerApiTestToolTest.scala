@@ -57,15 +57,10 @@ final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with Base
 
     releasedTools should not be empty
 
-    val currentMajorMinor =
-      ReleaseVersion(ReleaseVersion.current.major, ReleaseVersion.current.minor, 0)
-
     // We only test releases starting from 3.3.0, as earlier releases are no longer supported
     val releases33andLater = allReleases.filter(_ > ReleaseVersion(3, 3, 0))
 
-    val foundReleaseTools = releasedTools
-      .filter(_ <= currentMajorMinor)
-      .filter(_.isStable)
+    val foundReleaseTools = releasedTools.filter(_.isStable)
 
     val expectedReleases = releases33andLater.dropRight(1)
 

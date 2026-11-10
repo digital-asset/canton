@@ -15,6 +15,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.participant.admin.data.ImportPartyAcsForceFlag
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 
 import java.time.Duration
@@ -183,7 +184,14 @@ abstract class LsuRepairServiceUpgradeTimeIntegrationTestBase extends LsuBase {
       if (useRepairCommands) {
         participant2.repair.import_acs(daId, aliceAcs.canonicalPath)
       } else {
-        participant2.parties.import_party_acs(daId, Some(alice), aliceAcs.canonicalPath)
+        // The import at upgrade time is past Alice's activation, but participant2 has processed no
+        // event of Alice since then.
+        participant2.parties.import_party_acs(
+          daId,
+          Some(alice),
+          aliceAcs.canonicalPath,
+          forceFlags = Set(ImportPartyAcsForceFlag.AllowImportAfterActivation),
+        )
       }
 
       sequencer2.start()

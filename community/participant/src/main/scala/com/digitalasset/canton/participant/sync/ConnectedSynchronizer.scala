@@ -970,6 +970,13 @@ class ConnectedSynchronizer(
         )
 
         FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+          ephemeral.freezingToOnboardingScheduler.requestPendingMoves()(
+            initializationTraceContext
+          ),
+          "Pending moves from Freezing to Onboarding scheduling",
+        )
+
+        FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
           completeAssignment,
           "Failed to complete outstanding assignments on startup. " +
             "You may have to complete the assignments manually.",

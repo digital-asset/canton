@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.store.backend.common
 
 import com.daml.metrics.api.MetricHandle
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch
@@ -151,14 +151,16 @@ object QueryStrategy {
     // will call the JDBC execute will close the connection. If an error with setting the network timeout arises, the
     // connection needs to be closed anyway and with direct execution context the same thread will be used.
     // The H2 driver does not support the network timeout setting altogether.
-    val directEc = DirectExecutionContext(logger)
     val originalNetworkTimeout = connection.getNetworkTimeout
     try {
-      connection.setNetworkTimeout(directEc, timeoutMillis)
+      connection.setNetworkTimeout(directExecutionContext, timeoutMillis)
       f
     } finally {
       try {
-        connection.setNetworkTimeout(directEc, originalNetworkTimeout) // restore original timeout
+        connection.setNetworkTimeout(
+          directExecutionContext,
+          originalNetworkTimeout,
+        ) // restore original timeout
       } catch {
         case cause: Throwable =>
           logger.info("Could not set back original timeout", cause)
