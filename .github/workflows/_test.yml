@@ -2,6 +2,14 @@ name: Test
 on:
   workflow_call:
     inputs:
+      test_suite:
+        description: Optional exact compiled suite; uses one shard when set
+        default: ''
+        type: string
+      expected_topology_validation:
+        description: Independent enabled/disabled expectation for the draft integration proof
+        default: ''
+        type: string
       is_nightly_workflow:
         description: Whether this is a nightly test run
         default: false
@@ -85,11 +93,13 @@ jobs:
     runs-on: ${{ inputs.runner }}
     strategy:
       fail-fast: false
-      max-parallel: ${{ inputs.include_only_requires_external_kms_tests && 2 || 12 }}
+      max-parallel: ${{ inputs.test_suite != '' && 1 || inputs.include_only_requires_external_kms_tests && 2 || 12 }}
       matrix:
         # KMS mode targets only the security/kms package (~17 files), so 2 shards are enough.
         # Keep in sync with num_test_buckets in run_ordinary_tests step below.
-        shard: ${{ fromJSON(inputs.include_only_requires_external_kms_tests && '[0, 1]' || '[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]') }}
+        shard: >-
+          ${{ fromJSON(inputs.test_suite != '' && '[0]' || inputs.include_only_requires_external_kms_tests &&
+          '[0, 1]' || '[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]') }}
     # This is a safety net, not the primary limit. A hung sbt run is caught first, and gracefully, by
     # the 40m GNU-timeout cap in run_ordinary_tests, which leaves the if-always cleanup and log-upload
     # steps intact. The job-level cap here only comes into play for hangs outside sbt (postgres
@@ -99,6 +109,7 @@ jobs:
     timeout-minutes: 60
     env:
       CANTON_NIGHTLY_TEST_RUN: ${{ inputs.is_nightly_workflow }}
+      CANTON_TOPOLOGY_VALIDATION_EXPECTED: ${{ inputs.expected_topology_validation }}
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
       # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
       SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
@@ -135,15 +146,32 @@ jobs:
           previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
           previous-timings-resolved: "true"
 
+      - name: Prepare fresh integration proof evidence
+        if: inputs.expected_topology_validation != ''
+        uses: ./.github/actions/nix/nix_script_run
+        env:
+          CANTON_TOPOLOGY_PROOF_EVIDENCE: ${{ runner.temp }}/topology-integration-proof.json
+        with:
+          command: |
+            python3 - <<'PY'
+            import os
+            from pathlib import Path
+            path = Path(os.environ["CANTON_TOPOLOGY_PROOF_EVIDENCE"])
+            path.unlink(missing_ok=True)
+            with open(os.environ["GITHUB_ENV"], "a") as output:
+                print(f"CANTON_TOPOLOGY_PROOF_EVIDENCE={path}", file=output)
+            PY
+
       - name: Run Ordinary Tests
         uses: ./.github/actions/test/run_ordinary_tests
         with:
+          test_suite: ${{ inputs.test_suite }}
           setup_gcp_kms: ${{ inputs.include_only_requires_external_kms_tests }}
           execution_context_size: "8"
           exclude_unstable_tests: "true"
           include_only_requires_external_kms_tests: ${{ inputs.include_only_requires_external_kms_tests }}
-          num_test_buckets: ${{ inputs.include_only_requires_external_kms_tests && '2' || '12' }}
-          num_parallel_tasks: "4"
+          num_test_buckets: ${{ inputs.test_suite != '' && '1' || inputs.include_only_requires_external_kms_tests && '2' || '12' }}
+          num_parallel_tasks: ${{ inputs.test_suite != '' && '1' || '4' }}
           override_java_version_for_tests: ${{ inputs.override_java_version_for_tests }}
           artifact_name_suffix: >-
             ${{ inputs.protocol_version != '' && format('pv-{0}',
@@ -153,6 +181,24 @@ jobs:
           timings_file: ${{ github.job }}/.timings/timings.json
           job_name: ${{ inputs.job_name }}
           protocol_version: ${{ inputs.protocol_version }}
+
+      - name: Require the real integration proof and passing JUnit result
+        if: ${{ !cancelled() && inputs.expected_topology_validation != '' }}
+        uses: ./.github/actions/nix/nix_run
+        env:
+          PROOF_SUITE: ${{ inputs.test_suite }}
+        with:
+          command: python3 scripts/ci/verify_topology_integration_proof.py
+
+      - name: Save integration proof evidence
+        if: ${{ always() && inputs.expected_topology_validation != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.job_name }}-integration-proof
+          if-no-files-found: error
+          path: |
+            ${{ env.CANTON_TOPOLOGY_PROOF_EVIDENCE }}
+            .ci-test-results/merged/TEST-merged.xml
 
       - name: Stop Postgres container
         if: always()

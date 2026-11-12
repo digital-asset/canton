@@ -2,6 +2,9 @@ name: Run Ordinary Tests
 description: Run ordinary tests with sharding and parallel execution
 
 inputs:
+  test_suite:
+    default: ''
+    description: Optional exact compiled suite to run instead of the ordinary selection
   collect_postgres_query_stats:
     default: "false"
     description: Collect Postgres query stats
@@ -113,6 +116,16 @@ runs:
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
 
+    - name: Resolve an explicitly selected suite
+      id: exact_suite
+      if: inputs.test_suite != ''
+      uses: ./.github/actions/nix/nix_run
+      env:
+        TEST_SUITE: ${{ inputs.test_suite }}
+        TEST_FILE: ${{ inputs.test_file }}
+      with:
+        command: python3 scripts/ci/exact_test_suite.py
+
     - uses: ./.github/actions/test/run_tests
       with:
         collect_postgres_query_stats: ${{ inputs.collect_postgres_query_stats }}
@@ -120,6 +133,7 @@ runs:
         command: ${{ steps.build-sbt-command.outputs.command }}
         execution_context_size: ${{ inputs.execution_context_size }}
         exclude_patterns: ${{ steps.resolve-exclude-patterns.outputs.exclude_patterns }}
+        include_patterns: ${{ steps.exact_suite.outputs.include-pattern }}
         num_parallel_tasks: ${{ inputs.num_parallel_tasks }}
         num_test_buckets: ${{ inputs.num_test_buckets }}
         override_java_version_for_tests: ${{ inputs.override_java_version_for_tests }}

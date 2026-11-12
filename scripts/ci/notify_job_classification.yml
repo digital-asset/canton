@@ -11,6 +11,8 @@
 # `notify` and `canton_build_required_gate` are excluded (they report status, not
 # build health), like the guard excludes them from the aggregators' `needs`.
 test_jobs:
+  - topology_consistency_normal
+  - topology_consistency_nightly
   - test_36
   - test_36_requires_external_kms
   - sequential_test_36

@@ -412,6 +412,41 @@ jobs:
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
 
+  # Temporary end-to-end proof for this draft; both calls share the normal compile and test path.
+  topology_consistency_normal:
+    name: Topology consistency proof (ordinary default)
+    needs: [pick_runner, compile]
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == 'monaddle-too/canton' &&
+      github.event.pull_request.head.ref == 'codex/nightly-topology-consistency'
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+      job_name: topology_consistency_normal
+      test_suite: com.digitalasset.canton.integration.tests.manual.TopologyConsistencyIntegrationTestPostgres
+      expected_topology_validation: disabled
+      # Deliberately omit is_nightly_workflow to exercise the ordinary default.
+
+  topology_consistency_nightly:
+    name: Topology consistency proof (nightly mode)
+    needs: [pick_runner, compile]
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == 'monaddle-too/canton' &&
+      github.event.pull_request.head.ref == 'codex/nightly-topology-consistency'
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+      job_name: topology_consistency_nightly
+      test_suite: com.digitalasset.canton.integration.tests.manual.TopologyConsistencyIntegrationTestPostgres
+      expected_topology_validation: enabled
+      is_nightly_workflow: true
+
   notify:
     name: Notify on Failure
     needs:
@@ -444,6 +479,8 @@ jobs:
       - unstable_test_36
       - variations_test_36
       - variations_test_36_selected_users
+      - topology_consistency_normal
+      - topology_consistency_nightly
     if: |
       always() &&
       github.event_name == 'push' &&
@@ -499,6 +536,8 @@ jobs:
       - unstable_test_36
       - variations_test_36
       - variations_test_36_selected_users
+      - topology_consistency_normal
+      - topology_consistency_nightly
     if: ${{ always() }}
     # Keep required-gate runner selection independent from pick_runner output to avoid
     # stalling merge queue if pick_runner fails before emitting outputs.

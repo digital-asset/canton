@@ -40,7 +40,22 @@ are unchanged; tests can also override `topology.enable-topology-snapshot-consis
 explicitly in their configuration transforms. Dedicated topology cache unit tests retain their
 explicit consistency checks.
 
-For this draft's standalone proof, run `topology_consistency_proof.yml` in the fork on branch
+This draft also has two real integration proof calls in `canton_build_required.yml`, restricted to
+the draft branch and fork. They share the normal compile job and both invoke `_test.yml` with the
+exact `TopologyConsistencyIntegrationTestPostgres` suite on one shard. The ordinary call omits
+`is_nightly_workflow`; the nightly-mode call passes `true`. Each supplies a separate enabled/disabled
+expectation that only the test reads.
+
+The suite uses the default integration configuration and real Postgres-backed participants,
+sequencer, and mediator. After a successful ping, it checks every node's resolved configuration,
+inspects a fresh snapshot from its real topology client, and performs a topology key lookup. The
+job requires passing JUnit results for the named suite and fresh per-node JSON evidence bound to
+the commit, run, and attempt. Empty selections, skipped tests, and missing evidence fail the proof.
+The `topology_consistency_normal-integration-proof` and
+`topology_consistency_nightly-integration-proof` artifacts contain the evidence and JUnit XML;
+each proof job also publishes a per-node summary.
+
+For the earlier component-only proof, run `topology_consistency_proof.yml` in the fork on branch
 `codex/nightly-topology-consistency`. A push tests both values; a manual dispatch tests the value
 selected by `nightly_test_run`:
 
@@ -51,8 +66,9 @@ gh workflow run topology_consistency_proof.yml --repo monaddle-too/canton \
 
 Use `-f nightly_test_run=false` for the disabled case. The job summary must report
 `ValidatingTopologySnapshot` with one reference-store lookup when enabled, and a cached snapshot
-with zero reference-store lookups when disabled. This builds the base and test-support modules and
-exercises the production topology client; it does not run the full integration suites.
+with zero reference-store lookups when disabled. This directly sets the environment variable and
+builds the base and test-support modules using an in-memory store and a mocked cache. It does not
+verify the reusable workflow or running-node integration configuration.
 
 To enable the same variable for a local test run:
 

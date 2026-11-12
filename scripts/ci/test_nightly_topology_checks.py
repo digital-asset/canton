@@ -53,8 +53,29 @@ def test_ordinary_ci_does_not_opt_into_nightly_checks():
     for path in WORKFLOWS.glob("*.yml"):
         if path.name == "canton_nightly.yml":
             continue
-        for job in load_workflow(path)["jobs"].values():
+        for name, job in load_workflow(path)["jobs"].items():
             if job.get("uses") in marked_workflows:
+                if (
+                    path.name == "canton_build_required.yml"
+                    and name == "topology_consistency_nightly"
+                ):
+                    # This draft-only call deliberately exercises the nightly mode in a PR.
+                    assert job["with"]["expected_topology_validation"] == "enabled"
+                    continue
                 ordinary_calls.append(job)
                 assert job.get("with", {}).get("is_nightly_workflow", "false") == "false"
     assert ordinary_calls
+
+
+def test_real_integration_proof_exercises_the_default_and_explicit_nightly_input():
+    jobs = load_workflow(WORKFLOWS / "canton_build_required.yml")["jobs"]
+    normal = jobs["topology_consistency_normal"]
+    nightly = jobs["topology_consistency_nightly"]
+    assert normal["uses"] == nightly["uses"] == "./.github/workflows/_test.yml"
+    assert normal["needs"] == nightly["needs"] == ["pick_runner", "compile"]
+    assert "is_nightly_workflow" not in normal["with"]
+    assert nightly["with"]["is_nightly_workflow"] == "true"
+    assert normal["with"]["expected_topology_validation"] == "disabled"
+    assert nightly["with"]["expected_topology_validation"] == "enabled"
+    assert normal["with"]["test_suite"] == nightly["with"]["test_suite"]
+    assert normal["with"]["job_name"] != nightly["with"]["job_name"]

@@ -1,7 +1,7 @@
-name: Topology consistency proof (test only)
+name: Topology consistency component proof (test only)
 
-# Temporary proof harness for this draft. Both modes use the same production client and test-run
-# policy as the integration suites. It builds only the base/test-support modules, with no releases.
+# Component proof: directly sets the environment variable and uses an in-memory store/mocked cache.
+# The stronger real-network proof calls _test.yml from canton_build_required.yml in both modes.
 on:
   push:
     branches: [codex/nightly-topology-consistency]
