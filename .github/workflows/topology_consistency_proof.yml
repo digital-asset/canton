@@ -44,13 +44,14 @@ jobs:
           config_test=community/common/src/test/scala/com/digitalasset/canton/config/TopologyConfigTest.scala
           sbt -batch \
             "set LocalProject(\"community-testing\") / Test / unmanagedSources += file(\"$config_test\")" \
-            'set LocalProject("community-testing") / Test / testOptions := Seq(Tests.Argument(TestFrameworks.ScalaTest, "-oD"))' \
+            'set LocalProject("community-testing") / Test / testOptions := Seq(Tests.Argument(TestFrameworks.ScalaTest, "-oDW"))' \
             'community-testing/testOnly *TopologyConfigTest *TopologyConsistencyCheckTest' \
             2>&1 | tee "$RUNNER_TEMP/topology-proof.log"
           expected_reads=0
           if [[ "$CANTON_NIGHTLY_TEST_RUN" == true ]]; then expected_reads=1; fi
           grep -F "TOPOLOGY_CONSISTENCY_PROOF nightly=$CANTON_NIGHTLY_TEST_RUN " "$RUNNER_TEMP/topology-proof.log" \
-            | grep -F "reference-store-lookups=$expected_reads" >> "$GITHUB_STEP_SUMMARY"
+            | grep -F "reference-store-lookups=$expected_reads" \
+            | sed 's/^.*TOPOLOGY_CONSISTENCY_PROOF/TOPOLOGY_CONSISTENCY_PROOF/' >> "$GITHUB_STEP_SUMMARY"
       - name: Save proof output
         if: always()
         uses: actions/upload-artifact@v7
