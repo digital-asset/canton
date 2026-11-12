@@ -40,6 +40,27 @@ are unchanged; tests can also override `topology.enable-topology-snapshot-consis
 explicitly in their configuration transforms. Dedicated topology cache unit tests retain their
 explicit consistency checks.
 
+For this draft's standalone proof, run `topology_consistency_proof.yml` in the fork on branch
+`codex/nightly-topology-consistency`. A push tests both values; a manual dispatch tests the value
+selected by `nightly_test_run`:
+
+```sh
+gh workflow run topology_consistency_proof.yml --repo monaddle-too/canton \
+  --ref codex/nightly-topology-consistency -f nightly_test_run=true
+```
+
+Use `-f nightly_test_run=false` for the disabled case. The job summary must report
+`ValidatingTopologySnapshot` with one reference-store lookup when enabled, and a cached snapshot
+with zero reference-store lookups when disabled. This builds the base and test-support modules and
+exercises the production topology client; it does not run the full integration suites.
+
+To enable the same variable for a local test run:
+
+```sh
+CI=true CANTON_PROTOCOL_VERSION=36 CANTON_NIGHTLY_TEST_RUN=true \
+  sbt 'community-testing/testOnly *TopologyConsistencyCheckTest'
+```
+
 ---
 
 ## How to trigger manually

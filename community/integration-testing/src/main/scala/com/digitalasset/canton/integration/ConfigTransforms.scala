@@ -44,7 +44,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
 import com.digitalasset.canton.synchronizer.sequencer.{BlockSequencerConfig, SequencerConfig}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
-import com.digitalasset.canton.{BaseTest, UniquePortGenerator, config}
+import com.digitalasset.canton.{BaseTest, CiTestRun, UniquePortGenerator, config}
 import com.typesafe.config.ConfigValueFactory
 import monocle.macros.syntax.lens.*
 import monocle.macros.{GenLens, GenPrism}
@@ -137,11 +137,11 @@ object ConfigTransforms {
     ) ++ updateAllNodesTopologyConfig(
       // Keep the costly snapshot checks in nightly CI, independently of other checks.
       topology =>
-        if (sys.env.contains("CI"))
-          topology.copy(enableTopologySnapshotConsistencyChecks =
-            Some(sys.env.get("CANTON_NIGHTLY_TEST_RUN").contains("true"))
+        topology.copy(enableTopologySnapshotConsistencyChecks =
+          CiTestRun.topologySnapshotConsistencyChecks.orElse(
+            topology.enableTopologySnapshotConsistencyChecks
           )
-        else topology
+        )
     )
 
   lazy val dontWarnOnDeprecatedPV: Seq[ConfigTransform] = Seq(
