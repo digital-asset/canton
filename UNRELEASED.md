@@ -96,6 +96,10 @@ cross-site websocket hijacking.
 
 ### All node operators
 
+- Added `topology.enable-topology-snapshot-consistency-checks` to configure diagnostic topology
+  snapshot validation independently of other consistency checks. Leaving it unset preserves the
+  existing behavior.
+
 ### Participant node operators
 
 #### Sequencer connection penalty mechanism

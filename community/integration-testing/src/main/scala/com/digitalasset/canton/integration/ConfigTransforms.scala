@@ -106,7 +106,7 @@ object ConfigTransforms {
     * example, these transforms should be applied to toxiproxy tests.
     */
   val heavyTestDefaults: Seq[ConfigTransform] = protocolVersionTransforms ++
-    Seq(
+    Seq[ConfigTransform](
       ConfigTransforms.enableAchs,
       ConfigTransforms.uniqueH2DatabaseNames,
       ConfigTransforms.globallyUniquePorts,
