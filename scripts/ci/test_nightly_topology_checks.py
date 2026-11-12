@@ -94,6 +94,9 @@ def test_exact_suite_filter_is_forwarded_through_the_nix_composite_output():
     )
     assert selection["with"]["output-name"] == "include-pattern"
     assert run_tests["with"]["include_patterns"] == "${{ steps.exact_suite.outputs.result }}"
+    assert run_tests["with"]["exclude_patterns"] == (
+        "${{ inputs.test_suite == '' && steps.resolve-exclude-patterns.outputs.exclude_patterns || '' }}"
+    )
 
 
 @pytest.mark.parametrize(

@@ -133,7 +133,7 @@ runs:
         setup_gcp_kms: ${{ inputs.setup_gcp_kms }}
         command: ${{ steps.build-sbt-command.outputs.command }}
         execution_context_size: ${{ inputs.execution_context_size }}
-        exclude_patterns: ${{ steps.resolve-exclude-patterns.outputs.exclude_patterns }}
+        exclude_patterns: ${{ inputs.test_suite == '' && steps.resolve-exclude-patterns.outputs.exclude_patterns || '' }}
         include_patterns: ${{ steps.exact_suite.outputs.result }}
         num_parallel_tasks: ${{ inputs.num_parallel_tasks }}
         num_test_buckets: ${{ inputs.num_test_buckets }}

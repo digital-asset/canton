@@ -1,7 +1,12 @@
 import json
+import os
 import re
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
+import yaml
 from exact_test_suite import exact_pattern
 from verify_topology_integration_proof import NODES, verify
 
@@ -134,3 +139,44 @@ def test_exact_suite_selection_escapes_regex_and_requires_a_compiled_suite(tmp_p
     catalogue.write_text(SUITE + "\n" + SUITE + "\n")
     with pytest.raises(ValueError, match="exactly one"):
         exact_pattern(SUITE, catalogue)
+
+
+@pytest.mark.parametrize("explicit_suite", [False, True])
+def test_real_split_action_selects_one_suite_with_mutually_exclusive_filters(
+    tmp_path, explicit_suite
+):
+    root = Path(__file__).resolve().parents[2]
+    action = yaml.load(
+        (root / ".github/actions/test/split_tests/action.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    script = action["runs"]["steps"][0]["with"]["command"]
+    catalogue = tmp_path / "catalogue.log"
+    ordinary = "com.example.OrdinarySuite"
+    catalogue.write_text(f"{SUITE}\n{ordinary}\n")
+    output = tmp_path / "github-output"
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", script],
+        env={
+            **os.environ,
+            "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
+            "GITHUB_WORKSPACE": str(root),
+            "GITHUB_OUTPUT": str(output),
+            "TMPDIR": str(tmp_path),
+            "TEST_FILE": str(catalogue),
+            "TIMINGS_FILE": "",
+            "TOTAL_SHARDS": "1",
+            "SHARD_INDEX": "0",
+            "FALLBACK_TEST_TIME": "300",
+            "DEBUG_SPLIT_TESTS": "false",
+            "EXCLUDE_PATTERNS": "" if explicit_suite else r"\.integration\.tests\.manual\.",
+            "INCLUDE_PATTERNS": exact_pattern(SUITE, catalogue) if explicit_suite else "",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    result_file = Path(output.read_text().strip().removeprefix("result="))
+    fields = dict(line.split("=", 1) for line in result_file.read_text().splitlines())
+    assert fields["tests_per_shard"] == fields["total_tests"] == "1"
+    assert fields["selected_tests"] == (SUITE if explicit_suite else ordinary)
