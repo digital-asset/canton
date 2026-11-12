@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.manual
 
 import com.digitalasset.canton.config.{DbConfig, StorageConfig, TopologyConfig}
+import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -65,15 +66,15 @@ final class TopologyConsistencyIntegrationTestPostgres
           ),
           (
             "sequencer1",
-            sequencer1.underlying.value.config.topology,
-            sequencer1.underlying.value.config.storage,
+            actualConfig.sequencersByString(sequencer1.name).topology,
+            actualConfig.sequencersByString(sequencer1.name).storage,
             sequencer1.underlying.value.sequencer.syncCrypto.ips,
             sequencer1.id,
           ),
           (
             "mediator1",
-            mediator1.underlying.value.config.topology,
-            mediator1.underlying.value.config.storage,
+            actualConfig.mediatorsByString(mediator1.name).topology,
+            actualConfig.mediatorsByString(mediator1.name).storage,
             mediator1.underlying.value.replicaManager.mediatorRuntime.value.mediator.topologyClient,
             mediator1.id,
           ),
@@ -88,7 +89,7 @@ final class TopologyConsistencyIntegrationTestPostgres
           val snapshot = client.snapshot(client.latestTopologyChangeTimestamp).futureValueUS
           val validating = snapshot.isInstanceOf[ValidatingTopologySnapshot]
           validating shouldBe expected
-          snapshot.allKeys(member).futureValueUS.signingKeys should not be empty
+          snapshot.signingKeys(member, SigningKeyUsage.All).futureValueUS should not be empty
           Json.obj(
             "node" -> Json.fromString(name),
             "config_override" -> Json.fromBoolean(

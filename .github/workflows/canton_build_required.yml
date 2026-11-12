@@ -559,6 +559,8 @@ jobs:
         uses: ./.github/actions/nix/nix_script_run
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
+          # This draft must not go green if either proof call was silently skipped.
+          TOPOLOGY_PROOF_REQUIRED: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 721 }}
         with:
           command: |
             python3 <<'PY'
@@ -595,6 +597,15 @@ jobs:
                 for job_name, result in failed_or_interrupted.items():
                     print(f" - {job_name}: {result}")
                 sys.exit(1)
+
+            if os.environ.get("TOPOLOGY_PROOF_REQUIRED") == "true":
+                missing_proofs = [
+                    job for job in ("topology_consistency_normal", "topology_consistency_nightly")
+                    if needs.get(job, {}).get("result") != "success"
+                ]
+                if missing_proofs:
+                    print(f"Missing required topology integration proof: {', '.join(missing_proofs)}")
+                    sys.exit(1)
 
             print("All required canton_build_required jobs either succeeded or were skipped.")
             sys.exit(0)

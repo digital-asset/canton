@@ -1,5 +1,9 @@
 """Keep nightly topology validation coverage when test workflows are shared with PR CI."""
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -79,3 +83,50 @@ def test_real_integration_proof_exercises_the_default_and_explicit_nightly_input
     assert nightly["with"]["expected_topology_validation"] == "enabled"
     assert normal["with"]["test_suite"] == nightly["with"]["test_suite"]
     assert normal["with"]["job_name"] != nightly["with"]["job_name"]
+
+
+def test_exact_suite_filter_is_forwarded_through_the_nix_composite_output():
+    action = load_workflow(WORKFLOWS.parent / "actions/test/run_ordinary_tests/action.yml")
+    steps = action["runs"]["steps"]
+    selection = next(step for step in steps if step.get("id") == "exact_suite")
+    run_tests = next(
+        step for step in steps if step.get("uses") == "./.github/actions/test/run_tests"
+    )
+    assert selection["with"]["output-name"] == "include-pattern"
+    assert run_tests["with"]["include_patterns"] == "${{ steps.exact_suite.outputs.result }}"
+
+
+@pytest.mark.parametrize(
+    ("normal", "nightly", "required", "expected_code"),
+    [
+        ("success", "success", "true", 0),
+        ("skipped", "success", "true", 1),
+        ("success", "skipped", "true", 1),
+        ("skipped", "skipped", "false", 0),
+    ],
+)
+def test_draft_gate_requires_both_proofs_to_finish_successfully(
+    normal, nightly, required, expected_code
+):
+    gate = load_workflow(WORKFLOWS / "canton_build_required.yml")["jobs"][
+        "canton_build_required_gate"
+    ]
+    step = next(step for step in gate["steps"] if step.get("name") == "Evaluate workflow results")
+    script = step["with"]["command"].split("python3 <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env={
+            **os.environ,
+            "TOPOLOGY_PROOF_REQUIRED": required,
+            "NEEDS_JSON": json.dumps(
+                {
+                    "topology_consistency_normal": {"result": normal},
+                    "topology_consistency_nightly": {"result": nightly},
+                }
+            ),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == expected_code, result.stderr

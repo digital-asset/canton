@@ -125,6 +125,7 @@ runs:
         TEST_FILE: ${{ inputs.test_file }}
       with:
         command: python3 scripts/ci/exact_test_suite.py
+        output-name: include-pattern
 
     - uses: ./.github/actions/test/run_tests
       with:
@@ -133,7 +134,7 @@ runs:
         command: ${{ steps.build-sbt-command.outputs.command }}
         execution_context_size: ${{ inputs.execution_context_size }}
         exclude_patterns: ${{ steps.resolve-exclude-patterns.outputs.exclude_patterns }}
-        include_patterns: ${{ steps.exact_suite.outputs.include-pattern }}
+        include_patterns: ${{ steps.exact_suite.outputs.result }}
         num_parallel_tasks: ${{ inputs.num_parallel_tasks }}
         num_test_buckets: ${{ inputs.num_test_buckets }}
         override_java_version_for_tests: ${{ inputs.override_java_version_for_tests }}
