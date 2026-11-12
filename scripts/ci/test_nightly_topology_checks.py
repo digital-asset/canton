@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 
 
@@ -14,7 +13,7 @@ def load_workflow(path: Path) -> dict:
     return yaml.load(path.read_text(), Loader=yaml.BaseLoader)
 
 
-def test_jobs(workflow: dict) -> list[dict]:
+def running_test_jobs(workflow: dict) -> list[dict]:
     return [
         job
         for job in workflow["jobs"].values()
@@ -31,7 +30,9 @@ NIGHTLY_CALLS = [
     for name, job in load_workflow(WORKFLOWS / "canton_nightly.yml")["jobs"].items()
     if job.get("uses", "").startswith("./.github/workflows/")
 ]
-NIGHTLY_TEST_CALLS = [(name, job, called) for name, job, called in NIGHTLY_CALLS if test_jobs(called)]
+NIGHTLY_TEST_CALLS = [
+    (name, job, called) for name, job, called in NIGHTLY_CALLS if running_test_jobs(called)
+]
 
 
 @pytest.mark.parametrize(
@@ -42,7 +43,7 @@ def test_nightly_test_jobs_opt_in_and_forward_the_marker(name, job, called):
     inputs = called["on"]["workflow_call"]["inputs"]
     assert inputs["is_nightly_workflow"]["type"] == "boolean"
     assert inputs["is_nightly_workflow"]["default"] == "false"
-    for test_job in test_jobs(called):
+    for test_job in running_test_jobs(called):
         assert test_job["env"]["CANTON_NIGHTLY_TEST_RUN"] == "${{ inputs.is_nightly_workflow }}"
 
 
