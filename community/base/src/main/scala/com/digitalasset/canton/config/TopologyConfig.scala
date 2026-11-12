@@ -40,6 +40,9 @@ import com.google.common.annotations.VisibleForTesting
   * @param enableTopologyStateCacheConsistencyChecks
   *   If true, the topology state cache runs additional consistency checks. This is costly and
   *   should not be enabled in production environments.
+  * @param enableTopologySnapshotConsistencyChecks
+  *   Override whether topology snapshots are checked against the backing store. If unset, follow
+  *   the general additional consistency checks or topology state cache consistency checks setting.
   */
 final case class TopologyConfig(
     topologyTransactionRegistrationTimeout: NonNegativeFiniteDuration =
@@ -56,7 +59,13 @@ final case class TopologyConfig(
       defaultTopologyStateWriteThroughCacheEvictionThreshold,
     maxTopologyStateCacheItems: PositiveInt = defaultTopologyStateWriteThroughCacheSize,
     enableTopologyStateCacheConsistencyChecks: Boolean = false,
-)
+    enableTopologySnapshotConsistencyChecks: Option[Boolean] = None,
+) {
+  def shouldCheckTopologySnapshots(enableAdditionalConsistencyChecks: Boolean): Boolean =
+    enableTopologySnapshotConsistencyChecks.getOrElse(
+      enableAdditionalConsistencyChecks || enableTopologyStateCacheConsistencyChecks
+    )
+}
 
 object TopologyConfig {
 

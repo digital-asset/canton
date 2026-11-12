@@ -134,6 +134,14 @@ object ConfigTransforms {
       ConfigTransforms.setIdleStreamOffsetCheckpointTimeout(
         config.NonNegativeFiniteDuration.ofSeconds(1)
       ),
+    ) ++ updateAllNodesTopologyConfig(
+      // Keep the costly snapshot checks in nightly CI, independently of other checks.
+      topology =>
+        if (sys.env.contains("CI"))
+          topology.copy(enableTopologySnapshotConsistencyChecks =
+            Some(sys.env.get("CANTON_NIGHTLY_TEST_RUN").contains("true"))
+          )
+        else topology
     )
 
   lazy val dontWarnOnDeprecatedPV: Seq[ConfigTransform] = Seq(
