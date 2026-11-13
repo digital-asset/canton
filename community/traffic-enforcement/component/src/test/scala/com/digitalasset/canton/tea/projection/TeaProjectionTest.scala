@@ -193,11 +193,19 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
       s"projection-${UUID.randomUUID()}",
     )
 
+  /** Stops the projection like [[CloseableProjection]] does. On `ProjectionBehavior.Stop` the
+    * projection only terminates once its in-flight handler attempt has finished. Stopping the actor
+    * directly doesn't wait for it, so a retried DB transaction could commit into the next test's
+    * freshly cleaned tables.
+    */
   private def stopProjection(
       testKit: ActorTestKit,
       ref: ActorRef[ProjectionBehavior.Command],
-  ): Unit =
-    testKit.stop(ref, 30.seconds)
+  ): Unit = {
+    val deathWatch = testKit.createTestProbe[Nothing]()
+    ref ! ProjectionBehavior.Stop
+    deathWatch.expectTerminated(ref, 30.seconds)
+  }
 
   private val alice = AccountId.tryCreate("alice")
   private val bob = AccountId.tryCreate("bob")
