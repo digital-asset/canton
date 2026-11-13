@@ -7,12 +7,14 @@ import cats.syntax.option.*
 import com.digitalasset.canton.config
 import com.digitalasset.canton.console.{CommandFailure, ParticipantReference}
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, Offset}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.examples.java.cycle as C
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UsePostgres,
   UseProgrammableSequencer,
 }
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -147,12 +149,23 @@ class CommandDeduplicationPruningIntegrationTest
           deduplicationPeriod = dedupPeriod.some,
         )
 
+      // The BFT block time is derived from the commit timestamps of the previous block, so the first
+      // block ordered after a sim clock jump still carries the time from before the jump. A command
+      // sequenced in that block gets a record time far behind its ledger time and is rejected with
+      // LOCAL_VERDICT_TIMEOUT ("Time validation has failed"). Wait until the sequencer has sequenced
+      // an event at the new time; BFT time is monotonic, so later requests are sequenced at or after it.
+      def awaitSequencerReachedSimClockTime(): Unit =
+        TestUtils
+          .waitForTargetTimeOnSequencer(sequencer1, simClock.now, logger)
+          .discard
+
       // Send three transactions at t, t+1ms, and t+1ms+max_dedup_duration
       val after1 = submit(commandId1)
       simClock.advance(java.time.Duration.ofMillis(1))
       val before2 = simClock.now
       val after2 = submit(commandId2)
       simClock.advance(maxDedupDuration)
+      awaitSequencerReachedSimClockTime()
       val after3 = submit(commandId3)
 
       // Flake prevention: Wait for ACS commitments to be processed first before attempting to query the safe prune offset.
@@ -222,9 +235,7 @@ class CommandDeduplicationPruningIntegrationTest
         )
       )
 
-      // Required to avoid ABORTED/LOCAL_VERDICT_TIMEOUT: Rejected transaction due to a participant determined timeout
-      // In particular: Time validation has failed: The delta of the ledger time 1970-01-01T02:00:00.002Z and the record time 1970-01-01T01:00:00.011Z exceeds the max of 1m
-      participant1.testing.fetch_synchronizer_time(daId)
+      awaitSequencerReachedSimClockTime()
 
       val after6 = submit(
         commandId6DeduplicationPeriodAccepted,
