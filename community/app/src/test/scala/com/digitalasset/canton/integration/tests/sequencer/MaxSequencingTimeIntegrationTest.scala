@@ -28,7 +28,6 @@ import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
 import java.time.Duration
-import scala.concurrent.duration.DurationInt
 
 /** Checks that the config flag max sequencing time is taken into account. */
 final class MaxSequencingTimeIntegrationTest
@@ -81,50 +80,47 @@ final class MaxSequencingTimeIntegrationTest
       }
 
       /*
-        Time needs to progress for the message to be logged.
-        Hence, we retry a few times.
-       */
-      eventually(retryOnTestFailuresOnly = false) {
-        /*
-          In the standard scenario, the message is logged by the BlockUpdateGeneratorImpl.
+        In the standard scenario, the message is logged by the BlockUpdateGeneratorImpl.
 
-          However, it can happen that a topology tick is the first event sequencer >= maxSequencingTime.
-          Such a topology tick:
-            - Is not handled by the BlockUpdateGeneratorImpl: the log is emitted by WritePayloadsFlow.
-            - If dropped (which is the case if >= max sequencing time), completely blocks the orderer,
-              which prevents subsequent attempts to succeed.
-            - Can be emitted as soon as the clock is advanced.
-         */
-        loggerFactory
-          .assertEventuallyLogsSeq(
-            SuppressionRule.Level(Level.INFO) && (SuppressionRule
-              .forLogger[BlockUpdateGeneratorImpl] || LoggerNameContains(
-              WritePayloadsFlow.getClass.getSimpleName.dropRight(1) // Drop final $
-            ))
-          )(
-            {
-              environment.simClock.value.advanceTo(maxSequencingTime)
+        However, it can happen that a topology tick is the first event sequencer >= maxSequencingTime.
+        Such a topology tick:
+          - Is not handled by the BlockUpdateGeneratorImpl: the log is emitted by WritePayloadsFlow.
+          - If dropped (which is the case if >= max sequencing time), completely blocks the orderer.
+          - Can be emitted as soon as the clock is advanced.
+        Hence, the clock is advanced exactly once, while the logs are captured.
+       */
+      loggerFactory
+        .assertEventuallyLogsSeq(
+          SuppressionRule.Level(Level.INFO) && (SuppressionRule
+            .forLogger[BlockUpdateGeneratorImpl] || LoggerNameContains(
+            WritePayloadsFlow.getClass.getSimpleName.dropRight(1) // Drop final $
+          ))
+        )(
+          {
+            environment.simClock.value.advanceTo(maxSequencingTime)
+
+            // Wait until the orderer has output a block at or after the bound,
+            // so that the request below is sequenced after the bound.
+            eventually() {
               val ts =
                 sequencer1.underlying.value.sequencer.sequencer.sequencingTime.futureValueUS.value
               ts should be >= maxSequencingTime
+            }
 
-              environment.simClock.value.advance(Duration.ofMillis(10))
+            environment.simClock.value.advance(Duration.ofMillis(10))
 
-              sequencer1.underlying.value.sequencer.sequencer
-                .sendAsyncSigned(signedRequestForP1())
-                .value
-                .futureValueUS
-                .value
-            },
-            forAtLeast(1, _)(
-              _.infoMessage should include(
-                s"is not admissible (sequencing time is at or after the upper bound ($maxSequencingTime)"
-              )
-            ),
-            // To avoid the test taking too long
-            timeUntilSuccess = 2.seconds,
-          )
-      }
+            sequencer1.underlying.value.sequencer.sequencer
+              .sendAsyncSigned(signedRequestForP1())
+              .value
+              .futureValueUS
+              .value
+          },
+          forAtLeast(1, _)(
+            _.infoMessage should include(
+              s"is not admissible (sequencing time is at or after the upper bound ($maxSequencingTime)"
+            )
+          ),
+        )
     }
   }
 
