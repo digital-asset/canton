@@ -29,9 +29,12 @@ import com.digitalasset.canton.integration.{
   ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
+  TestConsoleEnvironment,
 }
 import eu.rekawek.toxiproxy.model.ToxicDirection
 import monocle.macros.syntax.lens.*
+
+import scala.concurrent.duration.FiniteDuration
 
 /** Two simultaneous block-based sequencers must not write to the database. The one that does not
   * acquire the lock (passive) should get killed.
@@ -55,20 +58,21 @@ class SimultaneousSequencerNodesIntegrationTest
   registerPlugin(toxiproxyPlugin)
   registerPlugin(externalPlugin)
 
+  // use lower timeout so test does not take too long to reach timeout
+  private val sequencer2ConnectionPoolConfig =
+    DbLockedConnectionPoolConfig(
+      initialMustRemainActiveConnectionTimeout = PositiveFiniteDuration.ofSeconds(10),
+      activeTimeout = PositiveFiniteDuration.ofSeconds(5),
+    )
+
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S2M1_Config.withManualStart
-      .addConfigTransform {
-        // use lower timeout so test does not take too long to reach timeout
-        val lowerTimeoutConfig =
-          DbLockedConnectionPoolConfig(
-            initialMustRemainActiveConnectionTimeout = PositiveFiniteDuration.ofSeconds(10),
-            activeTimeout = PositiveFiniteDuration.ofSeconds(5),
-          )
+      .addConfigTransform(
         ConfigTransforms.updateSequencerConfig("sequencer2")(
           _.focus(_.replication)
-            .replace(Some(ReplicationConfig(connectionPool = lowerTimeoutConfig)))
+            .replace(Some(ReplicationConfig(connectionPool = sequencer2ConnectionPoolConfig)))
         )
-      }
+      )
       .addConfigTransform(ConfigTransforms.setExitOnFatalFailures(true))
       .withSetup { implicit env =>
         import env.*
@@ -97,6 +101,36 @@ class SimultaneousSequencerNodesIntegrationTest
         )
       }
 
+  /** Waits for the sequencer2 process to exit with a failure.
+    *
+    * The process exits only after its JVM has started, the node has waited
+    * `initialMustRemainActiveConnectionTimeout` for the lock (or lost it), and the node has shut
+    * down. The bound is therefore the console's allowance for an external node to start (as used by
+    * `wait_for_running`), plus the lock timeout, plus the node closing timeout.
+    *
+    * Always marks sequencer2 as no longer running in the plugin, also if the wait fails, so that
+    * the following test cases can start it again.
+    */
+  private def awaitSequencer2Crash()(implicit env: TestConsoleEnvironment): Unit = {
+    import env.*
+    val name = remoteSequencer2.name
+    val bound: FiniteDuration =
+      commandTimeouts.unbounded.asFiniteApproximation +
+        sequencer2ConnectionPoolConfig.initialMustRemainActiveConnectionTimeout.asFiniteApproximation +
+        environment.config.parameters.timeouts.processing.closing.asFiniteApproximation
+    try {
+      val exitCode = externalPlugin.awaitExit(name, bound)
+      withClue(s"$name did not exit within $bound") {
+        exitCode should not be empty
+      }
+      exitCode.value should not be 0
+      remoteSequencer2.health.is_running() shouldBe false
+    } finally {
+      if (externalPlugin.processHasCrashed(name)) externalPlugin.crashed(name)
+      else externalPlugin.kill(name)
+    }
+  }
+
   "Starting simultaneous sequencers with the same database config" should {
     "the second sequencer should crash without interfering with the other" in { implicit env =>
       import env.*
@@ -111,13 +145,7 @@ class SimultaneousSequencerNodesIntegrationTest
       participant1.health.ping(participant1)
 
       // sequencer2 will fail to acquire the lock and stop the startup process, and crash
-      eventually() {
-        remoteSequencer2.health.is_running() shouldBe false
-        externalPlugin.processHasCrashed(remoteSequencer2.name) shouldBe true
-      }
-
-      // even though the process has crashed, the plugin still thinks it is running, so we explicitly mark it
-      externalPlugin.crashed(remoteSequencer2.name)
+      awaitSequencer2Crash()
     }
 
     "stopping the first sequencer should allow the second to start" in { implicit env =>
@@ -168,14 +196,7 @@ class SimultaneousSequencerNodesIntegrationTest
 
       toxic.remove()
 
-      eventually() {
-        remoteSequencer2.health.is_running() shouldBe false
-        externalPlugin.processHasCrashed(remoteSequencer2.name) shouldBe true
-      }
-
-      // even though the process has crashed, the plugin still thinks it is running, so we explicitly mark it crashed
-      externalPlugin.crashed(remoteSequencer2.name)
-
+      awaitSequencer2Crash()
     }
   }
 
