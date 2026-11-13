@@ -23,7 +23,12 @@ class DbStorageSingleShutdownTest extends AsyncWordSpec with BaseTest with HasEx
   private def withStorageAndOpenCaller(name: String)(
       test: (DbStorage, CloseContext) => Future[Assertion]
   ): Future[Assertion] = {
-    val setup = DbStorageSetup.h2(loggerFactory.append("test", name))
+    // A separate in-memory database per test case
+    val setup =
+      DbStorageSetup.h2(
+        loggerFactory,
+        mkDbConfig = cfg => cfg.copy(dbName = s"${cfg.dbName}-$name").toH2DbConfig,
+      )
     // The caller's close context stays open throughout the test: only the storage gets closed.
     val caller = FlagCloseable(logger, timeouts)
     test(setup.storage, CloseContext(caller)).thereafter { _ =>

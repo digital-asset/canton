@@ -78,14 +78,12 @@ object CloseContext {
     val flagCloseable = FlagCloseable(tracedLogger, processingTimeout)
     val cancelToken1 = closeContext1.context.runOnOrAfterClose(new RunOnClosing {
       override def name: String = s"combined-close-ctx1"
-      override def done: Boolean =
-        closeContext1.context.isClosing && closeContext2.context.isClosing
+      override def done: Boolean = flagCloseable.isClosing
       override def run()(implicit traceContext: TraceContext): Unit = flagCloseable.close()
     })
     val cancelToken2 = closeContext2.context.runOnOrAfterClose(new RunOnClosing {
       override def name: String = s"combined-close-ctx2"
-      override def done: Boolean =
-        closeContext1.context.isClosing && closeContext2.context.isClosing
+      override def done: Boolean = flagCloseable.isClosing
       override def run()(implicit traceContext: TraceContext): Unit = flagCloseable.close()
     })
     flagCloseable.runOnOrAfterClose_(new RunOnClosing {
