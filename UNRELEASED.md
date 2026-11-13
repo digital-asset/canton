@@ -198,6 +198,9 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 - Previously `canton.remote-participants.<remoteParticipant>.token` was used for both ledger API and admin API commands in the Canton Console.
   Now, an optional `canton.remote-participants.<remoteParticipant>.admin-api-token` can be specified to use a different token for admin API
   commands in case that admin API auth differs from ledger API auth.
+- With submission request amplification, a sequencer refuses a copy of a confirmation response whose aggregation was
+  already delivered through another sequencer. The participant now logs this at INFO instead of a WARN
+  "Failed to send responses", because the responses were sequenced.
 
 ### Synchronizer operators
 
