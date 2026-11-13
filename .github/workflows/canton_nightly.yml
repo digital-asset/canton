@@ -70,6 +70,7 @@ jobs:
     uses: ./.github/workflows/_build_docs_snippets.yml
     secrets: inherit
     with:
+      is_nightly_workflow: true
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   build_docs:
@@ -90,6 +91,7 @@ jobs:
     uses: ./.github/workflows/_unstable_test.yml
     secrets: inherit
     with:
+      is_nightly_workflow: true
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
 
@@ -99,6 +101,7 @@ jobs:
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
+      is_nightly_workflow: true
       override_java_version_for_tests: "17"
       protocol_version: "36"
       job_name: test_with_java17
@@ -110,6 +113,7 @@ jobs:
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
+      is_nightly_workflow: true
       override_java_version_for_tests: ""
       protocol_version: "37"
       job_name: test_37
@@ -121,6 +125,7 @@ jobs:
     uses: ./.github/workflows/_ledger_api_compatibility_tests.yml
     secrets: inherit
     with:
+      is_nightly_workflow: true
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
 
@@ -130,6 +135,7 @@ jobs:
     uses: ./.github/workflows/_protocol_continuity_test_all.yml
     secrets: inherit
     with:
+      is_nightly_workflow: true
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   stability_crash_recovery_test_36:
@@ -138,6 +144,7 @@ jobs:
     uses: ./.github/workflows/_stability_crash_recovery_test.yml
     secrets: inherit
     with:
+      is_nightly_workflow: true
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
 
@@ -167,6 +174,7 @@ jobs:
     uses: ./.github/workflows/_external_parties_test.yml
     secrets: inherit
     with:
+      is_nightly_workflow: true
       override_java_version_for_tests: ""
       protocol_version: "36"
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -177,6 +185,7 @@ jobs:
     uses: ./.github/workflows/_nightly_integration_test.yml
     secrets: inherit
     with:
+      is_nightly_workflow: true
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
 

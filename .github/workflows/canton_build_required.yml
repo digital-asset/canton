@@ -412,6 +412,54 @@ jobs:
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
 
+  # Temporary end-to-end proof for this draft; both calls share the normal compile and test path.
+  topology_consistency_normal:
+    name: Topology consistency proof (ordinary default)
+    needs: [pick_runner, compile]
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == 'monaddle-too/canton' &&
+      github.event.pull_request.head.ref == 'codex/nightly-topology-consistency'
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+      job_name: topology_consistency_normal
+      test_suite: com.digitalasset.canton.integration.tests.manual.TopologyConsistencyIntegrationTestPostgres
+      expected_topology_validation: disabled
+      # Deliberately omit is_nightly_workflow to exercise the ordinary default.
+
+  topology_consistency_nightly:
+    name: Topology consistency proof (nightly mode)
+    needs: [pick_runner, compile]
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == 'monaddle-too/canton' &&
+      github.event.pull_request.head.ref == 'codex/nightly-topology-consistency'
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+      job_name: topology_consistency_nightly
+      test_suite: com.digitalasset.canton.integration.tests.manual.TopologyConsistencyIntegrationTestPostgres
+      expected_topology_validation: enabled
+      is_nightly_workflow: true
+
+  topology_consistency_benchmark:
+    name: Topology consistency performance benchmark
+    # Start after the ordinary test legs finish, including their known compatibility failure.
+    needs: [pick_runner, compile, test_36, test_37]
+    if: >-
+      always() && !cancelled() && needs.compile.result == 'success' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == 'monaddle-too/canton' &&
+      github.event.pull_request.head.ref == 'codex/nightly-topology-consistency'
+    uses: ./.github/workflows/_topology_consistency_benchmark.yml
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
   notify:
     name: Notify on Failure
     needs:
@@ -444,6 +492,9 @@ jobs:
       - unstable_test_36
       - variations_test_36
       - variations_test_36_selected_users
+      - topology_consistency_normal
+      - topology_consistency_nightly
+      - topology_consistency_benchmark
     if: |
       always() &&
       github.event_name == 'push' &&
@@ -499,6 +550,9 @@ jobs:
       - unstable_test_36
       - variations_test_36
       - variations_test_36_selected_users
+      - topology_consistency_normal
+      - topology_consistency_nightly
+      - topology_consistency_benchmark
     if: ${{ always() }}
     # Keep required-gate runner selection independent from pick_runner output to avoid
     # stalling merge queue if pick_runner fails before emitting outputs.
@@ -520,6 +574,8 @@ jobs:
         uses: ./.github/actions/nix/nix_script_run
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
+          # This draft must not go green if either proof call was silently skipped.
+          TOPOLOGY_PROOF_REQUIRED: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 721 }}
         with:
           command: |
             python3 <<'PY'
@@ -556,6 +612,15 @@ jobs:
                 for job_name, result in failed_or_interrupted.items():
                     print(f" - {job_name}: {result}")
                 sys.exit(1)
+
+            if os.environ.get("TOPOLOGY_PROOF_REQUIRED") == "true":
+                missing_proofs = [
+                    job for job in ("topology_consistency_normal", "topology_consistency_nightly")
+                    if needs.get(job, {}).get("result") != "success"
+                ]
+                if missing_proofs:
+                    print(f"Missing required topology integration proof: {', '.join(missing_proofs)}")
+                    sys.exit(1)
 
             print("All required canton_build_required jobs either succeeded or were skipped.")
             sys.exit(0)

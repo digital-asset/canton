@@ -373,7 +373,7 @@ object WriteThroughCacheSynchronizerTopologyClient {
         store,
         packageDependencyResolver,
         cachingConfigs,
-        enableConsistencyChecks || topologyConfig.enableTopologyStateCacheConsistencyChecks,
+        topologyConfig.shouldCheckTopologySnapshots(enableConsistencyChecks),
         timeouts,
         futureSupervisor,
         loggerFactory,

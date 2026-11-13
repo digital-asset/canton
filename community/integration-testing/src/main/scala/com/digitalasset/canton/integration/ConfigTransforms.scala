@@ -44,7 +44,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
 import com.digitalasset.canton.synchronizer.sequencer.{BlockSequencerConfig, SequencerConfig}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
-import com.digitalasset.canton.{BaseTest, UniquePortGenerator, config}
+import com.digitalasset.canton.{BaseTest, CiTestRun, UniquePortGenerator, config}
 import com.typesafe.config.ConfigValueFactory
 import monocle.macros.syntax.lens.*
 import monocle.macros.{GenLens, GenPrism}
@@ -106,7 +106,7 @@ object ConfigTransforms {
     * example, these transforms should be applied to toxiproxy tests.
     */
   val heavyTestDefaults: Seq[ConfigTransform] = protocolVersionTransforms ++
-    Seq(
+    Seq[ConfigTransform](
       ConfigTransforms.enableAchs,
       ConfigTransforms.uniqueH2DatabaseNames,
       ConfigTransforms.globallyUniquePorts,
@@ -134,6 +134,14 @@ object ConfigTransforms {
       ConfigTransforms.setIdleStreamOffsetCheckpointTimeout(
         config.NonNegativeFiniteDuration.ofSeconds(1)
       ),
+    ) ++ updateAllNodesTopologyConfig(
+      // Keep the costly snapshot checks in nightly CI, independently of other checks.
+      topology =>
+        topology.copy(enableTopologySnapshotConsistencyChecks =
+          CiTestRun.topologySnapshotConsistencyChecks.orElse(
+            topology.enableTopologySnapshotConsistencyChecks
+          )
+        )
     )
 
   lazy val dontWarnOnDeprecatedPV: Seq[ConfigTransform] = Seq(

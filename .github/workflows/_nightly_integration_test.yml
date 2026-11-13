@@ -2,6 +2,10 @@ name: Nightly Integration Test
 on:
   workflow_call:
     inputs:
+      is_nightly_workflow:
+        description: Whether this is a nightly test run
+        default: false
+        type: boolean
       runner:
         description: GitHub Actions runner label
         required: true
@@ -70,6 +74,7 @@ jobs:
         shard: [0, 1]
     timeout-minutes: 60
     env:
+      CANTON_NIGHTLY_TEST_RUN: ${{ inputs.is_nightly_workflow }}
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
       # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
       SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}

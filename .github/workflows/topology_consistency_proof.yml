@@ -1,0 +1,62 @@
+name: Topology consistency component proof (test only)
+
+# Component proof: directly sets the environment variable and uses an in-memory store/mocked cache.
+# The stronger real-network proof calls _test.yml from canton_build_required.yml in both modes.
+on:
+  push:
+    branches: [codex/nightly-topology-consistency]
+  workflow_dispatch:
+    inputs:
+      nightly_test_run:
+        description: Enable topology snapshot consistency checks
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    name: Prove nightly=${{ matrix.nightly }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        nightly: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('[{0}]', inputs.nightly_test_run) || '[false,true]') }}
+    env:
+      CI: 'true'
+      CANTON_PROTOCOL_VERSION: '36'
+      CANTON_NIGHTLY_TEST_RUN: ${{ matrix.nightly }}
+      SBT_OPTS: -Xmx5G -XX:ActiveProcessorCount=4 -Dsbt.log.noformat=true -Dsbt.supershell=false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: sbt
+      - uses: sbt/setup-sbt@v1
+      - name: Build and prove topology consistency mode
+        shell: bash
+        run: |
+          echo "CI=$CI CANTON_NIGHTLY_TEST_RUN=$CANTON_NIGHTLY_TEST_RUN"
+          config_test=community/common/src/test/scala/com/digitalasset/canton/config/TopologyConfigTest.scala
+          sbt -batch \
+            "set LocalProject(\"community-testing\") / Test / unmanagedSources += file(\"$config_test\")" \
+            'set LocalProject("community-testing") / Test / testOptions := Seq(Tests.Argument(TestFrameworks.ScalaTest, "-oDW"))' \
+            'community-testing/testOnly *TopologyConfigTest *TopologyConsistencyCheckTest' \
+            2>&1 | tee "$RUNNER_TEMP/topology-proof.log"
+          expected_reads=0
+          if [[ "$CANTON_NIGHTLY_TEST_RUN" == true ]]; then expected_reads=1; fi
+          grep -F "TOPOLOGY_CONSISTENCY_PROOF nightly=$CANTON_NIGHTLY_TEST_RUN " "$RUNNER_TEMP/topology-proof.log" \
+            | grep -F "reference-store-lookups=$expected_reads" \
+            | sed 's/^.*TOPOLOGY_CONSISTENCY_PROOF/TOPOLOGY_CONSISTENCY_PROOF/' >> "$GITHUB_STEP_SUMMARY"
+      - name: Save proof output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: topology-consistency-proof-${{ matrix.nightly }}
+          path: |
+            ${{ runner.temp }}/topology-proof.log
+            community/testing/target/test-reports/
