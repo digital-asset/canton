@@ -7,8 +7,7 @@ import com.daml.metrics.api.MetricHandle.{Histogram, Meter}
 import com.daml.metrics.api.MetricsContext
 import com.google.common.base.Utf8
 import org.apache.pekko.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
-import org.apache.pekko.stream.scaladsl.{Flow, Sink}
-import org.apache.pekko.util.ByteString
+import org.apache.pekko.stream.scaladsl.Flow
 
 // Support to capture metrics on websockets on pekko http
 object WebSocketMetricsInterceptor {
@@ -40,7 +39,7 @@ object WebSocketMetricsInterceptor {
       )
 
   // support for message counting, and computation and report of the size of a message
-  // for streaming content, creates a copy of the message, with embedded support
+  // for streaming content, creates a copy of the message, whose stream records its total size
   private def messageCountAndSizeReportMetric(
       message: Message,
       totalMetric: Meter,
@@ -52,22 +51,18 @@ object WebSocketMetricsInterceptor {
         bytesMetric.update(m.data.length.toLong)
         m
       case m: BinaryMessage.Streamed =>
-        val newStream = m.dataStream.alsoTo(
-          Flow[ByteString]
-            .fold(0L)((acc, d) => acc + d.length)
-            .to(Sink.foreach(bytesMetric.update(_)))
+        BinaryMessage.Streamed(
+          StreamSizeMetric.recordTotalSize(m.dataStream, bytesMetric)(_.length.toLong)
         )
-        BinaryMessage.Streamed(newStream)
       case m: TextMessage.Strict =>
         bytesMetric.update(Utf8.encodedLength(m.text).toLong)
         m
       case m: TextMessage.Streamed =>
-        val newStream = m.textStream.alsoTo(
-          Flow[String]
-            .fold(0L)((acc, t) => acc + Utf8.encodedLength(t))
-            .to(Sink.foreach(bytesMetric.update(_)))
+        TextMessage.Streamed(
+          StreamSizeMetric.recordTotalSize(m.textStream, bytesMetric)(
+            Utf8.encodedLength(_).toLong
+          )
         )
-        TextMessage.Streamed(newStream)
     }
   }
 
