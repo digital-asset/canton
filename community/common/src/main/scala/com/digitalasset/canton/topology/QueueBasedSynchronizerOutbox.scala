@@ -161,7 +161,7 @@ class QueueBasedSynchronizerOutbox(
   protected def flush(numFailures: Int, initialize: Boolean = false)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
-    def markDone(numFailures: Int): Unit = {
+    def markDone(numFailures: Int, flushRemaining: Boolean = true): Unit = {
       isRunning.set(false)
       if (!hasUnsentTransactions) {
         idleFuture.getAndSet(None).foreach(_.trySuccess(UnlessShutdown.unit))
@@ -170,7 +170,7 @@ class QueueBasedSynchronizerOutbox(
       logger.debug(
         s"Marked flush as done. Current queue size: $queueSize. IsClosing: $isClosing"
       )
-      if (hasUnsentTransactions && !isClosing) {
+      if (flushRemaining && hasUnsentTransactions && !isClosing) {
         if (numFailures > 0) {
           logger.debug(s"Kick off a new delayed flush in ${topologyConfig.broadcastRetryDelay}")
           DelayUtil
@@ -277,7 +277,10 @@ class QueueBasedSynchronizerOutbox(
           shutdownHandler = () => {
             logger.info(s"Requeuing and stopping due to closing/synchronizer-disconnect")
             synchronizerOutboxQueue.requeue()
-            markDone(numFailures = 0)
+            // A dependency such as the topology client or the sequencer client is shutting down, so the outbox is
+            // about to be closed as well. Do not flush again: that would resubmit the requeued transactions to the
+            // synchronizer being disconnected. The outbox created on reconnect flushes them in `startup`.
+            markDone(numFailures = 0, flushRemaining = false)
           },
         )(ret)
       } else {

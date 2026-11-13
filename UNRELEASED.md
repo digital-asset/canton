@@ -25,6 +25,9 @@ Template for a bigger topic
 
 ## Bugfixes
 - Fixed slow query tracker mostly reporting `TryUtil.tryCatchInterrupted` instead of the actual originating call. 
+- Participant node: when a participant disconnects from a synchronizer while a topology transaction broadcast is
+  pending, it no longer immediately resubmits the pending and queued topology transactions to that synchronizer. They
+  are submitted after reconnecting, as before.
 
 ### (YY-nnn, Risk): Title
 
