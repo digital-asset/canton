@@ -3,6 +3,7 @@
 import json
 import subprocess
 import textwrap
+from types import SimpleNamespace
 
 import benchmark_topology_consistency as benchmark
 import pytest
@@ -136,6 +137,24 @@ def test_database_reset_refuses_any_other_container(monkeypatch):
     monkeypatch.setenv("GITHUB_RUN_ID", "123")
     with pytest.raises(ValueError, match="unexpected"):
         benchmark.reset_postgres("anything-else", 0)
+
+
+def test_database_reset_authenticates_to_the_standard_scram_postgres(monkeypatch):
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("GITHUB_RUN_ID", "123")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "test-password")
+    calls = []
+
+    def capture(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(benchmark.subprocess, "run", capture)
+    benchmark.reset_postgres("canton-postgres-123-0", 0)
+    command, kwargs = calls[0]
+    assert command[:6] == ["docker", "exec", "-i", "-e", "PGPASSWORD", "canton-postgres-123-0"]
+    assert kwargs["env"]["PGPASSWORD"] == "test-password"
+    assert "DROP DATABASE" in kwargs["input"] and "CREATE DATABASE test" in kwargs["input"]
 
 
 def test_fresh_invocations_preserve_nested_compilation_targets_and_evidence(tmp_path, monkeypatch):

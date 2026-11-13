@@ -118,6 +118,8 @@ def reset_postgres(container, shard):
             "docker",
             "exec",
             "-i",
+            "-e",
+            "PGPASSWORD",
             container,
             "psql",
             "-v",
@@ -133,6 +135,7 @@ def reset_postgres(container, shard):
             "CREATE DATABASE test;\n"
         ),
         text=True,
+        env={**os.environ, "PGPASSWORD": os.environ["POSTGRES_PASSWORD"]},
         check=True,
     )
     subprocess.run(["docker", "restart", container], check=True)
