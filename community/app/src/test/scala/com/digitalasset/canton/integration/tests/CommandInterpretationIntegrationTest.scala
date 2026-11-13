@@ -10,6 +10,7 @@ import com.digitalasset.canton.integration.{
   ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
+  TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.{BaseTest, config}
@@ -39,11 +40,10 @@ sealed trait CommandInterpretationIntegrationTest
     "be aborted if it takes too much time during interpretation" in { implicit env =>
       import env.*
 
+      val previousTolerance = ledgerTimeRecordTimeTolerance()
+
       // Reduce time tolerance such that the Ping has no chance to compute within limits
-      sequencer1.topology.synchronizer_parameters.set_ledger_time_record_time_tolerance(
-        synchronizerId = daId,
-        config.NonNegativeFiniteDuration.Zero,
-      )
+      setLedgerTimeRecordTimeTolerance(config.NonNegativeFiniteDuration.Zero)
 
       participant1.start()
       participant1.synchronizers.connect_local(sequencer1, alias = daName)
@@ -71,6 +71,9 @@ sealed trait CommandInterpretationIntegrationTest
           )
         ),
       )
+
+      // The environment is shared: restore the tolerance so that later setups can succeed
+      setLedgerTimeRecordTimeTolerance(previousTolerance)
     }
   }
 
@@ -79,12 +82,6 @@ sealed trait CommandInterpretationIntegrationTest
       import env.*
 
       // This test uses a Daml template with a choice that runs an infinite loop
-
-      // Set time tolerance to 3 seconds so that an infinite loop will trigger a stack overflow if not handled properly
-      sequencer1.topology.synchronizer_parameters.set_ledger_time_record_time_tolerance(
-        synchronizerId = daId,
-        config.NonNegativeFiniteDuration.tryFromDuration(3.seconds),
-      )
 
       participant1.start()
       participant1.synchronizers.connect_local(sequencer1, alias = daName)
@@ -107,6 +104,11 @@ sealed trait CommandInterpretationIntegrationTest
         .loneElement
         .contractId
 
+      // Set time tolerance to 3 seconds so that an infinite loop will trigger a stack overflow if not handled properly.
+      // Lower it only now: the max sequencing time of a submission is its ledger time plus this tolerance,
+      // so the setup above could otherwise time out before being sequenced.
+      setLedgerTimeRecordTimeTolerance(config.NonNegativeFiniteDuration.tryFromDuration(3.seconds))
+
       // Exercise the "infinite loop" choice
       val exerciseLoopCmd =
         ledger_api_utils.exercise(
@@ -126,6 +128,23 @@ sealed trait CommandInterpretationIntegrationTest
         _.errorMessage should include("Request failed for participant1"),
       )
     }
+  }
+
+  private def ledgerTimeRecordTimeTolerance()(implicit
+      env: TestConsoleEnvironment
+  ): config.NonNegativeFiniteDuration = {
+    import env.*
+    sequencer1.topology.synchronizer_parameters
+      .get_dynamic_synchronizer_parameters(daId)
+      .ledgerTimeRecordTimeTolerance
+  }
+
+  private def setLedgerTimeRecordTimeTolerance(
+      tolerance: config.NonNegativeFiniteDuration
+  )(implicit env: TestConsoleEnvironment): Unit = {
+    import env.*
+    sequencer1.topology.synchronizer_parameters
+      .set_ledger_time_record_time_tolerance(synchronizerId = daId, tolerance)
   }
 }
 
