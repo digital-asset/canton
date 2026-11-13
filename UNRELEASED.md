@@ -27,6 +27,9 @@ Template for a bigger topic
 ## Bugfixes
 - Sequencer node: fixed a resource leak, causing a spike of # of threads, CPU and memory consumption affecting the node's
   ability to keep up with the rest of synchronizer, requiring an imminent restart of the node every few days.
+- Participant node: when a participant disconnects from a synchronizer while a topology transaction broadcast is
+  pending, it no longer immediately resubmits the pending and queued topology transactions to that synchronizer. They
+  are submitted after reconnecting, as before.
 
 ### (YY-nnn, Risk): Title
 
