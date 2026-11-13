@@ -238,6 +238,9 @@ fix is deployed on MainNet:
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
 - Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
+- `commitments.reinitialize_commitments` returns only after the reinitialization has finished. Previously it could
+  return slightly earlier, so an immediately following call could be rejected with "Reinitialization is already
+  scheduled or in progress". A failed reinitialization is now reported right away instead of after the timeout.
 
 ## Compatibility
 

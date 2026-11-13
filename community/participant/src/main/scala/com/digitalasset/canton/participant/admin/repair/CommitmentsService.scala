@@ -9,7 +9,12 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+  UnlessShutdown,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
@@ -24,11 +29,11 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.util.retry.NoExceptionRetryPolicy
 import com.google.common.annotations.VisibleForTesting
 
-import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.DurationLong
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
 /** Implements the repair commands for ACS commitments. These do not require that the participants
   * disconnects from synchronizers.
@@ -47,38 +52,55 @@ final class CommitmentsService(
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
-  private def readCommitmentRepairStatus(
+  /** Waits for the reinitialization task, for at most `timeout` (granularity: seconds), and then
+    * reports the completion timestamp persisted in the store.
+    *
+    * We wait on the task itself rather than polling the store's completion marker: the marker is
+    * written before the task finishes, so a caller that returned on seeing the marker could issue
+    * the next reinitialization while the processor still considers this one in progress.
+    */
+  private def awaitCommitmentReinitialization(
+      reinitialization: FutureUnlessShutdown[Unit],
       synchronizerState: SyncPersistentState,
       expectedCompletionTs: CantonTimestamp,
       timeout: NonNegativeFiniteDuration,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Either[String, Option[CantonTimestamp]]] =
-    // retry until timeout, namely retry every second for maximum `timeout.duration.getSeconds` times
-    retry
-      .Pause(
-        logger,
-        this,
-        maxRetries = timeout.duration.getSeconds.intValue,
-        delay = 1.second,
-        "retrieving status of commitment reinitialization",
-      )
-      .unlessShutdown(
-        for {
-          ReinitializationStatus(_, reinitCompletedTs) <-
-            synchronizerState.acsCommitmentStore.runningCommitments
-              .readReinitilizationStatus()
-          result =
-            if (reinitCompletedTs.contains(expectedCompletionTs))
-              Right(reinitCompletedTs)
-            else {
-              Left(
-                s"Commitment reinitialization not completed yet, expected completion timestamp: $expectedCompletionTs, actual: $reinitCompletedTs"
+  ): FutureUnlessShutdown[Either[String, Option[CantonTimestamp]]] = {
+    def notCompleted(actual: Option[CantonTimestamp]): String =
+      s"Commitment reinitialization not completed yet, expected completion timestamp: $expectedCompletionTs, actual: $actual"
+
+    val completed: FutureUnlessShutdown[Either[String, Option[CantonTimestamp]]] =
+      reinitialization.transformWith {
+        case Success(UnlessShutdown.Outcome(())) =>
+          synchronizerState.acsCommitmentStore.runningCommitments
+            .readReinitilizationStatus()
+            .map { case ReinitializationStatus(_, reinitCompletedTs) =>
+              Either.cond(
+                reinitCompletedTs.contains(expectedCompletionTs),
+                reinitCompletedTs,
+                notCompleted(reinitCompletedTs),
               )
             }
-        } yield result,
-        NoExceptionRetryPolicy,
-      )
+        case Success(UnlessShutdown.AbortedDueToShutdown) =>
+          FutureUnlessShutdown.abortedDueToShutdown
+        case Failure(ex) =>
+          FutureUnlessShutdown.pure(
+            Left(s"Commitment reinitialization at $expectedCompletionTs failed: ${ex.getMessage}")
+          )
+      }
+
+    val timedOut: FutureUnlessShutdown[Either[String, Option[CantonTimestamp]]] =
+      DelayUtil
+        .delayIfNotClosing(
+          "commitment reinitialization timeout",
+          timeout.duration.getSeconds.seconds,
+          this,
+        )
+        .map(_ => Left(notCompleted(None)))
+
+    FutureUnlessShutdown(Future.firstCompletedOf(Seq(completed.unwrap, timedOut.unwrap)))
+  }
 
   def reinitializeLegacyCommitmentsUsingAcs(
       paramSynchronizerIds: Set[SynchronizerId],
@@ -116,11 +138,7 @@ final class CommitmentsService(
             s"Commitment reinitialization is disabled for ${synchronizer.psid} because the old ACS commitment processor is turned off.",
           )
 
-          _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-            processor.reinitializeCommitments(reinitRecordTime),
-            s"Reinitialization is already scheduled or in progress for ${synchronizer.psid}.",
-          )
-
+          // Check the storage before scheduling, so that an unsupported request does not start a reinitialization.
           persistentState <- EitherT.fromEither[FutureUnlessShutdown](
             syncPersistentStateLookup
               .get(synchronizer.psid)
@@ -135,8 +153,15 @@ final class CommitmentsService(
               s"${synchronizer.psid} is in memory which is not supported by commitment reinitialization. Use db persistence.",
             )
           )
+
+          reinitialization <- EitherT.fromOption[FutureUnlessShutdown](
+            processor.reinitializeCommitments(reinitRecordTime),
+            s"Reinitialization is already scheduled or in progress for ${synchronizer.psid}.",
+          )
+
           res <- EitherT(
-            readCommitmentRepairStatus(
+            awaitCommitmentReinitialization(
+              reinitialization,
               persistentState,
               reinitRecordTime.timestamp,
               timeoutSeconds,
