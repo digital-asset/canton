@@ -1041,92 +1041,6 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
     assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1)
   }
 
-  "restart during transaction submission" in { implicit env =>
-    import env.*
-
-    startSynchronizers(Seq(EnvironmentDefinition.S1M1))
-
-    val participant1 = startAndGet("participant1")
-
-    connectToDa(participant1)
-
-    // Use Alice instead of the P1 admin party at least until #16073 is fixed and the ledger api sees
-    // participant admin parties.
-    val alice = participant1.parties.testing.enable(
-      "Alice",
-      synchronizeParticipants = Nil,
-      synchronizer = daName,
-    )
-
-    val participant1Id =
-      participant1.id // Do not inline into policy because this internally performs a GRPC call
-    val p1Id = alice
-
-    val sequencer = getProgrammableSequencer(sequencer1.name)
-
-    val submissionDelay = Promise[Unit]()
-    val submissionHappened = Promise[Unit]()
-
-    // Shut down the participant when it sends the first message
-    sequencer.setPolicy_("delay until after shutdown") {
-      SendPolicy.processTimeProofs_ { submissionRequest =>
-        if (submissionRequest.sender == participant1Id && submissionRequest.isConfirmationRequest) {
-          submissionHappened.trySuccess(())
-          SendDecision.HoldBack(submissionDelay.future)
-        } else SendDecision.Process
-      }
-    }
-
-    val participantOffset = participant1.ledger_api.state.end()
-
-    val pingId = "participant1-ping-shutdown"
-    val commandId = "participant1-ping-shutdown-command"
-    val pingCommand =
-      new Ping(
-        pingId,
-        p1Id.toLf,
-        p1Id.toLf,
-      ).create.commands.asScala.toSeq
-
-    val submissionF = Future {
-      participant1.ledger_api.javaapi.commands.submit_async(
-        Seq(p1Id),
-        pingCommand,
-        commandId = commandId,
-      )
-    }
-    val shutdownF = submissionHappened.future.map { _ =>
-      restart(participant1, submissionDelay.success(()))
-      participant1.synchronizers.reconnect_all()
-    }
-    Await.result(shutdownF, 2.minutes)
-
-    val timeout = 30.seconds
-    val completions = participant1.ledger_api.completions.list(
-      p1Id,
-      1,
-      participantOffset,
-      timeout = timeout,
-      filter = filterCompletionsByCommandId(commandId),
-    )
-    val transactions =
-      participant1.ledger_api.updates.transactions(
-        partyIds = Set(p1Id),
-        completeAfter = 1,
-        beginOffsetExclusive = participantOffset,
-        timeout = timeout,
-      )
-    assert(completions.size == 1)
-    val completion = completions.head
-    assert(completion.status.forall(_.code == Status.OK.getCode.value))
-    assert(transactions.size == 1)
-    val transaction = transactions.head
-    assert(completion.updateId == transaction.updateId)
-    submissionF.futureValue
-
-    assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1)
-  }
-
   "successfully restart during a bong" taggedAs
     ReliabilityTest(
       Component("Bong application", "connected to single non-replicated participant"),
@@ -1247,99 +1161,6 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
       assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1, stateInspection1)
       assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant2, stateInspection2)
     }
-
-  "restart with inflight validation requests" in { implicit env =>
-    import env.*
-
-    NetworkBootstrapper(Seq(EnvironmentDefinition.S1M1)).bootstrap()
-    sequencer1.topology.synchronizer_parameters.propose_update(
-      daId,
-      _.update(confirmationResponseTimeout = NonNegativeFiniteDuration.ofSeconds(40)),
-    )
-
-    val participant1 = startAndGet("participant1")
-    val participant2 = startAndGet("participant2")
-    participant3.start()
-
-    connectToDa(participant1, noAutoReconnect = true)
-    participant2.synchronizers.connect_local(sequencer1, alias = daName)
-    participant3.synchronizers.connect_local(sequencer1, alias = daName)
-
-    // Do not inline into policy because this internally performs a GRPC call
-    val participant2Id = participant2.id
-
-    val sequencer = getProgrammableSequencer(sequencer1.name)
-
-    val firstTransactionRespondedPromise = Promise[Unit]()
-    val secondTransactionCompletePromise = Promise[Unit]()
-
-    // Hold back all confirmation responses from participant 2 until participant 3 has pinged participant 1
-    sequencer.setPolicy("hold back participant2 confirmation responses") {
-      SendPolicy.processTimeProofs { implicit traceContext => submissionRequest =>
-        if (
-          submissionRequest.sender == participant2Id && isConfirmationResponse(submissionRequest)
-        ) {
-          logger.info("Holding back mediator message.")
-          firstTransactionRespondedPromise.trySuccess(())
-          SendDecision.HoldBack(secondTransactionCompletePromise.future)
-        } else SendDecision.Process
-      }
-    }
-    val stateInspection1 = this.stateInspectionFor(participant1)
-    val stateInspection2 = this.stateInspectionFor(participant2)
-    val requestCounterOfFirstPing = RequestCounter.Genesis
-    valueOrFail(stateInspection1.requestStateInJournal(requestCounterOfFirstPing, daId))(
-      "Not find request counter for first ping"
-    ).futureValueUS shouldBe None
-
-    val firstPing = Future {
-      // This ping may succeed even if the first ping transaction times out
-      // because the ping service automatically retries
-      assertPingSucceeds(participant2, participant1, timeoutMillis = 60000, id = "firstPing")
-    }
-    val secondPing = firstTransactionRespondedPromise.future.flatMap { _ =>
-      // We can not wait for the second ping to finish because the TransactionAccepted updates will be stuck
-      // in the event scheduler until the first ping's request is resolved.
-      // So we wait for the second ping to become clean in the request journal (even though the clean cursor has not yet advanced).
-      val requestCounterOfSecondPing = requestCounterOfFirstPing + 1L
-      valueOrFail(stateInspection1.requestStateInJournal(requestCounterOfSecondPing, daId))(
-        "Not find request counter for second ping"
-      ).futureValueUS shouldBe None
-      val secondPingF = Future {
-        // We use participant 3 for the second ping because we are going to kill participant 1 and we're blocking participant 2.
-        assertPingSucceeds(participant3, participant1, timeoutMillis = 60000, id = "secondPing")
-      }
-      eventually(timeUntilSuccess = 10.seconds) {
-        val resultF =
-          stateInspection1.requestStateInJournal(requestCounterOfSecondPing, daId).value
-        resultF.futureValueUS.value.state shouldBe RequestJournal.RequestState.Clean
-      }
-
-      stopAndRestart(
-        participant1,
-        runBeforeReconnect = Some { () =>
-          // Abort the test if the first ping has already timed out
-          val resultF =
-            stateInspection1.requestStateInJournal(requestCounterOfFirstPing, daId).value
-          if (resultF.futureValueUS.value.state == RequestJournal.RequestState.Clean)
-            cancel()
-          Seq(daName)
-        },
-      )
-      secondTransactionCompletePromise.success(())
-      secondPingF
-    }
-
-    val patience = defaultPatience.copy(timeout = 90.seconds)
-    firstPing.futureValue(patience, Position.here)
-    secondPing.futureValue(patience, Position.here)
-    stateInspection1.verifyLapiStoreIntegrity()
-    stateInspection2.verifyLapiStoreIntegrity()
-    participant3.testing.state_inspection.verifyLapiStoreIntegrity()
-
-    assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1, stateInspection1)
-    assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant2, stateInspection2)
-  }
 
   "replay reassignments" in { implicit env =>
     import env.*
@@ -1603,6 +1424,228 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
     assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1, stateInspection1)
   }
 
+}
+
+/** Restart tests that hold a request in flight across a restart of participant1. They run under
+  * static time so that no protocol timeout can elapse while the external participant restarts.
+  */
+class ParticipantRestartInflightRequestIntegrationTest extends ParticipantRestartTest {
+
+  override lazy val environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P3S1M1_Manual
+      .addConfigTransforms(
+        ConfigTransforms.useStaticTime,
+        ProgrammableSequencer.configOverride(getClass.toString, loggerFactory),
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true),
+      )
+      .withSetup { implicit env =>
+        NetworkBootstrapper(Seq(EnvironmentDefinition.S1M1)).bootstrap()
+      }
+
+  "restart during transaction submission" in { implicit env =>
+    import env.*
+
+    val participant1 = startAndGet("participant1")
+
+    connectToDa(participant1)
+
+    // Use Alice instead of the P1 admin party at least until #16073 is fixed and the ledger api sees
+    // participant admin parties.
+    val alice = participant1.parties.testing.enable(
+      "Alice",
+      synchronizeParticipants = Nil,
+      synchronizer = daName,
+    )
+
+    val participant1Id =
+      participant1.id // Do not inline into policy because this internally performs a GRPC call
+    val p1Id = alice
+
+    val sequencer = getProgrammableSequencer(sequencer1.name)
+
+    val submissionDelay = Promise[Unit]()
+    val submissionHappened = Promise[Unit]()
+
+    // Shut down the participant when it sends the first message
+    sequencer.setPolicy_("delay until after shutdown") {
+      SendPolicy.processTimeProofs_ { submissionRequest =>
+        if (submissionRequest.sender == participant1Id && submissionRequest.isConfirmationRequest) {
+          submissionHappened.trySuccess(())
+          SendDecision.HoldBack(submissionDelay.future)
+        } else SendDecision.Process
+      }
+    }
+
+    val participantOffset = participant1.ledger_api.state.end()
+
+    val pingId = "participant1-ping-shutdown"
+    val commandId = "participant1-ping-shutdown-command"
+    val pingCommand =
+      new Ping(
+        pingId,
+        p1Id.toLf,
+        p1Id.toLf,
+      ).create.commands.asScala.toSeq
+
+    val submissionF = Future {
+      participant1.ledger_api.javaapi.commands.submit_async(
+        Seq(p1Id),
+        pingCommand,
+        commandId = commandId,
+      )
+    }
+    val shutdownF = submissionHappened.future.map { _ =>
+      restart(participant1, submissionDelay.success(()))
+      participant1.synchronizers.reconnect_all()
+    }
+    Await.result(shutdownF, 2.minutes)
+
+    val timeout = 30.seconds
+    val completions = participant1.ledger_api.completions.list(
+      p1Id,
+      1,
+      participantOffset,
+      timeout = timeout,
+      filter = filterCompletionsByCommandId(commandId),
+    )
+    val transactions =
+      participant1.ledger_api.updates.transactions(
+        partyIds = Set(p1Id),
+        completeAfter = 1,
+        beginOffsetExclusive = participantOffset,
+        timeout = timeout,
+      )
+    assert(completions.size == 1)
+    val completion = completions.head
+    assert(completion.status.forall(_.code == Status.OK.getCode.value))
+    assert(transactions.size == 1)
+    val transaction = transactions.head
+    assert(completion.updateId == transaction.updateId)
+    submissionF.futureValue
+
+    assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1)
+  }
+
+  "restart with inflight validation requests" in { implicit env =>
+    import env.*
+
+    val participant1 = startAndGet("participant1")
+    val participant2 = startAndGet("participant2")
+    participant3.start()
+
+    connectToDa(participant1, noAutoReconnect = true)
+    participant2.synchronizers.connect_local(sequencer1, alias = daName)
+    participant3.synchronizers.connect_local(sequencer1, alias = daName)
+
+    val alice = participant1.parties.testing.enable(
+      "Alice",
+      synchronizeParticipants = Seq(participant2, participant3),
+    )
+    val bob = participant2.parties.testing.enable(
+      "Bob",
+      synchronizeParticipants = Seq(participant1, participant3),
+    )
+    val charlie = participant3.parties.testing.enable(
+      "Charlie",
+      synchronizeParticipants = Seq(participant1, participant2),
+    )
+
+    // Do not inline into policy because this internally performs a GRPC call
+    val participant2Id = participant2.id
+
+    val sequencer = getProgrammableSequencer(sequencer1.name)
+
+    val firstTransactionRespondedPromise = Promise[Unit]()
+    val releaseParticipant2Responses = Promise[Unit]()
+
+    // Hold back all confirmation responses from participant 2 until participant 1 has restarted
+    sequencer.setPolicy("hold back participant2 confirmation responses") {
+      SendPolicy.processTimeProofs { implicit traceContext => submissionRequest =>
+        if (
+          submissionRequest.sender == participant2Id && isConfirmationResponse(submissionRequest)
+        ) {
+          logger.info("Holding back mediator message.")
+          firstTransactionRespondedPromise.trySuccess(())
+          SendDecision.HoldBack(releaseParticipant2Responses.future)
+        } else SendDecision.Process
+      }
+    }
+    val stateInspection1 = this.stateInspectionFor(participant1)
+    val stateInspection2 = this.stateInspectionFor(participant2)
+    val requestCounterOfFirstRequest = RequestCounter.Genesis
+    val requestCounterOfSecondRequest = requestCounterOfFirstRequest + 1L
+    valueOrFail(stateInspection1.requestStateInJournal(requestCounterOfFirstRequest, daId))(
+      "Not find request counter for first request"
+    ).futureValueUS shouldBe None
+
+    val offset1 = participant1.ledger_api.state.end()
+    val offset2 = participant2.ledger_api.state.end()
+    val offset3 = participant3.ledger_api.state.end()
+
+    // First request: Bob's confirmation response is held, so it stays in flight on participant1.
+    val firstCommandId = "inflight-first"
+    participant2.ledger_api.javaapi.commands.submit_async(
+      Seq(bob),
+      new Ping(firstCommandId, bob.toLf, alice.toLf).create.commands.asScala.toSeq,
+      commandId = firstCommandId,
+    )
+    firstTransactionRespondedPromise.future.futureValue
+
+    // Second request: confirmed by participant3 only. It becomes clean on participant1,
+    // but participant1 publishes it only after the first request is resolved.
+    val secondCommandId = "inflight-second"
+    participant3.ledger_api.javaapi.commands.submit_async(
+      Seq(charlie),
+      new Ping(secondCommandId, charlie.toLf, alice.toLf).create.commands.asScala.toSeq,
+      commandId = secondCommandId,
+    )
+    eventually() {
+      val resultF =
+        stateInspection1.requestStateInJournal(requestCounterOfSecondRequest, daId).value
+      resultF.futureValueUS.value.state shouldBe RequestJournal.RequestState.Clean
+    }
+
+    stopAndRestart(
+      participant1,
+      runBeforeReconnect = Some { () =>
+        // Under static time the first request cannot time out, so it is still in flight.
+        val resultF =
+          stateInspection1.requestStateInJournal(requestCounterOfFirstRequest, daId).value
+        resultF.futureValueUS.value.state should not be RequestJournal.RequestState.Clean
+        Seq(daName)
+      },
+    )
+    releaseParticipant2Responses.success(())
+
+    def assertCompletedOk(
+        participant: ParticipantReference,
+        party: PartyId,
+        offset: Long,
+        commandId: String,
+    ): Unit = {
+      val completion = participant.ledger_api.completions
+        .list(party, 1, offset, filter = filterCompletionsByCommandId(commandId))
+        .loneElement
+      withClue(s"completion of $commandId:") {
+        completion.status.forall(_.code == Status.OK.getCode.value) shouldBe true
+      }
+    }
+    assertCompletedOk(participant2, bob, offset2, firstCommandId)
+    assertCompletedOk(participant3, charlie, offset3, secondCommandId)
+    participant1.ledger_api.updates.transactions(
+      partyIds = Set(alice),
+      completeAfter = 2,
+      beginOffsetExclusive = offset1,
+    ) should have size 2
+
+    stateInspection1.verifyLapiStoreIntegrity()
+    stateInspection2.verifyLapiStoreIntegrity()
+    participant3.testing.state_inspection.verifyLapiStoreIntegrity()
+
+    assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1, stateInspection1)
+    assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant2, stateInspection2)
+  }
 }
 
 abstract class ParticipantRestartStaticTimeIntegrationTestBase(
@@ -2406,6 +2449,8 @@ class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTes
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S1M1_Manual
       .addConfigTransforms(
+        // Static time, so that the in-flight request cannot time out while participant1 restarts
+        ConfigTransforms.useStaticTime,
         ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory),
         // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
         ConfigTransforms.setCrashAfterFailedValidation(true),
@@ -2420,10 +2465,7 @@ class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTes
 
       sequencer1.topology.synchronizer_parameters.propose_update(
         daId,
-        _.update(
-          confirmationResponseTimeout = config.NonNegativeFiniteDuration.ofMinutes(10),
-          reconciliationInterval = reconciliationInterval.toConfig,
-        ),
+        _.update(reconciliationInterval = reconciliationInterval.toConfig),
       )
 
       val participant1 = startAndGet("participant1")
@@ -2537,10 +2579,9 @@ class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTes
           participant1,
           runBeforeReconnect = Some { () =>
             logger.info("before reconnecting participant 1")
-            // Abort the test if the first request has already timed out
+            // Under static time the first request cannot time out, so it is still in flight.
             val resultF = stateInspection1.requestStateInJournal(firstRequestCounter, daId).value
-            if (resultF.futureValueUS.value.state == RequestJournal.RequestState.Clean)
-              cancel()
+            resultF.futureValueUS.value.state should not be RequestJournal.RequestState.Clean
             Seq(daName)
           },
         )

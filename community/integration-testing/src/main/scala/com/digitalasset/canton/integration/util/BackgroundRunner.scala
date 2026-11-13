@@ -307,6 +307,10 @@ class BackgroundRunner(
         ) {
           noTracingLogger.info(s"Killing process $name forcibly")
           val _ = rt.destroyForcibly()
+          // destroyForcibly only sends the signal. Wait for the exit so that callers can rely on
+          // the process's sockets and database sessions being gone when kill returns.
+          if (!rt.waitFor(timeouts.shutdownProcessing.unwrap.toMillis, TimeUnit.MILLISECONDS))
+            noTracingLogger.error(s"Process $name did not exit after being killed forcibly")
         }
       } catch {
         case ex: Throwable => noTracingLogger.error(s"Failed to kill forcibly: $command", ex)
