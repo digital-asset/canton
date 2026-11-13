@@ -693,8 +693,8 @@ class SequencerConnectionPoolImplTest
       )(MetricsContext.Empty).connectionPool
 
       def currentMetrics =
-        poolMetrics.connectionHealthMetrics.map { case (mc, gauge) =>
-          mc.labels.get("connection").value -> gauge.value.getValue
+        poolMetrics.connectionHealthValues.map { case (mc, value) =>
+          mc.labels.get("connection").value -> value
         }
 
       withConnectionPool(
@@ -705,7 +705,7 @@ class SequencerConnectionPoolImplTest
         namePrefix = "first-config",
       ) { (pool, _, _, _) =>
         // on the first connect, the metrics should be empty
-        poolMetrics.connectionHealthMetrics shouldBe empty
+        poolMetrics.connectionHealthValues shouldBe empty
 
         pool.start().futureValueUS.value
 
@@ -750,7 +750,7 @@ class SequencerConnectionPoolImplTest
       }
 
       // Closing the pool closes all the metrics
-      poolMetrics.connectionHealthMetrics shouldBe empty
+      poolMetrics.connectionHealthValues shouldBe empty
 
       withConnectionPool(
         nbConnections = PositiveInt.three,
@@ -779,8 +779,8 @@ class SequencerConnectionPoolImplTest
       )(MetricsContext.Empty).connectionPool
 
       def currentMetricsPsids =
-        poolMetrics.connectionHealthMetrics.map { case (mc, _gauge) => mc.labels.get("psid") }.toSet
-      def currentMetricsSize = poolMetrics.connectionHealthMetrics.size
+        poolMetrics.connectionHealthValues.keySet.map(_.labels.get("psid"))
+      def currentMetricsSize = poolMetrics.connectionHealthValues.size
 
       withConnectionPool(
         nbConnections = PositiveInt.three,
