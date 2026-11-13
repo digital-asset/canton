@@ -18,8 +18,6 @@ import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 import org.scalatest.wordspec.AnyWordSpec
 
-import scala.math.Ordering.Implicits.*
-
 /** Simple test that loads config files in the /config folder for each release and verifies they
   * parse in this Canton version
   */
@@ -107,10 +105,6 @@ final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3
       .getDumpBaseDirectoriesForVersion(None)
       // Filter-out dumps that don't contain the config
       .filter { case (_, releaseVersion) => releaseVersion >= ReleaseVersion.tryCreate("3.4.10-a") }
-      // Skip dumps from newer release lines, their configs can have keys this version does not know
-      .filter { case (_, releaseVersion) =>
-        releaseVersion.majorMinor <= ReleaseVersion.current.majorMinor
-      }
       .foreach { case (directory, releaseVersion) =>
         s"parse default config for version $releaseVersion in ${directory.localDownloadPath}" in {
           val initialConfigFile = directory.localDownloadPath / "default.conf"
