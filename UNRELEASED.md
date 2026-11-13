@@ -238,6 +238,9 @@ fix is deployed on MainNet:
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
 - Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
+- When a participant disconnects from a synchronizer while a topology transaction broadcast is pending, the
+  participant no longer immediately resubmits the pending and queued topology transactions to that synchronizer. They
+  are submitted after reconnecting, as before.
 
 ## Compatibility
 

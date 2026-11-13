@@ -594,21 +594,29 @@ class QueueBasedSynchronizerOutboxTest
         // at exactly that moment.
         _ = handle.disconnectTopologyClient()
 
-        // Close the outbox before the client: aborting observation while the outbox is still open
-        // can trigger a retry of both transactions, incorrectly storing TB2 before reconnecting.
-        _ = manager.clearObservers()
-        _ = outbox.close()
+        // Close the topology client before the outbox, as the participant does on disconnect
+        // (the synchronizer crypto client, which owns the topology client, is closed first).
+        // This aborts the outbox's wait for TB1 to be observed while the outbox is still open.
         _ = client.close()
 
-        // if the shutdown procedure is properly wired up, the pending transactions gets put into the unsent queue
+        // if the shutdown procedure is properly wired up, the pending transaction gets put into the unsent queue
+        // and the outbox stops instead of flushing TB1 and TB2 again to the synchronizer it is disconnecting from.
         _ = eventually() {
           manager.outboxQueue.numInProcessTransactions shouldBe 0
           manager.outboxQueue.numUnsentTransactions shouldBe 2
         }
 
+        _ = manager.clearObservers()
+        _ = outbox.close()
+
         // Finish storing TB1 before reconnecting so the new outbox reliably filters it out.
         _ = handle.flushBlocker.get().outcome_(())
         _ <- handle.allObserved()
+
+        // TB1 was submitted exactly once to the synchronizer being disconnected from
+        _ = handle.batches.asScala.toSeq.map(_.map(_.transaction)) shouldBe Seq(
+          transactions.take(1)
+        )
 
         // now simulate reconnecting to the synchronizer by setting up a new
         // * topology client
