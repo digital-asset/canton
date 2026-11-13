@@ -695,11 +695,17 @@ trait ParticipantTestContext extends UserManagementTestContext {
       dummyCommand: Party => JList[Command],
   )(implicit ec: ExecutionContext): Future[Unit]
 
+  /** @param beforeEachAttempt
+    *   runs before every prune attempt. Canton only allows pruning offsets published at least the
+    *   max deduplication duration before the participant's latest publication time, which moves
+    *   only when something is published. Publishing here lets each attempt see a later time.
+    */
   def pruneWithAcsCheck(
       parties: Option[Seq[Party]],
       pruneUpTo: Long,
       attempts: Int = 10,
       activeAtOffset0: Option[Long] = None,
+      beforeEachAttempt: () => Future[Unit] = () => Future.unit,
   )(implicit ec: ExecutionContext): Future[Unit]
 
   def latestPrunedOffsets(): Future[(Long, Long)]

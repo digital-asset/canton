@@ -1801,11 +1801,14 @@ final class SingleParticipantTestContext private[participant] (
   private def prune(
       pruneUpTo: Long,
       attempts: Int,
-  ): Future[PruneResponse] =
+      beforeEachAttempt: () => Future[Unit],
+  )(implicit ec: ExecutionContext): Future[PruneResponse] =
     // Distributed ledger participants need to reach global consensus prior to pruning. Hence the "eventually" here:
     eventually(assertionName = "Prune", attempts = attempts) {
-      services.participantPruning
-        .prune(PruneRequest(pruneUpTo, nextSubmissionId(), pruneAllDivulgedContracts = true))
+      beforeEachAttempt().flatMap(_ =>
+        services.participantPruning
+          .prune(PruneRequest(pruneUpTo, nextSubmissionId(), pruneAllDivulgedContracts = true))
+      )
     }
 
   def pruneWithAcsCheck(
@@ -1813,9 +1816,10 @@ final class SingleParticipantTestContext private[participant] (
       pruneUpTo: Long,
       attempts: Int = 10,
       activeAtOffset0: Option[Long] = None,
+      beforeEachAttempt: () => Future[Unit] = () => Future.unit,
   )(implicit ec: ExecutionContext): Future[Unit] = for {
     acsBefore <- activeContracts(parties, activeAtOffset0, verbose = false)
-    _ <- prune(pruneUpTo, attempts)
+    _ <- prune(pruneUpTo, attempts, beforeEachAttempt)
     acsAfter <- activeContracts(parties, activeAtOffset0, verbose = false)
   } yield assert(acsBefore == acsAfter, "Active contract set changed unexpectedly during pruning")
 
