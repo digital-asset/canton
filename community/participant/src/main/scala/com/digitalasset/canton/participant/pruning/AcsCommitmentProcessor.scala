@@ -108,6 +108,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.collection.{IterableUtil, MapsUtil}
 import com.digitalasset.canton.util.retry.NoExceptionRetryPolicy
 import com.digitalasset.canton.version.ProtocolVersion
@@ -2521,12 +2522,16 @@ class AcsCommitmentProcessor private (
     * running commitments from the active contract store. Because the reinitialization task runs on
     * the queue, a reinitialization cannot start before a previous initialization finished.
     *
-    * Returns false if a reinitialization is already enqueued or executing, true otherwise.
+    * Returns None if a reinitialization is already enqueued or executing. Otherwise, returns a
+    * future that completes when the reinitialization has finished, successfully or not. By the time
+    * the returned future completes, the processor accepts a new reinitialization; callers must wait
+    * for this future rather than for the completion marker in the store, because the marker is
+    * written before the reinitialization task has finished.
     */
   def reinitializeCommitments(toc: TimeOfChange)(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): Boolean =
+  ): Option[FutureUnlessShutdown[Unit]] =
     if (reinitializationEnqueued.compareAndSet(false, true)) {
       val timestamp = toc.timestamp
 
@@ -2541,7 +2546,7 @@ class AcsCommitmentProcessor private (
           _ <- persistRunningCommitments(snapshot, isCheckpointAtTimestamp = Some(timestamp))
         } yield ()
 
-      val fut = publishQueue
+      val reinitialization = publishQueue
         .executeUS(
           for {
             _ <- store.runningCommitments.markReinitializationStarted(timestamp)
@@ -2571,19 +2576,21 @@ class AcsCommitmentProcessor private (
                 s"Could not complete renitialization of running commitments at $timestamp"
               )
             }
-            _ = reinitializationEnqueued.set(false)
           } yield (),
           s"reinitialize running commitments at $timestamp",
         )
+        // Release the flag whatever the outcome: success, failure or shutdown. Otherwise a failed
+        // reinitialization would block all later ones until the participant restarts.
+        .thereafter(_ => reinitializationEnqueued.set(false))
 
       FutureUtil.doNotAwait(
-        fut.onShutdown(
+        reinitialization.onShutdown(
           logger.info("Giving up on reinitializing ACS commitment due to shutdown")
         ),
         failureMessage = s"Reinitializing ACS commitments failed.",
       )
-      true
-    } else false
+      Some(reinitialization)
+    } else None
 
   override protected def onClosed(): Unit = {
     LifeCycle.close(initializationFlagCloseable, dbQueue, publishQueue, checkpointQueue)(logger)
