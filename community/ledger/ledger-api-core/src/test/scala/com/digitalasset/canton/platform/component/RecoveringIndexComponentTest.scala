@@ -5,12 +5,11 @@ package com.digitalasset.canton.platform.component
 
 import com.daml.metrics.api.MetricHandle.Gauge
 import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification, MetricsContext}
-import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.platform.component.IndexComponentTest.{ServiceParams, WithPostgres}
-import com.digitalasset.canton.platform.indexer.{IndexerConfig, IndexerParams}
+import com.digitalasset.canton.platform.indexer.IndexerParams
 import com.digitalasset.canton.protocol.ContractInstance
 import com.digitalasset.canton.util.PekkoUtil.{
   Commit,
@@ -19,43 +18,32 @@ import com.digitalasset.canton.util.PekkoUtil.{
   RecoveringQueueMetrics,
   ShutdownInProgress,
 }
-import com.digitalasset.canton.util.{MonadUtil, PekkoUtil}
-import org.scalatest.concurrent.PatienceConfiguration
+import com.digitalasset.canton.util.{Mutex, PekkoUtil}
 import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.time.Span
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.Future
-import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 
 class RecoveringIndexComponentTest extends AnyFlatSpec with IndexComponentTest with WithPostgres {
 
-  private val commitDelay: FiniteDuration = 25.millis
+  private val commitGate = new CommitGate
 
-  private val maxUncommittedGauge = new MaxRecordingGauge
+  private val uncommittedGauge = new RecordingGauge
 
   override protected def serviceParams: ServiceParams =
     super.serviceParams.copy(buildFutureQueue = (indexerF, config) => {
       val consumerFactory
           : Commit => ShutdownInProgress => Future[Future[FutureQueueConsumer[Update]]] =
         (commit: Commit) =>
-          (shutdownRequested: ShutdownInProgress) => {
-            val effectiveCommit: Commit =
-              new Commit {
-                override def apply(index: Long): Unit = {
-                  Threading.sleep(commitDelay.toMillis)
-                  commit(index)
-                }
-              }
+          (shutdownRequested: ShutdownInProgress) =>
             indexerF(
               IndexerParams(
                 repairMode = false,
-                commit = effectiveCommit,
+                commit = commitGate.wrap(commit),
                 shutdownRequested = shutdownRequested,
               )
             )
-          }
 
       new RecoveringFutureQueueImpl[Update](
         maxBlockedOffer = config.queueMaxBlockedOffer,
@@ -72,7 +60,7 @@ class RecoveringIndexComponentTest extends AnyFlatSpec with IndexComponentTest w
         recoveringQueueMetrics = RecoveringQueueMetrics(
           blockedGauge = RecoveringQueueMetrics.NoOp.blocked,
           bufferedGauge = RecoveringQueueMetrics.NoOp.buffered,
-          uncommittedGauge = maxUncommittedGauge,
+          uncommittedGauge = uncommittedGauge,
         ),
         consumerFactory = consumerFactory,
         consumerName = "indexer",
@@ -86,49 +74,33 @@ class RecoveringIndexComponentTest extends AnyFlatSpec with IndexComponentTest w
   private val uncommittedQueueWarning = "Uncommitted queue is growing too large"
 
   private def ingest(numberOfUpdates: Int): Unit = {
-    maxUncommittedGauge.reset()
     logger.debug(s"preparing $numberOfUpdates updates...")
     val updatesWithContracts: Vector[(Update, Vector[ContractInstance])] =
       (1 to numberOfUpdates).toVector.map { _ =>
         creates(recordTime = nextRecordTimeFactory, payloadLength = 64)(1)
       }
+    ingestUpdates(updatesWithContracts*).discard
+  }
 
-    val ledgerEndBefore =
-      index.currentLedgerEnd().map(_.lastOffset.unwrap).getOrElse(0L)
-
-    logger.debug("storing contracts...")
-    val updates: Seq[Update] =
-      MonadUtil
-        .sequentialTraverse(updatesWithContracts) { case (update, contracts) =>
-          storeContracts(update, contracts)
-        }
-        .futureValue(
-          PatienceConfiguration.Timeout(Span.convertDurationToSpan(Duration(600, "seconds")))
-        )
-
-    logger.debug("offering updates...")
-    MonadUtil
-      .sequentialTraverse_(updates)(ingestUpdateAsync)
-      .futureValue(
-        PatienceConfiguration.Timeout(Span.convertDurationToSpan(Duration(600, "seconds")))
-      )
-
-    logger.debug("all updates offered; waiting for the indexer to drain (commit) everything...")
-    val expectedOffset = Offset.tryFromLong(numberOfUpdates + ledgerEndBefore)
-    eventually(timeUntilSuccess = 600.seconds, maxPollInterval = 200.millis) {
-      index.currentLedgerEnd().map(_.lastOffset) shouldBe Some(expectedOffset)
+  /** Holds back the indexer's commits, ingests the updates, and checks that the indexer consumed
+    * all of them without any being committed. Then releases the commits and waits until all updates
+    * are committed.
+    */
+  private def ingestWithCommitsHeldBack(numberOfUpdates: Int): Unit = {
+    uncommittedGauge.getValue shouldBe 0
+    commitGate.close()
+    try {
+      ingest(numberOfUpdates)
+      // the ledger end covers all updates, so the indexer consumed all of them, and none was committed
+      uncommittedGauge.getValue shouldBe numberOfUpdates
+    } finally commitGate.open()
+    eventually() {
+      uncommittedGauge.getValue shouldBe 0
     }
   }
 
-  it should "not throw a warning for uncommited queue size growth when indexer pipeline is at full momentum and the commit is slow" in {
-    ingest(numberOfUpdates = 25000)
-    val minExpectedCommitedSize: Int = 12000
-
-    val peak = maxUncommittedGauge.max
-    // if the test flakes then minExpectedCommitedSize can be reduced to 10000
-    peak should be >= minExpectedCommitedSize
-    // this is also verified by the fact that no warning was logged
-    peak should be < IndexerConfig.DefaultQueueUncommittedWarnThreshold
+  it should "keep consumed updates uncommitted until the indexer commits them" in {
+    ingestWithCommitsHeldBack(numberOfUpdates = 2000)
   }
 
   it should "emit the uncommitted-queue warning when commit lags behind ingestion" in {
@@ -139,7 +111,7 @@ class RecoveringIndexComponentTest extends AnyFlatSpec with IndexComponentTest w
     )
 
     loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-      ingest(numberOfUpdates = 5000),
+      ingestWithCommitsHeldBack(numberOfUpdates = 2000),
       (logs: Seq[LogEntry]) =>
         forAtLeast(1, logs) { log =>
           log.warningMessage should include(uncommittedQueueWarning)
@@ -148,33 +120,47 @@ class RecoveringIndexComponentTest extends AnyFlatSpec with IndexComponentTest w
   }
 }
 
-final class MaxRecordingGauge extends Gauge[Int] {
+/** Forwards the indexer's commits, unless closed. While closed, it remembers the highest commit
+  * index, and forwards it on opening.
+  */
+@SuppressWarnings(Array("org.wartremover.warts.Var"))
+final class CommitGate {
+  private val lock = Mutex()
+  private var closed: Boolean = false
+  private var heldBack: Option[(Commit, Long)] = None
+
+  def wrap(commit: Commit): Commit = index =>
+    lock.exclusive {
+      if (closed) heldBack = Some(commit -> index)
+      else commit(index)
+    }
+
+  def close(): Unit = lock.exclusive {
+    closed = true
+  }
+
+  def open(): Unit = lock.exclusive {
+    closed = false
+    heldBack.foreach { case (commit, index) => commit(index) }
+    heldBack = None
+  }
+}
+
+final class RecordingGauge extends Gauge[Int] {
   private val current = new AtomicInteger(0)
-  private val peak = new AtomicInteger(0)
 
   override val info: MetricInfo =
-    MetricInfo(MetricName.Daml :+ "test_max_uncommitted", "", MetricQualification.Debug)
+    MetricInfo(MetricName.Daml :+ "test_uncommitted", "", MetricQualification.Debug)
 
-  override def updateValue(newValue: Int)(implicit mc: MetricsContext): Unit = {
+  override def updateValue(newValue: Int)(implicit mc: MetricsContext): Unit =
     current.set(newValue)
-    peak.accumulateAndGet(newValue, math.max)
-  }
 
-  override def updateValue(f: Int => Int): Unit = {
-    val updated = current.updateAndGet(f(_))
-    peak.accumulateAndGet(updated, math.max)
-  }
+  override def updateValue(f: Int => Int): Unit =
+    current.updateAndGet(f(_)).discard
 
   override def getValue: Int = current.get()
 
   override def getValueAndContext: (Int, MetricsContext) = current.get() -> MetricsContext.Empty
 
   override def close(): Unit = ()
-
-  def max: Int = peak.get()
-
-  def reset(): Unit = {
-    current.set(0)
-    peak.set(0)
-  }
 }
