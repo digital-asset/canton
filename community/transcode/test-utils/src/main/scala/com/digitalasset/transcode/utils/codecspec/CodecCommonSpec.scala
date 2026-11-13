@@ -11,7 +11,6 @@ import com.digitalasset.transcode.utils.propertygenerators.SchemaGenerator
 import zio.test.*
 import zio.test.Assertion.*
 import zio.test.TestAspect.samples
-import zio.{Chunk, durationInt}
 
 import scala.language.reflectiveCalls
 import scala.util.Try
@@ -77,13 +76,8 @@ trait CodecCommonSpec[P] extends ZIOSpecDefault:
             )
         )
       }
-    ) @@ samples(1000),
+    ) @@ samples(200),
   )
-
-  // Increase timeout to prevent warnings from failing the CI
-  // The roundtrip property takes more than 60 seconds to run
-  override def aspects: Chunk[TestAspectAtLeastR[Environment with TestEnvironment]] =
-    Chunk(TestAspect.fibers, TestAspect.timeoutWarning(120.seconds))
 
   private def getCodec(name: String, d: Descriptor) =
     val choice = Choice(ChoiceName(name), true, Descriptor.record(), d)

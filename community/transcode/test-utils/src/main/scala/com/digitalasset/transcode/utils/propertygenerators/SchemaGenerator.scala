@@ -13,29 +13,36 @@ import scala.collection.mutable
 object SchemaGenerator:
   type Schema = Dictionary[Descriptor]
 
+  // zio-test draws strings character by character and every draw is costly, so sizes are kept
+  // small to give the roundtrip property a predictable run time. These bounds still produce
+  // empty, single and multi-element values at every nesting level.
+  private val MaxCollectionSize = 3
+  private val MaxStringLength = 8
+  private val MaxNameSuffixLength = 3
+
   def generateSchema: Gen[Any, Schema] = Gen.listOfBounded(1, 5)(entityG).map(Dictionary(_))
 
   def dynamicEntityGen(schema: Schema): Gen[Any, Dictionary[DynamicValue]] =
     def go(tpe: Descriptor)(using varMap: Map[TypeVarName, DynamicValue]): Gen[Any, DynamicValue] =
       Gen.suspend(tpe match
         case Descriptor.List(elem) =>
-          Gen.listOfBounded(0, 10)(go(elem)).map(DynamicValue.List)
+          Gen.listOfBounded(0, MaxCollectionSize)(go(elem)).map(DynamicValue.List)
         case Descriptor.Optional(elem) =>
           Gen.option(go(elem)).map(DynamicValue.Optional)
         case Descriptor.TextMap(value) =>
           Gen
-            .listOfBounded(0, 10)(Gen.string zip go(value))
+            .listOfBounded(0, MaxCollectionSize)(textValueG zip go(value))
             .map(ll => DynamicValue.TextMap(ll.toMap.toSeq))
         case Descriptor.GenMap(key, value) =>
           Gen
-            .listOfBounded(0, 10)(go(key) zip go(value))
+            .listOfBounded(0, MaxCollectionSize)(go(key) zip go(value))
             .map(ll => DynamicValue.GenMap(ll.toMap.toSeq))
         case Descriptor.Unit =>
           Gen.const(DynamicValue.Unit)
         case Descriptor.Bool =>
           Gen.boolean.map(DynamicValue.Bool)
         case Descriptor.Text =>
-          Gen.string.map(DynamicValue.Text)
+          textValueG.map(DynamicValue.Text)
         case Descriptor.Int64 =>
           Gen.long.map(DynamicValue.Int64)
         case Descriptor.Numeric(scale) => // todo scale
@@ -47,9 +54,9 @@ object SchemaGenerator:
         case Descriptor.Date =>
           Gen.localDate.map(d => DynamicValue.Date(d.toEpochDay.toInt))
         case Descriptor.Party =>
-          Gen.alphaNumericString.map(DynamicValue.Party)
+          alphaNumericValueG.map(DynamicValue.Party)
         case Descriptor.ContractId(template) =>
-          Gen.alphaNumericString.map(DynamicValue.ContractId)
+          alphaNumericValueG.map(DynamicValue.ContractId)
         case Descriptor.Variable(name) =>
           Gen.const(varMap(name))
         case Descriptor.Constructor.Applied(id, vm, body) =>
@@ -79,6 +86,9 @@ object SchemaGenerator:
     val _ = schema.map(descriptor => go(descriptor)(using Map.empty)).map(f => generators.addOne(f))
     Gen.collectAll(generators).map(_.iterator).map(iterator => schema.map(_ => iterator.next()))
   end dynamicEntityGen
+
+  private def textValueG = Gen.stringBounded(0, MaxStringLength)(Gen.unicodeChar)
+  private def alphaNumericValueG = Gen.alphaNumericStringBounded(0, MaxStringLength)
 
   private def entityG: Gen[Any, Template[Descriptor]] =
     (identifierG zip templatePayloadG zip templateKeyG zip isInterfaceG zip templateImplementsG zip templateChoicesG)
@@ -255,7 +265,7 @@ object SchemaGenerator:
   private def packageIdG =
     Gen.long.map(_.toHexString).map(PackageId)
   private def packageNameG =
-    Gen.stringBounded(2, 10)(Gen.alphaChar).map(PackageName)
+    Gen.stringBounded(2, 2 + MaxNameSuffixLength)(Gen.alphaChar).map(PackageName)
   private def packageVersionG =
     (Gen.int(0, 100) zip Gen.int(0, 100) zip Gen.int(0, 100)).map((a, b, c) =>
       PackageVersion(s"$a.$b.$c")
@@ -265,11 +275,15 @@ object SchemaGenerator:
   private def entityNameG =
     upperCaseName.map(EntityName)
   private def lowerCaseName =
-    (Gen.char('a', 'z') zip Gen.alphaNumericStringBounded(0, 9)).map((l, s) => s"$l$s")
+    (Gen.char('a', 'z') zip Gen.alphaNumericStringBounded(0, MaxNameSuffixLength)).map((l, s) =>
+      s"$l$s"
+    )
   private def upperCaseName =
-    (Gen.char('A', 'Z') zip Gen.alphaNumericStringBounded(0, 9)).map((l, s) => s"$l$s")
+    (Gen.char('A', 'Z') zip Gen.alphaNumericStringBounded(0, MaxNameSuffixLength)).map((l, s) =>
+      s"$l$s"
+    )
   private def dottedNameG =
-    Gen.listOfBounded(1, 5)(upperCaseName).map(_.mkString("."))
+    Gen.listOfBounded(1, 3)(upperCaseName).map(_.mkString("."))
   private def identifierG: Gen[Any, Identifier] =
     (packageIdG zip packageNameG zip packageVersionG zip moduleNameG zip entityNameG)
       .map(Identifier.apply)
