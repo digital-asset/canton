@@ -1,0 +1,115 @@
+name: Topology consistency paired benchmark (test only)
+on:
+  workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  plan:
+    name: Freeze ordinary PV36 selection
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - uses: actions/download-artifact@v7
+        with:
+          name: test-full-class-names
+      # One immutable historical timing file for every mode, repetition, shard, and rerun.
+      - uses: actions/download-artifact@v7
+        with:
+          name: test-timings-latest
+          run-id: 42916965101
+          github-token: ${{ github.token }}
+          path: benchmark-timings
+      - name: Freeze production selection and command
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: >-
+            python3 scripts/ci/benchmark_topology_consistency.py prepare
+            --catalog test-full-class-names.log --timings benchmark-timings/timings.json
+            --output benchmark-plan.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: topology-benchmark-plan
+          path: benchmark-plan.json
+          overwrite: true
+          if-no-files-found: error
+
+  benchmark:
+    name: Paired PV36 benchmark (shard ${{ matrix.shard }})
+    needs: plan
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 200
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    env:
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - uses: actions/download-artifact@v7
+        with:
+          name: topology-benchmark-plan
+      - name: Restore precompiled classes and dependency caches once
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+      - name: Start disposable benchmark Postgres
+        id: postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: ${{ matrix.shard }}
+      - name: Run both modes twice on this runner
+        uses: ./.github/actions/nix/nix_run
+        env:
+          BENCHMARK_SHARD: ${{ matrix.shard }}
+          BENCHMARK_CONTAINER: ${{ steps.postgres.outputs.container-name }}
+        with:
+          command: >-
+            python3 scripts/ci/benchmark_topology_consistency.py run
+            --plan benchmark-plan.json --shard "$BENCHMARK_SHARD"
+            --container "$BENCHMARK_CONTAINER" --output topology-benchmark-results
+      - name: Save raw timings, fresh JUnit, and running-node evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: topology-benchmark-shard-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
+          path: topology-benchmark-results
+          if-no-files-found: error
+          retention-days: 7
+      - name: Stop benchmark Postgres
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}
+
+  summarize:
+    name: Measure runner-hours saved
+    needs: [plan, benchmark]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: topology-benchmark-shard-*-attempt-*
+          path: topology-benchmark-downloads
+      - name: Require complete paired evidence and report savings
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: >-
+            python3 scripts/ci/benchmark_topology_consistency.py summarize
+            --directory topology-benchmark-downloads --output topology-benchmark-summary.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: topology-benchmark-summary-attempt-${{ github.run_attempt }}
+          path: topology-benchmark-summary.json
+          if-no-files-found: error
