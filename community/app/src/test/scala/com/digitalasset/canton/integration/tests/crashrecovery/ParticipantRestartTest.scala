@@ -1643,8 +1643,10 @@ class ParticipantRestartInflightRequestIntegrationTest extends ParticipantRestar
     stateInspection2.verifyLapiStoreIntegrity()
     participant3.testing.state_inspection.verifyLapiStoreIntegrity()
 
-    assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1, stateInspection1)
-    assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant2, stateInspection2)
+    // Use fresh state inspections: an inspection reads the clean synchronizer index from a ledger end
+    // cached when it is created, so the ones above do not see the contracts created since.
+    assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1)
+    assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant2)
   }
 }
 
