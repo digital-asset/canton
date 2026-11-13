@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import textwrap
 
 import pytest
 
@@ -152,3 +153,61 @@ def test_fresh_invocations_preserve_nested_compilation_targets_and_evidence(tmp_
     benchmark.clean_runtime_files(plan, output)
     assert not generated.exists()
     assert source.exists() and compiled.exists() and plan.exists() and (output / "raw.json").exists()
+
+
+@pytest.mark.parametrize("fail_disabled", [False, True])
+def test_run_uses_fresh_process_env_reports_and_node_proof(tmp_path, monkeypatch, fail_disabled):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    wrapper = tmp_path / "scripts/ci/sbt-ci-wrapper.sh"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_text(textwrap.dedent("""\
+        #!/usr/bin/env python3
+        import json, os
+        from pathlib import Path
+        enabled = os.environ['CANTON_NIGHTLY_TEST_RUN'] == 'true'
+        assert os.environ['CANTON_TOPOLOGY_VALIDATION_EXPECTED'] == ('enabled' if enabled else 'disabled')
+        report = Path('community/app/target/test-reports/TEST-fresh.xml')
+        assert not report.exists()
+        report.parent.mkdir(parents=True, exist_ok=True)
+        suite = 'com.digitalasset.canton.integration.tests.manual.TopologyConsistencyIntegrationTestPostgres'
+        status = '<failure/>' if os.environ.get('FAKE_FAIL_DISABLED') == 'true' and not enabled else ''
+        report.write_text(f'<testsuite><testcase classname="{suite}" name="proof"/>'
+                          f'<testcase classname="OrdinaryTest" name="ordinary">{status}</testcase></testsuite>')
+        evidence = {
+            'suite': suite, 'commit': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'],
+            'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'nightly_marker': str(enabled).lower(),
+            'expected_validation': enabled, 'general_checks_enabled': True, 'ping_succeeded': True,
+            'nodes': [{'node': node, 'config_override': enabled, 'validator': enabled,
+                       'lookup_succeeded': True, 'storage_class': 'Postgres',
+                       'snapshot_class': 'ValidatingTopologySnapshot' if enabled else 'CachingTopologySnapshot'}
+                      for node in ['participant1', 'participant2', 'sequencer1', 'mediator1']],
+        }
+        Path(os.environ['CANTON_TOPOLOGY_PROOF_EVIDENCE']).write_text(json.dumps(evidence))
+        Path(os.environ['SBT_OUTPUT_FILE']).write_text('completed without compilation')
+        """))
+    wrapper.chmod(0o755)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "scripts"], check=True)
+    monkeypatch.setattr(benchmark, "ROOT", tmp_path)
+    resets = []
+    monkeypatch.setattr(benchmark, "reset_postgres", lambda container, shard: resets.append(shard))
+    for name, value in {
+        "GITHUB_ACTIONS": "true", "GITHUB_WORKSPACE": str(tmp_path), "GITHUB_SHA": "commit",
+        "GITHUB_RUN_ID": "run", "GITHUB_RUN_ATTEMPT": "2", "FAKE_FAIL_DISABLED": str(fail_disabled).lower(),
+    }.items():
+        monkeypatch.setenv(name, value)
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({
+        "commit": "commit", "run_id": "run", "command_template": '"$RUN_SPLITTED_TESTS_CMD"',
+        "buckets": [["OrdinaryTest"] for _ in range(12)],
+    }))
+    output = tmp_path / "results"
+    if fail_disabled:
+        with pytest.raises(ValueError, match="must pass"):
+            benchmark.run(plan, 0, "fake-container", output)
+    else:
+        benchmark.run(plan, 0, "fake-container", output)
+    saved = json.loads((output / "result.json").read_text())
+    assert resets == [0, 0, 0, 0]
+    assert saved["run_attempt"] == "2"
+    assert [s["validation_enabled"] for s in saved["samples"]] == [True, False, False, True]
+    assert [s["valid"] for s in saved["samples"]] == ([True, False, False, True] if fail_disabled else [True] * 4)
