@@ -25,10 +25,11 @@ def write_proof(tmp_path, enabled=True):
         "nightly_marker": str(enabled).lower(),
         "general_checks_enabled": True,
         "ping_succeeded": True,
+        "performance_opt_out_preserved": True,
         "nodes": [
             {
                 "node": name,
-                "config_override": enabled,
+                "config_override": None if enabled else False,
                 "validator": enabled,
                 "snapshot_class": (
                     "ValidatingTopologySnapshot" if enabled else "CachingTopologySnapshot"
@@ -100,6 +101,7 @@ def test_rejects_empty_test_selection_and_missing_evidence(tmp_path):
     ("field", "value"),
     [
         ("config_override", False),
+        ("config_override", True),
         ("validator", False),
         ("lookup_succeeded", False),
         ("storage_class", "Memory"),
@@ -124,6 +126,22 @@ def test_rejects_missing_nodes_or_a_failed_ping(tmp_path):
     evidence["ping_succeeded"] = False
     proof.write_text(json.dumps(evidence))
     with pytest.raises(ValueError, match="ping"):
+        check(proof, junit)
+
+
+def test_requires_explicit_preservation_of_performance_opt_outs(tmp_path):
+    evidence, proof, junit = write_proof(tmp_path)
+    evidence["performance_opt_out_preserved"] = False
+    proof.write_text(json.dumps(evidence))
+    with pytest.raises(ValueError, match="opt-outs"):
+        check(proof, junit)
+
+
+def test_missing_override_is_not_accepted_as_an_observed_unset_override(tmp_path):
+    evidence, proof, junit = write_proof(tmp_path)
+    del evidence["nodes"][0]["config_override"]
+    proof.write_text(json.dumps(evidence))
+    with pytest.raises(ValueError, match="configuration"):
         check(proof, junit)
 
 

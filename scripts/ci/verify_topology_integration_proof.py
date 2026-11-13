@@ -36,6 +36,10 @@ def verify(
     require(evidence.get("expected_validation") is expected, "Wrong proof expectation")
     require(evidence.get("general_checks_enabled") is True, "General checks must remain enabled")
     require(evidence.get("ping_succeeded") is True, "The real ping must succeed")
+    require(
+        evidence.get("performance_opt_out_preserved") is True,
+        "Existing opt-outs must remain effective",
+    )
 
     cases = [
         case for case in ET.parse(junit_path).iter("testcase") if case.get("classname") == suite
@@ -52,7 +56,10 @@ def verify(
     rows = []
     for node in nodes:
         name = node["node"]
-        require(node.get("config_override") is expected, f"{name}: wrong runtime configuration")
+        require(
+            "config_override" in node and node["config_override"] is (None if expected else False),
+            f"{name}: wrong runtime configuration",
+        )
         require(node.get("validator") is expected, f"{name}: wrong actual validator")
         require(node.get("lookup_succeeded") is True, f"{name}: topology lookup did not succeed")
         require(

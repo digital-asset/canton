@@ -78,7 +78,7 @@ def test_summarize_counts_runner_time_and_preserves_negative_savings(tmp_path):
     assert summary["validation_on_runner_hours"] == pytest.approx(1200 / 3600)
     assert summary["saved_runner_hours_per_selection"] == pytest.approx(240 / 3600)
     assert summary["saved_percent"] == 20
-    assert summary["invocations"] == 48
+    assert summary["invocations"] == 24
     for path in directory.rglob("result.json"):
         value = json.loads(path.read_text())
         path.write_text(json.dumps(result(value["shard"], on=80, off=100)))
@@ -186,7 +186,8 @@ def test_run_uses_fresh_process_env_reports_and_node_proof(tmp_path, monkeypatch
             'suite': suite, 'commit': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'],
             'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'nightly_marker': str(enabled).lower(),
             'expected_validation': enabled, 'general_checks_enabled': True, 'ping_succeeded': True,
-            'nodes': [{'node': node, 'config_override': enabled, 'validator': enabled,
+            'performance_opt_out_preserved': True,
+            'nodes': [{'node': node, 'config_override': None if enabled else False, 'validator': enabled,
                        'lookup_succeeded': True, 'storage_class': 'Postgres',
                        'snapshot_class': 'ValidatingTopologySnapshot' if enabled else 'CachingTopologySnapshot'}
                       for node in ['participant1', 'participant2', 'sequencer1', 'mediator1']],
@@ -227,9 +228,9 @@ def test_run_uses_fresh_process_env_reports_and_node_proof(tmp_path, monkeypatch
     else:
         benchmark.run(plan, 0, "fake-container", output)
     saved = json.loads((output / "result.json").read_text())
-    assert resets == [0, 0, 0, 0]
+    assert resets == [0, 0]
     assert saved["run_attempt"] == "2"
-    assert [s["validation_enabled"] for s in saved["samples"]] == [True, False, False, True]
+    assert [s["validation_enabled"] for s in saved["samples"]] == [True, False]
     assert [s["valid"] for s in saved["samples"]] == (
-        [True, False, False, True] if fail_disabled else [True] * 4
+        [True, False] if fail_disabled else [True] * 2
     )

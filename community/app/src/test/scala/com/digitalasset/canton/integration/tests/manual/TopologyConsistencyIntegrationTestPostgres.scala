@@ -8,6 +8,7 @@ import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
 }
@@ -43,6 +44,17 @@ final class TopologyConsistencyIntegrationTestPostgres
       sys.env.get("CI") shouldBe Some("true")
       sys.env.get("CANTON_NIGHTLY_TEST_RUN") shouldBe Some(expected.toString)
       actualConfig.parameters.enableAdditionalConsistencyChecks shouldBe true
+
+      val performanceConfig = EnvironmentDefinition.P2_S1M1
+        .addConfigTransform(ConfigTransforms.disableAdditionalConsistencyChecks)
+        .generateConfig
+      performanceConfig.parameters.enableAdditionalConsistencyChecks shouldBe false
+      val performanceTopologies = performanceConfig.participants.values.map(_.topology) ++
+        performanceConfig.sequencers.values.map(_.topology) ++
+        performanceConfig.mediators.values.map(_.topology)
+      forAll(performanceTopologies)(
+        _.shouldCheckTopologySnapshots(enableAdditionalConsistencyChecks = false) shouldBe false
+      )
 
       participant1.synchronizers.connect_local(sequencer1, daName)
       participant2.synchronizers.connect_local(sequencer1, daName)
@@ -83,7 +95,8 @@ final class TopologyConsistencyIntegrationTestPostgres
       val observed = nodes.map { case (name, topology, storage, client, member) =>
         withClue(s"$name: ") {
           storage shouldBe a[DbConfig.Postgres]
-          topology.enableTopologySnapshotConsistencyChecks shouldBe Some(expected)
+          topology.enableTopologySnapshotConsistencyChecks shouldBe
+            (if (expected) None else Some(false))
           // Using the topology-change timestamp avoids a forwarding wrapper hiding the validator.
           // This is a fresh snapshot from the real node's client, cache, and topology store.
           val snapshot = client.snapshot(client.latestTopologyChangeTimestamp).futureValueUS
@@ -92,9 +105,9 @@ final class TopologyConsistencyIntegrationTestPostgres
           snapshot.signingKeys(member, SigningKeyUsage.All).futureValueUS should not be empty
           Json.obj(
             "node" -> Json.fromString(name),
-            "config_override" -> Json.fromBoolean(
-              topology.enableTopologySnapshotConsistencyChecks.value
-            ),
+            "config_override" -> topology.enableTopologySnapshotConsistencyChecks
+              .map(Json.fromBoolean)
+              .getOrElse(Json.Null),
             "validator" -> Json.fromBoolean(validating),
             "snapshot_class" -> Json.fromString(snapshot.getClass.getSimpleName),
             "storage_class" -> Json.fromString(storage.getClass.getSimpleName),
@@ -114,6 +127,7 @@ final class TopologyConsistencyIntegrationTestPostgres
           actualConfig.parameters.enableAdditionalConsistencyChecks
         ),
         "ping_succeeded" -> Json.True,
+        "performance_opt_out_preserved" -> Json.True,
         "nodes" -> Json.fromValues(observed),
       )
       val path = Paths.get(sys.env("CANTON_TOPOLOGY_PROOF_EVIDENCE"))

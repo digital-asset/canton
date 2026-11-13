@@ -5,7 +5,8 @@ package com.digitalasset.canton
 
 object CiTestRun {
   val topologySnapshotConsistencyChecks: Option[Boolean] =
-    Option.when(sys.env.contains("CI"))(
-      sys.env.get("CANTON_NIGHTLY_TEST_RUN").contains("true")
-    )
+    // Nightly keeps the existing configuration, including explicit performance-test opt-outs.
+    Option.when(
+      sys.env.contains("CI") && !sys.env.get("CANTON_NIGHTLY_TEST_RUN").contains("true")
+    )(false)
 }

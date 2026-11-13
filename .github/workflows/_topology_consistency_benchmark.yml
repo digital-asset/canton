@@ -45,10 +45,10 @@ jobs:
     name: Paired PV36 benchmark (shard ${{ matrix.shard }})
     needs: plan
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 200
+    timeout-minutes: 110
     strategy:
       fail-fast: false
-      max-parallel: 12
+      max-parallel: 6
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     env:
@@ -67,7 +67,7 @@ jobs:
         uses: ./.github/actions/utils/postgres/start_postgres_container_standard
         with:
           shard-index: ${{ matrix.shard }}
-      - name: Run both modes twice on this runner
+      - name: Run each mode once on this runner
         uses: ./.github/actions/nix/nix_run
         env:
           BENCHMARK_SHARD: ${{ matrix.shard }}

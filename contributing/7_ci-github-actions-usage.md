@@ -33,9 +33,11 @@ Test workflows accept `is_nightly_workflow` (default `false`) and expose it to t
 including the ordinary test suites. PR, merge queue, push, and manual required-build runs use
 the default, even when they select a suite whose name includes "nightly".
 
-In CI, integration test defaults enable topology snapshot consistency checks only when
-`CANTON_NIGHTLY_TEST_RUN=true`. This avoids querying the backing store to validate every cached
-topology lookup during ordinary CI. Other consistency checks remain enabled. Local test defaults
+In ordinary CI, integration test defaults disable topology snapshot consistency checks.
+`CANTON_NIGHTLY_TEST_RUN=true` preserves the existing configuration: standard integration tests
+keep their checks, while performance tests that explicitly disable checks retain that opt-out.
+This avoids querying the backing store to validate every cached topology lookup during ordinary
+CI. Other consistency checks remain enabled. Local test defaults
 are unchanged; tests can also override `topology.enable-topology-snapshot-consistency-checks`
 explicitly in their configuration transforms. Dedicated topology cache unit tests retain their
 explicit consistency checks.

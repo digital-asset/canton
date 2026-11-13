@@ -5,7 +5,6 @@ import hashlib
 import importlib.util
 import json
 import os
-import random
 import re
 import resource
 import shutil
@@ -87,6 +86,7 @@ def prepare(catalog, timings, output):
         "commit": os.environ["GITHUB_SHA"],
         "run_id": os.environ["GITHUB_RUN_ID"],
         "protocol_version": "36",
+        "baseline_policy": "Preserve the existing nightly settings, including performance opt-outs",
         "catalog_sha256": digest(catalog.read_bytes()),
         # Preserve production's cross-project duplicate entries in both modes.
         "catalog_duplicate_entries": {
@@ -105,7 +105,7 @@ def prepare(catalog, timings, output):
 
 
 def order(shard):
-    return [True, False, False, True] if shard % 2 == 0 else [False, True, True, False]
+    return [True, False] if shard % 2 == 0 else [False, True]
 
 
 def reset_postgres(container, shard):
@@ -309,8 +309,8 @@ def run(plan_path, shard, container, output):
         )
         print(json.dumps(record), flush=True)
     require(
-        len(signatures) == 4 and all(x == signatures[0] for x in signatures),
-        "All four invocations must pass and execute identical test cases",
+        len(signatures) == 2 and all(x == signatures[0] for x in signatures),
+        "Both invocations must pass and execute identical test cases",
     )
 
 
@@ -331,38 +331,30 @@ def summarize(directory, output):
     for field, env in [("commit", "GITHUB_SHA"), ("run_id", "GITHUB_RUN_ID")]:
         if os.environ.get(env):
             require(results[0][field] == os.environ[env], f"Stale benchmark {field}")
-    pairs = [[], []]
     totals = {True: 0.0, False: 0.0}
     shard_deltas = []
     for result in results:
         samples = result["samples"]
         require(
-            len(samples) == 4 and all(s["valid"] and s["exit_code"] == 0 for s in samples),
+            len(samples) == 2 and all(s["valid"] and s["exit_code"] == 0 for s in samples),
             "Incomplete/failed sample",
         )
         require(
             [s["validation_enabled"] for s in samples] == order(result["shard"]),
             "Wrong sample order",
         )
-        require([s["index"] for s in samples] == list(range(4)), "Wrong sample indices")
+        require([s["index"] for s in samples] == list(range(2)), "Wrong sample indices")
         require(
             len({s["case_signature_sha256"] for s in samples}) == 1,
             "Different tests executed between modes",
         )
-        deltas = []
-        for pair_index, pair in enumerate([samples[:2], samples[2:]]):
-            on = next(s["elapsed_seconds"] for s in pair if s["validation_enabled"])
-            off = next(s["elapsed_seconds"] for s in pair if not s["validation_enabled"])
-            require(on > 0 and off > 0, "Invalid duration")
-            pairs[pair_index].append(on - off)
-            deltas.append(on - off)
-            totals[True] += on / 2
-            totals[False] += off / 2
-        shard_deltas.append(sum(deltas) / 2)
+        on = next(s["elapsed_seconds"] for s in samples if s["validation_enabled"])
+        off = next(s["elapsed_seconds"] for s in samples if not s["validation_enabled"])
+        require(on > 0 and off > 0, "Invalid duration")
+        totals[True] += on
+        totals[False] += off
+        shard_deltas.append(on - off)
     saving = sum(shard_deltas)
-    # Exploratory paired bootstrap by runner/shard. Retain negative savings/noise honestly.
-    rng = random.Random(721)
-    bootstrap = sorted(sum(rng.choices(shard_deltas, k=SHARDS)) / 3600 for _ in range(10000))
     summary = {
         "commit": results[0]["commit"],
         "run_id": results[0]["run_id"],
@@ -371,25 +363,23 @@ def summarize(directory, output):
         "validation_off_runner_hours": totals[False] / 3600,
         "saved_runner_hours_per_selection": saving / 3600,
         "saved_percent": 100 * saving / totals[True],
-        "round_savings_hours": [sum(p) / 3600 for p in pairs],
         "shards_faster_with_validation_off": sum(x > 0 for x in shard_deltas),
-        "exploratory_95_percent_interval_hours": [bootstrap[249], bootstrap[9749]],
         "shards": SHARDS,
-        "invocations": SHARDS * 4,
+        "invocations": SHARDS * 2,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(summary, indent=2))
     text = (
         f"Ordinary PV36 topology benchmark: {summary['saved_runner_hours_per_selection']:.3f} "
         f"runner-hours saved ({summary['saved_percent']:.2f}%).\n\n"
-        f"Validation on: {totals[True] / 3600:.3f} runner-hours; off: {totals[False] / 3600:.3f}.\n\n"
-        f"Two full-selection comparisons: {summary['round_savings_hours']}. "
-        f"Off was faster on {summary['shards_faster_with_validation_off']}/{SHARDS} shards.\n\n"
+        f"Existing baseline checks: {totals[True] / 3600:.3f} runner-hours; disabled: {totals[False] / 3600:.3f}.\n\n"
+        f"One on/off comparison per shard; "
+        f"off was faster on {summary['shards_faster_with_validation_off']}/{SHARDS} shards.\n\n"
         "Scope: ordinary PV36 without external KMS. Excludes the known protobuf compatibility "
         "reader failure. Every invocation includes a passing four-node Postgres validator proof. "
         "Setup/cache restore/database reset/artifact upload are outside the measured SBT interval. "
-        "The interval in the JSON is an exploratory bootstrap across 12 paired runners, not a "
-        "long-term performance guarantee. No failed/retried/skipped invocations enter the estimate.\n"
+        "This is a directional estimate from one comparison, not a long-term performance guarantee. "
+        "No failed/retried/skipped invocations enter the estimate.\n"
     )
     print(text)
     if os.environ.get("GITHUB_STEP_SUMMARY"):

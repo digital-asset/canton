@@ -25,6 +25,12 @@ import scala.jdk.CollectionConverters.*
 
 class TopologyConsistencyCheckTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   "The CI topology consistency setting" should {
+    "preserve an existing opt-out from additional consistency checks" in {
+      TopologyConfig(
+        enableTopologySnapshotConsistencyChecks = CiTestRun.topologySnapshotConsistencyChecks
+      ).shouldCheckTopologySnapshots(enableAdditionalConsistencyChecks = false) shouldBe false
+    }
+
     "control reference-store reads by the real topology client" in {
       val config = TopologyConfig(
         enableTopologySnapshotConsistencyChecks = CiTestRun.topologySnapshotConsistencyChecks
