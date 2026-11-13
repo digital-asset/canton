@@ -594,6 +594,9 @@ trait SynchronizerChangeDataContinuityTestSetup
       .clearConfigTransforms()
       .addConfigTransforms(ConfigTransforms.allDefaultsButGloballyUniquePorts*)
       .addConfigTransform(simClockTransform)
+      // Overriding environmentDefinition drops additionalConfigTransforms, so apply it explicitly:
+      // automatic assignment would otherwise race with the explicit assignment of the test
+      .addConfigTransforms(additionalConfigTransforms*)
       // required such that late message processing warning isn't emitted
       .addConfigTransform(cfg =>
         cfg
