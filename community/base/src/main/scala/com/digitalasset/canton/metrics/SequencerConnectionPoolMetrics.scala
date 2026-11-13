@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.metrics
 
-import cats.Eval
 import com.daml.metrics.api.*
 import com.daml.metrics.api.MetricHandle.{Counter, Gauge, LabeledMetricsFactory}
+import com.digitalasset.canton.util.Mutex
 import com.google.common.annotations.VisibleForTesting
 
-import scala.collection.concurrent.TrieMap
+import scala.collection.mutable
 
 class SequencerConnectionPoolMetrics(
     prefix: MetricName,
@@ -82,10 +82,13 @@ class SequencerConnectionPoolMetrics(
 
   // TODO(i28571): Factor this pattern into a helper class
   // Gauges don't support metrics context per update. So instead create a map with a gauge per context.
-  @VisibleForTesting
-  private[canton] val connectionHealthMetrics: TrieMap[MetricsContext, Eval[Gauge[Int]]] =
-    TrieMap.empty
-  def connectionHealth(mc: MetricsContext): Gauge[Int] = {
+  // The maps are only accessed under the lock, so that an update never hits a gauge closed by a concurrent removal.
+  private val healthMetricsLock = Mutex()
+  private val connectionHealthMetrics = mutable.HashMap.empty[MetricsContext, Gauge[Int]]
+  private val subscriptionHealthMetrics = mutable.HashMap.empty[MetricsContext, Gauge[Int]]
+
+  // NOTE: Call only while holding healthMetricsLock
+  private def connectionHealth(mc: MetricsContext): Gauge[Int] = {
     def createConnectionHealthGauge: Gauge[Int] = metricsFactory.gauge(
       MetricInfo(
         prefix :+ "connection-health",
@@ -98,12 +101,15 @@ class SequencerConnectionPoolMetrics(
       0,
     )(context.merge(mc))
 
-    // Two concurrent calls with the same context may cause getOrElseUpdate to evaluate the new value expression twice,
-    // even though only one of the results will be stored in the map.
-    // Eval.later ensures that we actually create only one instance of the gauge in such a case by delaying the creation
-    // until the getOrElseUpdate call has finished.
-    connectionHealthMetrics.getOrElseUpdate(mc, Eval.later(createConnectionHealthGauge)).value
+    connectionHealthMetrics.getOrElseUpdate(mc, createConnectionHealthGauge)
   }
+
+  def updateConnectionHealth(mc: MetricsContext, value: Int): Unit =
+    healthMetricsLock.exclusive(connectionHealth(mc).updateValue(value))
+
+  @VisibleForTesting
+  private[canton] def connectionHealthValues: Map[MetricsContext, Int] =
+    healthMetricsLock.exclusive(connectionHealthMetrics.view.mapValues(_.getValue).toMap)
 
   def removeMetricsForAllConnections(psidO: Option[String]): Unit =
     removeInternal(_.labels.get("psid") == psidO)
@@ -113,15 +119,16 @@ class SequencerConnectionPoolMetrics(
       mc.labels.get("psid") == psidO && mc.labels.get("connection").exists(toRemove(_))
     )
 
-  private def removeInternal[T](filter: MetricsContext => Boolean): Unit =
-    Seq(connectionHealthMetrics, subscriptionHealthMetrics).foreach { metricsMap =>
-      val toRemove = metricsMap.keys.filter(filter)
-      toRemove.foreach(metricsMap.remove(_).foreach(_.value.close))
+  private def removeInternal(filter: MetricsContext => Boolean): Unit =
+    healthMetricsLock.exclusive {
+      Seq(connectionHealthMetrics, subscriptionHealthMetrics).foreach { metricsMap =>
+        val toRemove = metricsMap.keys.filter(filter)
+        toRemove.foreach(metricsMap.remove(_).foreach(_.close()))
+      }
     }
 
-  // Gauges don't support metrics context per update. So instead create a map with a gauge per context.
-  private val subscriptionHealthMetrics: TrieMap[MetricsContext, Eval[Gauge[Int]]] = TrieMap.empty
-  def subscriptionHealth(mc: MetricsContext): Gauge[Int] = {
+  // NOTE: Call only while holding healthMetricsLock
+  private def subscriptionHealth(mc: MetricsContext): Gauge[Int] = {
     def createSubscriptionHealthGauge: Gauge[Int] = metricsFactory.gauge(
       MetricInfo(
         prefix :+ "subscription-health",
@@ -135,14 +142,11 @@ class SequencerConnectionPoolMetrics(
       0,
     )(context.merge(mc))
 
-    // Two concurrent calls with the same context may cause getOrElseUpdate to evaluate the new value expression twice,
-    // even though only one of the results will be stored in the map.
-    // Eval.later ensures that we actually create only one instance of the gauge in such a case by delaying the creation
-    // until the getOrElseUpdate call has finished.
-    subscriptionHealthMetrics
-      .getOrElseUpdate(mc, Eval.later(createSubscriptionHealthGauge))
-      .value
+    subscriptionHealthMetrics.getOrElseUpdate(mc, createSubscriptionHealthGauge)
   }
+
+  def updateSubscriptionHealth(mc: MetricsContext, value: Int): Unit =
+    healthMetricsLock.exclusive(subscriptionHealth(mc).updateValue(value))
 
   val connectionRequests: Counter = metricsFactory.counter(
     MetricInfo(
