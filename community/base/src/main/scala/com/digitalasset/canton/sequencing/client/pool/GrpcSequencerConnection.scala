@@ -161,8 +161,9 @@ class GrpcSequencerConnection(
   ): Either[SendAsyncClientResponseError, Unit] =
     // TODO(#12377) Do not trust the sequencer but monitor and stop using the given sequencer if it is denying service
     error match {
+      // The connection was not started, so the request never left the client
       case ConnectionError.InvalidStateError(_) =>
-        Left(SendAsyncClientError.RequestFailed(s"Failed to make request to the server: $error"))
+        Left(SendAsyncClientError.RequestNotSent(s"Request not sent to the server: $error"))
       case ConnectionError.TransportError(grpcError) =>
         grpcError match {
           // sequencer is overloaded, so let's retry

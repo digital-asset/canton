@@ -555,7 +555,19 @@ abstract class SequencerClientImpl(
     )
     val patienceO = Option.when(exclusions.sizeIs < factor.value - 1)(patience)
 
-    val linkDetailsO = connectionPool
+    val linkDetailsO = getLink(requester, exclusions, acceptableO)
+      // No connection available with exclusions -- try without exclusions
+      .orElse(getLink(requester, exclusions = Seq.empty, acceptableO))
+
+    (linkDetailsO, patienceO)
+  }
+
+  private def getLink(
+      requester: String,
+      exclusions: Seq[SequencerId],
+      acceptableO: Option[Set[SequencerId]],
+  )(implicit traceContext: TraceContext): Option[LinkDetails] =
+    connectionPool
       .getConnections(
         requester,
         PositiveInt.one,
@@ -563,17 +575,6 @@ abstract class SequencerClientImpl(
         acceptableO = acceptableO,
       )
       .headOption
-      .orElse(
-        // No connection available with exclusions -- try without exclusions
-        connectionPool
-          .getConnections(
-            requester,
-            PositiveInt.one,
-            excluded = Set.empty,
-            acceptableO = acceptableO,
-          )
-          .headOption
-      )
       .map(connection =>
         LinkDetails(
           SequencerAlias.tryCreate(connection.config.name),
@@ -581,9 +582,6 @@ abstract class SequencerClientImpl(
           connection,
         )
       )
-
-    (linkDetailsO, patienceO)
-  }
 
   /** Perform the send, without any check.
     *
@@ -698,6 +696,7 @@ abstract class SequencerClientImpl(
         ("refused", error.shortMessage, false)
       case SendAsyncClientError.RequestAlreadyExists(error) => ("already-exists", error, false)
       case SendAsyncClientError.RequestFailed(failed) => ("failed", failed, false)
+      case SendAsyncClientError.RequestNotSent(notSent) => ("not-sent", notSent, false)
       case SendAsyncClientError.DuplicateMessageId =>
         ("duplicate", "message id already registered with send tracker", true)
       case SendAsyncClientError.RequestInvalid(invalid) => ("invalid", invalid, true)
@@ -765,6 +764,8 @@ abstract class SequencerClientImpl(
           case _: SendAsyncClientError.RequestFailed =>
             // We currently do not have proper error codes for this type of error
             "RequestFailed"
+          case _: SendAsyncClientError.RequestNotSent =>
+            "RequestNotSent"
           case SendAsyncClientError.RequestAlreadyExists(_) =>
             "RequestAlreadyExists"
           case SendAsyncClientError.RequestRefused(SendAsyncError.SendAsyncErrorGrpc(grpcError)) =>
@@ -798,6 +799,28 @@ abstract class SequencerClientImpl(
         }
 
         error match {
+          case _: SendAsyncClientError.RequestNotSent =>
+            // The request never left the client (e.g., the connection was stopped after it was handed out), so
+            // sending it through a connection to another sequencer is safe regardless of amplification.
+            // The send is retried within the current step, so its patience and first-step status are kept.
+            val notSentTo = sequencerId +: previousSequencers
+            getLink(messageId.toString, exclusions = notSentTo, acceptableSequencersO) match {
+              case Some(next) =>
+                logger.info(
+                  s"Request with message id $messageId was not sent to $sequencerId: $error. Sending it to ${next.sequencerId} instead"
+                )
+                Left(state.copy(previousSequencers = notSentTo, nextLinkDetailsO = Some(next)))
+              case None =>
+                logger.debug(
+                  s"Request with message id $messageId was not sent to $sequencerId and no other sequencer is available: $error"
+                )
+                Either.cond(
+                  patienceO.isEmpty,
+                  Left(error),
+                  nextState(sendInFlight = sendInFlight),
+                )
+            }
+
           case _: SendAsyncClientError.RequestFailed =>
             // Immediately try the next sequencer because this was a problem talking to the chosen sequencer
             logger.debug(

@@ -1331,6 +1331,36 @@ final class SequencerClientTest
       }
     }
 
+    "a request that was not sent" should {
+      "be sent through a connection to another sequencer" in {
+        val env = RichEnvFactory.create(
+          firstSendAsyncResponseO = Some(Left(notSentError)),
+          withSecondConnection = true,
+        )
+
+        env
+          .sendAsync(Batch.empty(testedProtocolVersion))
+          .futureValueUS shouldBe Right(())
+
+        env.pool.connection.lastSend.get() should not be empty
+        env.pool.secondConnectionO.value.lastSend.get() should not be empty
+
+        env.client.close()
+      }
+
+      "fail with the not-sent error if no other connection is available" in {
+        val env = RichEnvFactory.create(
+          firstSendAsyncResponseO = Some(Left(notSentError))
+        )
+
+        env
+          .sendAsync(Batch.empty(testedProtocolVersion))
+          .futureValueUS shouldBe Left(notSentError)
+
+        env.client.close()
+      }
+    }
+
     "penalties" should {
       "be given to the sequencer of a connection that returns an overloaded error" in {
         val env = RichEnvFactory.create(
@@ -1787,6 +1817,7 @@ final class SequencerClientTest
       clock: SimClock,
       firstSendAsyncResponseO: Option[SendAsyncResponse],
       penalties: SequencerPenalties,
+      sequencerId: SequencerId = DefaultTestIdentities.daSequencerId,
   ) extends SequencerConnectionWithPekkoSubscribe {
     override val health: SequencerConnectionHealth =
       new SequencerConnectionHealth.AlwaysValidated(s"$name-health", logger)
@@ -1805,7 +1836,7 @@ final class SequencerClientTest
     override def attributes: ConnectionAttributes =
       ConnectionAttributes(
         DefaultTestIdentities.physicalSynchronizerId,
-        DefaultTestIdentities.daSequencerId,
+        sequencerId,
         defaultStaticSynchronizerParameters,
       )
 
@@ -1947,6 +1978,7 @@ final class SequencerClientTest
   private class MockPool(
       clock: SimClock,
       firstSendAsyncResponseO: Option[SendAsyncResponse],
+      withSecondConnection: Boolean,
   ) extends SequencerConnectionPool {
     val acknowledgedTimestamps: AtomicReference[Set[CantonTimestamp]] = new AtomicReference(
       Set.empty
@@ -1962,6 +1994,18 @@ final class SequencerClientTest
         firstSendAsyncResponseO = firstSendAsyncResponseO,
         penalties = penalties,
       )
+
+    /** A connection to another sequencer, which always accepts sends */
+    val secondConnectionO: Option[MockConnection] = Option.when(withSecondConnection)(
+      new MockConnection(
+        name = "test2",
+        ack = ts => acknowledgedTimestamps.getAndUpdate(_ + ts),
+        clock = clock,
+        firstSendAsyncResponseO = None,
+        penalties = penalties,
+        sequencerId = DefaultTestIdentities.sequencerId,
+      )
+    )
 
     override protected def loggerFactory: NamedLoggerFactory =
       SequencerClientTest.this.loggerFactory
@@ -2003,7 +2047,11 @@ final class SequencerClientTest
         acceptableO: Option[Set[SequencerId]],
     )(implicit
         traceContext: TraceContext
-    ): Set[SequencerConnection] = Set(connection)
+    ): Set[SequencerConnection] =
+      (connection +: secondConnectionO.toList)
+        .find(conn => !excluded.contains(conn.attributes.sequencerId))
+        .toList
+        .toSet
 
     override def getOneConnectionPerSequencer(
         requester: String,
@@ -2041,8 +2089,9 @@ final class SequencerClientTest
     def apply(
         clock: SimClock,
         firstSendAsyncResponseO: Option[SendAsyncResponse] = None,
+        withSecondConnection: Boolean = false,
     ): MockPool =
-      new MockPool(clock, firstSendAsyncResponseO)
+      new MockPool(clock, firstSendAsyncResponseO, withSecondConnection)
   }
 
   def clientErrorWithCantonErrorCode(errorCode: ErrorCode): SendAsyncClientError.RequestRefused =
@@ -2071,6 +2120,8 @@ final class SequencerClientTest
   private val senderUnknownError = clientErrorWithCantonErrorCode(
     SequencerErrors.SenderUnknown.code
   )
+  private val notSentError =
+    SendAsyncClientError.RequestNotSent("InvalidStateError(Connection is not started)")
   private val maxSequencingTimeTooFarError =
     clientErrorWithCantonErrorCode(SequencerErrors.MaxSequencingTimeTooFar.code)
 
@@ -2105,6 +2156,7 @@ final class SequencerClientTest
         amplificationConfig: SubmissionRequestAmplification =
           SubmissionRequestAmplification.NoAmplification,
         firstSendAsyncResponseO: Option[SendAsyncResponse] = None,
+        withSecondConnection: Boolean = false,
     )(implicit closeContext: CloseContext): Env[Client]
 
     protected def preloadStores(
@@ -2212,6 +2264,7 @@ final class SequencerClientTest
         synchronizerPredecessor: Option[SynchronizerPredecessor],
         amplificationConfig: SubmissionRequestAmplification,
         firstSendAsyncResponseO: Option[SendAsyncResponse],
+        withSecondConnection: Boolean,
     )(implicit closeContext: CloseContext): Env[RichSequencerClient] = {
       val clock = new SimClock(loggerFactory = loggerFactory)
       val timeouts = DefaultProcessingTimeouts.testing
@@ -2254,7 +2307,7 @@ final class SequencerClientTest
           Some(trafficStateController),
         )
 
-      val connectionPool = MockPool(clock, firstSendAsyncResponseO)
+      val connectionPool = MockPool(clock, firstSendAsyncResponseO, withSecondConnection)
 
       val transports = SequencerTransports
         .from(
@@ -2334,6 +2387,7 @@ final class SequencerClientTest
         synchronizerPredecessor: Option[SynchronizerPredecessor],
         amplificationConfig: SubmissionRequestAmplification,
         firstSendAsyncResponseO: Option[SendAsyncResponse],
+        withSecondConnection: Boolean,
     )(implicit closeContext: CloseContext): Env[SequencerClient] = {
       val clock = new SimClock(loggerFactory = loggerFactory)
       val timeouts = DefaultProcessingTimeouts.testing
@@ -2374,7 +2428,7 @@ final class SequencerClientTest
           Some(trafficStateController),
         )
 
-      val connectionPool = MockPool(clock)
+      val connectionPool = MockPool(clock, withSecondConnection = withSecondConnection)
 
       val client = new SequencerClientImplPekko(
         DefaultTestIdentities.physicalSynchronizerId,

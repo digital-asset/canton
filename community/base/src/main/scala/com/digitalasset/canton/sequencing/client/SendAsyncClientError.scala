@@ -72,6 +72,16 @@ object SendAsyncClientError extends SequencerErrorGroup {
     )
   }
 
+  /** The request was not sent because the chosen connection was not started (e.g., it was stopped
+    * after being handed out by the connection pool). The request never left the client, so it is
+    * safe to send it through another connection.
+    */
+  final case class RequestNotSent(message: String) extends SendAsyncClientResponseError {
+    override protected def pretty: Pretty[RequestNotSent] = prettyOfClass(
+      unnamedParam(_.message.unquoted)
+    )
+  }
+
   /** The request already exists and was therefore rejected */
   final case class RequestAlreadyExists(message: String) extends SendAsyncClientResponseError {
     override protected def pretty: Pretty[RequestAlreadyExists] = prettyOfClass(

@@ -4,8 +4,17 @@
 package com.digitalasset.canton.sequencing.client.pool
 
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.client.pool.InternalSequencerConnection.SequencerConnectionState
-import com.digitalasset.canton.sequencing.protocol.{AcknowledgeRequest, SignedContent}
+import com.digitalasset.canton.sequencing.protocol.{
+  AcknowledgeRequest,
+  Batch,
+  ClosedEnvelope,
+  MessageId,
+  SignedContent,
+  SubmissionRequest,
+}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
@@ -64,6 +73,57 @@ class GrpcSequencerConnectionTest
           .acknowledgeSigned(signedAcknowledgeRequest, timeouts.network.unwrap)
           .valueOrFail("acknowledge")
           .futureValueUS shouldBe true
+
+        responses.assertAllResponsesSent()
+      }
+    }
+
+    "report a send on a connection stopped after it was handed out as not sent" in {
+      val responses = TestResponses(
+        apiResponses = Seq(correctApiResponse),
+        handshakeResponses = Seq(successfulHandshake),
+        synchronizerAndSeqIdResponses = Seq(correctSynchronizerIdResponse1),
+        staticParametersResponses = Seq(correctStaticParametersResponse),
+      )
+      withConnection(responses) { (internalConnection, listener) =>
+        internalConnection.start().valueOrFail("start connection")
+        listener.shouldStabilizeOnState(SequencerConnectionState.Validated)
+
+        val connection =
+          internalConnection
+            .buildUserConnection(
+              authConfig,
+              testMember,
+              testCrypto,
+              wallClock,
+              penaltyModifier = SequencerPenaltyModifier.noOp,
+            )
+            .valueOrFail("make authenticated")
+
+        // The connection is stopped between being handed out and being used
+        internalConnection.fail("test")
+        listener.shouldStabilizeOnState(SequencerConnectionState.Stopped(Some("test")))
+
+        val request = SubmissionRequest.tryCreate(
+          testMember,
+          MessageId.randomMessageId(),
+          Batch.empty[ClosedEnvelope](testedProtocolVersion),
+          maxSequencingTime = CantonTimestamp.MaxValue,
+          aggregationRule = None,
+          submissionCost = None,
+          testedProtocolVersion,
+        )
+        val signedRequest =
+          SignedContent(request, SymbolicCrypto.emptySignature, None, testedProtocolVersion)
+
+        connection
+          .sendAsync(signedRequest, timeouts.network.unwrap)
+          .value
+          .futureValueUS shouldBe Left(
+          SendAsyncClientError.RequestNotSent(
+            "Request not sent to the server: InvalidStateError(Connection is not started)"
+          )
+        )
 
         responses.assertAllResponsesSent()
       }

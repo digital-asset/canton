@@ -238,6 +238,9 @@ fix is deployed on MainNet:
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
 - Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
+- The sequencer client no longer fails a submission when the sequencer connection it picked is stopped before the
+  request is sent (for example during a sequencer restart). Such a request never left the node, so it is now sent
+  through a connection to another sequencer. It fails with `RequestNotSent` only if no other sequencer is available.
 
 ## Compatibility
 
