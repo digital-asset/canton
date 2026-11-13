@@ -5,6 +5,7 @@ package com.digitalasset.canton.resource
 
 import cats.data.EitherT
 import cats.syntax.option.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, QueryCostMonitoringConfig}
 import com.digitalasset.canton.health.ComponentHealthState
@@ -75,9 +76,7 @@ final class DbStorageSingle private (
       operationName: String,
       maxRetries: Int,
   )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[A] =
-    run("reading", operationName, maxRetries)(
-      FutureUnlessShutdown.outcomeF(db.run(action))
-    )
+    run("reading", operationName, maxRetries)(runUnlessClosing(db.run(action)))
 
   override protected[canton] def runWrite[A](
       action: All[A],
@@ -87,9 +86,15 @@ final class DbStorageSingle private (
       traceContext: TraceContext,
       closeContext: CloseContext,
   ): FutureUnlessShutdown[A] =
-    run("writing", operationName, maxRetries)(
-      FutureUnlessShutdown.outcomeF(db.run(action))
-    )
+    run("writing", operationName, maxRetries)(runUnlessClosing(db.run(action)))
+
+  /** Runs `f` only if this storage is not closing, and makes closing wait for it, so that the
+    * database is not closed underneath a running action.
+    */
+  private def runUnlessClosing[A](f: => Future[A])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[A] =
+    synchronizeWithClosingF(functionFullName)(f)
 
   override def onClosed(): Unit = {
     periodicConnectionCheck.close()
@@ -135,9 +140,7 @@ final class DbStorageSingle private (
       traceContext: TraceContext
   ): FutureUnlessShutdown[T] =
     run("pure-jdbc-writing", "", 0)(
-      FutureUnlessShutdown.outcomeF(
-        db.run(SimpleJdbcAction(c => body(c.connection)))
-      )
+      runUnlessClosing(db.run(SimpleJdbcAction(c => body(c.connection))))
     )(traceContext, CloseContext(this))
 }
 

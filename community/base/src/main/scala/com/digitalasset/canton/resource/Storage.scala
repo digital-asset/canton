@@ -315,20 +315,31 @@ trait DbStorage extends Storage { self: NamedLogging =>
     }
     import Thereafter.syntax.*
     implicit val success: retry.Success[A] = retry.Success.always
-    retry
-      .Backoff(
-        logger,
-        closeContext.context,
-        maxRetries = maxRetries,
-        initialDelay = 50.milliseconds,
-        maxDelay = timeouts.storageMaxRetryInterval.unwrap,
-        operationName = operationName,
-        suspendRetries = Eval.always(
-          if (isActive) Duration.Zero
-          else dbConfig.parameters.connectionTimeout.asFiniteApproximation
-        ),
-      )
-      .unlessShutdown(body, DbExceptionRetryPolicy)
+    def retryUntilClosing(retryCC: CloseContext): FutureUnlessShutdown[A] =
+      retry
+        .Backoff(
+          logger,
+          retryCC.context,
+          maxRetries = maxRetries,
+          initialDelay = 50.milliseconds,
+          maxDelay = timeouts.storageMaxRetryInterval.unwrap,
+          operationName = operationName,
+          suspendRetries = Eval.always(
+            if (isActive) Duration.Zero
+            else dbConfig.parameters.connectionTimeout.asFiniteApproximation
+          ),
+        )
+        .unlessShutdown(body, DbExceptionRetryPolicy)
+    // Stop retrying when either the caller or this storage closes: once the storage is closed,
+    // every attempt fails (e.g., with a RejectedExecutionException from the terminated executor).
+    val storageCC = CloseContext(this)
+    val result =
+      if (closeContext == storageCC) retryUntilClosing(storageCC)
+      else
+        CloseContext.withCombinedContext(closeContext, storageCC, timeouts, logger)(
+          retryUntilClosing
+        )
+    result
       .thereafter { _ =>
         if (logOperations) {
           logger.debug(s"completed $action: $operationName")

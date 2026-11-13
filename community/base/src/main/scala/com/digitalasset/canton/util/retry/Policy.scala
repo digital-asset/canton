@@ -177,6 +177,8 @@ abstract class RetryWithDelay(
         lastErrorKind: Option[ErrorKind],
         retriesOfLastErrorKind: Int,
         delay: FiniteDuration,
+        // Set when `previousResult` has already been classified (and logged) before a suspension
+        suspendedErrorKind: Option[ErrorKind],
     ): Future[RetryOutcome[T]] = logOnThrow {
       previousResult.transformWith { x =>
         logOnThrow(
@@ -208,8 +210,10 @@ abstract class RetryWithDelay(
               Future.successful(RetryOutcome(outcome, RetryTermination.GiveUp))
 
             case outcome =>
-              // this will also log the exception in outcome
-              val errorKind = retryable.logAndDetermineErrorKind(outcome, logger, lastErrorKind)
+              // this will also log the exception in outcome, unless it has been logged before the suspension
+              val errorKind = suspendedErrorKind.getOrElse(
+                retryable.logAndDetermineErrorKind(outcome, logger, lastErrorKind)
+              )
               val retriesOfErrorKind =
                 if (lastErrorKind.contains(errorKind)) retriesOfLastErrorKind else 0
               logger.trace(
@@ -233,6 +237,7 @@ abstract class RetryWithDelay(
                         lastErrorKind = Some(errorKind),
                         retriesOfLastErrorKind = 0,
                         delay = initialDelay,
+                        suspendedErrorKind = Some(errorKind),
                       )
                     )(directExecutionContext)
                 } else {
@@ -289,6 +294,7 @@ abstract class RetryWithDelay(
                             lastErrorKind = Some(errorKind),
                             retriesOfLastErrorKind = retriesOfErrorKind + 1,
                             delay = nextDelay(totalRetries + 1, delay),
+                            suspendedErrorKind = None,
                           )
                         )(executionContext)
                       }
@@ -336,6 +342,7 @@ abstract class RetryWithDelay(
       lastErrorKind = None,
       retriesOfLastErrorKind = 0,
       delay = initialDelay,
+      suspendedErrorKind = None,
     )
   }
 

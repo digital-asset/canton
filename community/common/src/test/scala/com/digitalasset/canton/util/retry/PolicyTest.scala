@@ -8,6 +8,7 @@ import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
@@ -499,6 +500,47 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
           suspendRetries = suspend,
         )
     )
+
+    it("classifies and logs a failed attempt only once, however often retries are suspended") {
+      implicit val success: Success[Int] = Success.always
+      case class TestException() extends RuntimeException("test exception")
+
+      val classified = new AtomicInteger(0)
+      val retryable = new ExceptionRetryPolicy {
+        override protected def determineExceptionErrorKind(
+            exception: Throwable,
+            logger: TracedLogger,
+        )(implicit tc: TraceContext): ErrorKind = {
+          classified.incrementAndGet().discard
+          TransientErrorKind()
+        }
+      }
+
+      val attempts = new AtomicInteger(0)
+      def run(): Future[Int] =
+        if (attempts.incrementAndGet() == 1) Future.failed(TestException())
+        else Future.successful(attempts.get())
+
+      // Suspend three times before the retry
+      val suspensions = new AtomicInteger(0)
+      val suspend = Eval.always(
+        if (suspensions.incrementAndGet() <= 3) 1.millis else Duration.Zero
+      )
+
+      Backoff(
+        logger,
+        hasSynchronizeWithClosing = flagCloseable,
+        maxRetries = 10,
+        initialDelay = 1.millis,
+        maxDelay = Duration.Inf,
+        operationName = "backoff-suspend-classify-once-op",
+        suspendRetries = suspend,
+      ).apply(run(), retryable).map { result =>
+        result shouldBe 2
+        suspensions.get() shouldBe 4
+        classified.get() shouldBe 1
+      }
+    }
 
     testExceptionLogging(
       Backoff(

@@ -238,6 +238,9 @@ fix is deployed on MainNet:
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
 - Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
+- Database operations no longer keep retrying after the node's database storage has been closed. Previously, an
+  operation still in progress at shutdown could log `DB_STORAGE_DEGRADATION` warnings ("A database task was rejected
+  from the database task queue") until its component shut down, although the task queue was not full.
 
 ## Compatibility
 
