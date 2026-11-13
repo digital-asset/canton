@@ -17,12 +17,13 @@ from collections import Counter
 from pathlib import Path
 
 import yaml
-
 from parse_sbt_cmd import parse_cmd
 from verify_topology_integration_proof import verify
 
 ROOT = Path(__file__).resolve().parents[2]
-PROOF = "com.digitalasset.canton.integration.tests.manual.TopologyConsistencyIntegrationTestPostgres"
+PROOF = (
+    "com.digitalasset.canton.integration.tests.manual.TopologyConsistencyIntegrationTestPostgres"
+)
 EXCLUDED = "com.digitalasset.canton.integration.tests.version.ProtobufCompatibilityReaderTest"
 SHARDS = 12
 
@@ -71,7 +72,10 @@ def prepare(catalog, timings, output):
     splitter = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(splitter)
     names = splitter.load_test_names(str(catalog))
-    require(names.count(PROOF) == names.count(EXCLUDED) == 1, "Expected unique compiled proof/compatibility suite")
+    require(
+        names.count(PROOF) == names.count(EXCLUDED) == 1,
+        "Expected unique compiled proof/compatibility suite",
+    )
     selected = splitter.filter_tests(names, exclusions.splitlines())
     require(EXCLUDED in selected and PROOF not in selected, "Ordinary selection changed")
     selected.remove(EXCLUDED)
@@ -85,7 +89,9 @@ def prepare(catalog, timings, output):
         "protocol_version": "36",
         "catalog_sha256": digest(catalog.read_bytes()),
         # Preserve production's cross-project duplicate entries in both modes.
-        "catalog_duplicate_entries": {name: count for name, count in Counter(names).items() if count > 1},
+        "catalog_duplicate_entries": {
+            name: count for name, count in Counter(names).items() if count > 1
+        },
         "timings_sha256": digest(timings.read_bytes()),
         "selection_action_sha256": digest(action.read_bytes()),
         "excluded_suites": [EXCLUDED],
@@ -108,7 +114,19 @@ def reset_postgres(container, shard):
     require(container == expected, "Refusing to reset an unexpected Postgres container")
     # Only databases in this job's disposable container are reset. Roles/config remain identical.
     subprocess.run(
-        ["docker", "exec", "-i", container, "psql", "-v", "ON_ERROR_STOP=1", "-U", "test", "-d", "postgres"],
+        [
+            "docker",
+            "exec",
+            "-i",
+            container,
+            "psql",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            "test",
+            "-d",
+            "postgres",
+        ],
         input=(
             "SELECT format('DROP DATABASE %I WITH (FORCE);', datname) FROM pg_database "
             "WHERE datname NOT IN ('postgres', 'template0', 'template1')\n\\gexec\n"
@@ -122,6 +140,7 @@ def reset_postgres(container, shard):
         ready = subprocess.run(
             ["docker", "exec", container, "pg_isready", "-U", "test", "-d", "test"],
             stdout=subprocess.DEVNULL,
+            check=False,
         )
         if ready.returncode == 0:
             return
@@ -139,12 +158,23 @@ def junit_snapshot(destination):
 
 
 def clean_runtime_files(plan_path, output):
-    require(os.environ.get("GITHUB_ACTIONS") == "true", "Fresh checkouts are only cleaned in Actions")
+    require(
+        os.environ.get("GITHUB_ACTIONS") == "true", "Fresh checkouts are only cleaned in Actions"
+    )
     require(Path(os.environ["GITHUB_WORKSPACE"]).resolve() == ROOT, "Unexpected benchmark checkout")
     # Preserve compiled targets and raw results; reset generated test files between invocations.
     subprocess.run(
-        ["git", "clean", "-ffdxq", "-e", "target/", "-e", output.relative_to(ROOT).as_posix() + "/",
-         "-e", plan_path.resolve().relative_to(ROOT).as_posix()],
+        [
+            "git",
+            "clean",
+            "-ffdxq",
+            "-e",
+            "target/",
+            "-e",
+            output.relative_to(ROOT).as_posix() + "/",
+            "-e",
+            plan_path.resolve().relative_to(ROOT).as_posix(),
+        ],
         cwd=ROOT,
         check=True,
     )
@@ -205,14 +235,19 @@ def run(plan_path, shard, container, output):
         print(f"BENCHMARK shard={shard} sample={index} topology_validation={mode}", flush=True)
         cpu_before = resource.getrusage(resource.RUSAGE_CHILDREN)
         start = time.monotonic()
-        result = subprocess.run(["./scripts/ci/sbt-ci-wrapper.sh", *args], env=env, cwd=ROOT)
+        result = subprocess.run(
+            ["./scripts/ci/sbt-ci-wrapper.sh", *args], env=env, cwd=ROOT, check=False
+        )
         elapsed = time.monotonic() - start
         cpu_after = resource.getrusage(resource.RUSAGE_CHILDREN)
         record = {
             "index": index,
             "validation_enabled": enabled,
             "elapsed_seconds": elapsed,
-            "cpu_seconds": cpu_after.ru_utime + cpu_after.ru_stime - cpu_before.ru_utime - cpu_before.ru_stime,
+            "cpu_seconds": cpu_after.ru_utime
+            + cpu_after.ru_stime
+            - cpu_before.ru_utime
+            - cpu_before.ru_stime,
             "exit_code": result.returncode,
             "valid": False,
         }
@@ -221,14 +256,35 @@ def run(plan_path, shard, container, output):
             root = junit_snapshot(junit)
             signature = case_signature(root)
             require(result.returncode == 0, "SBT failed; this timing cannot establish savings")
-            require(not re.search(r"^\[info\] compiling \d+ (?:Scala|Java) sources? to ",
-                                  (sample_dir / "sbt.log").read_text(), re.MULTILINE),
-                    "Unexpected compilation inside the measured interval")
-            require(not list(root.iter("failure")) and not list(root.iter("error")), "Failing JUnit result")
-            require(sum(count for (_, _, skipped), count in signature.items() if not skipped) > 1, "Ordinary tests did not execute")
-            verify(proof, junit, PROOF, mode, plan["commit"], plan["run_id"], os.environ["GITHUB_RUN_ATTEMPT"])
+            require(
+                not re.search(
+                    r"^\[info\] compiling \d+ (?:Scala|Java) sources? to ",
+                    (sample_dir / "sbt.log").read_text(),
+                    re.MULTILINE,
+                ),
+                "Unexpected compilation inside the measured interval",
+            )
+            require(
+                not list(root.iter("failure")) and not list(root.iter("error")),
+                "Failing JUnit result",
+            )
+            require(
+                sum(count for (_, _, skipped), count in signature.items() if not skipped) > 1,
+                "Ordinary tests did not execute",
+            )
+            verify(
+                proof,
+                junit,
+                PROOF,
+                mode,
+                plan["commit"],
+                plan["run_id"],
+                os.environ["GITHUB_RUN_ATTEMPT"],
+            )
             signatures.append(signature)
-            record["executed_tests"] = sum(count for (_, _, skipped), count in signature.items() if not skipped)
+            record["executed_tests"] = sum(
+                count for (_, _, skipped), count in signature.items() if not skipped
+            )
             record["case_signature_sha256"] = digest(json.dumps(sorted(signature.items())).encode())
             record["valid"] = True
         except (ValueError, OSError, ET.ParseError) as error:
@@ -236,20 +292,35 @@ def run(plan_path, shard, container, output):
             record["error"] = str(error)
         samples.append(record)
         # Keep the complete raw record even if a later invocation fails or is cancelled.
-        (output / "result.json").write_text(json.dumps({
-            "commit": plan["commit"], "run_id": plan["run_id"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
-            "shard": shard, "runner": os.environ.get("RUNNER_NAME"),
-            "plan_sha256": digest(plan_path.read_bytes()), "command": args, "samples": samples,
-        }, indent=2))
+        (output / "result.json").write_text(
+            json.dumps(
+                {
+                    "commit": plan["commit"],
+                    "run_id": plan["run_id"],
+                    "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+                    "shard": shard,
+                    "runner": os.environ.get("RUNNER_NAME"),
+                    "plan_sha256": digest(plan_path.read_bytes()),
+                    "command": args,
+                    "samples": samples,
+                },
+                indent=2,
+            )
+        )
         print(json.dumps(record), flush=True)
-    require(len(signatures) == 4 and all(x == signatures[0] for x in signatures),
-            "All four invocations must pass and execute identical test cases")
+    require(
+        len(signatures) == 4 and all(x == signatures[0] for x in signatures),
+        "All four invocations must pass and execute identical test cases",
+    )
 
 
 def summarize(directory, output):
     files = sorted(directory.rglob("result.json"))
     all_results = [json.loads(path.read_text()) for path in files]
-    require(len({(x["shard"], x["run_attempt"]) for x in all_results}) == len(all_results), "Duplicate shard attempt")
+    require(
+        len({(x["shard"], x["run_attempt"]) for x in all_results}) == len(all_results),
+        "Duplicate shard attempt",
+    )
     latest = {}
     for result in sorted(all_results, key=lambda x: int(x["run_attempt"])):
         latest[result["shard"]] = result
@@ -265,10 +336,19 @@ def summarize(directory, output):
     shard_deltas = []
     for result in results:
         samples = result["samples"]
-        require(len(samples) == 4 and all(s["valid"] and s["exit_code"] == 0 for s in samples), "Incomplete/failed sample")
-        require([s["validation_enabled"] for s in samples] == order(result["shard"]), "Wrong sample order")
+        require(
+            len(samples) == 4 and all(s["valid"] and s["exit_code"] == 0 for s in samples),
+            "Incomplete/failed sample",
+        )
+        require(
+            [s["validation_enabled"] for s in samples] == order(result["shard"]),
+            "Wrong sample order",
+        )
         require([s["index"] for s in samples] == list(range(4)), "Wrong sample indices")
-        require(len({s["case_signature_sha256"] for s in samples}) == 1, "Different tests executed between modes")
+        require(
+            len({s["case_signature_sha256"] for s in samples}) == 1,
+            "Different tests executed between modes",
+        )
         deltas = []
         for pair_index, pair in enumerate([samples[:2], samples[2:]]):
             on = next(s["elapsed_seconds"] for s in pair if s["validation_enabled"])
@@ -284,7 +364,8 @@ def summarize(directory, output):
     rng = random.Random(721)
     bootstrap = sorted(sum(rng.choices(shard_deltas, k=SHARDS)) / 3600 for _ in range(10000))
     summary = {
-        "commit": results[0]["commit"], "run_id": results[0]["run_id"],
+        "commit": results[0]["commit"],
+        "run_id": results[0]["run_id"],
         "scope": "ordinary PV36, non-external-KMS; excludes protobuf compatibility reader; includes per-invocation four-node proof",
         "validation_on_runner_hours": totals[True] / 3600,
         "validation_off_runner_hours": totals[False] / 3600,
@@ -293,7 +374,8 @@ def summarize(directory, output):
         "round_savings_hours": [sum(p) / 3600 for p in pairs],
         "shards_faster_with_validation_off": sum(x > 0 for x in shard_deltas),
         "exploratory_95_percent_interval_hours": [bootstrap[249], bootstrap[9749]],
-        "shards": SHARDS, "invocations": SHARDS * 4,
+        "shards": SHARDS,
+        "invocations": SHARDS * 4,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(summary, indent=2))

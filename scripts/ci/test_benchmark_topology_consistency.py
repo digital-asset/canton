@@ -4,9 +4,8 @@ import json
 import subprocess
 import textwrap
 
-import pytest
-
 import benchmark_topology_consistency as benchmark
+import pytest
 
 
 def test_prepare_executes_the_production_selection_and_command(tmp_path, monkeypatch):
@@ -19,7 +18,9 @@ def test_prepare_executes_the_production_selection_and_command(tmp_path, monkeyp
         "com.digitalasset.canton.integration.tests.crashrecovery.ExampleTest",
     ]
     catalog = tmp_path / "catalog"
-    catalog.write_text("\n".join([*ordinary, ordinary[0], *excluded, benchmark.PROOF, benchmark.EXCLUDED]))
+    catalog.write_text(
+        "\n".join([*ordinary, ordinary[0], *excluded, benchmark.PROOF, benchmark.EXCLUDED])
+    )
     timings = tmp_path / "timings.json"
     timings.write_text("{}")
     output = tmp_path / "plan.json"
@@ -31,8 +32,10 @@ def test_prepare_executes_the_production_selection_and_command(tmp_path, monkeyp
     command = plan["command_template"].replace("$RUN_SPLITTED_TESTS_CMD", "testOnly ExampleTest")
     assert benchmark.parse_cmd(command) == [
         "dumpClassPath",
-        "testOnly ExampleTest -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest "
-        "-l RequiresExternalKms -l com.digitalasset.canton.annotations.RequiresExternalKms",
+        (
+            "testOnly ExampleTest -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest "
+            "-l RequiresExternalKms -l com.digitalasset.canton.annotations.RequiresExternalKms"
+        ),
         "checkErrors",
     ]
 
@@ -83,7 +86,10 @@ def test_summarize_counts_runner_time_and_preserves_negative_savings(tmp_path):
     assert json.loads(output.read_text())["saved_runner_hours_per_selection"] < 0
 
 
-@pytest.mark.parametrize("corruption", ["failed", "retry", "different_tests", "order", "indices", "duration", "commit", "plan"])
+@pytest.mark.parametrize(
+    "corruption",
+    ["failed", "retry", "different_tests", "order", "indices", "duration", "commit", "plan"],
+)
 def test_summarize_rejects_invalid_or_incomparable_samples(tmp_path, corruption):
     directory = records(tmp_path)
     path = directory / "shard-0/result.json"
@@ -152,7 +158,9 @@ def test_fresh_invocations_preserve_nested_compilation_targets_and_evidence(tmp_
     monkeypatch.setenv("GITHUB_WORKSPACE", str(tmp_path))
     benchmark.clean_runtime_files(plan, output)
     assert not generated.exists()
-    assert source.exists() and compiled.exists() and plan.exists() and (output / "raw.json").exists()
+    assert (
+        source.exists() and compiled.exists() and plan.exists() and (output / "raw.json").exists()
+    )
 
 
 @pytest.mark.parametrize("fail_disabled", [False, True])
@@ -160,7 +168,8 @@ def test_run_uses_fresh_process_env_reports_and_node_proof(tmp_path, monkeypatch
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     wrapper = tmp_path / "scripts/ci/sbt-ci-wrapper.sh"
     wrapper.parent.mkdir(parents=True)
-    wrapper.write_text(textwrap.dedent("""\
+    wrapper.write_text(
+        textwrap.dedent("""\
         #!/usr/bin/env python3
         import json, os
         from pathlib import Path
@@ -184,22 +193,33 @@ def test_run_uses_fresh_process_env_reports_and_node_proof(tmp_path, monkeypatch
         }
         Path(os.environ['CANTON_TOPOLOGY_PROOF_EVIDENCE']).write_text(json.dumps(evidence))
         Path(os.environ['SBT_OUTPUT_FILE']).write_text('completed without compilation')
-        """))
+        """)
+    )
     wrapper.chmod(0o755)
     subprocess.run(["git", "-C", str(tmp_path), "add", "scripts"], check=True)
     monkeypatch.setattr(benchmark, "ROOT", tmp_path)
     resets = []
     monkeypatch.setattr(benchmark, "reset_postgres", lambda container, shard: resets.append(shard))
     for name, value in {
-        "GITHUB_ACTIONS": "true", "GITHUB_WORKSPACE": str(tmp_path), "GITHUB_SHA": "commit",
-        "GITHUB_RUN_ID": "run", "GITHUB_RUN_ATTEMPT": "2", "FAKE_FAIL_DISABLED": str(fail_disabled).lower(),
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_WORKSPACE": str(tmp_path),
+        "GITHUB_SHA": "commit",
+        "GITHUB_RUN_ID": "run",
+        "GITHUB_RUN_ATTEMPT": "2",
+        "FAKE_FAIL_DISABLED": str(fail_disabled).lower(),
     }.items():
         monkeypatch.setenv(name, value)
     plan = tmp_path / "plan.json"
-    plan.write_text(json.dumps({
-        "commit": "commit", "run_id": "run", "command_template": '"$RUN_SPLITTED_TESTS_CMD"',
-        "buckets": [["OrdinaryTest"] for _ in range(12)],
-    }))
+    plan.write_text(
+        json.dumps(
+            {
+                "commit": "commit",
+                "run_id": "run",
+                "command_template": '"$RUN_SPLITTED_TESTS_CMD"',
+                "buckets": [["OrdinaryTest"] for _ in range(12)],
+            }
+        )
+    )
     output = tmp_path / "results"
     if fail_disabled:
         with pytest.raises(ValueError, match="must pass"):
@@ -210,4 +230,6 @@ def test_run_uses_fresh_process_env_reports_and_node_proof(tmp_path, monkeypatch
     assert resets == [0, 0, 0, 0]
     assert saved["run_attempt"] == "2"
     assert [s["validation_enabled"] for s in saved["samples"]] == [True, False, False, True]
-    assert [s["valid"] for s in saved["samples"]] == ([True, False, False, True] if fail_disabled else [True] * 4)
+    assert [s["valid"] for s in saved["samples"]] == (
+        [True, False, False, True] if fail_disabled else [True] * 4
+    )
