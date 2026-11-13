@@ -61,15 +61,21 @@ trait S3Synchronization extends FutureHelpers with TestEssentials {
       val onlyLatestDump = latestFromMajorMinor.isDefined
       val baseListing = if (perProtocolVersion) listPvDirectories() else listVersionDirectories()
 
+      def getReleaseVersion(directory: String): ReleaseVersion =
+        ReleaseVersion.tryCreate(directory.split("/").head)
+
       val listing = baseListing
         .filter(path =>
           !path.matches(s".*-ad-hoc.*") || path.contains("3.4.10-ad-hoc.20251211.17454.0.v04f84c64")
         )
         // Can be dropped when we have the new non-ad-hoc dumps
         .filterNot(_.contains("3.4.10-snapshot.20251209.17450.0.vfc6a5830"))
-
-      def getReleaseVersion(directory: String): ReleaseVersion =
-        ReleaseVersion.tryCreate(directory.split("/").head)
+        // Continuity means this version reads data and config written by earlier versions. Dumps from
+        // a newer release line are out of scope: they can use protocol versions and config keys this
+        // version does not know (e.g. 3.7 dumps with pv=37 read by release-line-3.6).
+        .filter(directory =>
+          getReleaseVersion(directory).majorMinor <= ReleaseVersion.current.majorMinor
+        )
 
       // Use maxOption instead of max to avoid UnsupportedOperationException on empty lists
       val latestDumpReleaseVersionOpt = listing
