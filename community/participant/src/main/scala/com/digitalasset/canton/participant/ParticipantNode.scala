@@ -620,7 +620,7 @@ class ParticipantNodeBootstrap(
                     .processPublications(_)(_)
                     .failOnShutdownTo(
                       // This will be thrown in the Indexer pekko-stream pipeline, and handled gracefully there
-                      new RuntimeException("Post processing aborted due to shutdown")
+                      new LedgerApiIndexer.PostProcessingAbortedDueToShutdown
                     ),
                   sequentialPostProcessor = sequentialPostProcessor,
                   loggerFactory = loggerFactory,

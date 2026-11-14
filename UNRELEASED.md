@@ -27,6 +27,8 @@ Template for a bigger topic
 ## Bugfixes
 - Sequencer node: fixed a resource leak, causing a spike of # of threads, CPU and memory consumption affecting the node's
   ability to keep up with the rest of synchronizer, requiring an imminent restart of the node every few days.
+- Participant node: when a participant shuts down or becomes passive, the ledger API indexer no longer logs
+  "Consumer terminated with a failure" at WARN level for the aborted post processing.
 
 ### (YY-nnn, Risk): Title
 
