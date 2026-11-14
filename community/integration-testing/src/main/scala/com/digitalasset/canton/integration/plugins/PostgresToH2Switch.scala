@@ -113,7 +113,7 @@ object PostgresToH2Switch {
           plugins.map {
             case pg: UsePostgres =>
               // UsePostgres is an EnvironmentSetupPlugin, so C and E are CantonConfig and CantonEnvironment here.
-              new UseH2InsteadOfPostgres(pg.loggerFactory)
+              new UseH2InsteadOfPostgres(pg)
                 .asInstanceOf[BaseEnvironmentSetupPlugin[C, E]]
             case other => other
           }
@@ -124,28 +124,64 @@ object PostgresToH2Switch {
 /** [[UseH2]] that also drops the in-memory H2 databases when the environment is destroyed, at the
   * point where [[UsePostgres]] drops its databases. Without this, every switched suite would leave
   * its databases in the test JVM heap (the URL sets `DB_CLOSE_DELAY=-1`) for the rest of the shard.
+  *
+  * Falls back to the original [[UsePostgres]] for the rest of the suite if a node in the config it
+  * receives has replication enabled. Configs loaded from files that declare Postgres storage get
+  * `replication.enabled = true` filled in at load time, and replicated storage needs database locks,
+  * which H2 does not have: the node then fails to start, and a sequencer that fails to start exits
+  * the whole test JVM (seen in CI with `ReferenceConfigExampleIntegrationTest`).
   */
-class UseH2InsteadOfPostgres(baseLoggerFactory: NamedLoggerFactory)
-    extends UseH2(baseLoggerFactory) {
+@SuppressWarnings(Array("org.wartremover.warts.Var"))
+class UseH2InsteadOfPostgres(original: UsePostgres) extends UseH2(original.loggerFactory) {
+
+  private var fellBack = false
+
+  private def nodesWithReplication(config: CantonConfig): Seq[String] =
+    (config.participants.collect { case (n, c) if c.replication.exists(_.isEnabled) => n } ++
+      config.mediators.collect { case (n, c) if c.replication.exists(_.isEnabled) => n } ++
+      config.sequencers.collect { case (n, c) if c.replication.exists(_.isEnabled) => n })
+      .map(_.unwrap)
+      .toSeq
+
+  override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig = synchronized {
+    if (!fellBack) {
+      val replicated = nodesWithReplication(config)
+      if (replicated.nonEmpty) {
+        noTracingLogger.info(
+          s"${PostgresToH2Switch.PropertyName}: falling back to Postgres, replication is enabled for ${replicated
+              .mkString(", ")}"
+        )
+        original.beforeTests()
+        fellBack = true
+      }
+    }
+    if (fellBack) original.beforeEnvironmentCreated(config) else super.beforeEnvironmentCreated(config)
+  }
+
+  override def afterTests(): Unit = synchronized {
+    if (fellBack) original.afterTests()
+  }
 
   override def afterEnvironmentDestroyed(config: CantonConfig): Unit =
-    config.allLocalNodes.values.map(_.storage).foreach {
-      case h2: DbConfig.H2 =>
-        val c = h2.config
-        val url = Try(c.getString("url")).getOrElse("")
-        if (url.startsWith("jdbc:h2:mem:")) {
-          try {
-            val conn = DriverManager.getConnection(
-              url,
-              Try(c.getString("user")).getOrElse(""),
-              Try(c.getString("password")).getOrElse(""),
-            )
-            try conn.createStatement().execute("SHUTDOWN")
-            finally conn.close()
-          } catch {
-            case NonFatal(e) => noTracingLogger.info(s"Could not drop H2 database $url: $e")
+    if (synchronized(fellBack)) original.afterEnvironmentDestroyed(config)
+    else
+      config.allLocalNodes.values.map(_.storage).foreach {
+        case h2: DbConfig.H2 =>
+          val c = h2.config
+          val url = Try(c.getString("url")).getOrElse("")
+          if (url.startsWith("jdbc:h2:mem:")) {
+            try {
+              val conn = DriverManager.getConnection(
+                url,
+                Try(c.getString("user")).getOrElse(""),
+                Try(c.getString("password")).getOrElse(""),
+              )
+              try conn.createStatement().execute("SHUTDOWN")
+              finally conn.close()
+            } catch {
+              case NonFatal(e) => noTracingLogger.info(s"Could not drop H2 database $url: $e")
+            }
           }
-        }
-      case _ => ()
-    }
+        case _ => ()
+      }
 }
