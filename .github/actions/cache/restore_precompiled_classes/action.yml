@@ -48,6 +48,10 @@ runs:
       env:
         BASE_BRANCH: ${{ steps.resolve_ref.outputs.base_branch }}
 
+    - name: Ensure zstd
+      if: steps.prepare_logic.outputs.needs_network_restore == 'true'
+      uses: ./.github/actions/cache/ensure_zstd
+
     - name: Restore Incremental Compile Cache
       if: steps.prepare_logic.outputs.needs_network_restore == 'true'
       id: restore_classes

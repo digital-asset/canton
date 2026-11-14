@@ -1,0 +1,27 @@
+name: Ensure zstd
+description: >-
+  [TEST ONLY] Put zstd from the pinned nixpkgs on PATH so that actions/cache
+  compresses with multi-threaded zstd instead of falling back to single-threaded
+  gzip (`tar -z`), which it does when `zstd` is not found. actions/cache keys its
+  cache version on the compression method, so every job that saves or restores
+  a cache must run this step, or it will not see caches saved by the others.
+  No-op when zstd is already on PATH.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        if command -v zstd >/dev/null 2>&1; then
+          echo "zstd already on PATH: $(command -v zstd)"
+          exit 0
+        fi
+        start=$(date +%s)
+        if out=$(nix-build --no-out-link -E 'with import (import ./nix/sources.nix).nixpkgs { }; zstd.bin' 2>&1 | tail -1) \
+          && [[ -x "${out}/bin/zstd" ]]; then
+          echo "${out}/bin" >> "$GITHUB_PATH"
+          echo "zstd from ${out} ($(( $(date +%s) - start ))s): $("${out}/bin/zstd" --version)"
+        else
+          echo "::warning::Could not provide zstd, actions/cache will use gzip: ${out}"
+        fi

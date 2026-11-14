@@ -12,6 +12,9 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Ensure zstd
+      uses: ./.github/actions/cache/ensure_zstd
+
     - name: Save cache
       uses: actions/cache/save@v5
       with:

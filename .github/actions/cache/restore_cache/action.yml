@@ -27,6 +27,9 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Ensure zstd
+      uses: ./.github/actions/cache/ensure_zstd
+
     - name: Restore cache
       id: restore
       uses: actions/cache/restore@v5
