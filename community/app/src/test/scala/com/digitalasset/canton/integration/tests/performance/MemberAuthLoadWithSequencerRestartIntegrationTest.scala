@@ -4,9 +4,7 @@
 package com.digitalasset.canton.integration.tests.performance
 
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.UsePostgres
@@ -16,10 +14,10 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.elements.DriverStatus
 import com.digitalasset.canton.performance.{PerformanceRunner, RateSettings}
+import com.digitalasset.canton.{SynchronizerAlias, config}
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.Future
