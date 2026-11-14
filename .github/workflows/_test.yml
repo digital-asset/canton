@@ -131,6 +131,9 @@ jobs:
       - name: Fetch base refs
         uses: ./.github/actions/utils/fetch_base_refs
 
+      - name: Stable .proto modification times
+        uses: ./.github/actions/utils/stable_proto_mtimes
+
       - name: Start Postgres container
         id: postgres
         uses: ./.github/actions/utils/postgres/start_postgres_container_standard

@@ -26,6 +26,9 @@ jobs:
       - name: Fetch base refs
         uses: ./.github/actions/utils/fetch_base_refs
 
+      - name: Stable .proto modification times
+        uses: ./.github/actions/utils/stable_proto_mtimes
+
       - name: Restore compile and sbt caches
         id: cache_restore
         uses: ./.github/actions/build/restore_compile_sbt_caches

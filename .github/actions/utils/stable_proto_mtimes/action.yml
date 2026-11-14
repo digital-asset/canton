@@ -1,0 +1,23 @@
+name: Stable .proto modification times
+description: >-
+  [TEST ONLY] sbt-protoc decides whether to regenerate code by comparing the
+  modification times of the .proto inputs with the ones it recorded (sbt
+  FileInfo.lastModified). A fresh checkout gives every file a new time, so every
+  job regenerates the code of all 173 tracked .proto files even though the restored
+  compile cache already holds it. Set each tracked .proto file's modification
+  time from its git blob hash: unchanged files get the same time in every job
+  and run, and a changed file gets a different one, which sbt-protoc sees as a
+  change. The times lie in 2001-2009, so they are never newer than outputs.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        count=0
+        while read -r _mode sha _stage path; do
+          touch -m -d "@$(( 1000000000 + 16#${sha:0:7} ))" -- "$path"
+          count=$(( count + 1 ))
+        done < <(git ls-files -s -- '*.proto')
+        echo "Set stable modification times on ${count} .proto files"
