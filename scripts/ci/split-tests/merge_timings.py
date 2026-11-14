@@ -30,6 +30,15 @@ def parse_args():
         action="store_true",
         help="Allow empty merged current timings (still fails when no files match --input-glob).",
     )
+    parser.add_argument(
+        "--previous-only-if-no-current",
+        action="store_true",
+        help=(
+            "For reruns: when no files match --input-glob because no shard ran in this attempt, "
+            "write --previous-timings unchanged instead of failing. Still fails when there are "
+            "no usable previous timings either."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -63,30 +72,59 @@ def validate_current_timings(paths, merged, allow_empty_current=False):
         )
 
 
+def load_previous_timings(path):
+    if not path or not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (
+        OSError,
+        ValueError,
+        json.JSONDecodeError,
+    ):  # silent-ok: previous timings are only a fallback, callers decide whether empty is fatal
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    try:
+        return {k: float(v) for k, v in data.items()}
+    except (TypeError, ValueError):  # silent-ok: same as an unreadable file
+        return {}
+
+
+def resolve_timings(
+    paths, merged, previous, allow_empty_current=False, previous_only_if_no_current=False
+):
+    """Returns the timings to write, or raises ValueError.
+
+    A rerun in which no shard ran again has no current files; with previous_only_if_no_current the
+    previous timings are kept as they are. Without usable previous timings that is still an error.
+    """
+    if not paths and previous_only_if_no_current and previous:
+        return dict(previous)
+    validate_current_timings(paths, merged, allow_empty_current)
+    return merge_previous_as_fallback(merged, previous)
+
+
 def main():
     args = parse_args()
     paths = sorted(glob.glob(args.input_glob, recursive=True))
     merged = merge_timings(paths)
+    previous = load_previous_timings(args.previous_timings)
 
     try:
-        validate_current_timings(paths, merged, args.allow_empty_current)
+        merged = resolve_timings(
+            paths,
+            merged,
+            previous,
+            allow_empty_current=args.allow_empty_current,
+            previous_only_if_no_current=args.previous_only_if_no_current,
+        )
     except ValueError as e:
         print(f"merge-timings error: {e}", file=sys.stderr)
         raise SystemExit(1)
-
-    # Load and merge previous timings if provided
-    if args.previous_timings and os.path.isfile(args.previous_timings):
-        try:
-            with open(args.previous_timings, encoding="utf-8") as f:
-                previous = json.load(f)
-            merge_previous_as_fallback(merged, previous)
-        except (
-            OSError,
-            ValueError,
-            json.JSONDecodeError,
-        ):  # silent-ok: previous timings are only a fallback
-            # If we can't read previous timings, just continue with current ones
-            pass
+    if not paths:
+        print("merge-timings: no shard timings from this attempt, keeping the previous timings")
 
     out_dir = os.path.dirname(args.output)
     if out_dir:
@@ -106,6 +144,11 @@ def self_test():
     test_merge_timings_empty_input()
     test_merge_timings_deduplicates_across_shards()
     test_merge_timings_with_previous_timings_fallback_only()
+    test_resolve_timings_keeps_previous_when_no_shard_reran()
+    test_resolve_timings_without_current_or_previous_still_fails()
+    test_resolve_timings_without_flag_still_fails_on_no_current()
+    test_resolve_timings_partial_rerun_overrides_only_rerun_classes()
+    test_load_previous_timings_tolerates_bad_input()
     print("All self-checks passed")
 
 
@@ -220,6 +263,51 @@ def test_merge_timings_with_previous_timings_fallback_only():
         assert result["com.example.BazTest"] == 1.0, (
             f"Expected 1.0, got {result['com.example.BazTest']}"
         )
+
+
+def test_resolve_timings_keeps_previous_when_no_shard_reran():
+    previous = {"com.example.FooTest": 3.0}
+    result = resolve_timings([], {}, previous, previous_only_if_no_current=True)
+    assert result == previous, f"Expected previous timings unchanged, got {result}"
+
+
+def test_resolve_timings_without_current_or_previous_still_fails():
+    try:
+        resolve_timings([], {}, {}, previous_only_if_no_current=True)
+        assert False, "Expected ValueError without current and previous timings"
+    except ValueError as e:
+        assert "No timing files matched" in str(e), f"Unexpected error: {e}"
+
+
+def test_resolve_timings_without_flag_still_fails_on_no_current():
+    try:
+        resolve_timings([], {}, {"com.example.FooTest": 3.0})
+        assert False, "Expected ValueError on a first attempt without timing files"
+    except ValueError as e:
+        assert "No timing files matched" in str(e), f"Unexpected error: {e}"
+
+
+def test_resolve_timings_partial_rerun_overrides_only_rerun_classes():
+    # "Re-run failed jobs": only the rerun shard's classes come from this attempt, the others
+    # keep the previous attempt's timings, nothing is summed with the previous value.
+    previous = {"com.example.FooTest": 3.0, "com.example.BarTest": 4.0}
+    current = {"com.example.FooTest": 5.0}
+    result = resolve_timings(["s1.json"], current, previous, previous_only_if_no_current=True)
+    assert result == {"com.example.FooTest": 5.0, "com.example.BarTest": 4.0}, result
+
+
+def test_load_previous_timings_tolerates_bad_input():
+    import tempfile
+
+    assert load_previous_timings("") == {}
+    assert load_previous_timings("/nonexistent/timings.json") == {}
+    with tempfile.TemporaryDirectory() as tmp:
+        bad = os.path.join(tmp, "bad.json")
+        with open(bad, "w", encoding="utf-8") as f:
+            f.write("{not json")
+        assert load_previous_timings(bad) == {}
+        good = _write_timings(tmp, "good.json", {"com.example.FooTest": 1})
+        assert load_previous_timings(good) == {"com.example.FooTest": 1.0}
 
 
 if __name__ == "__main__":

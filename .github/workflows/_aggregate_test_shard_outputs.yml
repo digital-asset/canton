@@ -90,12 +90,17 @@ jobs:
               "$CALLER_JOB/.timings" \
               "$CALLER_JOB/.summary-state"
 
+      # Only this attempt's bundles: shards from earlier attempts are already in the summary state
+      # and timings "latest" artifacts downloaded below. Matching every attempt double-counted
+      # timings (merge_timings.py sums per class) and raced with GitHub removing superseded
+      # attempts' artifacts, so a listed bundle could 404 and fail the whole download.
+      # A pattern that matches nothing is not an error; a failed download is, so that a partial
+      # aggregate never overwrites the latest summary state and timings.
       - name: Download shard bundle artifacts
         uses: actions/download-artifact@v7
         with:
-          pattern: ${{ env.LATEST_ARTIFACT_PREFIX }}-bundle-run-${{ github.run_id }}-pv-${{ inputs.protocol_version || 'default' }}-*
+          pattern: ${{ env.LATEST_ARTIFACT_PREFIX }}-bundle-run-${{ github.run_id }}-pv-${{ inputs.protocol_version || 'default' }}-shard-*-attempt-${{ github.run_attempt }}
           path: ${{ env.CALLER_JOB }}/.shard-bundles
-        continue-on-error: true
 
       - name: Download summary state from previous run (reruns only)
         if: ${{ !cancelled() && github.run_attempt > 1 }}
@@ -153,6 +158,11 @@ jobs:
             EXTRA_ARGS=()
             if [[ "$ALLOW_EMPTY_CURRENT_TIMINGS" == "true" ]]; then
               EXTRA_ARGS+=(--allow-empty-current)
+            fi
+            # On a rerun where no shard ran again (only this job was re-run), there are no
+            # bundles from this attempt; keep the previous timings instead of failing.
+            if [[ "$GITHUB_RUN_ATTEMPT" -gt 1 ]]; then
+              EXTRA_ARGS+=(--previous-only-if-no-current)
             fi
 
             python3 scripts/ci/split-tests/merge_timings.py \
