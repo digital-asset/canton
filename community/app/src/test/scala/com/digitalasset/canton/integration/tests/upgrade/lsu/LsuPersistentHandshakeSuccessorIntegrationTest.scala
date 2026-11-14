@@ -145,6 +145,13 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
 
         performSynchronizerNodesLsu(fixture, announceSequencerSuccessors = false)
 
+        // The successor mediators play no part in the handshakes. Stop them first: sequencer4 stays down for
+        //  the rest of the suite (P2's handshake must keep failing until the LSU is cancelled), and a running
+        //  mediator's connection pool warns once a connection has failed validation for longer than
+        //  `warnConnectionValidationDelay` (20s), which these tests may or may not exceed.
+        mediator3.stop()
+        mediator4.stop()
+
         // So that first handshake fails.
         // Note: since the error is transient, there is not WARN/ERROR in the logs (only INFO)
         sequencer3.stop()
