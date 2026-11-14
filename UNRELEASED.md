@@ -244,6 +244,9 @@ fix is deployed on MainNet:
 - `commitments.reinitialize_commitments` returns only after the reinitialization has finished. Previously it could
   return slightly earlier, so an immediately following call could be rejected with "Reinitialization is already
   scheduled or in progress". A failed reinitialization is now reported right away instead of after the timeout.
+- When a participant disconnects from a synchronizer while a topology transaction broadcast is pending, the
+  participant no longer immediately resubmits the pending and queued topology transactions to that synchronizer. They
+  are submitted after reconnecting, as before.
 
 ## Compatibility
 
