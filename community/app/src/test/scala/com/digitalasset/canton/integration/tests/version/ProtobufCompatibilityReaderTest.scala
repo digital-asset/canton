@@ -285,6 +285,9 @@ final class ProtobufCompatibilityReaderTest
       """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
     ),
     (3, 7) -> Seq(
+      // Not for merge (combined flake PR #747 only): RPCs added in 3.7.3 that this public main mirror, last synced 11-06, does not have yet
+      """com/digitalasset/canton/admin/participant/v30/party_management_service.proto:Previously present RPC "GetPartyFreezingTime" on service "PartyManagementService" was deleted.""",
+      """com/digitalasset/canton/admin/participant/v30/party_management_service.proto:Previously present RPC "GetRemoteAcs" on service "PartyManagementService" was deleted.""",
       // Added `sequencer_connection_penalty_config` to `SequencerConnections` for sequencer connections penalty mechanism configuration
       """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "7" with name "sequencer_connection_penalty_config" on message "SequencerConnections" was deleted.""",
       // Added new StaticSynchronizerParameters in v33
