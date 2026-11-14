@@ -39,7 +39,7 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
-import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
@@ -51,7 +51,6 @@ import com.google.protobuf.ByteString
 import io.grpc.Status
 import monocle.Optional
 import monocle.macros.GenLens
-import org.slf4j.event.Level
 
 import java.util.UUID
 import scala.jdk.OptionConverters.RichOption
@@ -1325,19 +1324,12 @@ class InteractiveSubmissionIntegrationTestTimeouts
       aliceE,
       epn,
     )
+    // Just checking the completion and avoiding reconnecting in order
+    //  not to have the confirming participant log a "Response message for request ... timed out"
+    //  warning while replaying the sequenced events, as the environment is going to be
+    //  tear down anyway.
     completion.status.value.code shouldBe Status.Code.ABORTED.value()
     completion.status.value.message should include("MEDIATOR_SAYS_TX_TIMED_OUT")
-    loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.WARN))(
-      cpn.synchronizers.reconnect_all(),
-      LogEntry.assertLogSeq(
-        Seq.empty,
-        Seq(
-          _.warningMessage should (include("Response message for request") and include(
-            "timed out"
-          ))
-        ),
-      ),
-    )
   }
 }
 
