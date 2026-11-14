@@ -138,6 +138,14 @@ runs:
       with:
         reset_classes_if_requested: ${{ inputs.reset_classes_if_requested }}
 
+    - name: Reuse the compile job's classes
+      # [TEST ONLY] An exact hit is the compile job's cache for this commit, so its classes and
+      # compile analyses match the checkout: sbt then skips the incremental compiler and source
+      # generators (project/CantonReuseCompiled.scala). On any other restore, sbt compiles as usual.
+      if: steps.restore_classes.outputs.compile-cache-hit == 'true'
+      shell: bash
+      run: echo "CANTON_REUSE_COMPILED_CLASSES=true" >> "$GITHUB_ENV"
+
     - name: Track CPU and Memory Start
       id: track_start
       uses: ./.github/actions/build/track_cpu_memory
