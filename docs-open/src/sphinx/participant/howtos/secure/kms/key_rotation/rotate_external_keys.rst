@@ -12,7 +12,7 @@ Canton keys can still be manually rotated even if they are externally stored in 
 To do that, you can use the :ref:`standard rotate key commands <rotating-canton-keys>`, or
 **if you already have a pre-generated KMS key to rotate to**, run the following command:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/RotateKmsKeyIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/security/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/RotateKmsKeyIntegrationTest.scala
    :language: scala
    :start-after: user-manual-entry-begin: RotateKmsNodeKey
    :end-before: user-manual-entry-end: RotateKmsNodeKey

@@ -84,7 +84,7 @@ parties are enabled.
 The `onlyRunWithLocalParty` methods takes a `UnsupportedExternalPartyTest` that links to an issue indicating the reason
 why this test cannot run with external parties yet.
 
-See [here](https://github.com/DACH-NY/canton/blob/main/community/app/src/test/scala/com/digitalasset/canton/integration/tests/CommandDeduplicationIntegrationTest.scala#L331)
+See [here](https://github.com/DACH-NY/canton/blob/main/community/app-tests/core/src/test/scala/com/digitalasset/canton/integration/tests/CommandDeduplicationIntegrationTest.scala#L331)
 for an example.
 
 ## Common issues

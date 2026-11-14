@@ -67,7 +67,7 @@ Use separate consoles
 Similarly to :ref:`initializing a distributed synchronizer with separate consoles<synchronizer_bootstrapping_separate_consoles>`,
 dynamically onboarding new Sequencers can be achieved in separate consoles as follows:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/sequencer/SynchronizerBootstrapWithMultipleConsolesAndSequencersIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/sync/src/test/scala/com/digitalasset/canton/integration/tests/sequencer/SynchronizerBootstrapWithMultipleConsolesAndSequencersIntegrationTest.scala
    :language: scala
    :start-after: user-manual-entry-begin: DynamicallyOnboardSequencerWithSeparateConsoles
    :end-before: user-manual-entry-end: DynamicallyOnboardSequencerWithSeparateConsoles
@@ -85,7 +85,7 @@ at a later point as described in this section.
 #. :ref:`Prepare a new Mediator<synchronizer-bootstrap>` node and make sure it's running.
 #. Save the new Mediator's identity and load it to relevant Sequencers:
 
-    .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/bftsynchronizer/MediatorOnboardingTest.scala
+    .. literalinclude:: CANTON/community/app-tests/sync/src/test/scala/com/digitalasset/canton/integration/tests/bftsynchronizer/MediatorOnboardingTest.scala
        :language: scala
        :start-after: user-manual-entry-begin: DynamicallyOnboardMediator-LoadIdentity
        :end-before: user-manual-entry-end: DynamicallyOnboardMediator-LoadIdentity
@@ -93,7 +93,7 @@ at a later point as described in this section.
 
 #. Propose a new Mediator state with active Mediators including the newly-onboarding Mediator:
 
-    .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/bftsynchronizer/MediatorOnboardingTest.scala
+    .. literalinclude:: CANTON/community/app-tests/sync/src/test/scala/com/digitalasset/canton/integration/tests/bftsynchronizer/MediatorOnboardingTest.scala
        :language: scala
        :start-after: user-manual-entry-begin: DynamicallyOnboardMediator-Propose
        :end-before: user-manual-entry-end: DynamicallyOnboardMediator-Propose
@@ -101,7 +101,7 @@ at a later point as described in this section.
 
 #. Initialize the new Mediator:
 
-    .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/bftsynchronizer/MediatorOnboardingTest.scala
+    .. literalinclude:: CANTON/community/app-tests/sync/src/test/scala/com/digitalasset/canton/integration/tests/bftsynchronizer/MediatorOnboardingTest.scala
        :language: scala
        :start-after: user-manual-entry-begin: DynamicallyOnboardMediator-Initialize
        :end-before: user-manual-entry-end: DynamicallyOnboardMediator-Initialize

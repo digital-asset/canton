@@ -66,7 +66,7 @@ echo "***** Starting test execution..."
 		sbt -J-Dlogback.configurationFile=logback.xml \
 				-J-Dcanton.metrics.reporters.csv.directory="$METRICS_DIR" \
 				-J-Dio.opentelemetry.exporter.metrics.csv.directory="$METRICS_DIR" \
-				"community-app/testOnly com.digitalasset.canton.integration.tests.nightly.sequencer.SequencerCatchUpPerformanceIntegrationTest"
+				"community-app-tests-resilience/testOnly com.digitalasset.canton.integration.tests.nightly.sequencer.SequencerCatchUpPerformanceIntegrationTest"
 )
 
 # Terminate test components before gathering metrics

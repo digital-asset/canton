@@ -31,7 +31,7 @@ Enable automatic pruning by specifying a pruning schedule consisting of the foll
 
 For example, to run pruning every Saturday starting at 8 AM until 4 PM (both in UTC):
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/pruning/PruningDocumentationTest.scala
+.. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/pruning/PruningDocumentationTest.scala
    :start-after: user-manual-entry-begin: AutoPruneParticipantNode
    :end-before: user-manual-entry-end: AutoPruneParticipantNode
    :dedent:
@@ -49,7 +49,7 @@ but requires identifying an explicit ledger offset up to which the ledger should
 
 1. Identify the numeric ledger offset up to which to prune the ledger by specifying the time up to which to prune:
 
-   .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/ledgerapi/LedgerApiParticipantPruningTest.scala
+   .. literalinclude:: CANTON/community/app-tests/ledgerapi/src/test/scala/com/digitalasset/canton/integration/tests/ledgerapi/LedgerApiParticipantPruningTest.scala
       :start-after: user-manual-entry-begin: ManualPruneParticipantNodeSafeOffsetLookup
       :end-before: user-manual-entry-end: ManualPruneParticipantNodeSafeOffsetLookup
       :dedent:
@@ -61,7 +61,7 @@ but requires identifying an explicit ledger offset up to which the ledger should
    In almost all cases, choose the comprehensive `prune` method that frees up the most storage, but also reduces the portion
    of the ledger visible via the Ledger API.
 
-   .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/ledgerapi/LedgerApiParticipantPruningTest.scala
+   .. literalinclude:: CANTON/community/app-tests/ledgerapi/src/test/scala/com/digitalasset/canton/integration/tests/ledgerapi/LedgerApiParticipantPruningTest.scala
       :start-after: user-manual-entry-begin: ManualPruneParticipantNodePrune
       :end-before: user-manual-entry-end: ManualPruneParticipantNodePrune
       :dedent:
@@ -70,7 +70,7 @@ but requires identifying an explicit ledger offset up to which the ledger should
    invoke the `prune_internally` method after the `prune` method and with a larger offset. For example, this way you can
    retain three months of the Ledger API history, but prune the internal stores up to one month.
 
-   .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/ledgerapi/LedgerApiParticipantPruningTest.scala
+   .. literalinclude:: CANTON/community/app-tests/ledgerapi/src/test/scala/com/digitalasset/canton/integration/tests/ledgerapi/LedgerApiParticipantPruningTest.scala
       :start-after: user-manual-entry-begin: ManualPruneParticipantNodeInternalPrune
       :end-before: user-manual-entry-end: ManualPruneParticipantNodeInternalPrune
       :dedent:

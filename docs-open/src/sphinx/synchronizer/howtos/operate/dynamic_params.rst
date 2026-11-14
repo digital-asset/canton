@@ -21,7 +21,7 @@ Get dynamic Synchronizer parameters
 
 You can get the current parameters on a Synchronizer you are connected to using the following command:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/dynamicsynchronizerparameters/SynchronizerParametersChangeIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/sync/src/test/scala/com/digitalasset/canton/integration/tests/dynamicsynchronizerparameters/SynchronizerParametersChangeIntegrationTest.scala
    :language: scala
    :start-after: user-manual-entry-begin:-begin: GetDynamicSynchronizerParameters
    :end-before: user-manual-entry-begin:-end: GetDynamicSynchronizerParameters
@@ -34,7 +34,7 @@ Change dynamic Synchronizer parameters
 
 You can set several dynamic parameters at the same time:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/dynamicsynchronizerparameters/SynchronizerParametersChangeIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/sync/src/test/scala/com/digitalasset/canton/integration/tests/dynamicsynchronizerparameters/SynchronizerParametersChangeIntegrationTest.scala
    :language: scala
    :start-after: user-manual-entry-begin:-begin: SetDynamicSynchronizerParameters
    :end-before: user-manual-entry-begin:-end: SetDynamicSynchronizerParameters
@@ -87,7 +87,7 @@ This means you need to modify both the Synchronizer and the Participant Node con
 
 After the configuration is modified, disconnect all the Participant Nodes from the Synchronizer and then restart all nodes.
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/MaxRequestSizeCrashIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/core/src/test/scala/com/digitalasset/canton/integration/tests/MaxRequestSizeCrashIntegrationTest.scala
    :language: scala
    :start-after: user-manual-entry-begin: StopCanton
    :end-before: user-manual-entry-end: StopCanton
@@ -95,7 +95,7 @@ After the configuration is modified, disconnect all the Participant Nodes from t
 
 Then perform the restart:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/MaxRequestSizeCrashIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/core/src/test/scala/com/digitalasset/canton/integration/tests/MaxRequestSizeCrashIntegrationTest.scala
    :language: scala
    :start-after: user-manual-entry-begin: RestartCanton
    :end-before: user-manual-entry-end: RestartCanton

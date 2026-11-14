@@ -492,7 +492,7 @@ The simplest operation is adding a new party to a participant. For this, we add 
 of the participant, which in the default case is part of the participant node. There is a simple macro to enable the
 party on a given participant if the participant is running their own topology manager:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/topology/TopologyManagementIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/upgrade-topology/src/test/scala/com/digitalasset/canton/integration/tests/topology/TopologyManagementIntegrationTest.scala
    :language: scala
    :start-after: architecture-handbook-entry-begin: EnableParty
    :end-before: architecture-handbook-entry-end: EnableParty
@@ -502,7 +502,7 @@ This will create a new party in the namespace of the participant's topology mana
 
 And there is the corresponding disable macro:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/topology/TopologyManagementIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/upgrade-topology/src/test/scala/com/digitalasset/canton/integration/tests/topology/TopologyManagementIntegrationTest.scala
    :language: scala
    :start-after: architecture-handbook-entry-begin: DisableParty
    :end-before: architecture-handbook-entry-end: DisableParty

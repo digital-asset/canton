@@ -19,7 +19,7 @@ You can set up scheduled automatic pruning for each of your Mediators as explain
 
 You can also directly prune the Mediator without using a schedule by calling the following command:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/pruning/MediatorPruningIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/pruning/MediatorPruningIntegrationTest.scala
    :start-after: user-manual-entry-begin: MediatorPrune
    :end-before: user-manual-entry-end: MediatorPrune
    :dedent:
@@ -129,7 +129,7 @@ catch up after crashing and coming back.
 
 See below how to manually prune using an admin command and also check the status.
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/pruning/BftOrdererPruningIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/pruning/BftOrdererPruningIntegrationTest.scala
    :language: none
    :start-after: user-manual-entry-begin: BftSequencerPruning
    :end-before: user-manual-entry-end: BftSequencerPruning
@@ -138,7 +138,7 @@ See below how to manually prune using an admin command and also check the status
 You can also set up scheduled automatic pruning for the BFT Orderer using the commands shown below as well as the ones
 explained :externalref:`here <ledger-pruning-automatic>`.
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/pruning/BftOrdererPruningIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/pruning/BftOrdererPruningIntegrationTest.scala
    :language: none
    :start-after: user-manual-entry-begin: BftSequencerScheduledPruning
    :end-before: user-manual-entry-end: BftSequencerScheduledPruning

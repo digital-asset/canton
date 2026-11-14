@@ -75,7 +75,7 @@ Decommissioning a Participant Node once the prerequisites are met
 #. Use the :ref:`topology.participant_synchronizer_permissions.propose <topology.participant_synchronizer_permissions.propose>` command
    to fully unauthorize the Participant Node on the Synchronizer:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/ParticipantOffboardingIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/ParticipantOffboardingIntegrationTest.scala
   :language: scala
   :start-after: user-manual-entry-begin: OffboardParticipant
   :end-before: user-manual-entry-end: OffboardParticipant
@@ -84,7 +84,7 @@ Decommissioning a Participant Node once the prerequisites are met
 Finally use the :ref:`repair.disable_member <repair.disable_member>` command to disable the Participant Node
 being decommissioned in all Sequencers and remove any Sequencer data associated with it.
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/ParticipantOffboardingIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/ParticipantOffboardingIntegrationTest.scala
   :language: scala
   :start-after: user-manual-entry-begin: DisableParticipant
   :end-before: user-manual-entry-end: DisableParticipant

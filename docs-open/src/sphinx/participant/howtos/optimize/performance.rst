@@ -277,7 +277,7 @@ While resource limits are necessary to protect the system from denial of service
 they can prevent Canton from achieving maximum throughput.
 Resource limits at the Canton protocol level can be configured as follows from the Canton console:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/BackpressureIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/core/src/test/scala/com/digitalasset/canton/integration/tests/BackpressureIntegrationTest.scala
    :start-after: user-manual-entry-begin: SetResourceLimits
    :end-before: user-manual-entry-end: SetResourceLimits
    :dedent:
@@ -446,14 +446,14 @@ If the underlying machine runs other processes (e.g., a database) or if Canton r
 the thread-pool may be too big, resulting in excessive context switching.
 To avoid that, configure the size of the thread pool explicitly like this:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/release/CliIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/resilience/src/test/scala/com/digitalasset/canton/integration/tests/release/CliIntegrationTest.scala
    :start-after: user-manual-entry-begin: SetNumThreads
    :end-before: user-manual-entry-end: SetNumThreads
    :dedent:
 
 As a result, Canton will log the following line:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/release/CliIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/resilience/src/test/scala/com/digitalasset/canton/integration/tests/release/CliIntegrationTest.scala
    :start-after: user-manual-entry-begin: LogNumThreads
    :end-before: user-manual-entry-end: LogNumThreads
    :dedent:

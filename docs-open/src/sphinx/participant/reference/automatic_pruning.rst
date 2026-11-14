@@ -14,14 +14,14 @@ Automatic Pruning
 
 The following functions are available to set, modify, and read the pruning schedule:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/pruning/PruningDocumentationTest.scala
+.. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/pruning/PruningDocumentationTest.scala
    :start-after: user-manual-entry-begin: AutoPruneAllMethods
    :end-before: user-manual-entry-end: AutoPruneAllMethods
    :dedent:
 
 Refer to the cron specification to customize the pruning schedule. Here are a few examples:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/pruning/PruningDocumentationTest.scala
+.. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/pruning/PruningDocumentationTest.scala
    :start-after: user-manual-entry-begin: PruningScheduleExamples
    :end-before: user-manual-entry-end: PruningScheduleExamples
    :dedent:
