@@ -252,6 +252,12 @@ fix is deployed on MainNet:
   transferred.
 - The health check of DB locked connections no longer counts a connection that is busy with other work as an inconclusive read-only check.
   Under sustained load this could make the node log "Locked connection was lost, trying to rebuild" and needlessly rebuild a healthy connection and its lock.
+- BFT sequencer: on shutdown, an incoming P2P call that was still being set up could fail with
+  `RejectedExecutionException: event executor terminated`, logged as "Authentication token verification caused an
+  unexpected exception" and an error from gRPC's `SerializingExecutor`. The P2P server now finishes its in-flight
+  calls before closing its network event loop.
+- BFT sequencer: a P2P connection attempt that is superseded by a newer attempt no longer logs an
+  "[UNEXPECTED] State transition" warning.
 
 ## Compatibility
 
