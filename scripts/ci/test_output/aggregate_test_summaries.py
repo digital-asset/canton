@@ -474,6 +474,7 @@ def self_test():
     test_load_shard_summaries_records_parse_errors_for_invalid_json()
     test_load_previous_state_reads_persisted_shards()
     test_merge_shards_prefers_current_shard_data()
+    test_merge_shards_partial_rerun_keeps_previous_shards()
     test_build_summary_handles_empty_input_glob()
     test_build_summary_reports_missing_shards_and_deduplicates_tests()
     test_build_summary_truncates_not_passed_tests()
@@ -617,6 +618,22 @@ def test_merge_shards_prefers_current_shard_data():
     assert len(merged) == 1, f"Expected one merged shard, got {merged}"
     assert merged[0]["path"] == "new.json"
     assert merged[0]["passed"] == 3
+
+
+def test_merge_shards_partial_rerun_keeps_previous_shards():
+    # "Re-run failed jobs": only shard 1 has a bundle from this attempt, shards 0 and 2 come
+    # from the previous state, and nothing is counted twice.
+    previous = [
+        _sample_shard(shard_index=str(i), total_shards="3", path=f"old-{i}.json")
+        for i in range(3)
+    ]
+    current = [
+        _sample_shard(shard_index="1", total_shards="3", path="new-1.json", passed=7, total=7)
+    ]
+    merged = merge_shards(previous, current)
+    assert [s["path"] for s in merged] == ["old-0.json", "new-1.json", "old-2.json"], merged
+    summary = build_summary(["new-1.json"], merged, [], limit=10)
+    assert "Missing shard indices" not in summary, summary
 
 
 def test_build_summary_handles_empty_input_glob():
