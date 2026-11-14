@@ -238,6 +238,9 @@ fix is deployed on MainNet:
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
 - Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
+- JSON Ledger API: the byte-size metrics of streamed HTTP request and response entities and of streamed websocket
+  messages are now recorded before the stream completes, not afterwards. A stream that fails also records the bytes it
+  transferred.
 
 ## Compatibility
 
