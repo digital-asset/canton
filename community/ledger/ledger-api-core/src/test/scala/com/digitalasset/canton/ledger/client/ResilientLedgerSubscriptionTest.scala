@@ -8,6 +8,7 @@ import com.daml.ledger.javaapi.data.Party
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.client.ResilientLedgerSubscriptionTest.SubscriptionState
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.ParticipantPrunedDataAccessed
+import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.logging.{LogEntry, NoLogging}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import io.grpc.{Status, StatusRuntimeException}
@@ -43,18 +44,22 @@ class ResilientLedgerSubscriptionTest extends AnyWordSpec with BaseTest with Has
       }
     }
 
-    "complete with the last error" when {
-      "closed after a failed subscription" in new TestContext {
+    "complete with AbortedDueToShutdown without logging the previous error again" when {
+      "closed while waiting to resubscribe after a failed subscription" in new TestContext {
         runTest { sut =>
           val sub = getSubscriberWhenReady()
+          // E.g. the Ledger API offset dispatcher being restarted by a repair operation
           val exception = new StatusRuntimeException(Status.UNAVAILABLE)
           sub.subscriber.onError(exception)
+          // Close while the retry waits for its backoff delay before resubscribing
           sut.close()
-          sut.subscriptionF.failed.futureValue shouldBe exception
+          sut.subscriptionF.unwrap.futureValue shouldBe UnlessShutdown.AbortedDueToShutdown
+          // No resubscription happened
+          subscriber.get().map(_.index) shouldBe Some(1)
         }(
+          // The failure is logged once, when it happens, and not again when closing
           expectedWarningMessages = Seq(
-            s"Ledger subscription $subscriptionName failed with an error",
-            s"wait-for-$subscriptionName-completed finished with an error",
+            s"Ledger subscription $subscriptionName failed with an error"
           )
         )
       }

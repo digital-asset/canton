@@ -53,7 +53,11 @@ class ResilientLedgerSubscription[S, T](
   private val offsetRef = new AtomicReference[Long](startOffset)
   private implicit val policyRetry: retry.Success[Any] = retry.Success.always
   private val ledgerSubscriptionRef = new AtomicReference[Option[LedgerSubscription]](None)
-  private[client] val subscriptionF = retry
+  // Use `unlessShutdown` so that a retry loop that stops due to shutdown completes with
+  // `AbortedDueToShutdown`, not with the failure of the previous attempt. That failure was
+  // already logged when it happened (e.g. the Ledger API offset dispatcher being restarted by a
+  // repair operation) and must not be reported again as a failure of the close.
+  private[client] val subscriptionF: FutureUnlessShutdown[Unit] = retry
     .Backoff(
       logger = logger,
       hasSynchronizeWithClosing = this,
@@ -62,7 +66,10 @@ class ResilientLedgerSubscription[S, T](
       maxDelay = 5.seconds,
       operationName = s"restartable-$subscriptionName",
     )
-    .apply(resilientSubscription(), AllExceptionRetryPolicy)
+    .unlessShutdown(
+      FutureUnlessShutdown.outcomeF(resilientSubscription()),
+      AllExceptionRetryPolicy,
+    )
 
   runOnOrAfterClose_(new RunOnClosing {
     override def name: String = s"$subscriptionName-shutdown"
@@ -80,7 +87,7 @@ class ResilientLedgerSubscription[S, T](
     Seq(
       AsyncCloseable(
         name,
-        subscriptionF.recover { error =>
+        subscriptionF.onShutdown(()).recover { error =>
           logger.warn(s"$name finished with an error", error)
           ()
         },
