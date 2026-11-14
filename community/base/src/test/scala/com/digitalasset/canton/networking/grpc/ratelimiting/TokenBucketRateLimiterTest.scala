@@ -6,13 +6,10 @@ package com.digitalasset.canton.networking.grpc.ratelimiting
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
-import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.RateLimitConfig
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.RateLimitMetrics
-import com.digitalasset.canton.util.PekkoUtil
-import com.typesafe.scalalogging.Logger
 import io.grpc.{Status, StatusRuntimeException}
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
@@ -22,7 +19,6 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Seconds, Span}
 import org.scalatest.wordspec.AnyWordSpec
-import org.slf4j.LoggerFactory
 
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
@@ -42,17 +38,16 @@ class TokenBucketRateLimiterTest
 
   // Can't mix in canton's own HasActorSystem/HasExecutionContext here: both live in
   // community-testing, which depends on community-base, so community-base depending back on
-  // either (even in Test scope) would be a circular module dependency. This reproduces just the
-  // handful of lines HasActorSystem itself needs, using primitives (PekkoUtil, Materializer)
-  // already in community-base's own main sources.
-  private implicit val ec: DirectExecutionContext =
-    DirectExecutionContext(Logger(LoggerFactory.getLogger(getClass)))
+  // either (even in Test scope) would be a circular module dependency.
+  // The actor system uses Pekko's own default dispatcher. A direct execution context as the
+  // default dispatcher would run actors (including the system's own termination) inline on
+  // whichever thread sends them a message, such as Pekko's scheduler thread.
   private implicit lazy val actorSystem: ActorSystem =
-    PekkoUtil.createActorSystem(getClass.getSimpleName)
+    ActorSystem(s"${getClass.getSimpleName}-actor-system")
   private implicit lazy val materializer: Materializer = Materializer(actorSystem)
 
   override def afterAll(): Unit =
-    try actorSystem.terminate().discard
+    try actorSystem.terminate().futureValue.discard
     finally super.afterAll()
 
   private def limiter(config: RateLimitConfig): TokenBucketRateLimiter =

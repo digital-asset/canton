@@ -15,6 +15,7 @@ import org.slf4j.event.Level
 import slick.util.AsyncExecutorWithMetrics
 
 import java.sql.Connection
+import scala.concurrent.Future
 
 trait DbLockedConnectionTest
     extends FixtureAsyncWordSpec
@@ -250,6 +251,42 @@ trait DbLockedConnectionTest
           checkHealth(f.connection)
           f.connection.state shouldNot be(prevState)
         }
+      }
+    }
+
+    "report a connection held by someone else as in use in the read-only check" in { f =>
+      awaitHealthy(f.connection)
+
+      val connection = f.connection.get.valueOrFail("Connection not available")
+
+      // Compose the futures instead of blocking on them: callbacks run on the test suite's serial
+      // execution context, which only makes progress once the test body has returned.
+      def checkReadOnly(): Future[Either[DbLockedConnection.ReadOnlyCheckError, Boolean]] =
+        DbLockedConnection
+          .checkReadOnlyConnection(
+            DbLock
+              .isSupported(setup.storage.profile)
+              .valueOrFail("Storage profile does not support DB locks"),
+            connection,
+            f.config.healthCheckTimeout,
+            executor,
+            noTracingLogger,
+          )
+          .value
+
+      // Hold the connection, as a write or the DB lock check does
+      connection.markInUse() shouldBe true
+      val whileInUseF = checkReadOnly().transform { result =>
+        connection.markFree()
+        result
+      }
+
+      for {
+        whileInUse <- whileInUseF
+        whenFree <- checkReadOnly()
+      } yield {
+        whileInUse shouldBe Left(DbLockedConnection.ReadOnlyCheckError.ConnectionInUse)
+        whenFree shouldBe Right(false)
       }
     }
 

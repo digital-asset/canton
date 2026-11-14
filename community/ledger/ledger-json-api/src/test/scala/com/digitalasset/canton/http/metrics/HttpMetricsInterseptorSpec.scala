@@ -97,8 +97,8 @@ class HttpMetricsInterseptorSpec
   "requests_total" should {
     "collect successful requests" in {
       withRouteAndMetrics { (route, metrics) =>
-        Get() ~> route
-        Get("/simple") ~> route
+        Get() ~> route ~> check(responseAs[String])
+        Get("/simple") ~> route ~> check(responseAs[String])
         Get("/a/bit/deeper") ~> route ~> check {
           metrics.requestsTotalValue("GET", "/") should be(1L)
           metrics.requestsTotalValue("GET", "/simple") should be(1L)
@@ -109,7 +109,7 @@ class HttpMetricsInterseptorSpec
 
     "collect missing routes" in {
       withRouteAndMetrics { (route, metrics) =>
-        Get("/undefined") ~> route
+        Get("/undefined") ~> route ~> check(responseAs[String])
         Get("/otherUndefined") ~> route ~> check {
           metrics.requestsTotalValue("GET", "/undefined") should be(1L)
           metrics.requestsTotalValue("GET", "/otherUndefined") should be(1L)
@@ -143,7 +143,7 @@ class HttpMetricsInterseptorSpec
 
     "contains all the labels" in {
       withRouteAndMetrics { (route, metrics) =>
-        Get("/simple") ~> route
+        Get("/simple") ~> route ~> check(responseAs[String])
         Post("/badrequest") ~> route ~> check {
           metrics.requestsTotal.valueFilteredOnLabels(
             LabelFilter("host", "example.com"),
@@ -270,7 +270,10 @@ class HttpMetricsInterseptorSpec
 
     "record byte payload size on multiple request" in {
       withRouteAndMetrics { (route, metrics) =>
-        Get("/", HttpEntity.Strict(ContentTypes.`text/plain(UTF-8)`, byteStringText)) ~> route
+        Get(
+          "/",
+          HttpEntity.Strict(ContentTypes.`text/plain(UTF-8)`, byteStringText),
+        ) ~> route ~> check(responseAs[String])
         Get(
           "/mirror/200",
           HttpEntity.Chunked(
@@ -298,7 +301,7 @@ class HttpMetricsInterseptorSpec
         Get(
           "/simple",
           HttpEntity.Strict(ContentTypes.`application/octet-stream`, byteString1),
-        ) ~> route
+        ) ~> route ~> check(responseAs[String])
         Post(
           "/badrequest",
           HttpEntity.Strict(ContentTypes.`application/octet-stream`, byteString2),
@@ -477,7 +480,7 @@ class HttpMetricsInterseptorSpec
         Get(
           "/mirror/200",
           HttpEntity.Strict(ContentTypes.`application/octet-stream`, byteString1),
-        ) ~> route
+        ) ~> route ~> check(responseAs[String])
         Post(
           "/badrequest",
           HttpEntity.Strict(ContentTypes.`application/octet-stream`, byteString2),
@@ -567,8 +570,8 @@ class HttpMetricsInterseptorSpec
 
     "record meaningful duration for multiple requests" in {
       withRouteAndMetrics { (route, metrics) =>
-        Get("/delay/300") ~> route
-        Get("/delay/300") ~> route
+        Get("/delay/300") ~> route ~> check(responseAs[String])
+        Get("/delay/300") ~> route ~> check(responseAs[String])
         Get("/delay/500") ~> route ~> check {
           val values300 = metrics.latencyValues("GET", "/delay/300")
           values300.size should be(2L)

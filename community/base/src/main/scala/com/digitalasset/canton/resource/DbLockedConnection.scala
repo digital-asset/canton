@@ -34,6 +34,7 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.{AllExceptionRetryPolicy, RetryEither, Success}
 import com.google.common.annotations.VisibleForTesting
 import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.scalalogging.Logger
 import org.slf4j.event.Level
 import slick.dbio.DBIO
 import slick.jdbc.{DataSourceJdbcDataSource, JdbcDataSource}
@@ -59,7 +60,11 @@ class DbLockedConnection private (
     createConnection: () => EitherT[Future, String, KeepAliveConnection],
     createLock: KeepAliveConnection => DbLock,
     config: DbLockedConnectionConfig,
-    checkReadOnly: KeepAliveConnection => EitherT[Future, String, Boolean],
+    checkReadOnly: KeepAliveConnection => EitherT[
+      Future,
+      DbLockedConnection.ReadOnlyCheckError,
+      Boolean,
+    ],
     private[resource] val lockId: DbLockId,
     exitOnFatalFailures: Boolean,
     clock: Clock,
@@ -631,6 +636,64 @@ object DbLockedConnection {
     case object Indeterminate extends ConnectionHealth
   }
 
+  /** Why a read-only check of a connection did not produce an answer. */
+  private[resource] sealed trait ReadOnlyCheckError extends Product with Serializable
+  private[resource] object ReadOnlyCheckError {
+
+    /** The connection is in use by someone else, e.g., a write or the DB lock check. */
+    case object ConnectionInUse extends ReadOnlyCheckError
+
+    final case class Failed(error: String) extends ReadOnlyCheckError
+  }
+
+  /** Checks whether the connection is read-only.
+    *
+    * The query runs through a single-connection database on top of `connection`, so it fails with
+    * [[ReadOnlyCheckError.ConnectionInUse]] if someone else holds the connection.
+    */
+  private[resource] def checkReadOnlyConnection(
+      profile: DbStorage.Profile with DbStorage.DbLockSupport,
+      connection: KeepAliveConnection,
+      queryTimeout: PositiveFiniteDurationConfig,
+      writeExecutor: AsyncExecutorWithShutdown,
+      logger: Logger,
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[Future, ReadOnlyCheckError, Boolean] =
+    profile match {
+      case Profile.Postgres(jdbc) =>
+        import slick.jdbc.canton.ActionBasedSQLInterpolation.Implicits.*
+        val db = KeepAliveConnection.createDatabaseFromConnection(
+          connection,
+          logger,
+          writeExecutor,
+        )
+
+        import profile.DbStorageAPI.jdbcActionExtensionMethods
+
+        val readOnlyQuery =
+          sql"show transaction_read_only"
+            .as[String]
+            .headOption
+            .withStatementParameters(statementInit =
+              _.setQueryTimeout(
+                queryTimeout.toInternal.toSecondsTruncated(TracedLogger(logger)).unwrap
+              )
+            )
+
+        EitherTUtil
+          .fromFuture(
+            db.run(readOnlyQuery),
+            {
+              case _: DbStorage.NoConnectionAvailable => ReadOnlyCheckError.ConnectionInUse
+              case err =>
+                ReadOnlyCheckError.Failed(show"Failed to check new connection for read-only: $err")
+            },
+          )
+          .map(_.map(_.toLowerCase).contains("on"))
+    }
+
   /** Checks whether the connection is valid and not read-only.
     *
     * @param readOnlyCheckTimeout
@@ -638,7 +701,7 @@ object DbLockedConnection {
     */
   private def checkConnection(
       connection: KeepAliveConnection,
-      checkReadOnly: KeepAliveConnection => EitherT[Future, String, Boolean],
+      checkReadOnly: KeepAliveConnection => EitherT[Future, ReadOnlyCheckError, Boolean],
       connectionTimeout: PositiveFiniteDuration,
       readOnlyCheckTimeout: PositiveFiniteDurationConfig,
       logger: TracedLogger,
@@ -680,7 +743,14 @@ object DbLockedConnection {
           case util.Success(Right(false)) =>
             logger.trace(s"Connection $connection is not read-only")
             ConnectionHealth.Healthy
-          case util.Success(Left(err)) =>
+          case util.Success(Left(ReadOnlyCheckError.ConnectionInUse)) =>
+            // Another user took the connection after the validity check above. As for a connection that is
+            // already in use when the check starts, this is no sign of a problem with the connection.
+            logger.trace(
+              s"Skip read-only check of connection $connection because the connection is in use"
+            )
+            ConnectionHealth.Healthy
+          case util.Success(Left(ReadOnlyCheckError.Failed(err))) =>
             logger.debug(s"Failed to check if connection $connection is read-only: $err")
             ConnectionHealth.Indeterminate
           case Failure(_: TimeoutException) =>
@@ -921,37 +991,16 @@ object DbLockedConnection {
           writeExecutor,
         )
 
-    def checkReadOnly(connection: KeepAliveConnection): EitherT[Future, String, Boolean] =
-      profile match {
-        case Profile.Postgres(jdbc) =>
-          import slick.jdbc.canton.ActionBasedSQLInterpolation.Implicits.*
-          val db = KeepAliveConnection.createDatabaseFromConnection(
-            connection,
-            logger,
-            writeExecutor,
-          )
-
-          import profile.DbStorageAPI.jdbcActionExtensionMethods
-
-          val readOnlyQuery =
-            sql"show transaction_read_only"
-              .as[String]
-              .headOption
-              .withStatementParameters(statementInit =
-                _.setQueryTimeout(
-                  connectionConfig.healthCheckTimeout.toInternal
-                    .toSecondsTruncated(tracedLogger)
-                    .unwrap
-                )
-              )
-
-          EitherTUtil
-            .fromFuture(
-              db.run(readOnlyQuery),
-              err => show"Failed to check new connection for read-only: $err",
-            )
-            .map(_.map(_.toLowerCase).contains("on"))
-      }
+    def checkReadOnly(
+        connection: KeepAliveConnection
+    ): EitherT[Future, ReadOnlyCheckError, Boolean] =
+      checkReadOnlyConnection(
+        profile,
+        connection,
+        connectionConfig.healthCheckTimeout,
+        writeExecutor,
+        logger,
+      )
 
     if (ds.keepAliveConnection) {
       logger.warn(s"DataSource should not be configured with keep-alive")

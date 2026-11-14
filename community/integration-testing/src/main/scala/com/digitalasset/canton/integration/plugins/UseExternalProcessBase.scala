@@ -11,6 +11,8 @@ import com.digitalasset.canton.integration.util.{BackgroundRunnerHandler, Backgr
 import com.digitalasset.canton.integration.{EnvironmentSetupPlugin, TestConsoleEnvironment}
 import com.digitalasset.canton.logging.NamedLogging
 
+import scala.concurrent.duration.FiniteDuration
+
 /** Run Canton processes in separate JVM instances such that we can kill them at any time
   *
   * The implementation of this trait that you will likely want to use is
@@ -73,6 +75,12 @@ trait UseExternalProcessBase[Config] extends EnvironmentSetupPlugin with NamedLo
   def stop(instanceName: String): Unit = handler.stopAndRemove(instanceName)
   def isRunning(instanceName: String): Boolean = handler.tryIsRunning(instanceName)
   def processHasCrashed(instanceName: String): Boolean = handler.processHasCrashed(instanceName)
+
+  /** Wait until the process of `instanceName` exits. Returns its exit code, or None if it is still
+    * alive after `timeout`.
+    */
+  def awaitExit(instanceName: String, timeout: FiniteDuration): Option[Int] =
+    handler.tryAwaitExit(instanceName, timeout)
   def restart(instanceName: String): Unit = handler.tryRestart(instanceName)
   def config(instanceName: String): Config = handler.tryInfo(instanceName)
 }

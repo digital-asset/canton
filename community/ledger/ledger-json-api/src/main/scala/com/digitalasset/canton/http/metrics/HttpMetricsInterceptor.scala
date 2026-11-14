@@ -8,7 +8,7 @@ import com.daml.metrics.api.MetricsContext
 import org.apache.pekko.http.scaladsl.model.{HttpEntity, RequestEntity, ResponseEntity}
 import org.apache.pekko.http.scaladsl.server.RouteResult.*
 import org.apache.pekko.http.scaladsl.server.{Directive, Route}
-import org.apache.pekko.stream.scaladsl.{Flow, Sink, Source}
+import org.apache.pekko.stream.scaladsl.Source
 import org.apache.pekko.util.ByteString
 
 import scala.concurrent.ExecutionContext
@@ -103,24 +103,18 @@ object HttpMetricsInterceptor {
         e.copy(data = byteStringSourceLengthReportMetric(e.data, metric))
     }
 
-  // adds a side flow to the source, to compute and report the total size of the ByteString elements
+  // Computes and reports the total size of the ByteString elements of the source.
   private def byteStringSourceLengthReportMetric[Mat](
       source: Source[ByteString, Mat],
       metric: Histogram,
   )(implicit mc: MetricsContext): Source[ByteString, Mat] =
-    source.alsoTo(
-      Flow[ByteString].fold(0L)((acc, d) => acc + d.length).to(Sink.foreach(metric.update(_)))
-    )
+    StreamSizeMetric.recordTotalSize(source, metric)(_.length.toLong)
 
-  // Adds a side flow to the source, to compute and report the total size of the ChunkStreamPart elements.
+  // Computes and reports the total size of the ChunkStreamPart elements of the source.
   private def chunkStreamPartSourceLengthReportMetric[Mat](
       source: Source[HttpEntity.ChunkStreamPart, Mat],
       metric: Histogram,
   )(implicit mc: MetricsContext): Source[HttpEntity.ChunkStreamPart, Mat] =
-    source.alsoTo(
-      Flow[HttpEntity.ChunkStreamPart]
-        .fold(0L)((acc, c) => acc + c.data.length)
-        .to(Sink.foreach(metric.update(_)))
-    )
+    StreamSizeMetric.recordTotalSize(source, metric)(_.data.length.toLong)
 
 }

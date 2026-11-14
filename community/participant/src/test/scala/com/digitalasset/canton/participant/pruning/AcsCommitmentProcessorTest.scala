@@ -4585,6 +4585,59 @@ class AcsCommitmentProcessorTest
 
     }
   }
+
+  "commitment reinitialization" should {
+    "refuse a second reinitialization while one is running, and accept one as soon as it finishes" in {
+      // Holds every reinitialization at its first step until released, so that "in progress" is a
+      // state the test controls rather than one it hopes to observe.
+      val release = Promise[Unit]()
+      val store =
+        new InMemoryAcsCommitmentStore(
+          synchronizerId,
+          new InMemoryAcsCommitmentConfigStore(),
+          loggerFactory,
+        ) {
+          override val runningCommitments: InMemoryIncrementalCommitments =
+            new InMemoryIncrementalCommitments(RecordTime.MinValue, Map.empty) {
+              override def markReinitializationStarted(timestamp: CantonTimestamp)(implicit
+                  traceContext: TraceContext
+              ): FutureUnlessShutdown[Unit] =
+                // pass the store's execution context explicitly: inside this class body it is
+                // ambiguous with the test suite's
+                FutureUnlessShutdown
+                  .outcomeF(release.future)(ec)
+                  .flatMap(_ => super.markReinitializationStarted(timestamp))(ec)
+            }
+        }
+
+      val (proc, _, _) = testSetup(
+        timeProofs = List.empty,
+        contractSetup = Map.empty,
+        topology = Map(localId -> Set(alice), remoteId1 -> Set(bob)),
+        optCommitmentStore = Some(store),
+      )
+
+      (for {
+        processor <- proc
+        first = processor.reinitializeCommitments(toc(1))
+        _ = first shouldBe defined
+        _ = processor.reinitializeCommitments(toc(2)) shouldBe None
+        _ = release.success(())
+        _ <- first.value
+        // No waiting or polling: once the returned future has completed, a new reinitialization
+        // must be accepted. Before the fix, callers waited for the store's completion marker, which
+        // is written before the processor releases its in-progress flag.
+        second = processor.reinitializeCommitments(toc(3))
+        _ = second shouldBe defined
+        _ <- second.value
+        status <- store.runningCommitments.readReinitilizationStatus()
+      } yield status shouldBe AcsCommitmentStore.ReinitializationStatus(
+        Some(toc(3).timestamp),
+        Some(toc(3).timestamp),
+      )).failOnShutdown
+    }
+  }
+
   "metrics" should {
     "Report differently latencies for distinguished and non-distinguished counter participants" in {
       val timeProofs = List(3L, 8, 20, 35, 59).map(CantonTimestamp.ofEpochSecond)

@@ -465,7 +465,8 @@ trait AcsCommitmentRepairIntegrationTest
             s"Reinitialization is already scheduled or in progress for $daId."
           )
         )
-        // after all reinits return, another reinit should succeed
+        // after all reinits return, another reinit must succeed: the repair service returns only once the
+        // reinitialization task has finished and released the processor's in-progress flag
         successfulReinit = participant1.commitments.reinitialize_commitments(
           Seq(daId.logical),
           Seq.empty,

@@ -198,6 +198,9 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 - Previously `canton.remote-participants.<remoteParticipant>.token` was used for both ledger API and admin API commands in the Canton Console.
   Now, an optional `canton.remote-participants.<remoteParticipant>.admin-api-token` can be specified to use a different token for admin API
   commands in case that admin API auth differs from ledger API auth.
+- With submission request amplification, a sequencer refuses a copy of a confirmation response whose aggregation was
+  already delivered through another sequencer. The participant now logs this at INFO instead of a WARN
+  "Failed to send responses", because the responses were sequenced.
 
 ### Synchronizer operators
 
@@ -238,6 +241,17 @@ fix is deployed on MainNet:
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
 - Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
+- `commitments.reinitialize_commitments` returns only after the reinitialization has finished. Previously it could
+  return slightly earlier, so an immediately following call could be rejected with "Reinitialization is already
+  scheduled or in progress". A failed reinitialization is now reported right away instead of after the timeout.
+- When a participant disconnects from a synchronizer while a topology transaction broadcast is pending, the
+  participant no longer immediately resubmits the pending and queued topology transactions to that synchronizer. They
+  are submitted after reconnecting, as before.
+- JSON Ledger API: the byte-size metrics of streamed HTTP request and response entities and of streamed websocket
+  messages are now recorded before the stream completes, not afterwards. A stream that fails also records the bytes it
+  transferred.
+- The health check of DB locked connections no longer counts a connection that is busy with other work as an inconclusive read-only check.
+  Under sustained load this could make the node log "Locked connection was lost, trying to rebuild" and needlessly rebuild a healthy connection and its lock.
 
 ## Compatibility
 

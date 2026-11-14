@@ -160,16 +160,25 @@ abstract class AbstractMessageProcessor(
        Discard the inner future (actual send) and wait only on the outer future.
        As a result, we don't wait on the send of confirmation responses.
        */
+      /*
+       Responses are sent with amplification, so the sequencer client adds a sender-dedup aggregation rule.
+       A sequencer refuses a copy with `RequestAlreadyExists` only when the aggregation has already been
+       delivered, i.e., another copy of the same responses has been sequenced. This is not a failure.
+       */
+      def logSendError(err: SendAsyncClientError, otherwise: Level): Unit = {
+        val level = err match {
+          case _: SendAsyncClientError.RequestAlreadyExists => Level.INFO
+          case _ => otherwise
+        }
+        LoggerUtil.logAtLevel(level, s"$errorBody: ${err.show}")
+      }
+
       sendResult.value.value.map {
-        case Left(err) =>
-          logger.warn(s"$errorBody: ${err.show}")
+        case Left(err) => logSendError(err, Level.WARN)
 
         case Right(inner: EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit]) =>
           FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-            inner.valueOr { err =>
-              LoggerUtil
-                .logAtLevel(SendAsyncClientError.logLevel(err), s"$errorBody: ${err.show}")
-            },
+            inner.valueOr(err => logSendError(err, SendAsyncClientError.logLevel(err))),
             failureMessage = errorBody,
             level = Level.INFO,
           )

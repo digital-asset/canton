@@ -189,7 +189,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       ) // This offset is the largest exclusive offset we can no longer read from after
       offsetOfFirstSurvivingTransaction = offsets(lastItemToPruneIndex + 1)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- pruneAfterPublishing(participant, submitter, offsetToPruneUpTo)
 
       txReqAfterPrune <- participant
         .getTransactionsRequest(
@@ -259,7 +259,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       ) // This offset is the largest exclusive offset we can no longer read from after
       offsetOfFirstSurvivingTransaction = offsets(lastItemToPruneIndex + 1)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- pruneAfterPublishing(participant, submitter, offsetToPruneUpTo)
       txReqAfterPrune <- participant
         .getTransactionsRequest(
           transactionFormat = participant.transactionFormat(parties = Some(Seq(submitter))),
@@ -329,7 +329,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
         )
         .map(_.headOption.value)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- pruneAfterPublishing(participant, submitter, offsetToPruneUpTo)
 
       firstCheckpointsAfterPrune <- participant
         .offsets(
@@ -392,7 +392,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
     for {
       offsets <- populateLedgerAndGetOffsets(participant, submitter)
       offsetToPruneUpTo = offsets(lastItemToPruneIndex)
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- pruneAfterPublishing(participant, submitter, offsetToPruneUpTo)
 
     } yield ()
 
@@ -421,7 +421,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       ).toVector
         .map(offsetAndUpdateIdEntries(_)._2)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- pruneAfterPublishing(participant, submitter, offsetToPruneUpTo)
 
       prunedTransactions <- Future.sequence(
         prunedUpdateIds.map(
@@ -465,7 +465,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       ).toVector
         .map(offsets(_))
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- pruneAfterPublishing(participant, submitter, offsetToPruneUpTo)
 
       prunedFlatTransactions <- Future.sequence(
         prunedTransactionOffsets.map(
@@ -499,7 +499,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       offsets <- populateLedgerAndGetOffsets(participant, submitter)
       offsetToPruneUpTo = offsets(lastItemToPruneIndex)
       offsetOfFirstSurvivingTransaction = offsets(lastItemToPruneIndex + 1)
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- pruneAfterPublishing(participant, submitter, offsetToPruneUpTo)
 
       txReqAfterPrune <- participant
         .getTransactionsRequest(participant.transactionFormat(parties = Some(Seq(submitter))))
@@ -512,7 +512,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
 
       offsetAlreadyPruned = offsets(lastItemToPruneIndex / 2)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- pruneAfterPublishing(participant, submitter, offsetToPruneUpTo)
 
       txReqAfterRedundantPrune <- participant
         .getTransactionsRequest(participant.transactionFormat(parties = Some(Seq(submitter))))
@@ -529,7 +529,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       // Add more events before second prune too to advance canton's safe pruning offset
       offsetsFollowingSecondRealPrune <- populateLedgerAndGetOffsets(participant, submitter)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpToInSecondRealPrune)
+      _ <- pruneAfterPublishing(participant, submitter, offsetToPruneUpToInSecondRealPrune)
 
       txReqAfterSecondPrune <- participant
         .getTransactionsRequest(participant.transactionFormat(parties = Some(Seq(submitter))))
@@ -580,7 +580,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       offsets <- populateLedgerAndGetOffsets(participant, submitter)
       offsetToPruneUpTo = offsets(lastItemToPruneIndex)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- pruneAfterPublishing(participant, submitter, offsetToPruneUpTo)
 
       _ <- participant.exercise(submitter, createdBeforePrune.exerciseDummyChoice1())
     } yield ()
@@ -599,7 +599,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       offsets <- populateLedgerAndGetOffsets(participant, submitter)
       offsetInPrunedRange = offsets(lastItemToPruneIndex / 2)
       offsetToPruneUpTo = offsets(lastItemToPruneIndex)
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- pruneAfterPublishing(participant, submitter, offsetToPruneUpTo)
 
       emptyRangeBeforePruning <- participant
         .getTransactionsRequest(
@@ -669,7 +669,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       )
       _ <- participant.submitAndWait(exerciseCmd)
       events2 <- getEvents(dummyCid)
-      _ <- participant.pruneWithAcsCheck(Some(Seq(party)), end1)
+      _ <- pruneAfterPublishing(participant, party, end1)
       events3 <- getEvents(dummyCid)
       _ <- pruneToCurrentEnd(participant, party) // TODO(#16361) - This line causes the problem
       events4 <- getEvents(dummyCid)
@@ -726,6 +726,27 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
 //      assertEquals("Expected no events following prune", events3, 0)
 //    }
 //  })
+
+  /** Prunes up to `pruneUpTo` and checks that the ACS of `party` is unchanged.
+    *
+    * Canton refuses to prune offsets published less than the max deduplication duration before the
+    * participant's latest publication time, and that time only moves when something is published.
+    * So every prune attempt is preceded by a create for a separate party: it moves the publication
+    * time forward without adding events that `party` sees.
+    */
+  private def pruneAfterPublishing(
+      participant: ParticipantTestContext,
+      party: Party,
+      pruneUpTo: Long,
+  )(implicit ec: ExecutionContext): Future[Unit] =
+    for {
+      publisher <- participant.allocateParty()
+      _ <- participant.pruneWithAcsCheck(
+        Some(Seq(party)),
+        pruneUpTo,
+        beforeEachAttempt = () => participant.create(publisher, new Dummy(publisher)).map(_ => ()),
+      )
+    } yield ()
 
   private def populateLedgerAndGetOffsets(participant: ParticipantTestContext, submitter: Party)(
       implicit ec: ExecutionContext
