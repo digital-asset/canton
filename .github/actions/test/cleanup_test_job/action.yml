@@ -57,9 +57,15 @@ runs:
       uses: ./.github/actions/nix/nix_run
       with:
         command: |
+          EXTRA_ARGS=()
+          # [TEST ONLY] Suite-wall weights for lanes that opt in (see build_timings.py).
+          if [[ "${CANTON_SUITE_WALL_TIMINGS:-}" == "true" ]]; then
+            EXTRA_ARGS+=(--suite-junit-glob ".ci-test-results/first-run/**/TEST-*.xml" --canton-log-glob "log/canton_test*.log")
+          fi
           python3 scripts/ci/split-tests/build_timings.py \
             --junit-glob ".ci-test-results/merged/TEST-*.xml" \
-            --output timings.json
+            --output timings.json \
+            "${EXTRA_ARGS[@]}"
 
     - name: Build Test Results Summary (Shard Artifact)
       if: ${{ !cancelled() }}

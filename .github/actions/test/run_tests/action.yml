@@ -295,6 +295,10 @@ runs:
         exclude_patterns: ${{ inputs.exclude_patterns }}
         include_patterns: ${{ inputs.include_patterns }}
         debug_split_tests: "false"
+        # [TEST ONLY] With suite-wall timings, classes without a weight are almost all classes that never
+        # produce a report (e.g. abstract bases), so 300 s per class would be phantom weight; ~30 s is a
+        # typical small integration suite.
+        fallback_test_time: ${{ env.CANTON_SUITE_WALL_TIMINGS == 'true' && '30' || '300' }}
 
     - name: Persist the test split for reruns
       if: inputs.num_test_buckets != '0' && steps.split.outcome == 'success'
@@ -398,6 +402,24 @@ runs:
     - name: Set CANTON_CRASH_ON_PRETTY_PRINTING_ERRORS
       shell: bash
       run: echo "CANTON_CRASH_ON_PRETTY_PRINTING_ERRORS=true" >> "$GITHUB_ENV"
+
+    - name: Write the suite order file
+      # [TEST ONLY] Lanes that set CANTON_SUITE_WALL_TIMINGS run their in-process suites longest first
+      # (project/CantonOrderedTests.scala). The weights are this shard's timings file.
+      if: env.CANTON_SUITE_WALL_TIMINGS == 'true' && inputs.timings_file != ''
+      uses: ./.github/actions/nix/nix_run
+      env:
+        TIMINGS_FILE: ${{ inputs.timings_file }}
+      with:
+        command: |
+          if [[ -f "$TIMINGS_FILE" ]]; then
+            ORDER_FILE="$RUNNER_TEMP/canton-test-order.tsv"
+            python3 -c 'import json,sys; [print(f"{k}\t{v}") for k, v in json.load(open(sys.argv[1])).items()]' "$TIMINGS_FILE" > "$ORDER_FILE"
+            echo "CANTON_TEST_ORDER_FILE=$ORDER_FILE" >> "$GITHUB_ENV"
+            echo "Suite order: $(wc -l < "$ORDER_FILE") weights from $TIMINGS_FILE"
+          else
+            echo "No timings file at $TIMINGS_FILE; sbt keeps its default suite order."
+          fi
 
     - name: Run SBT Tests
       id: run_sbt_tests

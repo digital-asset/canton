@@ -73,7 +73,8 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/utils/resolve_previous_artifact_run
         with:
-          artifact-name: ${{ inputs.job_name }}-timings-latest
+          # [TEST ONLY] The PV37 lane uses suite-wall timings under their own name, so other PRs' splits are unaffected.
+          artifact-name: ${{ inputs.job_name == 'test_37' && 'test_37-suitewall' || inputs.job_name }}-timings-latest
 
   test:
     name: Test (shard ${{ matrix.shard }})
@@ -118,6 +119,9 @@ jobs:
       AWS_MAX_ATTEMPTS: "10"
       EXECUTOR_JVM_HEAP_SIZE: 14000M
       CANTON_CI_JOB_NAME: ${{ inputs.job_name }}
+      # [TEST ONLY] PV37 lane: weight suites by wall time (build_timings.py) and run them longest first
+      # (project/CantonOrderedTests.scala via CANTON_TEST_ORDER_FILE, written in run_tests).
+      CANTON_SUITE_WALL_TIMINGS: ${{ inputs.job_name == 'test_37' && 'true' || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -132,7 +136,8 @@ jobs:
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings
         with:
-          timings-artifact-name: ${{ inputs.job_name }}-timings-latest
+          timings-artifact-name: ${{ inputs.job_name == 'test_37' && 'test_37-suitewall' || inputs.job_name }}-timings-latest
+          seed-timings-file: ${{ inputs.job_name == 'test_37' && 'scripts/ci/split-tests/seeds/test_37-suitewall-timings.json' || '' }}
           timings-path: ${{ github.job }}/.timings
           github-token: ${{ github.token }}
           previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
@@ -178,3 +183,4 @@ jobs:
       # upload via the DATADOG_TEST_OPTIMIZATION env above, so also surface the
       # results link on the run summary. Keep this in sync with that env var.
       datadog_test_optimization: true
+      timings_artifact_prefix: ${{ inputs.job_name == 'test_37' && 'test_37-suitewall' || '' }}
