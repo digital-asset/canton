@@ -25,6 +25,12 @@ inputs:
       it here. Defaults to false for standalone callers.
     required: false
     default: "false"
+  seed-timings-file:
+    description: >
+      [TEST ONLY] Checked-in timings.json to use when no previous timings artifact was found, so the
+      first run with a new timings artifact name still gets a balanced split.
+    required: false
+    default: ""
 
 outputs:
   previous-timings-run-id:
@@ -111,3 +117,18 @@ runs:
         path: ${{ inputs.timings-path }}
         run-id: ${{ steps.timings_run.outputs.run-id }}
         github-token: ${{ inputs.github-token }}
+
+    - name: Use seed timings when no previous timings artifact was found
+      if: always() && inputs.seed-timings-file != ''
+      shell: bash
+      env:
+        SEED_TIMINGS_FILE: ${{ inputs.seed-timings-file }}
+        TIMINGS_PATH: ${{ inputs.timings-path }}
+      run: |
+        if [[ -f "$TIMINGS_PATH/timings.json" ]]; then
+          echo "Using the downloaded timings."
+        else
+          mkdir -p "$TIMINGS_PATH"
+          cp "$SEED_TIMINGS_FILE" "$TIMINGS_PATH/timings.json"
+          echo "No previous timings artifact; using seed $SEED_TIMINGS_FILE."
+        fi

@@ -1,0 +1,49 @@
+name: Request Full Canton CI
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  request_full_ci:
+    name: Request full CI
+    if: github.event.issue.pull_request && github.event.issue.state == 'open' && contains(github.event.comment.body, '/ci all')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authorize exact command
+        id: authorize
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { comment, issue } = context.payload;
+            if (comment.body.trim() !== '/ci all') return;
+            if (issue.labels.some(label => label.name === 'ci:full')) {
+              core.notice('Full CI is already enabled for this PR.');
+              return;
+            }
+            const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+              ...context.repo, username: comment.user.login,
+            });
+            if (['write', 'maintain', 'admin'].includes(data.permission)) core.setOutput('allowed', 'true');
+
+      # An App token lets this label emit the pull_request event for the required check.
+      - name: Create label token
+        if: steps.authorize.outputs.allowed == 'true'
+        id: token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.CANTON_CI_APP_ID }}
+          private-key: ${{ secrets.CANTON_CI_APP_PRIVATE_KEY }}
+          permission-issues: write
+
+      - name: Enable full CI
+        if: steps.authorize.outputs.allowed == 'true'
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ steps.token.outputs.token }}
+          script: |
+            await github.rest.issues.addLabels({
+              ...context.repo, issue_number: context.issue.number, labels: ['ci:full'],
+            });
