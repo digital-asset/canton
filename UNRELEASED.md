@@ -238,6 +238,12 @@ fix is deployed on MainNet:
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
 - Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
+- BFT sequencer: on shutdown, an incoming P2P call that was still being set up could fail with
+  `RejectedExecutionException: event executor terminated`, logged as "Authentication token verification caused an
+  unexpected exception" and an error from gRPC's `SerializingExecutor`. The P2P server now finishes its in-flight
+  calls before closing its network event loop.
+- BFT sequencer: a P2P connection attempt that is superseded by a newer attempt no longer logs an
+  "[UNEXPECTED] State transition" warning.
 
 ## Compatibility
 

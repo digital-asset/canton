@@ -1679,6 +1679,16 @@ private[bftordering] object P2PGrpcConnectionManager {
       ] = UnlessShutdown.Outcome(Map.empty)
   ) {
 
+    private def unchangedOnOwnChannelIsUnexpected(
+        oldState: P2POutgoingConnectionStatus,
+        stateChannel: ManagedChannel,
+        channel: ManagedChannel,
+    ): (Level, () => String) =
+      if (stateChannel == channel)
+        Level.WARN -> (() => s"$oldState (this worker's channel, unchanged)")
+      else
+        Level.DEBUG -> (() => s"$oldState (another worker's channel, unchanged)")
+
     def attemptTransitionToConnecting(
         p2pEndpointId: P2PEndpoint.Id
     ): (State, ResultWithLogs[Boolean]) =
@@ -1808,11 +1818,20 @@ private[bftordering] object P2PGrpcConnectionManager {
                 case oldState @ P2POutgoingConnectionStatus.Connecting =>
                   this -> ResultWithLogs((), Level.INFO -> (() => s"$oldState (unchanged)"))
 
+                // Same race as above: this attempt's channel was removed by a disconnect before its worker
+                //  was recorded, and a newer attempt on another channel has since recorded its own worker
+                //  and progressed. Only a state on this attempt's own channel would be unexpected here.
                 case oldState: P2POutgoingConnectionStatus.DisconnectingFromChannel =>
-                  this -> ResultWithLogs((), Level.WARN -> (() => s"$oldState (unchanged)"))
+                  this -> ResultWithLogs(
+                    (),
+                    unchangedOnOwnChannelIsUnexpected(oldState, oldState.channel, channel),
+                  )
 
                 case oldState: P2POutgoingConnectionStatus.ConnectedOnChannel =>
-                  this -> ResultWithLogs((), Level.WARN -> (() => s"$oldState (unchanged)"))
+                  this -> ResultWithLogs(
+                    (),
+                    unchangedOnOwnChannelIsUnexpected(oldState, oldState.channel, channel),
+                  )
               }
 
             case None =>
