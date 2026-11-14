@@ -238,6 +238,8 @@ fix is deployed on MainNet:
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
 - Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
+- The health check of DB locked connections no longer counts a connection that is busy with other work as an inconclusive read-only check.
+  Under sustained load this could make the node log "Locked connection was lost, trying to rebuild" and needlessly rebuild a healthy connection and its lock.
 
 ## Compatibility
 
