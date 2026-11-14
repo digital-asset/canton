@@ -927,8 +927,9 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       pruneUpTo: Long,
       attempts: Int,
       activeAtOffset0: Option[Long],
+      beforeEachAttempt: () => Future[Unit],
   )(implicit ec: ExecutionContext): Future[Unit] =
-    delegate.pruneWithAcsCheck(parties, pruneUpTo, attempts, activeAtOffset0)
+    delegate.pruneWithAcsCheck(parties, pruneUpTo, attempts, activeAtOffset0, beforeEachAttempt)
 
   override def pruneCantonSafe(
       pruneUpTo: Long,
