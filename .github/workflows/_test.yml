@@ -102,6 +102,11 @@ jobs:
       PROFILE_EXTRA_SBT_PARAMETERS: >-
         ${{ inputs.job_name == 'test_37' && format('-J-Dcanton-test.integration.concurrency={0}
         -J-XX:StartFlightRecording=filename=track/test.jfr,settings=default,dumponexit=true,maxsize=600m', '4') || '' }}
+      # [TEST ONLY] PV37 H2 experiment, not for merging. On the PV37 lane only, swap UsePostgres for in-memory H2
+      # in integration suites that don't need Postgres (PostgresToH2Switch.scala). Unlike the profiling flags above,
+      # run_tests passes this to the failed-only rerun too, so a suite that fails on H2 is not retried on Postgres.
+      # Unit PostgresTest suites and the kept integration suites still use the shard's Postgres container.
+      H2_EXPERIMENT_SBT_PARAMETERS: ${{ inputs.job_name == 'test_37' && '-J-Dcanton-test.integration.postgres-to-h2=true' || '' }}
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
       # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
       SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}

@@ -80,7 +80,7 @@ import scala.util.control.NonFatal
 class UsePostgres(
     protected[plugins] val loggerFactory: NamedLoggerFactory,
     customDbNames: Option[(String => String, String)] = None,
-    nodeDbMapping: String => String = identity,
+    nodeDbMapping: String => String = UsePostgres.DefaultNodeDbMapping,
     customMaxConnectionsByNode: Option[String => Option[PositiveInt]] = None,
     forceTestContainer: Boolean = false,
     dropDatabaseAfterTest: Boolean = true,
@@ -103,6 +103,13 @@ class UsePostgres(
   private lazy val dbPrefix = "d" + Random.alphanumeric.map(_.toLower).take(7).mkString
 
   private lazy val applicationName: String = loggerFactory.name
+
+  /** [TEST ONLY] PV37 H2 experiment: true if this plugin gives every node its own fresh database
+    * that is dropped after the test, i.e. nothing a test could rely on beyond "a database".
+    */
+  private[plugins] def usesDefaultDbLayout: Boolean =
+    customDbNames.isEmpty && customMaxConnectionsByNode.isEmpty && !forceTestContainer &&
+      dropDatabaseAfterTest && (nodeDbMapping eq UsePostgres.DefaultNodeDbMapping)
 
   def generateDbName(nodeName: String): String =
     customDbNames match {
@@ -315,4 +322,9 @@ class UsePostgres(
     val pgDumpRestore = PostgresDumpRestore(this, forceLocal)
     names.parTraverse_(db => pgDumpRestore.restoreDump(db, dumpTempFile(tempDirectory, db).path))
   }
+}
+
+object UsePostgres {
+  // A stable instance so that PostgresToH2Switch can tell the default mapping from a custom one.
+  private[plugins] val DefaultNodeDbMapping: String => String = identity
 }

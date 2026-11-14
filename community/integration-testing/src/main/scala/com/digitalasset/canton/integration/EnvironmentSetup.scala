@@ -7,7 +7,7 @@ import com.digitalasset.canton.CloseableTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DefaultPorts, SharedCantonConfig, TestingConfigInternal}
 import com.digitalasset.canton.environment.{Environment, EnvironmentFactory}
-import com.digitalasset.canton.integration.plugins.{UseH2, UsePostgres}
+import com.digitalasset.canton.integration.plugins.{PostgresToH2Switch, UseH2, UsePostgres}
 import com.digitalasset.canton.logging.{LogEntry, NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.metrics.{MetricsFactoryType, ScopedInMemoryMetricsFactory}
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
@@ -42,6 +42,9 @@ sealed trait EnvironmentSetup[C <: SharedCantonConfig[C], E <: Environment[C]]
   protected val acsDigestConsistencyCheckTimeout: Timeout = Timeout(Span(60, Seconds))
 
   override protected def beforeAll(): Unit = {
+    // [TEST ONLY] PV37 H2 experiment: no-op unless -Dcanton-test.integration.postgres-to-h2=true.
+    // All plugins are registered by now (constructor), so the switch sees the whole set.
+    plugins = PostgresToH2Switch(this, plugins, loggerFactory)
     plugins.foreach(_.beforeTests())
     super.beforeAll()
   }
