@@ -111,9 +111,16 @@ trait SynchronizerParametersTimeoutChangesIntegrationTest
         _.update(
           confirmationResponseTimeout =
             defaultsParameters.confirmationResponseTimeout.toConfig.minusSeconds(1),
-          // Need to increase mediatorReactionTimeout accordingly, so that mediator stays within the deadline.
+          // Increase mediatorReactionTimeout so that the mediator's timeout verdict is sequenced before
+          // the decision time `ts + confirmationResponseTimeout + mediatorReactionTimeout`, where `ts`
+          // is the request's sequencing time. The delay policy advances the clock to whole seconds:
+          // the late response of participant1 is sequenced shortly after `trunc(ts) + 30s`, and the
+          // verdict shortly after `trunc(ts) + 30s + defaultMediatorReactionTimeout`. Increasing by
+          // only 1s leaves a margin of the sub-second part of `ts` minus the verdict's offset, which
+          // can be negative: participant1 then times out locally (LOCAL_VERDICT_TIMEOUT) instead of
+          // receiving the mediator's verdict. Increasing by 2s gives the verdict a full second.
           mediatorReactionTimeout =
-            defaultsParameters.mediatorReactionTimeout.toConfig.plusSeconds(1),
+            defaultsParameters.mediatorReactionTimeout.toConfig.plusSeconds(2),
         ),
         mustFullyAuthorize = true,
       )
