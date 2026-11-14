@@ -92,6 +92,7 @@ jobs:
       AWS_RETRY_MODE: adaptive
       AWS_MAX_ATTEMPTS: "10"
       EXECUTOR_JVM_HEAP_SIZE: 14000M
+      SBT_TASK_TIMINGS: "true" # [TEST ONLY] per-task timings in the sbt log
     steps:
       - name: Checkout
         uses: actions/checkout@v5

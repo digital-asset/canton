@@ -356,6 +356,14 @@ SBT_CMD+=("-J-XX:MaxMetaspaceSize=$EXECUTOR_JVM_METASPACE_SIZE")
 # Create a heap dump on OOME
 SBT_CMD+=("-J-XX:+HeapDumpOnOutOfMemoryError")
 
+# [TEST ONLY] Per-task timings, to see where `update` and an up-to-date `Test/compile` spend their
+# time. sbt prints, after each command, every task that took longer than the threshold.
+if [[ "${SBT_TASK_TIMINGS:-}" == "true" ]]; then
+  SBT_CMD+=("-Dsbt.task.timings=true" "-Dsbt.task.timings.threshold=300" "-Dsbt.task.timings.omit.paths=true")
+  info "Dependency caches before sbt starts:"
+  du -sh "$HOME/.cache/coursier" "$HOME/.ivy2/cache" "$HOME/.sbt" "$HOME/.m2/repository" 2>&1 | sed 's/^/  /' || true
+fi
+
 # Setup execution context size
 SBT_CMD+=("-J-Dscala.concurrent.context.numThreads=${EXECUTION_CONTEXT_SIZE}")
 SBT_CMD+=("-J-Dscala.concurrent.context.maxThreads=${EXECUTION_CONTEXT_SIZE}")
