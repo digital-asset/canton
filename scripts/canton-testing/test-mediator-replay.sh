@@ -63,7 +63,7 @@ echo "***** Running Mediator Replay Test..."
 			-J-Dreplay-tests.total-cycles="${MEDIATOR_REPLAY_TOTAL_CYCLES:-1000}" \
 			-J-Dcanton.metrics.reporters.csv.directory="$METRICS_DIR" \
 			-J-Dio.opentelemetry.exporter.metrics.csv.directory="$METRICS_DIR" \
-			"community-app/testOnly com.digitalasset.canton.integration.tests.benchmarks.MediatorReplayBenchmark"
+			"community-app-tests-resilience/testOnly com.digitalasset.canton.integration.tests.benchmarks.MediatorReplayBenchmark"
 )
 
 terminate-subprocesses

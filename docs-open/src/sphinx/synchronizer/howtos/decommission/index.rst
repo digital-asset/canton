@@ -38,7 +38,7 @@ Disconnecting all nodes from the Sequencer to be decommissioned
 * Change the Sequencer connection on the Mediators connected to the Sequencer to be decommissioned
   to use another active Sequencer, as per :ref:`mediator connectivity <mediator-connectivity>`:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/SequencerOffboardingIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/SequencerOffboardingIntegrationTest.scala
    :language: scala
    :start-after: user-manual-entry-begin: SequencerOffboardingSwitchAwayMediator
    :end-before: user-manual-entry-end: SequencerOffboardingSwitchAwayMediator
@@ -47,7 +47,7 @@ Disconnecting all nodes from the Sequencer to be decommissioned
 * Reconnect Participant Nodes to the Synchronizer, as described in :externalref:`Synchronizer connectivity <participant_Synchronizer_connectivity>`, using a Sequencer connection
   to another active Sequencer:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/SequencerOffboardingIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/SequencerOffboardingIntegrationTest.scala
    :language: scala
    :start-after: user-manual-entry-begin: SequencerOffboardingSwitchAwayParticipant
    :end-before: user-manual-entry-end: SequencerOffboardingSwitchAwayParticipant

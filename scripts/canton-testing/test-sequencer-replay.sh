@@ -64,7 +64,7 @@ echo "***** Running Sequencer Replay Test..."
 			-J-Dreplay-tests.recording-timeout-minutes=20 \
 			-J-Dcanton.metrics.reporters.csv.directory="$METRICS_DIR" \
 			-J-Dio.opentelemetry.exporter.metrics.csv.directory="$METRICS_DIR" \
-			"community-app/testOnly com.digitalasset.canton.integration.tests.benchmarks.BftSequencerReplayBenchmark"
+			"community-app-tests-resilience/testOnly com.digitalasset.canton.integration.tests.benchmarks.BftSequencerReplayBenchmark"
 )
 
 terminate-subprocesses

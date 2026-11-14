@@ -100,7 +100,7 @@ Since the identities of the two Participants are the same, you do not need to mo
 
 First, recreate all parties from the old Participant on the new Participant:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/KmsMigrationIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/security/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/KmsMigrationIntegrationTest.scala
   :language: scala
   :start-after: user-manual-entry-begin: KmsRecreatePartiesInNewParticipant
   :end-before: user-manual-entry-end: KmsRecreatePartiesInNewParticipant
@@ -109,7 +109,7 @@ First, recreate all parties from the old Participant on the new Participant:
 Next, transfer the active contracts of all parties from the old Participant to the new one.
 You can then reconnect to the Synchronizer:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/KmsMigrationIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/security/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/KmsMigrationIntegrationTest.scala
   :language: scala
   :start-after: user-manual-entry-begin: KmsMigrateACSofParties
   :end-before: user-manual-entry-end: KmsMigrateACSofParties
@@ -134,7 +134,7 @@ Creating new keys directly in the KMS is not possible because the keys must firs
 the only way to start using a new KMS-backed participant with fresh keys is either to create them before migrating
 the node to the KMS or to rotate the keys after the migration is complete using:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/RotateKmsKeyIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/security/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/RotateKmsKeyIntegrationTest.scala
   :language: scala
   :start-after: user-manual-entry-begin: RotateKmsNodeKey
   :end-before: user-manual-entry-end: RotateKmsNodeKey

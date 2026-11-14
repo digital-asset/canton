@@ -107,14 +107,14 @@ How do I write data to a file and how do I read it back?
   and as a result, you can leverage Protobuf to write objects to a file.
   Here is a basic example:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/DumpIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/core/src/test/scala/com/digitalasset/canton/integration/tests/DumpIntegrationTest.scala
    :start-after: architecture-handbook-entry-begin: DumpLastSequencedEventToFile
    :end-before: architecture-handbook-entry-end: DumpLastSequencedEventToFile
    :dedent:
 
 - You can also dump several objects to the same file:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/DumpIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/core/src/test/scala/com/digitalasset/canton/integration/tests/DumpIntegrationTest.scala
    :start-after: architecture-handbook-entry-begin: DumpAllSequencedEventsToFile
    :end-before: architecture-handbook-entry-end: DumpAllSequencedEventsToFile
    :dedent:
@@ -123,7 +123,7 @@ How do I write data to a file and how do I read it back?
   `ByteString <https://developers.google.com/protocol-buffers/docs/reference/java/com/google/protobuf/ByteString>`__
   instead. You can dump the corresponding instances as follows:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/DumpIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/core/src/test/scala/com/digitalasset/canton/integration/tests/DumpIntegrationTest.scala
    :start-after: architecture-handbook-entry-begin: DumpAcsCommitmentToFile
    :end-before: architecture-handbook-entry-end: DumpAcsCommitmentToFile
    :dedent:

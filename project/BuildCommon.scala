@@ -753,7 +753,7 @@ object BuildCommon {
       `model-based-testing-integration-tests`,
       `traffic-enforcement-api`,
       `traffic-enforcement-component`,
-    )
+    ) ++ communityAppTestProjects
 
     // Project for utilities that are also used outside of the Canton repo
     lazy val `util-external` = project
@@ -1002,6 +1002,65 @@ object BuildCommon {
         // Allow to exit the systematic testing generator app
         (Test / run / trapExit) := false,
       )
+
+    /** [TEST ONLY] The `community-app` test suites, split by feature so that they compile in
+      * parallel instead of as one serial step at the end of `Test/compile`. Shared test support,
+      * the Daml codegen, the test protobufs and all test resources stay in `community-app` / Test;
+      * each module depends on it and on nothing else in this group. Packages and class names are
+      * unchanged, so test selection, timings and exclude patterns still apply.
+      */
+    private def communityAppTests(name: String): Project =
+      Project(s"community-app-tests-$name", file(s"community/app-tests/$name"))
+        .dependsOn(
+          `community-app` % "compile->compile;test->test",
+          `community-common` % "compile->compile;test->test",
+          `community-synchronizer` % "compile->compile;test->test",
+          `community-integration-testing` % Test,
+          `mock-kms-driver` % Test,
+          `performance-driver` % Test,
+          `ledger-common-dars` % Test,
+          `model-based-testing-drivers` % Test,
+        )
+        .settings(
+          sharedCantonSettings,
+          HouseRules.damlRepoHeaderSettings,
+          libraryDependencies ++= Seq(
+            scalatest % Test,
+            scalacheck % Test,
+            scalatestScalacheck % Test,
+            mockito_scala % Test,
+            scalatestMockito % Test,
+            pekko_stream_testkit % Test,
+            pekko_http_testkit % Test,
+            google_cloud_storage % Test,
+            zstd % Test,
+          ),
+          excludeTranscodeConflictingDependencies,
+          // Same as `community-app`: some tests read the TypeScript codegen output
+          Test / fullClasspath := (Test / fullClasspath)
+            .dependsOn(`community-app` / Test / damlGenerateTs)
+            .value,
+        )
+
+    lazy val `community-app-tests-core` = communityAppTests("core")
+    lazy val `community-app-tests-ledgerapi` = communityAppTests("ledgerapi")
+    lazy val `community-app-tests-multi` = communityAppTests("multi")
+    lazy val `community-app-tests-resilience` = communityAppTests("resilience")
+    lazy val `community-app-tests-security` = communityAppTests("security")
+    lazy val `community-app-tests-state` = communityAppTests("state")
+    lazy val `community-app-tests-sync` = communityAppTests("sync")
+    lazy val `community-app-tests-upgrade-topology` = communityAppTests("upgrade-topology")
+
+    lazy val communityAppTestProjects: Seq[Project] = Seq(
+      `community-app-tests-core`,
+      `community-app-tests-ledgerapi`,
+      `community-app-tests-multi`,
+      `community-app-tests-resilience`,
+      `community-app-tests-security`,
+      `community-app-tests-state`,
+      `community-app-tests-sync`,
+      `community-app-tests-upgrade-topology`,
+    )
 
     lazy val `community-app-base` = project
       .in(file("community/app-base"))

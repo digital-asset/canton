@@ -460,6 +460,14 @@ lazy val jsonApiDocsArtifact = Artifact("canton-json-apidocs", "tar.gz", "tar.gz
 
 lazy val `community-app` = CommunityProjects.`community-app`
 lazy val `community-app-base` = CommunityProjects.`community-app-base`
+lazy val `community-app-tests-core` = CommunityProjects.`community-app-tests-core`
+lazy val `community-app-tests-ledgerapi` = CommunityProjects.`community-app-tests-ledgerapi`
+lazy val `community-app-tests-multi` = CommunityProjects.`community-app-tests-multi`
+lazy val `community-app-tests-resilience` = CommunityProjects.`community-app-tests-resilience`
+lazy val `community-app-tests-security` = CommunityProjects.`community-app-tests-security`
+lazy val `community-app-tests-state` = CommunityProjects.`community-app-tests-state`
+lazy val `community-app-tests-sync` = CommunityProjects.`community-app-tests-sync`
+lazy val `community-app-tests-upgrade-topology` = CommunityProjects.`community-app-tests-upgrade-topology`
 lazy val `community-base` = CommunityProjects.`community-base`
 lazy val `community-common` = CommunityProjects.`community-common`
 lazy val `community-synchronizer` = CommunityProjects.`community-synchronizer`

@@ -29,7 +29,7 @@ Node administrators need to coordinate as follows:
    "source" and the "new" synchronizer. Additionally, set the "force" flag to true given that the old Synchronizer
    is either lost or untrusted in this scenario.
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/repair/ParticipantMigrateSynchronizerIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/repair/ParticipantMigrateSynchronizerIntegrationTest.scala
    :start-after: user-manual-entry-begin: MigrateSynchronizerForRecovery
    :end-before: user-manual-entry-end: MigrateSynchronizerForRecovery
    :dedent:
@@ -73,7 +73,7 @@ from reconnecting to the Synchronizers:
 Then, download the identity state of the Participant Node to a directory on the machine you are running the
 process:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/sequencer/RehydrationIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/sync/src/test/scala/com/digitalasset/canton/integration/tests/sequencer/RehydrationIntegrationTest.scala
    :language: scala
    :start-after: architecture-handbook-entry-begin: RepairMacroCloneIdentityDownload
    :end-before: architecture-handbook-entry-end: RepairMacroCloneIdentityDownload
@@ -89,7 +89,7 @@ were uploaded through the Ledger API need to be manually re-uploaded to the new 
 After downloading, stop the Participant Node, back up the database, and then truncate the database. Then, restart
 the Participant Node and upload the data again:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/sequencer/RehydrationIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/sync/src/test/scala/com/digitalasset/canton/integration/tests/sequencer/RehydrationIntegrationTest.scala
    :language: scala
    :start-after: architecture-handbook-entry-begin: RepairMacroCloneIdentityUpload
    :end-before: architecture-handbook-entry-end: RepairMacroCloneIdentityUpload
@@ -97,7 +97,7 @@ the Participant Node and upload the data again:
 
 Reconnect the Participant Node to the Synchronizer using a normal connect:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/sequencer/RehydrationIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/sync/src/test/scala/com/digitalasset/canton/integration/tests/sequencer/RehydrationIntegrationTest.scala
    :language: scala
    :start-after: architecture-handbook-entry-begin: RepairMacroCloneIdentityConnect
    :end-before: architecture-handbook-entry-end: RepairMacroCloneIdentityConnect
@@ -135,7 +135,7 @@ describes how to unblock the Participant Node.
    - If in step 1 you identified the first and last sequencing timestamps, translate the timestamps to first and last
      sequencer counters:
 
-     .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/repair/IgnoreSequencedEventsIntegrationTest.scala
+     .. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/repair/IgnoreSequencedEventsIntegrationTest.scala
         :language: scala
         :start-after: user-manual-entry-begin: LookUpSequencedEventToIgnoreByTimestamp
         :end-before: user-manual-entry-end: LookUpSequencedEventToIgnoreByTimestamp
@@ -144,7 +144,7 @@ describes how to unblock the Participant Node.
    - Otherwise you may choose to ignore the last event that the Participant Node has processed from the Synchronizer
      and look up the sequencer counter as follows:
 
-     .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/repair/IgnoreSequencedEventsIntegrationTest.scala
+     .. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/repair/IgnoreSequencedEventsIntegrationTest.scala
         :language: scala
         :start-after: user-manual-entry-begin: LookUpLastSequencedEventToIgnore
         :end-before: user-manual-entry-end: LookUpLastSequencedEventToIgnore
@@ -154,7 +154,7 @@ describes how to unblock the Participant Node.
    The command takes the Synchronizer ID and the first and last sequencer counters of the events to ignore as parameters.
    You should not set the force flag.
 
-   .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/repair/IgnoreSequencedEventsIntegrationTest.scala
+   .. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/repair/IgnoreSequencedEventsIntegrationTest.scala
       :language: scala
       :start-after: user-manual-entry-begin: RepairIgnoreEvents
       :end-before: user-manual-entry-end: RepairIgnoreEvents
@@ -163,7 +163,7 @@ describes how to unblock the Participant Node.
    If you find that you have made a mistake and chose the wrong sequencer counters, you can invoke `repair.unignore_events`
    to "unignore" the events:
 
-   .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/repair/IgnoreSequencedEventsIntegrationTest.scala
+   .. literalinclude:: CANTON/community/app-tests/state/src/test/scala/com/digitalasset/canton/integration/tests/repair/IgnoreSequencedEventsIntegrationTest.scala
       :language: scala
       :start-after: user-manual-entry-begin: RepairUnignoreEvents
       :end-before: user-manual-entry-end: RepairUnignoreEvents

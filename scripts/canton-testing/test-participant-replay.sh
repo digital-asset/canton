@@ -73,7 +73,7 @@ echo "***** Replaying events..."
 
   run-in-namespace.sh "$PARTICIPANTS_NAMESPACE" \
   sbt -J-Dlogback.configurationFile=logback.xml \
-      "community-app/testOnly com.digitalasset.canton.integration.tests.manual.ParticipantReplayBenchmark"
+      "community-app-tests-resilience/testOnly com.digitalasset.canton.integration.tests.manual.ParticipantReplayBenchmark"
 )
 
 # so metrics don't get confused if the synchronizer keeps runnning

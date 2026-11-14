@@ -85,7 +85,7 @@ echo "Running test: $FULL_CLASS"
 echo "with max Heap: -Xmx=$XMX"
 
 # ---- Run sbt ----
-SBT_OPTS="$JVM_OPTS" /usr/bin/time sbt "project community-app" "testOnly $FULL_CLASS"
+SBT_OPTS="$JVM_OPTS" /usr/bin/time sbt "project community-app-tests-resilience" "testOnly $FULL_CLASS"
 
 echo "Run completed with max heap size $XMX!"
 echo "JFR output: $JFR_FILE"

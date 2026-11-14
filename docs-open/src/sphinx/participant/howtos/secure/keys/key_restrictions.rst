@@ -47,7 +47,7 @@ If you are using a Key Management Service (KMS) to handle Canton's keys in :ref:
 and want to use manually generated keys that are already stored in the KMS, set the ``usage`` parameter with the desired usages when you
 register the keys with Canton:
 
-.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/security/KeyManagementIntegrationTest.scala
+.. literalinclude:: CANTON/community/app-tests/security/src/test/scala/com/digitalasset/canton/integration/tests/security/KeyManagementIntegrationTest.scala
    :language: scala
    :start-after: user-manual-entry-begin: register_kms_signing_key
    :end-before: user-manual-entry-end: register_kms_signing_key
