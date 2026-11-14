@@ -101,7 +101,7 @@ jobs:
       # Change the concurrency value in the format() call below between runs.
       PROFILE_EXTRA_SBT_PARAMETERS: >-
         ${{ inputs.job_name == 'test_37' && format('-J-Dcanton-test.integration.concurrency={0}
-        -J-XX:StartFlightRecording=filename=track/test.jfr,settings=default,dumponexit=true,maxsize=600m', '2') || '' }}
+        -J-XX:StartFlightRecording=filename=track/test.jfr,settings=default,dumponexit=true,maxsize=600m', '4') || '' }}
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
       # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
       SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
