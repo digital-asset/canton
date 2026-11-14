@@ -415,7 +415,8 @@ runs:
         succeed_on_error: ${{ inputs.succeed_on_error }}
         timeout: ${{ inputs.timeout }}
         report_to_datadog: ${{ inputs.report_to_datadog }}
-        extra_parameters: -J-Xlog:gc=info,safepoint=info:file=track/GC.log:time
+        # [TEST ONLY] PROFILE_EXTRA_SBT_PARAMETERS is set by _test.yml for the PV37 profiling experiment.
+        extra_parameters: -J-Xlog:gc=info,safepoint=info:file=track/GC.log:time ${{ env.PROFILE_EXTRA_SBT_PARAMETERS }}
 
     - name: Snapshot first-run JUnit reports
       if: always()

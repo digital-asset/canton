@@ -10,6 +10,8 @@ fi
 while true; do
     echo "---------- $(date): after $a iterations:" | tee -a "$FILE"
     ps -e -o pid,user,state,start_time,cputime,rss,args --sort=-rss --cols 300 | head -n7 | tee -a "$FILE"
+    # [TEST ONLY] PV37 profiling: node-wide load (pods have no CPU limit), file only to keep the job log unchanged.
+    echo "loadavg $(cat /proc/loadavg 2>/dev/null)" >> "$FILE"
     echo | tee -a "$FILE"
     sleep 1
  let a=$a+1
