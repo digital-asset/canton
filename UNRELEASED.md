@@ -247,6 +247,9 @@ fix is deployed on MainNet:
 - When a participant disconnects from a synchronizer while a topology transaction broadcast is pending, the
   participant no longer immediately resubmits the pending and queued topology transactions to that synchronizer. They
   are submitted after reconnecting, as before.
+- JSON Ledger API: the byte-size metrics of streamed HTTP request and response entities and of streamed websocket
+  messages are now recorded before the stream completes, not afterwards. A stream that fails also records the bytes it
+  transferred.
 
 ## Compatibility
 
