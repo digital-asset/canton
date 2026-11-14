@@ -48,6 +48,14 @@ runs:
       env:
         BASE_BRANCH: ${{ steps.resolve_ref.outputs.base_branch }}
 
+    - name: List compile cache paths
+      id: cache_paths
+      if: steps.prepare_logic.outputs.needs_network_restore == 'true'
+      shell: bash
+      run: |
+        # [TEST ONLY] explicit target directories instead of the **/target glob
+        { echo "paths<<EOF_CACHE_PATHS"; ./scripts/ci/compile_cache_paths.sh; echo "EOF_CACHE_PATHS"; } >> "$GITHUB_OUTPUT"
+
     - name: Ensure zstd
       if: steps.prepare_logic.outputs.needs_network_restore == 'true'
       uses: ./.github/actions/cache/ensure_zstd
@@ -57,8 +65,7 @@ runs:
       id: restore_classes
       uses: actions/cache/restore@v5
       with:
-        path: |
-          **/target
+        path: ${{ steps.cache_paths.outputs.paths }}
         key: |-
           compile-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=${{ github.sha }}
         restore-keys: |-

@@ -18,6 +18,15 @@ runs:
       id: compute_hash
       uses: ./.github/actions/cache/compute_build_hash
 
+    - name: List compile cache paths
+      id: cache_paths
+      if: inputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        # [TEST ONLY] explicit target directories instead of the **/target glob; must match
+        # the list restore_precompiled_classes uses, which it does on the same checkout
+        { echo "paths<<EOF_CACHE_PATHS"; ./scripts/ci/compile_cache_paths.sh; echo "EOF_CACHE_PATHS"; } >> "$GITHUB_OUTPUT"
+
     - uses: ./.github/actions/cache/save_cache
       # Save unless the restore was an exact primary-key hit (same branch, hash
       # and sha), the one case where the cache already holds what this build
@@ -27,7 +36,6 @@ runs:
       # for downstream jobs in the same run and later commits on this branch.
       if: inputs.cache-hit != 'true'
       with:
-        path: |
-          **/target
+        path: ${{ steps.cache_paths.outputs.paths }}
         key: |-
           compile-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
