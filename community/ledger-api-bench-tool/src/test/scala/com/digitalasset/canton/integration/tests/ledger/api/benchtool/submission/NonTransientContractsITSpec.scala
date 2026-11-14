@@ -11,7 +11,6 @@ import com.digitalasset.canton.ledger.api.benchtool.BenchtoolSandboxFixture
 import com.digitalasset.canton.ledger.api.benchtool.config.WorkflowConfig
 import com.digitalasset.canton.ledger.api.benchtool.services.LedgerApiServices
 import com.digitalasset.canton.ledger.api.benchtool.submission.{EventsObserver, ObservedEvents}
-import org.scalatest.time.{Minutes, Span}
 import org.scalatest.{AppendedClues, Checkpoints, EitherValues, OptionValues}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -24,12 +23,10 @@ class NonTransientContractsITSpec
     with Checkpoints {
   registerPlugin(NoAuthPlugin(loggerFactory))
   registerPlugin(new UseH2(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
-
-  // The average duration is around 100-110s, so let's give it some margin for a slowdown
-  // We can't increase `maxInFlightCommands` in `benchtoolFooSubmissionFixture`,
-  // because submission has to be sequential.
-  override implicit lazy val patienceConfig: PatienceConfig = PatienceConfig(Span(3, Minutes))
+  // Submission has to be sequential (see below), so the mempool never reaches the default minimum
+  // batch size and every sequencing round would wait for the batch creation interval. Cut a batch
+  // as soon as a request arrives instead, so that the run time does not scale with that timer.
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
 
   "benchtool" should {
     "submit non-transient contracts" in { env =>
