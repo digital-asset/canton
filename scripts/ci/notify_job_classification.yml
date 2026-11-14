@@ -28,6 +28,7 @@ test_jobs:
   - variations_test_36_selected_users
 infra_jobs:
   - pick_runner
+  - plan_ci
   - setup_and_validation
   - static_tests
   - compile
@@ -45,3 +46,5 @@ infra_jobs:
   # flaky pipeline. Alert here, otherwise its failures would be silent.
   - crash_recovery_test_36
   - crash_recovery_test_36_requires_external_kms
+  - crash_recovery_test_37
+  - publish_draft_results

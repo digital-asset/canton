@@ -94,6 +94,14 @@ jobs:
     # a wedged shard from running for three hours.
     timeout-minutes: 60
     env:
+      # [TEST ONLY] PV37 lane profiling experiment, not for merging. On the PV37 lane only:
+      # - canton-test.integration.concurrency sets the ConcurrentEnvironmentLimiter permits (code default 2),
+      #   the number of Canton environments one sbt project may run at once in a shard;
+      # - a JFR recording of the first-run test JVM goes to track/test.jfr, which the shard bundle uploads.
+      # Change the concurrency value in the format() call below between runs.
+      PROFILE_EXTRA_SBT_PARAMETERS: >-
+        ${{ inputs.job_name == 'test_37' && format('-J-Dcanton-test.integration.concurrency={0}
+        -J-XX:StartFlightRecording=filename=track/test.jfr,settings=default,dumponexit=true,maxsize=600m', '4') || '' }}
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
       # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
       SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
