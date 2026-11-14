@@ -7,6 +7,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveDurationSeconds}
 import com.digitalasset.canton.integration.ConfigTransforms.updateAllParticipantConfigs_
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -20,10 +21,19 @@ trait LedgerApiIterativePruningTest extends CommunityIntegrationTest with Shared
 
   private val transactionTolerance = NonNegativeFiniteDuration.ofSeconds(2)
 
+  // Sim time to advance after the bong so that its requests are past their decision time and the
+  // ACS commitment processor has ticked past them: reconciliation interval + confirmation response
+  // timeout + mediator reaction timeout.
+  private val pruningDelay = transactionTolerance.asJava.multipliedBy(3)
+
   // single participant environment to focus on ledger api server pruning rather than acs canton commitments
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
       .addConfigTransforms(
+        // Sim clock: the short timeouts below only serve to make pruning possible quickly. On a
+        // wall clock the bong ran under the 2s deadlines and confirmation responses could time out
+        // under load. With a sim clock no time passes during the bong; the test advances it later.
+        ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(transactionTolerance.asJava),
         updateAllParticipantConfigs_(
           _.focus(_.ledgerApi.indexService.contractPruningBatchSize)
@@ -59,9 +69,14 @@ trait LedgerApiIterativePruningTest extends CommunityIntegrationTest with Shared
     participant1.testing.state_inspection.contractCount.futureValueUS shouldBe 126
 
     // ensure we can prune the bong contracts
+    val simClock = environment.simClock.value
+    simClock.advance(pruningDelay)
+    TestUtils.waitForTargetTimeOnSequencer(sequencer1, simClock.now, logger)
     eventually() {
       participant1.health.ping(participant1)
-      participant1.pruning.find_safe_offset().value should be >= ledgerEndAfterBong
+      participant1.pruning
+        .find_safe_offset(simClock.now.toInstant)
+        .value should be >= ledgerEndAfterBong
     }
     logger.info(s"Pruning is possible at $ledgerEndAfterBong")
 
