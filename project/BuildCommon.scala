@@ -537,7 +537,7 @@ object BuildCommon {
     // Make sure that shared dependencies with the Daml repo force their version
     dependencyOverrides ++= SharedDependencies.allModuleIds,
     publish / skip := true,
-  )
+  ) ++ sbt.CantonOrderedTests.settings // [TEST ONLY] longest-first suite order; empty unless CANTON_TEST_ORDER_FILE is set
 
   // Base of daml and Canton community settings
   lazy val baseCommunitySettings = Def.settings(

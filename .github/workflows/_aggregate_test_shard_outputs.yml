@@ -43,6 +43,12 @@ on:
           this commit to the run summary. Set by callers that enable the JUnit
           upload experiment in cleanup_test_job (see PR #35868).
         type: boolean
+      timings_artifact_prefix:
+        description: >-
+          [TEST ONLY] Prefix of the <prefix>-timings-latest artifact. Defaults to job_name (or caller_job),
+          like the other per-lane artifacts.
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -67,11 +73,12 @@ jobs:
       # artifacts, and falls back to caller_job for every other caller, keeping their artifact
       # names unchanged.
       LATEST_ARTIFACT_PREFIX: ${{ inputs.job_name != '' && inputs.job_name || inputs.caller_job }}
+      TIMINGS_ARTIFACT_PREFIX: ${{ inputs.timings_artifact_prefix != '' && inputs.timings_artifact_prefix || (inputs.job_name != '' && inputs.job_name || inputs.caller_job) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             .github/actions/nix/nix_run
@@ -109,7 +116,7 @@ jobs:
         if: ${{ !cancelled() && github.run_attempt > 1 }}
         uses: actions/download-artifact@v7
         with:
-          name: ${{ env.LATEST_ARTIFACT_PREFIX }}-timings-latest
+          name: ${{ env.TIMINGS_ARTIFACT_PREFIX }}-timings-latest
           path: ${{ env.CALLER_JOB }}/.timings/previous
         continue-on-error: true
 
@@ -165,7 +172,7 @@ jobs:
         if: ${{ inputs.shard_job_result == 'success' || inputs.shard_job_result == 'failure' }}
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.LATEST_ARTIFACT_PREFIX }}-timings-latest
+          name: ${{ env.TIMINGS_ARTIFACT_PREFIX }}-timings-latest
           path: ${{ env.CALLER_JOB }}/.timings/timings.json
           retention-days: 90
           overwrite: true
