@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{HashOps, SynchronizerCryptoClient}
@@ -835,11 +835,18 @@ final class BftBlockOrderer(
             "p2pGrpcServerManager.close()",
             p2pGrpcServerManager.close(),
           ),
+          // The server's termination does not wait for call handlers still running on the gRPC executor;
+          //  drain it before closing the server's Netty event loop group, otherwise those handlers fail
+          //  with `RejectedExecutionException: event executor terminated` when they touch the transport.
+          SyncCloseable(
+            "p2pServerGrpcExecutor.close()",
+            ExecutorServiceExtensions(p2pServerGrpcExecutor)(logger, timeouts)
+              .close("p2pServerGrpcExecutor"),
+          ),
           SyncCloseable(
             "serverTransportInstrumentation.close()",
             serverTransportInstrumentationO.foreach(_.close()),
           ),
-          SyncCloseable("p2pServerGrpcExecutor.shutdown()", p2pServerGrpcExecutor.shutdown()),
         ) ++
         // The kill switch ensures that we don't process the remaining contents of the queue buffer
         standaloneSubscriptionKillSwitchF
