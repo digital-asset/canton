@@ -7,7 +7,6 @@ import io.grpc.*
 
 import java.net.SocketAddress
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 
 final class GrpcServerResource(
     services: () => Iterable[BindableService with AutoCloseable],
@@ -26,7 +25,7 @@ final class GrpcServerResource(
   }
 
   override protected def destruct(resource: ServerWithChannelProvider): Unit = {
-    resource.server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
+    ServerWithChannelProvider.shutdownServer(resource.server)
     boundServices.foreach(_.close())
     boundServices = Nil
     ()
