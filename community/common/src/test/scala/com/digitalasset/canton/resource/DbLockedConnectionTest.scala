@@ -253,6 +253,34 @@ trait DbLockedConnectionTest
       }
     }
 
+    "report a connection held by someone else as in use in the read-only check" in { f =>
+      awaitHealthy(f.connection)
+
+      val connection = f.connection.get.valueOrFail("Connection not available")
+
+      def checkReadOnly(): Either[DbLockedConnection.ReadOnlyCheckError, Boolean] =
+        DbLockedConnection
+          .checkReadOnlyConnection(
+            DbLock
+              .isSupported(setup.storage.profile)
+              .valueOrFail("Storage profile does not support DB locks"),
+            connection,
+            f.config.healthCheckTimeout,
+            executor,
+            noTracingLogger,
+          )
+          .value
+          .futureValue
+
+      // Hold the connection, as a write or the DB lock check does
+      connection.markInUse() shouldBe true
+      try {
+        checkReadOnly() shouldBe Left(DbLockedConnection.ReadOnlyCheckError.ConnectionInUse)
+      } finally connection.markFree()
+
+      checkReadOnly() shouldBe Right(false)
+    }
+
     "have tcp_keepalives_* and client_connection_check_interval configured on the connection" in {
       f =>
         awaitHealthy(f.connection)

@@ -250,6 +250,8 @@ fix is deployed on MainNet:
 - JSON Ledger API: the byte-size metrics of streamed HTTP request and response entities and of streamed websocket
   messages are now recorded before the stream completes, not afterwards. A stream that fails also records the bytes it
   transferred.
+- The health check of DB locked connections no longer counts a connection that is busy with other work as an inconclusive read-only check.
+  Under sustained load this could make the node log "Locked connection was lost, trying to rebuild" and needlessly rebuild a healthy connection and its lock.
 
 ## Compatibility
 
