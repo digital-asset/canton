@@ -18,6 +18,7 @@ import java.io.{IOException, InputStream, StringWriter}
 import java.nio.BufferOverflowException
 import java.util.concurrent.TimeUnit
 import scala.collection.concurrent.TrieMap
+import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 
 /** Handler that exposes lifecycle methods for managing a background process.
@@ -118,6 +119,19 @@ class BackgroundRunnerHandler[ProcessInfo](
       r.runner.processHasCrashed()
     case _ => false
   }
+
+  /** Wait until the process of a running instance exits.
+    * @return
+    *   the exit code, or None if the process is still alive after `timeout`
+    */
+  def tryAwaitExit(instanceName: String, timeout: FiniteDuration): Option[Int] =
+    external.get(instanceName) match {
+      case Some(r: Running) => r.runner.awaitExit(timeout)
+      case _ =>
+        ErrorUtil.internalError(
+          new IllegalStateException(s"can not await exit of $instanceName as it is not running")
+        )
+    }
 
   def tryStart(instanceName: String): Unit =
     perform(
@@ -327,6 +341,12 @@ class BackgroundRunner(
       noTracingLogger.debug("Shutting down external process")
       rt.destroy()
     }
+
+  /** Wait until the process exits. Returns the exit code, or None if it is still alive after
+    * `timeout`.
+    */
+  def awaitExit(timeout: FiniteDuration): Option[Int] =
+    Option.when(rt.waitFor(timeout.toMillis, TimeUnit.MILLISECONDS))(rt.exitValue())
 
   /** Return true when the process has exited with non-zero */
   def processHasCrashed(): Boolean = {
