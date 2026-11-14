@@ -78,7 +78,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             .github/actions/nix/nix_run

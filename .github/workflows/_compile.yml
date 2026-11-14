@@ -20,7 +20,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
+
+      - name: Fetch base refs
+        uses: ./.github/actions/utils/fetch_base_refs
 
       - name: Restore compile and sbt caches
         id: cache_restore

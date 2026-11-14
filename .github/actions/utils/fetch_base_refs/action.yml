@@ -1,0 +1,29 @@
+name: Fetch base refs
+description: >-
+  After a shallow checkout, fetch the tips of the branches that cache keys are
+  derived from (origin/main, the pull request base, and the release line named
+  in version.sbt), one commit deep. resolve_ref and the cache restore/save
+  actions read these refs with `git rev-parse origin/<branch>`. A missing
+  branch is skipped, as it would be absent after a full fetch too.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        BASE_REF: ${{ github.base_ref }}
+      run: |
+        set -euo pipefail
+        branches=(main)
+        if [[ -n "${BASE_REF}" ]]; then branches+=("${BASE_REF}"); fi
+        version=$(grep -oE '[0-9]+\.[0-9]+' version.sbt 2>/dev/null | head -1 || true)
+        if [[ -n "${version}" ]]; then branches+=("release-line-${version}"); fi
+        start=$(date +%s)
+        for branch in $(printf '%s\n' "${branches[@]}" | sort -u); do
+          if git fetch --no-tags --depth=1 origin "+refs/heads/${branch}:refs/remotes/origin/${branch}"; then
+            echo "origin/${branch} -> $(git rev-parse "refs/remotes/origin/${branch}")"
+          else
+            echo "origin/${branch} not found, skipped"
+          fi
+        done
+        echo "Fetched base refs in $(( $(date +%s) - start ))s"
