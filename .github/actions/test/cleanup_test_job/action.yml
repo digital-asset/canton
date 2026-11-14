@@ -54,7 +54,7 @@ runs:
 
     - name: Build timings.json
       if: always()
-      uses: ./.github/actions/nix/nix_run
+      uses: ./.github/actions/nix/nix_script_run
       with:
         command: |
           EXTRA_ARGS=()
