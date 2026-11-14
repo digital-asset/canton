@@ -467,6 +467,88 @@ jobs:
           )
         }}
 
+  test_36_r2:
+    # Flake-measurement only (combined flake PR): an independent repeat of the PV36 lane in the same run
+    name: Test protocol version 36 (repeat 2)
+    needs: [pick_runner, compile]
+    if: github.event_name != 'merge_group'
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      include_only_requires_external_kms_tests: false
+      override_java_version_for_tests: ""
+      protocol_version: '36'
+      job_name: test_r2
+      timings_job_name: test
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  test_37_r2:
+    # Flake-measurement only (combined flake PR): an independent repeat of the PV37 lane in the same run
+    name: Test Protocol Version 37 (repeat 2)
+    needs: [pick_runner, compile]
+    if: github.event_name != 'merge_group' && github.ref_type != 'tag'
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      protocol_version: '37'
+      job_name: test_37_r2
+      timings_job_name: test_37
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  crash_recovery_test_36_r2:
+    # Flake-measurement only (combined flake PR): an independent repeat of the crash recovery lane in the same run
+    name: Crash Recovery Test 36 (repeat 2)
+    needs: [pick_runner, compile]
+    if: github.event_name != 'merge_group'
+    uses: ./.github/workflows/_crash_recovery_test.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+      job_name: crash_recovery_test_r2
+      timings_job_name: crash_recovery_test
+
+  test_36_r3:
+    # Flake-measurement only (combined flake PR): an independent repeat of the PV36 lane in the same run
+    name: Test protocol version 36 (repeat 3)
+    needs: [pick_runner, compile]
+    if: github.event_name != 'merge_group'
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      include_only_requires_external_kms_tests: false
+      override_java_version_for_tests: ""
+      protocol_version: '36'
+      job_name: test_r3
+      timings_job_name: test
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  test_37_r3:
+    # Flake-measurement only (combined flake PR): an independent repeat of the PV37 lane in the same run
+    name: Test Protocol Version 37 (repeat 3)
+    needs: [pick_runner, compile]
+    if: github.event_name != 'merge_group' && github.ref_type != 'tag'
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      protocol_version: '37'
+      job_name: test_37_r3
+      timings_job_name: test_37
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  crash_recovery_test_36_r3:
+    # Flake-measurement only (combined flake PR): an independent repeat of the crash recovery lane in the same run
+    name: Crash Recovery Test 36 (repeat 3)
+    needs: [pick_runner, compile]
+    if: github.event_name != 'merge_group'
+    uses: ./.github/workflows/_crash_recovery_test.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+      job_name: crash_recovery_test_r3
+      timings_job_name: crash_recovery_test
+
   canton_build_required_gate:
     name: Canton Build Required Gate
     needs:
@@ -492,6 +574,12 @@ jobs:
       - test_data_continuity_dumps
       - test_docker_images
       - test_37
+      - test_36_r2
+      - test_37_r2
+      - crash_recovery_test_36_r2
+      - test_36_r3
+      - test_37_r3
+      - crash_recovery_test_36_r3
       - test_37_requires_external_kms
       - test_dev
       - toxiproxy_test_fast_36

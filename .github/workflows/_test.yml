@@ -8,6 +8,10 @@ on:
       protocol_version:
         required: true
         type: string
+      timings_job_name:
+        description: Leg whose timings-latest artifact drives the test split. Defaults to job_name.
+        default: ''
+        type: string
       job_name:
         default: test
         type: string
@@ -73,7 +77,7 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/utils/resolve_previous_artifact_run
         with:
-          artifact-name: ${{ inputs.job_name }}-timings-latest
+          artifact-name: ${{ inputs.timings_job_name || inputs.job_name }}-timings-latest
 
   test:
     name: Test (shard ${{ matrix.shard }})
@@ -124,7 +128,7 @@ jobs:
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings
         with:
-          timings-artifact-name: ${{ inputs.job_name }}-timings-latest
+          timings-artifact-name: ${{ inputs.timings_job_name || inputs.job_name }}-timings-latest
           timings-path: ${{ github.job }}/.timings
           github-token: ${{ github.token }}
           previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
