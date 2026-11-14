@@ -98,6 +98,10 @@ trait OutputMetadataStore[E <: Env[E]] extends AutoCloseable {
   ): E#FutureUnlessShutdownT[OutputMetadataStore.NumberOfRecords]
   protected def loadNumberOfRecordsName: String = s"load number of records"
 
+  /** Prunes epochs, blocks and leader selection states before `epochNumberExclusive`, except for an
+    * onboarding boundary block that is still needed (see
+    * `OutputMetadataStore.onboardingBoundaryBlockToKeep`).
+    */
   def prune(
       epochNumberExclusive: EpochNumber
   )(implicit
@@ -178,6 +182,28 @@ object OutputMetadataStore {
   object NumberOfRecords {
     val empty = NumberOfRecords(0L, 0L)
   }
+
+  /** When a node is onboarded, the output module persists the block immediately preceding its lower
+    * bound (the "boundary block", which belongs to the epoch before the onboarding start epoch) so
+    * that, if the node restarts before it has stored any block of its start epoch, it can still
+    * seed the BFT time computation for the start epoch.
+    *
+    * Pruning deletes all blocks before the lower bound epoch, and it is also performed at every
+    * startup to complete a possibly interrupted pruning. Deleting the boundary block there would
+    * make a restarted onboarded node compute different BFT times than its peers for its start
+    * epoch, and thus query the next epoch's topology at the wrong time.
+    *
+    * @return
+    *   the boundary block number to keep, if the lower bound block itself is not stored yet; once
+    *   it is stored, BFT time can be recovered from it, and the boundary block can be pruned.
+    */
+  def onboardingBoundaryBlockToKeep(
+      lowerBound: Option[LowerBound],
+      lowerBoundBlockStored: Boolean,
+  ): Option[BlockNumber] =
+    lowerBound
+      .filter(lb => !lowerBoundBlockStored && lb.blockNumber > BlockNumber.First)
+      .map(lb => BlockNumber(lb.blockNumber - 1))
 
   def apply(
       storage: Storage,

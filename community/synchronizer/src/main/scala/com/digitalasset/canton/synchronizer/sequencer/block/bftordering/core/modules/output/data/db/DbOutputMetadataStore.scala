@@ -359,8 +359,24 @@ class DbOutputMetadataStore(
             sqlu""" delete from ord_metadata_output_epochs where epoch_number < $epochNumberExclusive """,
             functionFullName,
           )
-          blocksDeleted <- storage.update(
-            sqlu""" delete from ord_metadata_output_blocks where epoch_number < $epochNumberExclusive """,
+          blocksDeleted <- storage.queryAndUpdate(
+            (for {
+              lowerBound <- sql"select epoch_number, block_number from ord_output_lower_bound"
+                .as[LowerBound]
+                .headOption
+              lowerBoundBlockStored <- lowerBound.fold(DBIO.successful(false): DBIO[Boolean])(lb =>
+                sql"select count(*) from ord_metadata_output_blocks where block_number = ${lb.blockNumber}"
+                  .as[Int]
+                  .head
+                  .map(_ > 0)
+              )
+              deleted <- onboardingBoundaryBlockToKeep(lowerBound, lowerBoundBlockStored).fold(
+                sqlu""" delete from ord_metadata_output_blocks where epoch_number < $epochNumberExclusive """
+              )(boundaryBlockNumber =>
+                sqlu""" delete from ord_metadata_output_blocks
+                        where epoch_number < $epochNumberExclusive and block_number <> $boundaryBlockNumber """
+              )
+            } yield deleted).transactionally,
             functionFullName,
           )
           _ <- storage.update(
