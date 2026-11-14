@@ -19,7 +19,10 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
-import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisabledUs
+import com.digitalasset.canton.participant.sync.SyncServiceError.{
+  SyncServiceSynchronizerDisabledUs,
+  SyncServiceSynchronizerDisconnect,
+}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
@@ -190,12 +193,30 @@ trait ParticipantOffboardingIntegrationTestAssertions { self: CommunityIntegrati
       LogEntryOptionality.Required,
       _.warningMessage should include(s"$offboardedParticipant access is disabled"),
     ),
+    // The subscription pool and the fatally failed sole sequencer connection both react to the
+    //  permission denied subscription close. Whichever completes the sequencer client first
+    //  determines the error: permission denied, or an unreachable trust threshold.
+    //  These are mutually exclusive outcomes of the same subscription close.
     (
       LogEntryOptionality.Required,
-      _.shouldBeCantonError(
-        SyncServiceSynchronizerDisabledUs,
-        _ should include(s"$synchronizer rejected our subscription attempt with permission denied"),
-      ),
+      entry =>
+        if (entry.message.startsWith(SyncServiceSynchronizerDisabledUs.id))
+          entry.shouldBeCantonError(
+            SyncServiceSynchronizerDisabledUs,
+            _ should include(
+              s"$synchronizer rejected our subscription attempt with permission denied"
+            ),
+          )
+        else
+          entry.shouldBeCantonError(
+            SyncServiceSynchronizerDisconnect,
+            message => {
+              message should include(
+                "PERMISSION_DENIED/Authentication token refresh error"
+              )
+              message should include(s"$offboardedParticipant access is disabled")
+            },
+          ),
     ),
     (
       LogEntryOptionality.Optional,
