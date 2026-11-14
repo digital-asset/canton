@@ -4,18 +4,22 @@
 package com.digitalasset.canton.integration.tests.performance
 
 import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.UsePostgres
-import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
+import com.digitalasset.canton.integration.{
+  ConfigTransforms,
+  EnvironmentDefinition,
+  TestConsoleEnvironment,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.elements.DriverStatus
 import com.digitalasset.canton.performance.{PerformanceRunner, RateSettings}
-import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.Future
@@ -55,23 +59,45 @@ abstract class MemberAuthLoadWithSequencerRestartIntegrationTest
             .replace(true)
         ),
       )
-      .updateTestingConfig(
-        _.focus(_.participantsWithoutLapiVerification)
-          .replace(Set("participant1", "participant2"))
-      )
       .withSetup { implicit env =>
         import env.*
 
         participants.all.foreach(
           _.synchronizers.connect_local_bft(
             sequencers.all,
-            "synchronizer",
+            synchronizerAlias.unwrap,
             sequencerTrustThreshold = 1,
           )
         )
 
         performanceTestSetup
       }
+
+  private lazy val synchronizerAlias = SynchronizerAlias.tryCreate("synchronizer")
+
+  /** A participant stores the contracts of an approved request before it publishes the request's
+    * update to the Ledger API indexer. Stopping it in between leaves contracts without events,
+    * which the Ledger API store integrity check rejects (crash recovery would index them on the
+    * next start). So wait until nothing is in flight, then ping: updates are published in
+    * sequencing order, so once both participants have indexed the ping, they have indexed every
+    * earlier request too.
+    */
+  private def awaitInFlightRequestsIndexed()(implicit env: TestConsoleEnvironment): Unit = {
+    import env.*
+
+    // An unsequenced submission is resolved by its max sequencing time, a request by its decision time.
+    val inFlightBound =
+      participant1.config.sequencerClient.defaultMaxSequencingTimeOffset +
+        participant1.topology.synchronizer_parameters
+          .get_dynamic_synchronizer_parameters(daId)
+          .decisionTimeout
+    eventually(timeUntilSuccess = inFlightBound.underlying) {
+      Seq(participant1, participant2).filter(
+        _.health.count_in_flight(synchronizerAlias).exists
+      ) shouldBe empty
+    }
+    participant1.health.ping(participant2).discard
+  }
 
   "run a performance test with lots of auth reconnects for a minute" in { implicit env =>
     import env.*
@@ -130,14 +156,17 @@ abstract class MemberAuthLoadWithSequencerRestartIntegrationTest
         }
         val cf =
           FutureUnlessShutdown.outcomeF(Future.sequence(Seq(runnerP1, runnerP2).map(_.closeF())))
-        cf.thereafter { _ =>
+        try {
+          cf.futureValueUS.discard
           logger.info("Performance runners stopped")
+          awaitInFlightRequestsIndexed()
+        } finally {
           // Ensure that the participants are stopped before the end of the test, otherwise they may
           //  still log warnings because of timeouts triggering after the test case is over
           participant1.stop()
           participant2.stop()
           logger.info("Participants stopped")
-        }.futureValueUS
+        }
       },
       forEvery(_)(
         acceptableLogMessageExt(
