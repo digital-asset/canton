@@ -3,9 +3,17 @@
 
 package com.digitalasset.canton.integration.tests.security.kms
 
-import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
+import com.digitalasset.canton.admin.api.client.data.{
+  StaticSynchronizerParameters,
+  SynchronizerConnectionConfig,
+}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{CryptoProvider, KmsConfig, NonNegativeFiniteDuration}
+import com.digitalasset.canton.config.{
+  CryptoProvider,
+  KmsConfig,
+  NonNegativeFiniteDuration,
+  SynchronizerTimeTrackerConfig,
+}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.bootstrap.InitializedSynchronizer
@@ -25,6 +33,11 @@ trait KmsCryptoIntegrationTestBase extends TopologyManagementHelper {
   protected lazy val protectedNodes: Set[String] = Set("participant1")
 
   protected def otherConfigTransforms: Seq[ConfigTransform] = Seq.empty
+
+  /** Time tracker configuration for the participants' connection to the synchronizer. If `None`,
+    * the participants connect with the default configuration.
+    */
+  protected def participantTimeTrackerConfig: Option[SynchronizerTimeTrackerConfig] = None
 
   protected def kmsConfig: KmsConfig
 
@@ -138,9 +151,19 @@ trait KmsCryptoIntegrationTestBase extends TopologyManagementHelper {
         participant1.health.wait_for_initialized()
         participant2.health.wait_for_initialized()
 
-        Seq(participant1, participant2).foreach(
-          _.synchronizers.connect_local(sequencer1, alias = daName)
-        )
+        Seq(participant1, participant2).foreach { participant =>
+          participantTimeTrackerConfig match {
+            case None => participant.synchronizers.connect_local(sequencer1, alias = daName)
+            case Some(timeTracker) =>
+              participant.synchronizers.connect_by_config(
+                SynchronizerConnectionConfig(
+                  synchronizerAlias = daName,
+                  sequencerConnections = sequencer1,
+                  timeTracker = timeTracker,
+                )
+              )
+          }
+        }
       }
       .withTeardown(_ => teardown())
 

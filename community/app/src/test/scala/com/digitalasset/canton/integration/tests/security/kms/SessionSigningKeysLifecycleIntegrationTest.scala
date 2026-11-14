@@ -6,7 +6,11 @@ package com.digitalasset.canton.integration.tests.security.kms
 import com.daml.metrics.api.testing.MetricValues.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.{KmsConfig, SessionSigningKeysConfig}
+import com.digitalasset.canton.config.{
+  KmsConfig,
+  SessionSigningKeysConfig,
+  SynchronizerTimeTrackerConfig,
+}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.security.kms.mock.MockKmsDriverCryptoIntegrationTestBase
 import com.digitalasset.canton.integration.tests.security.kms.mock.MockKmsDriverCryptoIntegrationTestBase.mockKmsDriverConfig
@@ -40,8 +44,25 @@ trait SessionSigningKeysLifecycleIntegrationTest
     sessionSigningKeysConfig.keyValidityDuration.duration.div(2.0)
   )
 
+  /** Time proof requests are signed with `validityPeriodEnd = now + timeRequest.requestTimeout`.
+    * With the default request timeout (2 minutes) that interval does not fit into the short
+    * session key validity used here, so every time proof would be signed with the long-term key and
+    * count as a fallback. Time proofs are requested whenever a node needs to observe the
+    * synchronizer time (e.g., to detect that a submission timed out), which made the fallback count
+    * depend on load. We therefore shorten the request timeout on all nodes so that time proofs are
+    * signed with session keys, as they are with the default session key configuration.
+    */
+  private val timeTrackerConfig: SynchronizerTimeTrackerConfig = {
+    val default = SynchronizerTimeTrackerConfig()
+    default.copy(timeRequest = default.timeRequest.copy(requestTimeout = shortDuration))
+  }
+
+  override protected def participantTimeTrackerConfig: Option[SynchronizerTimeTrackerConfig] =
+    Some(timeTrackerConfig)
+
   override protected def otherConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.setSigningKeysIfPV35OrHigher(sessionSigningKeysConfig),
+    ConfigTransforms.updateSynchronizerTimeTrackerConfigs_(_ => timeTrackerConfig),
     // adjust the max sequencing time offset so requests remain compatible with the short validity
     // periods of session signing keys.
     ConfigTransforms.updateAllSequencerConfigs_(
