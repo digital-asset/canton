@@ -34,6 +34,7 @@ import com.digitalasset.canton.performance.model.java.orchestration.partygrowth.
 import com.digitalasset.canton.performance.model.java.orchestration.runtype.DvpRun
 import com.digitalasset.canton.performance.model.java.orchestration.{Mode, PartyGrowth, TestRun}
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.util.ShowUtil.*
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.pekko.actor.ActorSystem
@@ -50,12 +51,14 @@ class TraderStats(metric: Gauge[Long]) extends LazyLogging {
 
   private val submitted_ = new AtomicInteger(0)
   private val observed_ = new AtomicInteger(0)
+  // Appended to from submission callbacks and read by the flusher, so guarded by `lock`
   private val reports = mutable.ListBuffer[(Int, Instant)]()
+  private val lock = new Mutex()
 
-  def init(count: Int): Unit = {
+  def init(count: Int): Unit = lock.exclusive {
     submitted_.set(count)
     observed_.set(count)
-    reports.append((count, Instant.now))
+    reports.append((count, Instant.now)).discard
   }
 
   def submitted: Int = submitted_.get()
@@ -66,21 +69,21 @@ class TraderStats(metric: Gauge[Long]) extends LazyLogging {
   def incrementSubmitted(): Int = submitted_.incrementAndGet()
   def decrementSubmitted(): Int = submitted_.decrementAndGet()
 
-  def updateObservedCount(count: Int): Unit = {
+  def updateObservedCount(count: Int): Unit = lock.exclusive {
     metric.updateValue(_ + count)
     val current = observed_.updateAndGet(_ + count)
     // remember timestamps we need to report progress
-    reports.append((current, Instant.now))
+    reports.append((current, Instant.now)).discard
   }
 
-  def incrementObserved(): Unit = {
+  def incrementObserved(): Unit = lock.exclusive {
     metric.updateValue(_ + 1)
     val current = observed_.incrementAndGet()
     // remember timestamps we need to report progress
-    reports.append((current, Instant.now))
+    reports.append((current, Instant.now)).discard
   }
 
-  def findTimestampAndCleanup(observation: Int): Instant = {
+  def findTimestampAndCleanup(observation: Int): Instant = lock.exclusive {
     // find our report timestamp
     val idx = reports.indexWhere(_._1 == observation)
     // drop old reporting timestamps (we keep the current if we need to resubmit the stats)

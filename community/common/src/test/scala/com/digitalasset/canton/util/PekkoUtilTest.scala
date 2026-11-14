@@ -1819,7 +1819,27 @@ class PekkoUtilTest
         },
       )
 
-      recoveringQueue.shutdown()
+      // Shutting down races with the retry of attempt #3: if the retry fires first, shutdown waits
+      // for attempt #4, which only completes when the test completes its promise. So wait for
+      // attempt #4 to start, shut down while it is in progress, then let it fail.
+      initializationStartedPromise.get().future.futureValue
+      loggerFactory.assertEventuallyLogsSeq(
+        SuppressionRule.LoggerNameContains("RecoveringFutureQueueImpl") &&
+          SuppressionRule.LevelAndAbove(Level.DEBUG)
+      )(
+        recoveringQueue.shutdown(),
+        logEntries => {
+          logEntries should have size 3
+          logEntries.head.infoMessage should include(
+            "Before shutting down, preventing further initialization retries"
+          )
+          logEntries(1).infoMessage should include("Shutdown initiated")
+          logEntries(2).debugMessage should include(
+            "Consumer initialization is in progress, shutdown signal will be propagated to consumer"
+          )
+        },
+      )
+      initializationContinuePromise.get().trySuccess(whitelistedError)
       recoveringQueue.done.futureValue
     }
 
