@@ -15,6 +15,12 @@ test_jobs:
   - test_36_requires_external_kms
   - sequential_test_36
   - test_37
+  - test_36_r2
+  - test_37_r2
+  - crash_recovery_test_36_r2
+  - test_36_r3
+  - test_37_r3
+  - crash_recovery_test_36_r3
   - test_37_requires_external_kms
   - test_dev
   - ledger_api_compatibility_tests_36

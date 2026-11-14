@@ -624,8 +624,7 @@ def test_merge_shards_partial_rerun_keeps_previous_shards():
     # "Re-run failed jobs": only shard 1 has a bundle from this attempt, shards 0 and 2 come
     # from the previous state, and nothing is counted twice.
     previous = [
-        _sample_shard(shard_index=str(i), total_shards="3", path=f"old-{i}.json")
-        for i in range(3)
+        _sample_shard(shard_index=str(i), total_shards="3", path=f"old-{i}.json") for i in range(3)
     ]
     current = [
         _sample_shard(shard_index="1", total_shards="3", path="new-1.json", passed=7, total=7)

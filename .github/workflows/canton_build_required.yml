@@ -437,6 +437,12 @@ jobs:
       - test_data_continuity_dumps
       - test_docker_images
       - test_37
+      - test_36_r2
+      - test_37_r2
+      - crash_recovery_test_36_r2
+      - test_36_r3
+      - test_37_r3
+      - crash_recovery_test_36_r3
       - test_37_requires_external_kms
       - test_dev
       - toxiproxy_test_fast_36
