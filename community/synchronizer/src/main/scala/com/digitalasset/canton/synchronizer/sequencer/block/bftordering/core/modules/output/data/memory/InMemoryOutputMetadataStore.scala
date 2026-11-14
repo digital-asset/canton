@@ -192,7 +192,15 @@ abstract class GenericInMemoryOutputMetadataStore[E <: Env[E]] extends OutputMet
       val epochsToDelete = epochs.filter(_._1 < epochNumberExclusive).keys
       epochsToDelete.foreach(epochs.remove(_).discard)
 
-      val blocksToDelete = blocks.filter(_._2.epochNumber < epochNumberExclusive).keys
+      val currentLowerBound = lowerBound.get()
+      val boundaryBlockToKeep =
+        OutputMetadataStore.onboardingBoundaryBlockToKeep(
+          currentLowerBound,
+          lowerBoundBlockStored = currentLowerBound.exists(lb => blocks.contains(lb.blockNumber)),
+        )
+      val blocksToDelete = blocks.filter { case (blockNumber, block) =>
+        block.epochNumber < epochNumberExclusive && !boundaryBlockToKeep.contains(blockNumber)
+      }.keys
       blocksToDelete.foreach(blocks.remove(_).discard)
 
       val leaderSelectionStatesToDelete =

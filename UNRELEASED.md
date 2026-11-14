@@ -211,6 +211,11 @@ Advisories first, then the other fixes as a bullet list, including dependency up
 (e.g. "Dependency updates to address security vulnerabilities: jackson 2.22.4, gRPC 1.85").
 -->
 
+- Fixed a BFT ordering stall when a newly onboarded BFT sequencer restarts before it has caught up with its
+  onboarding epoch, on H2 or in-memory storage. Startup pruning deleted the block that the sequencer stores during
+  onboarding to compute block times after such a restart. The sequencer then computed different block times than
+  its peers, did not consider itself part of the next epoch's ordering topology, and ordering could stop.
+
 <!--
 Advisory for a bug fix with a severity, e.g. (25-012, Low). For a Critical or High security fix, only once the
 fix is deployed on MainNet:

@@ -368,6 +368,39 @@ trait OutputMetadataStoreTest extends AsyncWordSpec {
 
           } yield succeed
         }
+
+        "keep an onboarded node's boundary block until a block at the lower bound is stored" in {
+          val store = createStore()
+          val startEpoch = EpochNumber(4L)
+          val firstBlockInStartEpoch = BlockNumber(40L)
+          val olderBlock =
+            createBlock(38L, epochNumber = 3L, timestamp = CantonTimestamp.ofEpochMilli(32))
+          val boundaryBlock =
+            createBlock(39L, epochNumber = 3L, timestamp = CantonTimestamp.ofEpochMilli(33))
+          val firstBlock =
+            createBlock(40L, epochNumber = 4L, timestamp = CantonTimestamp.ofEpochMilli(34))
+          for {
+            // What onboarding persists before any block of the start epoch is processed
+            _ <- store.saveOnboardedNodeLowerBound(startEpoch, firstBlockInStartEpoch)
+            _ <- store.insertBlockIfMissing(olderBlock)
+            _ <- store.insertBlockIfMissing(boundaryBlock)
+
+            // Pruning at the lower bound, as done at every startup, must keep the boundary block
+            _ <- store.prune(startEpoch)
+            older <- store.getBlock(olderBlock.blockNumber)
+            _ = older shouldBe None
+            boundary <- store.getBlock(boundaryBlock.blockNumber)
+            _ = boundary shouldBe Some(boundaryBlock)
+
+            // Once a block at the lower bound is stored, the boundary block is no longer needed
+            _ <- store.insertBlockIfMissing(firstBlock)
+            _ <- store.prune(startEpoch)
+            boundaryAfterFirstBlockStored <- store.getBlock(boundaryBlock.blockNumber)
+            _ = boundaryAfterFirstBlockStored shouldBe None
+            first <- store.getBlock(firstBlock.blockNumber)
+            _ = first shouldBe Some(firstBlock)
+          } yield succeed
+        }
       }
 
       "leader selection policy" should {
