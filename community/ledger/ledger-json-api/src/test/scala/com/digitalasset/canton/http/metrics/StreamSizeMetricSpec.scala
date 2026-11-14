@@ -55,8 +55,11 @@ class StreamSizeMetricSpec
 
     "record the size transferred before the stream fails" in {
       val histogram = newHistogram()
+      // The failure is raised when the third element is pulled, so the first two have passed.
       valuesAtTermination(
-        Source(List("ab", "cde")).concat(Source.failed(new RuntimeException("test failure"))),
+        Source(List("ab", "cde", "fail")).map { s =>
+          if (s == "fail") throw new RuntimeException("test failure") else s
+        },
         histogram,
       ).map(_ shouldBe Seq(5L))
     }
