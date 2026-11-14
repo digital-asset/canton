@@ -17,9 +17,15 @@ trait ReferenceServiceFixture
   protected lazy val channel = suiteResource.value.channel()
   protected lazy val clientStub = HelloServiceGrpc.stub(channel)
 
+  // Stop the server (see `ServerWithChannelProvider.shutdownServer`) before closing the client
+  // channel, so in-flight streams can end before their connection goes away.
   override protected def afterAll(): Unit = {
-    channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
-    super.afterAll()
+    val clientChannel = channel
+    try super.afterAll()
+    finally {
+      clientChannel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
+      ()
+    }
   }
 
   override protected def services =

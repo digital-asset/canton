@@ -33,7 +33,9 @@ class PekkoStreamGrpcServerResource(
   override protected def destruct(resource: ServerWithChannelProvider): Unit = {
     val server = derivedValue.server
 
-    server.shutdownNow()
+    // Graceful first (see `ServerWithChannelProvider.shutdownServer`); closing the services
+    // completes the streams they are still serving.
+    server.shutdown()
 
     runningServices.foreach {
       case closeable: AutoCloseable => closeable.close()
@@ -41,7 +43,9 @@ class PekkoStreamGrpcServerResource(
     }
     runningServices = Nil
 
-    server.awaitTermination(10, TimeUnit.SECONDS)
+    if (!server.awaitTermination(5, TimeUnit.SECONDS)) {
+      server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
+    }
     ()
   }
 }
