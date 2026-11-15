@@ -402,6 +402,42 @@ runs:
         echo "resolved_command_file=$resolved_command_file" >> "$GITHUB_OUTPUT"
         echo "::endgroup::"
 
+    # [TEST ONLY] Restrict the root `testOnly` to the projects that define this shard's suites
+    # (CANTON_TEST_PROJECTS, see project/CantonOrderedTests.scala). The compile job writes the
+    # project of every test to test-projects.tsv next to the test list. If that file is missing or
+    # does not cover every selected test, the variable stays unset and every project runs testOnly.
+    - name: Restrict testOnly to the shard's projects
+      if: inputs.num_test_buckets != '0' && inputs.test_sub_command == 'testOnly'
+      shell: bash
+      env:
+        SELECTED_TESTS_FILE: ${{ steps.selected_tests.outputs.selected_tests_file }}
+        TEST_FILE: ${{ inputs.test_file }}
+        COLLECT_POSTGRES_QUERY_STATS: ${{ inputs.collect_postgres_query_stats }}
+      run: |
+        set -euo pipefail
+        map="$(dirname "$TEST_FILE")/test-projects.tsv"
+        if [[ ! -s "$map" || ! -s "$SELECTED_TESTS_FILE" ]]; then
+          echo "No test project map ($map) or no selected tests; testOnly runs in every project."
+          exit 0
+        fi
+        selected_names() { tr -s ' \t\r\n' '\n' < "$SELECTED_TESTS_FILE" | grep -v '^$' || true; }
+        unmapped=$(selected_names | awk -F'\t' 'NR == FNR { known[$2] = 1; next } !($0 in known)' "$map" -)
+        if [[ -n "$unmapped" ]]; then
+          echo "::warning::$(echo "$unmapped" | wc -l) selected tests have no project in $map (e.g. $(echo "$unmapped" | head -1)); testOnly runs in every project."
+          exit 0
+        fi
+        projects=$(selected_names \
+          | awk -F'\t' 'NR == FNR { owners[$2] = owners[$2] " " $1; next }
+                        { n = split(owners[$0], p, " "); for (i = 1; i <= n; i++) seen[p[i]] = 1 }
+                        END { for (q in seen) print q }' "$map" - \
+          | sort)
+        if [[ "${COLLECT_POSTGRES_QUERY_STATS,,}" == "true" || "$COLLECT_POSTGRES_QUERY_STATS" == "1" ]]; then
+          projects=$(printf '%s\ncommunity-common\n' "$projects" | sort -u)
+        fi
+        projects=$(echo "$projects" | grep -v '^$' | paste -sd, -)
+        echo "testOnly restricted to $(echo "$projects" | tr ',' '\n' | wc -l) project(s): $projects"
+        echo "CANTON_TEST_PROJECTS=$projects" >> "$GITHUB_ENV"
+
     - name: Limit Parallel Test Execution
       uses: ./.github/actions/test/limit_parallel_test_execution
       with:

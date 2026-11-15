@@ -39,8 +39,8 @@ jobs:
 
       - name: Truncate the file collecting the test names to prevent duplicate test runs
         run: |
-          touch test-full-class-names.log
-          truncate --size=0 test-full-class-names.log
+          touch test-full-class-names.log test-projects.tsv
+          truncate --size=0 test-full-class-names.log test-projects.tsv
         shell: bash
 
       # [TEST ONLY] no explicit `update`: a task named on the command line is an execution root,
@@ -63,7 +63,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: test-full-class-names
-          path: test-full-class-names.log
+          # [TEST ONLY] test-projects.tsv: the project of each test, for project-scoped shards
+          path: |
+            test-full-class-names.log
+            test-projects.tsv
           retention-days: 1
 
       - name: Save compiled classes

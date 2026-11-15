@@ -25,8 +25,15 @@ import scala.util.Try
   * each in-process test group, heaviest first, into `CANTON_TEST_ORDER_LANES` (default 4) serial
   * lanes that run in parallel (greedy longest-processing-time assignment). Every suite task keeps
   * the configured tags, so global limits such as `Tags.limit(Tags.Test, n)` still apply. Suites
-  * missing from the file get the median weight. Forked groups are unchanged. Without the variable
-  * the settings are empty and sbt's default `testOnly` is used.
+  * missing from the file get the median weight. Forked groups are unchanged.
+  *
+  * When `CANTON_TEST_PROJECTS` lists project ids (comma-separated), `testOnly` in every other
+  * project is a no-op that accepts any arguments, so a root `testOnly A B -- ...` in a test shard
+  * no longer resolves dependencies, builds classpaths, discovers tests and loads test frameworks
+  * in the projects that hold none of the shard's suites (120 of 121 in a crash-recovery shard).
+  * Without an order file, the selected projects run their suites with sbt's own runner.
+  *
+  * With neither variable set the settings are empty and sbt's default `testOnly` is used.
   *
   * The task wiring is adapted from sbt 1.12.9 (`Defaults.inputTests0`,
   * `Defaults.allTestGroupsTask`, `Tests.testTask`), Apache License 2.0.
@@ -66,18 +73,55 @@ object CantonOrderedTests {
       .filter(_ > 0)
       .getOrElse(4)
 
-  /** Add to every project. Empty unless `CANTON_TEST_ORDER_FILE` names an existing file. */
+  private val testProjects: Option[Set[String]] =
+    sys.env
+      .get("CANTON_TEST_PROJECTS")
+      .map(_.split(',').iterator.map(_.trim).filter(_.nonEmpty).toSet)
+      .filter(_.nonEmpty)
+
+  private def projectSelected(projectId: String): Boolean = testProjects.forall(_.contains(projectId))
+
+  /** Add to every project. Empty unless `CANTON_TEST_ORDER_FILE` names an existing file or
+    * `CANTON_TEST_PROJECTS` is set.
+    */
   def settings: Seq[Setting[_]] =
-    if (orderFile.isEmpty) Nil
-    else
-      inConfig(Test)(
-        Seq(
-          testOnly := {
-            try orderedInputTests(testOnly).evaluated
-            finally close(testLoader.value)
-          }
+    if (orderFile.isEmpty && testProjects.isEmpty) Nil
+    else inConfig(Test)(Seq(testOnly := orderedInputTests(testOnly).evaluated))
+
+  /** What a test run needs from the project. Building it resolves dependencies, assembles the test
+    * classpath, discovers the tests and loads the test frameworks, so it is only built for selected
+    * projects.
+    */
+  private final case class TestRunInputs(
+      filter: Seq[String] => Seq[String => Boolean],
+      config: Tests.Execution,
+      frameworks: Map[TestFramework, Framework],
+      loader: ClassLoader,
+      groups: Seq[Tests.Group],
+      classpath: Classpath,
+      forkedParallel: Boolean,
+      javaOptions: Seq[String],
+      strategy: ClassLoaderLayeringStrategy,
+  )
+
+  // A conditional task: the dependencies in the selected branch are not evaluated otherwise.
+  private lazy val selectedProjectInputs: Initialize[Task[Option[TestRunInputs]]] = Def.taskIf {
+    if (projectSelected(thisProject.value.id))
+      Some(
+        TestRunInputs(
+          testFilter.value,
+          testExecution.value,
+          loadedTestFrameworks.value,
+          testLoader.value,
+          testGrouping.value,
+          fullClasspath.value,
+          testForkedParallel.value,
+          javaOptions.value,
+          classLoaderLayeringStrategy.value,
         )
       )
+    else None
+  }
 
   private def close(loader: ClassLoader): Unit = loader match {
     case closeable: AutoCloseable => closeable.close()
@@ -94,24 +138,43 @@ object CantonOrderedTests {
     Def.inputTaskDyn {
       val (selected, frameworkOptions) = parser.parsed
       val s = streams.value
-      val filter = testFilter.value
-      val config = testExecution.value
       val display = Project.showContextKey(state.value)
-      val modifiedOpts =
-        Tests.Filters(filter(selected)) +: Tests.Argument(frameworkOptions: _*) +: config.options
-      val newConfig = config.copy(options = modifiedOpts)
-      val output = allTestGroupsTask(
-        s,
-        loadedTestFrameworks.value,
-        testLoader.value,
-        testGrouping.value,
-        newConfig,
-        fullClasspath.value,
-        testForkedParallel.value,
-      )
       val taskName = display.show(resolvedScoped.value)
       val trl = testResultLogger.value
-      output.map(out => trl.run(s.log, out, taskName))
+      val projectId = s"${thisProject.value.id} / "
+      selectedProjectInputs.value match {
+        case None => Def.task(())
+        case Some(in) =>
+          val modifiedOpts =
+            Tests.Filters(in.filter(selected)) +: Tests.Argument(frameworkOptions: _*) +:
+              in.config.options
+          val newConfig = in.config.copy(options = modifiedOpts)
+          val output =
+            if (orderFile.nonEmpty)
+              allTestGroupsTask(
+                s,
+                in.frameworks,
+                in.loader,
+                in.groups,
+                newConfig,
+                in.classpath,
+                in.forkedParallel,
+              )
+            else
+              Defaults.allTestGroupsTask(
+                s,
+                in.frameworks,
+                in.loader,
+                in.groups,
+                newConfig,
+                in.classpath,
+                in.forkedParallel,
+                in.javaOptions,
+                in.strategy,
+                projectId,
+              )
+          output.map(out => trl.run(s.log, out, taskName)).andFinally(close(in.loader))
+      }
     }
   }
 

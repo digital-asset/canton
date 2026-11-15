@@ -330,6 +330,13 @@ object BuildCommon {
       // Projects run this task in parallel; unsynchronized appends can splice lines together
       printTestsLock.synchronized {
         IO.writeLines(file(destination), testNames, append = true)
+        // [TEST ONLY] which project defines each test, so that a test shard can restrict
+        // `testOnly` to its projects (CANTON_TEST_PROJECTS, see CantonOrderedTests)
+        IO.writeLines(
+          file("test-projects.tsv"),
+          testNames.map(name => s"$projectName\t$name"),
+          append = true,
+        )
       }
       println(s"Printed ${testNames.size} tests for `$projectName`")
     }
