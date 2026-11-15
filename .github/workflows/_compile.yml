@@ -41,10 +41,14 @@ jobs:
           truncate --size=0 test-full-class-names.log
         shell: bash
 
+      # [TEST ONLY] no explicit `update`: a task named on the command line is an execution root,
+      # and sbt forces dependency resolution for root `update` tasks (every aggregated project),
+      # ignoring the cached resolution in target/streams. `Test/compile` still runs `update` as a
+      # dependency, which reuses the cached resolution when the inputs are unchanged.
       - name: SBT compile
         uses: ./.github/actions/sbt/execute_sbt_command
         with:
-          cmd: update Test/compile printTests
+          cmd: Test/compile printTests
           report_to_datadog: "false"
           retry_fetch: "50"
           execution_context_size: "8"
