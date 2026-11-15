@@ -123,8 +123,10 @@ object DamlPlugin extends AutoPlugin {
   // In the long-term, it would be best if this build process worked alongside
   // all of the other tasks in DamlPlugin.
   def parallelDamlBuildDarsTask = Def.task {
-    damlInstall.value
     val damlVersion = damlCompilerVersion.value
+    val registry = dpmRegistry.value
+    val useCustomVersion = damlUseCustomVersion.value
+    val log = streams.value.log
     val targetRoot = (Test / parallelDamlBuildDarsOutput).value
 
     import CacheImplicits._
@@ -153,6 +155,7 @@ object DamlPlugin extends AutoPlugin {
       (changed: Boolean, _: (Set[HashFileInfo], String, String)) =>
         val shouldRebuild = changed || !targetRoot.exists
         if (shouldRebuild) {
+          ensureDamlInstalled(damlVersion, registry, useCustomVersion, log)
           if (targetRoot.exists) IO.delete(targetRoot)
           buildAllDarsInParallel(upgradesTestFiles, targetRoot, damlVersion)
         }
@@ -257,61 +260,80 @@ object DamlPlugin extends AutoPlugin {
   }
 
   def damlStablePackagesManifest = Def.task {
-    damlInstall.value
     val damlVersion = damlCompilerVersion.value
     val registry = dpmRegistry.value
-    IO.withTemporaryDirectory { dir =>
-      val values = Map[String, Any](
-        "override-components" -> Map(
-          "damlc" -> Map("version" -> damlVersion).asJava,
-          "daml-script" -> Map("version" -> damlVersion).asJava,
-          "codegen" -> Map("version" -> damlVersion).asJava,
+    val useCustomVersion = damlUseCustomVersion.value
+    val log = streams.value.log
+    val targetLocation =
+      (Compile / resourceManaged).value / "compiler" / "damlc" / "stable-packages"
+    // [TEST ONLY experiment] Skip `dpm resolve` (and the daml install it needs) when the stable
+    // packages for this daml version and registry were already copied, e.g. into target
+    // directories restored from the compile job.
+    val stamp = streams.value.cacheDirectory / "stable-packages-source"
+    val stampValue = s"$damlVersion\n$registry\n"
+    def copied: Seq[File] =
+      IO.listFiles(targetLocation / "lf-v2" / "daml-stdlib").toSeq ++
+        IO.listFiles(targetLocation / "lf-v2" / "daml-prim").toSeq
+    if (
+      !useCustomVersion && stamp.exists() && IO.read(stamp) == stampValue &&
+      IO.listFiles(targetLocation / "lf-v2" / "daml-stdlib").nonEmpty &&
+      IO.listFiles(targetLocation / "lf-v2" / "daml-prim").nonEmpty
+    ) copied
+    else {
+      ensureDamlInstalled(damlVersion, registry, useCustomVersion, log)
+      val result = IO.withTemporaryDirectory { dir =>
+        val values = Map[String, Any](
+          "override-components" -> Map(
+            "damlc" -> Map("version" -> damlVersion).asJava,
+            "daml-script" -> Map("version" -> damlVersion).asJava,
+            "codegen" -> Map("version" -> damlVersion).asJava,
+          ).asJava
         ).asJava
-      ).asJava
-      // write package configuration file
-      writeYaml(dir / "daml.yaml", values)
-      val rawResolution = runCommand(
-        command = Seq("dpm", "resolve"),
-        workingDir = dir,
-        extraEnv = Seq("DPM_REGISTRY" -> registry),
-      )(
-        failureMessage = "dpm resolve failed"
-      )
-      val resolution = readYamlString(rawResolution)
-      val damlcLocation = resolution
-        .get("packages")
-        .asInstanceOf[JMap[String, Any]]
-        .get(dir.getCanonicalFile.toString)
-        .asInstanceOf[JMap[String, Any]]
-        .get("components")
-        .asInstanceOf[JMap[String, Any]]
-        .get("damlc")
-        .asInstanceOf[String]
-      val targetLocation =
-        (Compile / resourceManaged).value / "compiler" / "damlc" / "stable-packages"
-      if (!targetLocation.exists()) {
-        IO.createDirectory(targetLocation)
-        IO.createDirectory(targetLocation / "lf-v2" / "daml-prim")
-        IO.createDirectory(targetLocation / "lf-v2" / "daml-stdlib")
+        // write package configuration file
+        writeYaml(dir / "daml.yaml", values)
+        val rawResolution = runCommand(
+          command = Seq("dpm", "resolve"),
+          workingDir = dir,
+          extraEnv = Seq("DPM_REGISTRY" -> registry),
+        )(
+          failureMessage = "dpm resolve failed"
+        )
+        val resolution = readYamlString(rawResolution)
+        val damlcLocation = resolution
+          .get("packages")
+          .asInstanceOf[JMap[String, Any]]
+          .get(dir.getCanonicalFile.toString)
+          .asInstanceOf[JMap[String, Any]]
+          .get("components")
+          .asInstanceOf[JMap[String, Any]]
+          .get("damlc")
+          .asInstanceOf[String]
+        if (!targetLocation.exists()) {
+          IO.createDirectory(targetLocation)
+          IO.createDirectory(targetLocation / "lf-v2" / "daml-prim")
+          IO.createDirectory(targetLocation / "lf-v2" / "daml-stdlib")
+        }
+
+        // val stablePackagesManifestLocation = new File(damlcLocation + "/damlc-dist-dpm/resources/stable-packages-manifest-v2.txt")
+        val damlStdlibLocation =
+          new File(damlcLocation + "/damlc-dist-dpm/resources/stable-packages/lf-v2/daml-stdlib")
+        val damlPrimLocation =
+          new File(damlcLocation + "/damlc-dist-dpm/resources/stable-packages/lf-v2/daml-prim")
+        // IO.copyFile(stablePackagesManifestLocation, targetLocation / "stable-packages-manifest-v2.txt")
+        IO.copyDirectory(
+          damlStdlibLocation,
+          targetLocation / "lf-v2" / "daml-stdlib",
+          overwrite = true,
+        )
+        IO.copyDirectory(damlPrimLocation, targetLocation / "lf-v2" / "daml-prim", overwrite = true)
+
+        val a1 = IO.listFiles(targetLocation / "lf-v2" / "daml-stdlib").toSeq
+        val a2 = IO.listFiles(targetLocation / "lf-v2" / "daml-prim").toSeq
+        // val a3 = Seq(targetLocation / "stable-packages-manifest-v2.txt")
+        a1 ++ a2 // ++ a3
       }
-
-      // val stablePackagesManifestLocation = new File(damlcLocation + "/damlc-dist-dpm/resources/stable-packages-manifest-v2.txt")
-      val damlStdlibLocation =
-        new File(damlcLocation + "/damlc-dist-dpm/resources/stable-packages/lf-v2/daml-stdlib")
-      val damlPrimLocation =
-        new File(damlcLocation + "/damlc-dist-dpm/resources/stable-packages/lf-v2/daml-prim")
-      // IO.copyFile(stablePackagesManifestLocation, targetLocation / "stable-packages-manifest-v2.txt")
-      IO.copyDirectory(
-        damlStdlibLocation,
-        targetLocation / "lf-v2" / "daml-stdlib",
-        overwrite = true,
-      )
-      IO.copyDirectory(damlPrimLocation, targetLocation / "lf-v2" / "daml-prim", overwrite = true)
-
-      val a1 = IO.listFiles(targetLocation / "lf-v2" / "daml-stdlib").toSeq
-      val a2 = IO.listFiles(targetLocation / "lf-v2" / "daml-prim").toSeq
-      // val a3 = Seq(targetLocation / "stable-packages-manifest-v2.txt")
-      a1 ++ a2 // ++ a3
+      IO.write(stamp, stampValue)
+      result
     }
   }
 
@@ -343,15 +365,32 @@ object DamlPlugin extends AutoPlugin {
   // in-memory cache for damlInstall
   // we don't use a file cache, because sbt file cache and dpm cache can be out-of-sync on CI
   private var installedDamlVersion: Option[String] = None
+  private val damlInstallLock = new Object
 
   private def installDaml = Def.task {
-    val damlVersion = damlCompilerVersion.value
-    val registry = dpmRegistry.value
-    val useCustomVersion = damlUseCustomVersion.value
-    val streams = Keys.streams.value
+    ensureDamlInstalled(
+      damlCompilerVersion.value,
+      dpmRegistry.value,
+      damlUseCustomVersion.value,
+      Keys.streams.value.log,
+    )
+  }
 
+  /** [TEST ONLY experiment] Installs the daml components once per sbt JVM, when first needed.
+    *
+    * `damlBuild`, `damlGenerateJava` and `damlGenerateTs` call this only on a cache miss, right
+    * before running `dpm`. They used to depend on the `damlInstall` task, which ran `dpm install`
+    * (~22 s in CI) in every sbt JVM even when every Daml output was already up to date, e.g. in
+    * test shards that restore the compile job's target directories.
+    */
+  private def ensureDamlInstalled(
+      damlVersion: String,
+      registry: String,
+      useCustomVersion: Boolean,
+      log: Logger,
+  ): Unit = damlInstallLock.synchronized {
     if (!useCustomVersion && !installedDamlVersion.contains(damlVersion)) {
-      streams.log.info(s"Installing daml $damlVersion")
+      log.info(s"Installing daml $damlVersion")
 
       // create a temporary daml.yaml file with damlc and daml-script overrides
       // invoke `dpm install package` on it
@@ -414,6 +453,8 @@ object DamlPlugin extends AutoPlugin {
     val settings = damlJavaCodegen.value
     val outputDirectory = damlJavaCodegenOutput.value
     val damlVersion = damlCompilerVersion.value
+    val registry = dpmRegistry.value
+    val useCustomVersion = damlUseCustomVersion.value
 
     import CacheImplicits._
     val cacheInput = (
@@ -438,6 +479,7 @@ object DamlPlugin extends AutoPlugin {
     )
     val cachedOutput =
       Cache.cached(cacheStore) { (_: (Set[(String, HashFileInfo, String)], String, String)) =>
+        ensureDamlInstalled(damlVersion, registry, useCustomVersion, streams.log)
         IO.delete(outputDirectory)
         settings.foreach { case (damlPackageDirectory, darFile, packageName) =>
           generateJavaCode(
@@ -462,6 +504,8 @@ object DamlPlugin extends AutoPlugin {
     val settings = damlTsCodegen.value
     val outputDirectory = damlTsCodegenOutput.value
     val damlVersion = damlCompilerVersion.value
+    val registry = dpmRegistry.value
+    val useCustomVersion = damlUseCustomVersion.value
 
     import CacheImplicits._
     val cacheInput = (
@@ -485,6 +529,7 @@ object DamlPlugin extends AutoPlugin {
     )
     val cachedOutput =
       Cache.cached(cacheStore) { (_: (Set[(String, HashFileInfo)], String, String)) =>
+        ensureDamlInstalled(damlVersion, registry, useCustomVersion, streams.log)
         IO.delete(outputDirectory)
         settings.foreach { case (damlPackageDirectory, darFile) =>
           generateTsCode(streams.log, damlPackageDirectory, darFile, outputDirectory, damlVersion)
@@ -500,8 +545,9 @@ object DamlPlugin extends AutoPlugin {
     dir.toPath.relativize(path).normalize().toFile
 
   private def damlBuildTask = Def.taskDyn {
-    damlInstall.value
     val streams = Keys.streams.value
+    val registry = dpmRegistry.value
+    val useCustomVersion = damlUseCustomVersion.value
     val dependencies = damlDependencies.value
     val outputDirectory = damlDarOutput.value
     val lfVersions = damlDarLfVersions.value
@@ -572,6 +618,7 @@ object DamlPlugin extends AutoPlugin {
       val cachedOutputDars =
         Cache.cached(cacheStore) {
           (_: (Set[HashFileInfo], String, Boolean, String, Boolean, Set[File])) =>
+            ensureDamlInstalled(damlVersion, registry, useCustomVersion, streams.log)
             // build the daml files in a sorted way, using the build order definition
             for {
               projectFile <- damlProjectFiles.sortWith(buildOrder)
