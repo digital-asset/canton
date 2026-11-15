@@ -98,14 +98,6 @@ runs:
 
         echo "cmd_file=$cmd_file" >> "$GITHUB_OUTPUT"
 
-    - name: Parse SBT command
-      uses: ./.github/actions/nix/nix_run
-      with:
-        command: python3 ./scripts/ci/parse_sbt_cmd.py --cmd-file "$SBT_CMD_FILE" --output-file "$PARSED_ARGS_FILE"
-      env:
-        SBT_CMD_FILE: ${{ steps.resolve_sbt_cmd.outputs.cmd_file }}
-        PARSED_ARGS_FILE: ${{ steps.parse_sbt_cmd.outputs.args_file }}
-
     - name: Display and execute SBT command
       id: execute_sbt
       run: |
@@ -124,13 +116,18 @@ runs:
         echo "sbt $full_cmd"
         echo "::endgroup::"
 
-        sbt_cmd_args=()
-        # Load pre-parsed argv tokens into a bash array for safe execution.
-        while IFS= read -r token; do
-          sbt_cmd_args+=("$token")
-        done < "$PARSED_ARGS_FILE"
-
-        .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh "${sbt_cmd_args[@]}"
+        # [TEST ONLY] Parse the command inside the same nix shell that runs sbt: each .ci/nix-exec
+        # evaluates shell.nix (2-3 s), and parsing used to take a nix shell of its own.
+        # The parsed argv tokens are loaded into a bash array for safe execution.
+        .ci/nix-exec bash -c '
+          set -euo pipefail
+          python3 ./scripts/ci/parse_sbt_cmd.py --cmd-file "$SBT_CMD_FILE" --output-file "$PARSED_ARGS_FILE"
+          sbt_cmd_args=()
+          while IFS= read -r token; do
+            sbt_cmd_args+=("$token")
+          done < "$PARSED_ARGS_FILE"
+          exec ./scripts/ci/sbt-ci-wrapper.sh "${sbt_cmd_args[@]}"
+        '
       shell: bash
       env:
         SBT_CMD_FILE: ${{ steps.resolve_sbt_cmd.outputs.cmd_file }}

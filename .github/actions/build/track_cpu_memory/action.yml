@@ -14,7 +14,10 @@ runs:
       shell: bash
       run: |
         echo "Starting resource monitoring..."
-        ./scripts/ci/record-memory-usage.sh &
+        # [TEST ONLY] Detach the monitor's output from this step: while a background process holds
+        # the step's stdout, the runner waits 5 s for it before moving on. The monitor appends to
+        # track/memory-usage-actual.txt itself (tee -a).
+        ./scripts/ci/record-memory-usage.sh > /dev/null 2>&1 &
 
         echo "monitor_pid=$!" >> "$GITHUB_OUTPUT"
         echo "Monitoring started with PID: $!"
