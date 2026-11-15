@@ -133,4 +133,8 @@ sbt-license-report: unable to find the value for property joda\.artifactId
 # task and suite names such as `root / checkErrors` or `...ErrorSpec` are not errors.
 ^\[info\]   \S.*: +[0-9]+ ms\s*$
 
+# [TEST ONLY] Daml build cache-miss diagnostics (project/DamlPlugin.scala): file paths may contain
+# words such as "error".
+^\[info\] \[daml-cache\]
+
 # Make sure to have a trailing newline

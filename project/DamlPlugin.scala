@@ -376,6 +376,44 @@ object DamlPlugin extends AutoPlugin {
     )
   }
 
+  /** [TEST ONLY] On a Daml build cache miss, logs how the cache input differs from the input of
+    * the last build, which was written next to the cache store. Lines start with `[daml-cache]`
+    * (ignored by the CI log check, since paths may contain words like "error").
+    */
+  private def logCacheMiss(
+      log: Logger,
+      label: String,
+      cacheStoreFile: File,
+      manifestFile: File,
+      current: Seq[String],
+  ): Unit = {
+    val store =
+      if (cacheStoreFile.exists()) s"cache store present (${cacheStoreFile.length()} bytes)"
+      else "no cache store"
+    if (!manifestFile.exists())
+      log.info(s"[daml-cache] $label: rebuilding; $store; no input manifest of a previous build")
+    else {
+      def keyed(lines: Seq[String]): Map[String, String] = lines.map { line =>
+        val cut = line.lastIndexOf('\t')
+        if (cut < 0) line -> "" else line.substring(0, cut) -> line.substring(cut + 1)
+      }.toMap
+      val previous = keyed(IO.readLines(manifestFile))
+      val now = keyed(current)
+      val added = (now.keySet -- previous.keySet).toSeq.sorted
+      val removed = (previous.keySet -- now.keySet).toSeq.sorted
+      val changed = now.keySet.intersect(previous.keySet).filter(k => now(k) != previous(k)).toSeq.sorted
+      log.info(
+        s"[daml-cache] $label: rebuilding; $store; vs the last build's input: " +
+          s"${added.size} added, ${removed.size} removed, ${changed.size} changed"
+      )
+      added.take(10).foreach(k => log.info(s"[daml-cache]   added   $k"))
+      removed.take(10).foreach(k => log.info(s"[daml-cache]   removed $k"))
+      changed.take(10).foreach(k => log.info(s"[daml-cache]   changed $k: ${previous(k)} -> ${now(k)}"))
+      if (added.isEmpty && removed.isEmpty && changed.isEmpty)
+        log.info("[daml-cache]   same input as the last build, so the cache store itself did not match")
+    }
+  }
+
   /** [TEST ONLY experiment] For projects whose tests run `dpm` themselves (daml-script-tests,
     * daml-lf-snapshot): install the daml components before their tests run. They used to rely on
     * the Daml build tasks having installed them, which now happens only on a cache miss. As a test
@@ -627,15 +665,37 @@ object DamlPlugin extends AutoPlugin {
       FileStamp.Formats.seqFileJsonFormatter,
     )
 
+    // [TEST ONLY] the cache input above as text, to log what changed on a cache miss
+    val inputManifest: Seq[String] =
+      inputFileHash.toSeq
+        .map(h => s"file\t${h.file}\t${if (h.file.exists) sbt.io.Hash.toHex(sbt.io.Hash(h.file)) else "missing"}")
+        .sorted ++ Seq(
+        s"outputDirectory\t$outputDirectory",
+        s"useVersionedDarFileName\t$useVersionedDarFileName",
+        s"damlVersion\t$damlVersion",
+        s"extractMainDalf\t$shouldExtractMainDalf",
+        s"pinnedProjects\t${relativePinnedProjectFiles.toSeq.map(_.toString).sorted.mkString(",")}",
+      )
+    val projectName = thisProject.value.id
+    val configName = configuration.value.name
+
     // start a new task for each LF version, for parallelization
     def cachedTask(lfVersion: String) = Def.task {
       val cacheStore = streams.cacheStoreFactory.make(s"damlBuild-$lfVersion")
+      val manifestFile = streams.cacheDirectory / s"damlBuild-$lfVersion-inputs.txt"
       val cachedOutputDars =
         Cache.cached(cacheStore) {
           (_: (Set[HashFileInfo], String, Boolean, String, Boolean, Set[File])) =>
+            logCacheMiss(
+              streams.log,
+              s"$projectName / $configName / damlBuild-$lfVersion",
+              streams.cacheDirectory / s"damlBuild-$lfVersion",
+              manifestFile,
+              inputManifest,
+            )
             ensureDamlInstalled(damlVersion, registry, useCustomVersion, streams.log)
             // build the daml files in a sorted way, using the build order definition
-            for {
+            val dars = for {
               projectFile <- damlProjectFiles.sortWith(buildOrder)
               relativeProjectFile = relativeFile(sourceDirectory, projectFile.toPath)
               if !relativePinnedProjectFiles.contains(relativeProjectFile)
@@ -653,6 +713,8 @@ object DamlPlugin extends AutoPlugin {
                   shouldExtractMainDalf,
                 )
             } yield file
+            IO.writeLines(manifestFile, inputManifest)
+            dars
         }(cacheFormat)
       cachedOutputDars(cacheInput)
     }
