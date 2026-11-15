@@ -1,4 +1,2 @@
 ^main$
 ^release-line-
-# [TEST ONLY][TEMPORARY] cold compile job on the #765 branch, to compare with and without pipelining
-^ci/compile-steps$
