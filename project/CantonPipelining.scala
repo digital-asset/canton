@@ -38,15 +38,20 @@ object CantonPipelining extends AutoPlugin {
   // Early output holds the pickles scalac writes. A project without hand-written Scala sources
   // (pure Java such as `bindings-java`, or only generated code) gives downstream projects no
   // usable early output, so they must wait for its class files.
-  private val hasHandWrittenScala = Def.setting {
-    (Compile / unmanagedSourceDirectories).value.exists(dir => (dir ** "*.scala").get.nonEmpty)
+  private def hasHandWrittenScala(config: Configuration) = Def.setting {
+    (config / unmanagedSourceDirectories).value.exists(dir => (dir ** "*.scala").get.nonEmpty)
   }
 
   override def projectSettings: Seq[Setting[_]] = Seq(
+    // Projects without any hand-written Scala gain nothing from pipelining (javac cannot read
+    // pickles), and in CI the pure-Java `daml-lf-snapshot-proto` was compiled again by the
+    // `printTests` that followed a full `Test/compile` when it was pipelined. Test sources
+    // count: the community-app test modules have Scala only in Test.
     usePipelining := enabled && scalaBinaryVersion.value == "2.13" &&
-      compileOrder.value == CompileOrder.Mixed,
+      compileOrder.value == CompileOrder.Mixed &&
+      (hasHandWrittenScala(Compile).value || hasHandWrittenScala(Test).value),
     exportPipelining := usePipelining.value && !noEarlyOutput.contains(thisProject.value.id) &&
-      hasHandWrittenScala.value,
+      hasHandWrittenScala(Compile).value,
     // sbt adds `-Ypickle-write <early output>` to each configuration's scalacOptions, and Test
     // inherits Compile's options, so the Test compile sees both its own and Compile's
     // `-Ypickle-write`. scalac uses the last one, so the Test compile overwrote Compile's early
