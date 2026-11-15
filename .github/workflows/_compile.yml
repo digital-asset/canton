@@ -49,6 +49,10 @@ jobs:
         uses: ./.github/actions/sbt/execute_sbt_command
         with:
           cmd: Test/compile printTests
+          # [TEST ONLY] bound a hang: with build pipelining, sbt waits forever (no error, no CPU)
+          # if an upstream project never signals its early output, as seen once locally. A cold
+          # compile takes ~7 min here and ~11 min at worst in the baselines; the default is 240m.
+          timeout: "20m"
           report_to_datadog: "false"
           retry_fetch: "50"
           execution_context_size: "8"
