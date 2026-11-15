@@ -437,12 +437,9 @@ jobs:
       - test_data_continuity_dumps
       - test_docker_images
       - test_37
-      - test_36_r2
-      - test_37_r2
-      - crash_recovery_test_36_r2
-      - test_36_r3
-      - test_37_r3
-      - crash_recovery_test_36_r3
+      - test_36_repeat
+      - test_37_repeat
+      - crash_recovery_test_36_repeat
       - test_37_requires_external_kms
       - test_dev
       - toxiproxy_test_fast_36
@@ -473,86 +470,61 @@ jobs:
           )
         }}
 
-  test_36_r2:
-    # Flake-measurement only (combined flake PR): an independent repeat of the PV36 lane in the same run
-    name: Test protocol version 36 (repeat 2)
+  # Flake-measurement only (combined flake PR): 29 independent repeats of each lane, so with the
+  # original lane each lane runs 30 times per run. max-parallel 3 keeps three repeats of each lane
+  # running at once (four while the original lane is still running); fail-fast is off so one
+  # failure does not cancel the remaining repeats.
+  test_36_repeat:
+    name: Test protocol version 36 (repeat ${{ matrix.repeat }})
     needs: [pick_runner, compile]
     if: github.event_name != 'merge_group'
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        repeat: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
       include_only_requires_external_kms_tests: false
       override_java_version_for_tests: ""
       protocol_version: '36'
-      job_name: test_r2
+      job_name: test_r${{ matrix.repeat }}
       timings_job_name: test
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test_37_r2:
-    # Flake-measurement only (combined flake PR): an independent repeat of the PV37 lane in the same run
-    name: Test Protocol Version 37 (repeat 2)
+  test_37_repeat:
+    name: Test Protocol Version 37 (repeat ${{ matrix.repeat }})
     needs: [pick_runner, compile]
     if: github.event_name != 'merge_group' && github.ref_type != 'tag'
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        repeat: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
       protocol_version: '37'
-      job_name: test_37_r2
+      job_name: test_37_r${{ matrix.repeat }}
       timings_job_name: test_37
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  crash_recovery_test_36_r2:
-    # Flake-measurement only (combined flake PR): an independent repeat of the crash recovery lane in the same run
-    name: Crash Recovery Test 36 (repeat 2)
+  crash_recovery_test_36_repeat:
+    name: Crash Recovery Test 36 (repeat ${{ matrix.repeat }})
     needs: [pick_runner, compile]
     if: github.event_name != 'merge_group'
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        repeat: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
     uses: ./.github/workflows/_crash_recovery_test.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
-      job_name: crash_recovery_test_r2
-      timings_job_name: crash_recovery_test
-
-  test_36_r3:
-    # Flake-measurement only (combined flake PR): an independent repeat of the PV36 lane in the same run
-    name: Test protocol version 36 (repeat 3)
-    needs: [pick_runner, compile]
-    if: github.event_name != 'merge_group'
-    uses: ./.github/workflows/_test.yml
-    secrets: inherit
-    with:
-      include_only_requires_external_kms_tests: false
-      override_java_version_for_tests: ""
-      protocol_version: '36'
-      job_name: test_r3
-      timings_job_name: test
-      runner: ${{ needs.pick_runner.outputs.runner }}
-
-  test_37_r3:
-    # Flake-measurement only (combined flake PR): an independent repeat of the PV37 lane in the same run
-    name: Test Protocol Version 37 (repeat 3)
-    needs: [pick_runner, compile]
-    if: github.event_name != 'merge_group' && github.ref_type != 'tag'
-    uses: ./.github/workflows/_test.yml
-    secrets: inherit
-    with:
-      protocol_version: '37'
-      job_name: test_37_r3
-      timings_job_name: test_37
-      runner: ${{ needs.pick_runner.outputs.runner }}
-
-  crash_recovery_test_36_r3:
-    # Flake-measurement only (combined flake PR): an independent repeat of the crash recovery lane in the same run
-    name: Crash Recovery Test 36 (repeat 3)
-    needs: [pick_runner, compile]
-    if: github.event_name != 'merge_group'
-    uses: ./.github/workflows/_crash_recovery_test.yml
-    secrets: inherit
-    with:
-      runner: ${{ needs.pick_runner.outputs.runner }}
-      protocol_version: '36'
-      job_name: crash_recovery_test_r3
+      job_name: crash_recovery_test_r${{ matrix.repeat }}
       timings_job_name: crash_recovery_test
 
   canton_build_required_gate:
@@ -580,12 +552,9 @@ jobs:
       - test_data_continuity_dumps
       - test_docker_images
       - test_37
-      - test_36_r2
-      - test_37_r2
-      - crash_recovery_test_36_r2
-      - test_36_r3
-      - test_37_r3
-      - crash_recovery_test_36_r3
+      - test_36_repeat
+      - test_37_repeat
+      - crash_recovery_test_36_repeat
       - test_37_requires_external_kms
       - test_dev
       - toxiproxy_test_fast_36
