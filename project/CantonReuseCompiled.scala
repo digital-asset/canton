@@ -32,8 +32,12 @@ object CantonReuseCompiled extends AutoPlugin {
           Seq(
             compile := {
               val previous = previousCompile.value.analysis()
+              // Looked up unconditionally: sbt evaluates task dependencies regardless of `if`,
+              // and CI rejects the linter warning for a lookup inside one. Listing the source
+              // directories is cheap and generates nothing.
+              val sources = unmanagedSources.value
               if (previous.isPresent) previous.get()
-              else if (unmanagedSources.value.isEmpty) sbt.internal.inc.Analysis.Empty
+              else if (sources.isEmpty) sbt.internal.inc.Analysis.Empty
               else
                 sys.error(
                   s"CANTON_REUSE_COMPILED_CLASSES is set but ${thisProject.value.id} / " +
