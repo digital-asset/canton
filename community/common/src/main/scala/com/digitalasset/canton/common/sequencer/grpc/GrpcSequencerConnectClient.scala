@@ -219,11 +219,30 @@ class GrpcSequencerConnectClient(
     // did not wait for the registration to complete before signalling success. While this has
     // been improved in the meantime, we've left this retry logic in the code in order to support
     // future, less synchronous implementations.
-    val interval = 500.millis
-    val maxRetries: Int = timeouts.verifyActive.retries(interval)
+    //
+    // When waiting for a new participant to become active, the onboarding topology transactions
+    // typically become effective a few hundred milliseconds after they were registered. Polling at
+    // a fixed 500ms therefore overshoots by ~250ms on average, so back off from a short interval
+    // instead. The total time budget stays `timeouts.verifyActive`: the ramp-up steps are added on
+    // top of the retries a fixed `maxInterval` would get.
+    val initialInterval = 20.millis
+    val maxInterval = 500.millis
+    val rampUpSteps =
+      Iterator.iterate(initialInterval)(_ * 2).takeWhile(_ < maxInterval).size
+    val maxRetries: Int = {
+      val retries = timeouts.verifyActive.retries(maxInterval)
+      if (retries == Int.MaxValue) retries else retries + rampUpSteps
+    }
     EitherT(
       retry
-        .Pause(logger, this, maxRetries, interval, "verify active")
+        .Backoff(
+          logger,
+          this,
+          maxRetries,
+          initialDelay = initialInterval,
+          maxDelay = maxInterval,
+          operationName = "verify active",
+        )(retry.Jitter.none(maxInterval))
         .unlessShutdown(verifyActive().value, AllExceptionRetryPolicy)
     )
   }
