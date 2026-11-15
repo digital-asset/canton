@@ -17,7 +17,9 @@ jobs:
     runs-on: ${{ inputs.runner }}
     env:
       EXECUTOR_JVM_HEAP_SIZE: 14000M
-      SBT_TASK_TIMINGS: "true" # [TEST ONLY] per-task timings in the sbt log
+      # [TEST ONLY] timings off in the compile job for one run: does the ~25 s pause after each
+      # timed sbt command come from the timing report itself?
+      SBT_TASK_TIMINGS: "false"
     steps:
       - name: Checkout
         uses: actions/checkout@v5
