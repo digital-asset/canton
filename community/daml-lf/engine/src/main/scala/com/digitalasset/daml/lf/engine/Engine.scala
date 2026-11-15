@@ -1081,7 +1081,19 @@ class Engine(
     * affected by [[com.digitalasset.daml.lf.engine.EngineConfig.packageValidation]] flag in
     * [config]. Package in [pkgIds] but not in [pkgs] are assumed to be preloaded.
     */
-  def validateDar(dar: Dar[(PackageId, Package)]): Either[Error.Package.Error, Unit] = {
+  def validateDar(dar: Dar[(PackageId, Package)]): Either[Error.Package.Error, Unit] =
+    validateDar(dar, alreadyTypechecked = _ => false)
+
+  /** Like [[validateDar]], but packages for which `alreadyTypechecked` returns true are not
+    * typechecked again, in the same way as packages that are already loaded in this engine. All
+    * other checks run on every package. Only pass a predicate that returns true for packages whose
+    * id identifies their content (e.g. checked against the archive hash) and that passed this
+    * typecheck before.
+    */
+  def validateDar(
+      dar: Dar[(PackageId, Package)],
+      alreadyTypechecked: PackageId => Boolean,
+  ): Either[Error.Package.Error, Unit] = {
     val pkgIdDepGraph: Map[PackageId, Set[PackageId]] =
       dar.all.toMap.view.mapValues(_.imports.pkgIds).toMap
     val mainPackageId: PackageId = dar.main._1
@@ -1123,7 +1135,7 @@ class Engine(
         darPackages.iterator
           // we trust already loaded packages
           .collect {
-            case (pkgId, pkg) if !compiledPackages.contains(pkgId) =>
+            case (pkgId, pkg) if !compiledPackages.contains(pkgId) && !alreadyTypechecked(pkgId) =>
               Validation.checkPackage(pkgInterface, pkgId, pkg)
           }
           .collectFirst { case Left(err) => Error.Package.Validation(err) }

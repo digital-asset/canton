@@ -26,7 +26,7 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.{LedgerSubmissionId, LfPackageId}
-import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, Decode, Dar as LfDar}
+import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, Dar as LfDar}
 import com.digitalasset.daml.lf.engine.{Engine, Error as EngineError}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion as LV}
 import com.google.protobuf.ByteString
@@ -58,9 +58,9 @@ class PackageUploader(
       for {
         dar <- catchUpstreamErrors(DarParser.readArchive(darName, stream))
           .thereafter(_ => stream.close())
-        mainPackage <- catchUpstreamErrors(Decode.decodeArchive(dar.main))
+        mainPackage <- catchUpstreamErrors(PackageProcessingCache.decodeArchive(dar.main))
         dependencies <- dar.dependencies.parTraverse(archive =>
-          catchUpstreamErrors(Decode.decodeArchive(archive))
+          catchUpstreamErrors(PackageProcessingCache.decodeArchive(archive))
         )
         lfDar = LfDar(mainPackage, dependencies)
         _ <- validateLfDarPackages(lfDar)
@@ -95,7 +95,8 @@ class PackageUploader(
               .fold("")(n => s" from $n")} for submissionId $submissionId"
         )
 
-        mainPackage <- catchUpstreamErrors(Decode.decodeArchive(dar.main)).map(dar.main -> _)
+        mainPackage <- catchUpstreamErrors(PackageProcessingCache.decodeArchive(dar.main))
+          .map(dar.main -> _)
         foundMainPackageId = mainPackage._2._1
         _ <- expectedMainPackageId.traverse(expected =>
           EitherT.cond[FutureUnlessShutdown](
@@ -106,7 +107,7 @@ class PackageUploader(
           )
         )
         dependencies <- dar.dependencies.parTraverse(archive =>
-          catchUpstreamErrors(Decode.decodeArchive(archive)).map(archive -> _)
+          catchUpstreamErrors(PackageProcessingCache.decodeArchive(archive)).map(archive -> _)
         )
         _ <- uploadDar(darPayload, mainPackage, dependencies, lengthValidatedDescO, submissionId)
       } yield (foundMainPackageId, dependencies.map(_._2._1))
@@ -195,15 +196,21 @@ class PackageUploader(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
     EitherT.fromEither[FutureUnlessShutdown](
-      engine.validateDar(dar).left.flatMap {
-        case err: EngineError.Package.DarSelfConsistency
-            if (!enableStrictDarValidation || (!LV.featurePackageImports
-              .enabledIn(dar.main._2.languageVersion))) && err.logReportingEnabled =>
-          logger.warn(err.message)
-          Right(())
-        case err: EngineError.Package.Error =>
-          Left(PackageServiceErrors.Validation.handleLfEnginePackageError(err))
-      }
+      engine
+        .validateDar(dar, alreadyTypechecked = PackageProcessingCache.isTypechecked)
+        // Record only the engine's own success: on the lenient DarSelfConsistency path below the
+        // typecheck has not run.
+        .map(_ => PackageProcessingCache.markTypechecked(dar.all.map(_._1)))
+        .left
+        .flatMap {
+          case err: EngineError.Package.DarSelfConsistency
+              if (!enableStrictDarValidation || (!LV.featurePackageImports
+                .enabledIn(dar.main._2.languageVersion))) && err.logReportingEnabled =>
+            logger.warn(err.message)
+            Right(())
+          case err: EngineError.Package.Error =>
+            Left(PackageServiceErrors.Validation.handleLfEnginePackageError(err))
+        }
     )
 
   private def readDarFromPayload(darPayload: ByteString, description: Option[String])(implicit
