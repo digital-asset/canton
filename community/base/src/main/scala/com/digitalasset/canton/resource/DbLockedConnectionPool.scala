@@ -94,13 +94,17 @@ class DbLockedConnectionPool private (
     // Create an exclusive connection and lock for the pool and wait until active to ensure that the other connection
     // pool has scaled down all its connections.
     val poolExclusive = createPoolConnection("pool-wait", DbLockMode.Exclusive)
+    // `poolExclusive.get` only reads in-memory state. The exclusive connection is built in the
+    // background and is usually ready tens of milliseconds after creation, so the first check
+    // nearly always fails: back off from a short delay instead of pausing a fixed 500ms.
     retry
-      .Pause(
+      .Backoff(
         logger,
         this,
         retry.Forever,
-        500.millis,
-        "wait for exclusive access to connection pool",
+        initialDelay = 10.millis,
+        maxDelay = 500.millis,
+        operationName = "wait for exclusive access to connection pool",
         retryLogLevel = Some(Level.DEBUG),
       )
       .unlessShutdown(

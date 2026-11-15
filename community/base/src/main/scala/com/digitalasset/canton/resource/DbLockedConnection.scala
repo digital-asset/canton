@@ -699,6 +699,10 @@ object DbLockedConnection {
       ConnectionHealth.Healthy
     }
 
+  /** First wait of [[awaitConnection]]; the wait doubles from there up to the caller's `waitInMs`.
+    */
+  private val AwaitConnectionInitialWaitInMs: Long = 5L
+
   private[resource] def awaitConnection(
       connection: DbLockedConnection,
       maxRetries: Int,
@@ -709,9 +713,14 @@ object DbLockedConnection {
       traceContext: TraceContext,
       closeContext: CloseContext,
   ): EitherT[UnlessShutdown, DbLockedConnectionError, Connection] =
-    RetryEither.retry[DbLockedConnectionError, Connection](
+    // `connection.get` only reads the connection's in-memory state, so checking often is cheap.
+    // The connection is typically connected and locked tens of milliseconds after it was created,
+    // so start with a short wait and back off to `waitInMs` instead of always sleeping `waitInMs`.
+    // The total wait budget stays `maxRetries * waitInMs`.
+    RetryEither.retryWithBackoff[DbLockedConnectionError, Connection](
       maxRetries,
-      waitInMs,
+      initialWaitInMs = Math.min(AwaitConnectionInitialWaitInMs, waitInMs),
+      maxWaitInMs = waitInMs,
       functionFullName,
       stop,
       retryLogLevel = Level.DEBUG,

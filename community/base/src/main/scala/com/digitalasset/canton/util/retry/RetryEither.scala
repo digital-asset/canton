@@ -40,6 +40,69 @@ object RetryEither {
       EitherT(UnlessShutdown.Outcome(body))
     )
 
+  /** Like [[retry]], but the wait between attempts starts at `initialWaitInMs` and doubles up to
+    * `maxWaitInMs`. Use it when the check is cheap (e.g., reads in-memory state) and the condition
+    * usually becomes true shortly after the first attempt, so that a fixed `maxWaitInMs` pause
+    * would mostly be idle time.
+    *
+    * The total time spent waiting is bounded by `maxRetries * maxWaitInMs`, i.e., the same budget
+    * that [[retry]] has with `waitInMs = maxWaitInMs`. `maxRetries = Int.MaxValue` retries forever.
+    */
+  def retryWithBackoff[A, B](
+      maxRetries: Int,
+      initialWaitInMs: Long,
+      maxWaitInMs: Long,
+      operationName: String,
+      stopOnLeft: Option[A => Boolean] = None,
+      retryLogLevel: Level = Level.INFO,
+      failLogLevel: Level = Level.WARN,
+  )(
+      body: => Either[A, B]
+  )(implicit
+      loggingContext: ErrorLoggingContext,
+      closeContext: CloseContext,
+  ): EitherT[UnlessShutdown, A, B] = {
+    require(
+      0 < initialWaitInMs && initialWaitInMs <= maxWaitInMs,
+      s"initialWaitInMs ($initialWaitInMs) must be positive and at most maxWaitInMs ($maxWaitInMs)",
+    )
+    val forever = maxRetries == Int.MaxValue
+    val budgetInMs = if (forever) Long.MaxValue else maxRetries.toLong * maxWaitInMs
+    // State: (remaining wait budget, next wait)
+    (budgetInMs, initialWaitInMs).tailRecM { case (remainingInMs, nextWaitInMs) =>
+      EitherT {
+        closeContext.context
+          .synchronizeWithClosingSync(operationName)(body)(loggingContext.traceContext)
+          .map {
+            _.map(Right(_)).leftFlatMap { err =>
+              if (stopOnLeft.exists(fn => fn(err))) {
+                LoggerUtil.logAtLevel(
+                  failLogLevel,
+                  s"Operation $operationName failed, stopping retries: $err",
+                )
+                Left(err)
+              } else if (remainingInMs <= 0) {
+                LoggerUtil.logAtLevel(
+                  failLogLevel,
+                  s"Operation $operationName failed, exhausted retries: $err",
+                )
+                Left(err)
+              } else {
+                val waitInMs = Math.min(nextWaitInMs, remainingInMs)
+                LoggerUtil.logAtLevel(
+                  retryLogLevel,
+                  s"Operation $operationName failed, retrying in ${waitInMs}ms: $err",
+                )
+                Threading.sleep(waitInMs)
+                val remaining = if (forever) remainingInMs else remainingInMs - waitInMs
+                Right(Left((remaining, Math.min(nextWaitInMs * 2, maxWaitInMs))))
+              }
+            }
+          }
+      }
+    }
+  }
+
   def retryUnlessShutdown[A, B](
       maxRetries: Int,
       waitInMs: Long,
