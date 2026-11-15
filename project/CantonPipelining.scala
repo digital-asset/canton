@@ -30,7 +30,12 @@ object CantonPipelining extends AutoPlugin {
   override def trigger = allRequirements
   override def requires = plugins.JvmPlugin
 
-  private val enabled: Boolean = sys.props.get("canton.pipelining").forall(_ != "false")
+  // Off when CantonReuseCompiled replaces `compile` (test shards): nothing is compiled there, but
+  // with pipelining on, test runs still evaluated `compileEarly`, which runs the source
+  // generators (protobuf, Daml) and zinc's up-to-date check for every project.
+  private val enabled: Boolean =
+    sys.props.get("canton.pipelining").forall(_ != "false") &&
+      !sys.env.get("CANTON_REUSE_COMPILED_CLASSES").contains("true")
 
   private val noEarlyOutput: Set[String] =
     Set("nameof", "magnolify-addon", "scalatest-addon", "wartremover-extension")
