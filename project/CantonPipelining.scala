@@ -24,7 +24,7 @@ import sbt.Keys.*
   * Test inherits Compile's scalacOptions, including Compile's `-Ypickle-write` target, which is
   * removed for Test below.
   *
-  * Disable with `-Dcanton.pipelining=false`.
+  * Disable with `-Dcanton.pipelining=false` or `CANTON_PIPELINING=false`.
   */
 object CantonPipelining extends AutoPlugin {
   override def trigger = allRequirements
@@ -33,8 +33,11 @@ object CantonPipelining extends AutoPlugin {
   // Off when CantonReuseCompiled replaces `compile` (test shards): nothing is compiled there, but
   // with pipelining on, test runs still evaluated `compileEarly`, which runs the source
   // generators (protobuf, Daml) and zinc's up-to-date check for every project.
+  // `CANTON_PIPELINING=false` in the environment does the same as `-Dcanton.pipelining=false`,
+  // so CI can switch it off per job.
   private val enabled: Boolean =
     sys.props.get("canton.pipelining").forall(_ != "false") &&
+      !sys.env.get("CANTON_PIPELINING").contains("false") &&
       !sys.env.get("CANTON_REUSE_COMPILED_CLASSES").contains("true")
 
   private val noEarlyOutput: Set[String] =
