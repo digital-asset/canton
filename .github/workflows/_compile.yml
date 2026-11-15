@@ -18,6 +18,8 @@ jobs:
     env:
       EXECUTOR_JVM_HEAP_SIZE: 14000M
       SBT_TASK_TIMINGS: "true" # [TEST ONLY] per-task timings in the sbt log
+      # [TEST ONLY][TEMPORARY] measure a cold compile without build pipelining
+      CANTON_PIPELINING: "false"
     steps:
       - name: Checkout
         uses: actions/checkout@v5
