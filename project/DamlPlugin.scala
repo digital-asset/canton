@@ -376,6 +376,21 @@ object DamlPlugin extends AutoPlugin {
     )
   }
 
+  /** [TEST ONLY experiment] For projects whose tests run `dpm` themselves (daml-script-tests,
+    * daml-lf-snapshot): install the daml components before their tests run. They used to rely on
+    * the Daml build tasks having installed them, which now happens only on a cache miss. As a test
+    * setup it runs only when the project's tests actually run, not in shards that skip it.
+    */
+  def installDamlBeforeTests: Seq[Def.Setting[_]] = Seq(
+    Test / testOptions += {
+      val damlVersion = damlCompilerVersion.value
+      val registry = dpmRegistry.value
+      val useCustomVersion = damlUseCustomVersion.value
+      val log = streams.value.log
+      Tests.Setup(() => ensureDamlInstalled(damlVersion, registry, useCustomVersion, log))
+    }
+  )
+
   /** [TEST ONLY experiment] Installs the daml components once per sbt JVM, when first needed.
     *
     * `damlBuild`, `damlGenerateJava` and `damlGenerateTs` call this only on a cache miss, right

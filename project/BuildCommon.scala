@@ -1520,6 +1520,7 @@ object BuildCommon {
       )
       .settings(
         sharedCantonCommunitySettings,
+        DamlPlugin.installDamlBeforeTests, // [TEST ONLY] DamlScriptIT runs `dpm build`
         libraryDependencies ++= Seq(
         ),
         excludeTranscodeConflictingDependencies,
@@ -4041,6 +4042,7 @@ object BuildCommon {
         // TODO (#30325): consider migrating PartiesAllocator to community-integration-testing
         CommunityProjects.`community-app` % "test->test",
       )
+      .settings(DamlPlugin.installDamlBeforeTests) // [TEST ONLY] snapshot tests run `dpm`
       .settings(
         sharedCommunitySettings,
         enablePublishLibrary,
