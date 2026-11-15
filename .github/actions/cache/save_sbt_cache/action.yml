@@ -30,6 +30,12 @@ runs:
       id: compute_hash
       uses: ./.github/actions/cache/compute_build_hash
 
+    # [TEST ONLY] the coursier cache replaces ~/.ivy2/cache, see restore_sbt_cache.
+    - name: Locate coursier cache
+      id: coursier_dir
+      shell: bash
+      run: echo "dir=${COURSIER_CACHE:-$HOME/.cache/coursier}" >> "$GITHUB_OUTPUT"
+
     - name: Check if ivy cache is up to date
       id: ivy_up_to_date
       uses: ./.github/actions/nix/nix_run
@@ -41,22 +47,22 @@ runs:
             "${{ inputs.ivy-cache-matched-key }}"
         output-name: cache-up-to-date
 
-    - name: Save Ivy cache
+    - name: Save coursier cache
       id: save_ivy
       if: steps.ivy_up_to_date.outputs.result != 'true'
       # Best-effort: parallel jobs can race on identical cache keys.
       continue-on-error: true
       uses: ./.github/actions/cache/save_cache
       with:
-        path: ~/.ivy2/cache/
+        path: ${{ steps.coursier_dir.outputs.dir }}
         key: >-
-          sbt-ivy-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
+          sbt-coursier-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
 
     - name: Warn on Ivy cache save failure
       if: steps.save_ivy.outcome == 'failure'
       shell: bash
       run: |
-        echo "::warning::Failed to save Ivy cache (best-effort). Check cache key, size limits, and permissions."
+        echo "::warning::Failed to save coursier cache (best-effort). Check cache key, size limits, and permissions."
 
     - name: Check if sbt cache is up to date
       id: sbt_up_to_date

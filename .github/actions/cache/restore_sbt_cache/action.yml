@@ -34,23 +34,34 @@ runs:
       env:
         BASE_BRANCH: ${{ steps.resolve_ref.outputs.base_branch }}
 
+    # [TEST ONLY] sbt resolves through coursier since sbt 1.3, so ~/.ivy2/cache stayed empty
+    # (the saved archive was 194 bytes) and every job fetched every jar again. Cache the
+    # coursier cache instead. The `ivy-*` step id and outputs keep their names so callers are
+    # unchanged; the key prefix is new so old ivy archives are not restored into it.
+    - name: Locate coursier cache
+      id: coursier_dir
+      shell: bash
+      run: echo "dir=${COURSIER_CACHE:-$HOME/.cache/coursier}" >> "$GITHUB_OUTPUT"
+
     - name: Reset local dependency caches before restore
       shell: bash
       run: |
-        rm -rf ~/.ivy2/cache ~/.sbt
-        mkdir -p ~/.ivy2/cache ~/.sbt
+        rm -rf "${COURSIER_DIR}" ~/.sbt
+        mkdir -p "${COURSIER_DIR}" ~/.sbt
+      env:
+        COURSIER_DIR: ${{ steps.coursier_dir.outputs.dir }}
 
-    - name: Restore Ivy cache
+    - name: Restore coursier cache
       id: restore_ivy
       uses: ./.github/actions/cache/restore_cache
       with:
-        path: ~/.ivy2/cache/
+        path: ${{ steps.coursier_dir.outputs.dir }}
         key: >-
-          sbt-ivy-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
+          sbt-coursier-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
         restore-keys: |-
-          sbt-ivy-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=
-          sbt-ivy-os=${{ runner.os }}-branch=branch-${{ steps.resolve_ref.outputs.base_branch }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ steps.compute_base_sha.outputs.base_sha }}
-          sbt-ivy-os=${{ runner.os }}-branch=branch-${{ steps.resolve_ref.outputs.base_branch }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=
+          sbt-coursier-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=
+          sbt-coursier-os=${{ runner.os }}-branch=branch-${{ steps.resolve_ref.outputs.base_branch }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ steps.compute_base_sha.outputs.base_sha }}
+          sbt-coursier-os=${{ runner.os }}-branch=branch-${{ steps.resolve_ref.outputs.base_branch }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=
 
     - name: Restore SBT cache
       id: restore_sbt

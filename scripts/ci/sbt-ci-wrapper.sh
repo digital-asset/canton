@@ -595,6 +595,11 @@ while true; do
   break
 done
 
+if [[ "${SBT_TASK_TIMINGS:-}" == "true" ]]; then
+  info "Dependency caches after sbt (COURSIER_CACHE=${COURSIER_CACHE:-unset}):"
+  du -sh "${COURSIER_CACHE:-$HOME/.cache/coursier}" "$HOME/.ivy2/cache" "$HOME/.sbt" "$HOME/.m2/repository" 2>&1 | sed 's/^/  /' || true
+fi
+
 # Use filter 'ansi2txt' to remove control characters starting with '\e' like:
 #   reset text formatting: '\e[m'
 #   colors: '\e[1;34m' '\e[90m' '\e[97m' '\e[0m'
