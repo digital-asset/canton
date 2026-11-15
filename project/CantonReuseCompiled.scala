@@ -44,7 +44,24 @@ object CantonReuseCompiled extends AutoPlugin {
                     s"${configuration.value.name} has no stored compile analysis; " +
                     "the compile cache for this commit was not restored"
                 )
-            }
+            },
+            // `compile` alone is not enough: sbt defines `compileOutputs` as triggered by
+            // `compile`, and `compileOutputs` reads `manipulateBytecode`, which runs
+            // `compileIncremental` (the source generators and zinc's up-to-date check). Answer
+            // `manipulateBytecode` from the stored analysis too. Configurations without one have
+            // no sources and keep the real task, which has nothing to compile.
+            manipulateBytecode := Def.taskIf {
+              if (
+                previousCompile.value.analysis().isPresent &&
+                previousCompile.value.setup().isPresent
+              )
+                xsbti.compile.CompileResult.of(
+                  previousCompile.value.analysis().get(),
+                  previousCompile.value.setup().get(),
+                  false,
+                )
+              else manipulateBytecode.value
+            }.value,
           )
         )
       }
