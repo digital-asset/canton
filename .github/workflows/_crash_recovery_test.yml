@@ -63,7 +63,8 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/utils/resolve_previous_artifact_run
         with:
-          artifact-name: ${{ inputs.job_name }}-timings-latest
+          # [TEST ONLY] The crash recovery 37 lane uses suite-wall timings under their own name, so other PRs' splits are unaffected.
+          artifact-name: ${{ inputs.job_name == 'crash_recovery_test_37' && 'crash_recovery_test_37-suitewall' || inputs.job_name }}-timings-latest
 
   crash_recovery_test:
     name: Crash Recovery Test (shard ${{ matrix.shard }})
@@ -93,6 +94,10 @@ jobs:
       AWS_MAX_ATTEMPTS: "10"
       EXECUTOR_JVM_HEAP_SIZE: 14000M
       SBT_TASK_TIMINGS: "true" # [TEST ONLY] per-task timings in the sbt log
+      # [TEST ONLY] Crash recovery 37 lane: weight suites by wall time and give classes that run no tests weight 0
+      # (build_timings.py). With test-case sums, the two RequiresExternalKms classes and the
+      # ParticipantFailoverIntegrationTestBase class never get a time and are weighted at the 300 s fallback.
+      CANTON_SUITE_WALL_TIMINGS: ${{ inputs.job_name == 'crash_recovery_test_37' && 'true' || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -118,7 +123,8 @@ jobs:
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings
         with:
-          timings-artifact-name: ${{ inputs.job_name }}-timings-latest
+          timings-artifact-name: ${{ inputs.job_name == 'crash_recovery_test_37' && 'crash_recovery_test_37-suitewall' || inputs.job_name }}-timings-latest
+          seed-timings-file: ${{ inputs.job_name == 'crash_recovery_test_37' && 'scripts/ci/split-tests/seeds/crash_recovery_test_37-suitewall-timings.json' || '' }}
           timings-path: ${{ github.job }}/.timings
           github-token: ${{ github.token }}
           previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
@@ -157,4 +163,5 @@ jobs:
       job_name: ${{ inputs.job_name }}
       runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}
+      timings_artifact_prefix: ${{ inputs.job_name == 'crash_recovery_test_37' && 'crash_recovery_test_37-suitewall' || '' }}
     secrets: inherit
