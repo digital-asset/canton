@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.apiserver.services.tracking
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.completion.Completion
 import com.digitalasset.base.error.ErrorsAssertions
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors
 import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -210,7 +210,7 @@ class SubmissionTrackerSpec
         val resubmitted = submissionTracker.track(submissionKey, `1 day timeout`, submitSucceeds)
         complete()
         resubmitted
-      }(DirectExecutionContext(noTracingLogger))
+      }(directExecutionContext)
       complete()
 
       second.map(_ shouldBe CompletionResponse(completionOk))

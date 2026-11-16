@@ -29,6 +29,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccept
   SameAsContractPackageId,
 }
 import com.digitalasset.canton.ledger.participant.state.{
+  ParticipantEvent,
   Reassignment,
   ReassignmentInfo,
   TestAcsChangeFactory,
@@ -77,6 +78,7 @@ import com.digitalasset.daml.lf.value.Value
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status as StatusProto
 import io.grpc.Status
+import org.scalatest.EitherValues.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks.*
 import org.scalatest.wordspec.AnyWordSpec
@@ -281,6 +283,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           representative_package_id =
             if (isRepairTransaction) someRepresentativePackageId
             else createNode.templateId.packageId,
+          participant_event_category = None,
           notPersistedContractId = createNode.coid,
           internal_contract_id = 42L,
           create_key_hash = createNode.gkeyOpt.map(_.hash.toHexString),
@@ -642,6 +645,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           assignment_exclusivity = None,
           target_synchronizer_id = None,
           reassignment_counter = None,
+          participant_event_category = None,
           contract_id = exerciseNode.targetCoid,
           internal_contract_id = None,
           template_id = templateIdWithPackageName(exerciseNode),
@@ -1376,6 +1380,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           reassignment_counter = None,
           reassignment_id = None,
           representative_package_id = createNodeC.templateId.packageId,
+          participant_event_category = None,
           notPersistedContractId = createNodeC.coid,
           internal_contract_id = 42L,
           create_key_hash = createNodeC.gkeyOpt.map(_.hash.toHexString),
@@ -1868,6 +1873,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           assignment_exclusivity = None,
           target_synchronizer_id = None,
           reassignment_counter = None,
+          participant_event_category = None,
           contract_id = exerciseNode.targetCoid,
           internal_contract_id = None,
           template_id = templateIdWithPackageName(exerciseNode),
@@ -2006,6 +2012,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         reassignment_counter = None,
         reassignment_id = None,
         representative_package_id = createNode.templateId.packageId,
+        participant_event_category = None,
         notPersistedContractId = createNode.coid,
         internal_contract_id = 42L,
         create_key_hash = None,
@@ -2057,6 +2064,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         assignment_exclusivity = None,
         target_synchronizer_id = None,
         reassignment_counter = None,
+        participant_event_category = None,
         contract_id = exerciseNode.targetCoid,
         internal_contract_id = None,
         template_id = templateIdWithPackageName(exerciseNode),
@@ -2259,6 +2267,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         reassignment_counter = None,
         reassignment_id = None,
         representative_package_id = createNode.templateId.packageId,
+        participant_event_category = None,
         notPersistedContractId = createNode.coid,
         internal_contract_id = 42L,
         create_key_hash = None,
@@ -2300,7 +2309,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         None,
       ),
       (
-        Some(DeduplicationDuration(Duration.ofDays(1L).plusNanos(100 * 1000))),
+        Some(DeduplicationDuration.create(Duration.ofDays(1L).plusNanos(100 * 1000)).value),
         None,
         Some(Duration.ofDays(1L).toMinutes * 60L),
         Some(100 * 1000),
@@ -2421,6 +2430,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             reassignment_counter = None,
             reassignment_id = None,
             representative_package_id = createNode.templateId.packageId,
+            participant_event_category = None,
             notPersistedContractId = createNode.coid,
             internal_contract_id = 42L,
             create_key_hash = None,
@@ -2552,6 +2562,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         reassignment_counter = Some(1500L),
         reassignment_id = Some(ReassignmentId.tryCreate("001000000000").toBytes.toByteArray),
         representative_package_id = createNode.templateId.packageId,
+        participant_event_category = None,
         notPersistedContractId = createNode.coid,
         internal_contract_id = 42L,
         create_key_hash = createNode.gkeyOpt.map(_.hash.toHexString),
@@ -2691,6 +2702,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         assignment_exclusivity = Some(123456L),
         target_synchronizer_id = Some(SynchronizerId.tryFromString("x::synchronizer2")),
         reassignment_counter = Some(1500L),
+        participant_event_category = None,
         contract_id = createNode.coid,
         internal_contract_id = None,
         template_id = templateIdWithPackageName(createNode),
@@ -2757,6 +2769,227 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         ),
       )
       dtos.size shouldEqual 6
+    }
+
+    "handle ParticipantEventUpdate - Added" in {
+      val templateId = Ref.Identifier.assertFromString("P:M:T")
+      val keyValue = Value.ValueUnit
+      val contract = ExampleContractFactory.build(
+        stakeholders = Set("signatory", "observer", "observer2").map(Ref.Party.assertFromString),
+        signatories = Set(Ref.Party.assertFromString("signatory")),
+        templateId = templateId,
+        argument = Value.ValueUnit,
+        createdAt = CreationTime.CreatedAt(Time.Timestamp.assertFromLong(17000000)),
+        keyOpt = Some(
+          GlobalKeyWithMaintainers(
+            templateId = templateId,
+            value = keyValue,
+            valueHash = crypto.Hash.hashPrivateKey(keyValue.toString),
+            maintainers = Set("signatory").map(Ref.Party.assertFromString),
+            packageName = ExampleContractFactory.packageName,
+          )
+        ),
+      )
+      val createNode = contract.inst.toCreateNode
+
+      val update = state.Update.RepairParticipantEventUpdate(
+        updateId = updateId,
+        workflowId = Some(someWorkflowId),
+        synchronizerId = someSynchronizerId1,
+        recordTime = someRecordTime,
+        events = Seq(
+          ParticipantEvent.Added(
+            nodeId = 0,
+            contractInstance = PersistedContractInstance(
+              internalContractId = 42L,
+              inst = contract.inst,
+            ),
+            reassignmentCounter = 1500L,
+            representativePackageId = SameAsContractPackageId,
+          )
+        ),
+        category = PersistentParticipantEventUpdateCategory.AcsImport,
+        traceContext = TraceContext.empty,
+        repairCounter = RepairCounter(15L),
+      )
+
+      val dtos = updateToDtos(update)
+
+      dtos.head shouldEqual DbDto.EventActivate(
+        event_offset = someOffset.unwrap,
+        update_id = update.updateId.toProtoPrimitive.toByteArray,
+        workflow_id = Some(someWorkflowId),
+        command_id = None,
+        submitters = None,
+        record_time = someRecordTime.toMicros,
+        synchronizer_id = someSynchronizerId1,
+        trace_context = serializedEmptyTraceContext,
+        external_transaction_hash = None,
+        traffic_cost = None,
+        event_type = PersistentEventType.Add.asInt,
+        event_sequential_id = 0,
+        node_id = 0,
+        additional_witnesses = None,
+        source_synchronizer_id = None,
+        reassignment_counter = Some(1500L),
+        reassignment_id = None,
+        representative_package_id = createNode.templateId.packageId,
+        participant_event_category = Some(2),
+        notPersistedContractId = createNode.coid,
+        internal_contract_id = 42L,
+        create_key_hash = createNode.gkeyOpt.map(_.hash.toHexString),
+        notPersistedContractKey = createNode.gkeyOpt,
+      )
+      dtos(4) shouldEqual DbDto.TransactionMeta(
+        update_id = updateIdByteArray,
+        event_offset = someOffset.unwrap,
+        publication_time = 0,
+        record_time = someRecordTime.toMicros,
+        synchronizer_id = someSynchronizerId1,
+        event_sequential_id_first = 0,
+        event_sequential_id_last = 0,
+        transaction_hash = None,
+      )
+      Set(dtos(1), dtos(2), dtos(3)) should contain theSameElementsAs Set(
+        DbDto.IdFilterActivateStakeholder(
+          IdFilter(
+            0L,
+            templateIdWithPackageName(createNode),
+            "signatory",
+            first_per_sequential_id = false,
+          )
+        ),
+        DbDto.IdFilterActivateStakeholder(
+          IdFilter(
+            0L,
+            templateIdWithPackageName(createNode),
+            "observer",
+            first_per_sequential_id = true,
+          )
+        ),
+        DbDto.IdFilterActivateStakeholder(
+          IdFilter(
+            0L,
+            templateIdWithPackageName(createNode),
+            "observer2",
+            first_per_sequential_id = false,
+          )
+        ),
+      )
+      dtos.size shouldEqual 5
+    }
+
+    "handle ParticipantEventUpdate - Removed" in {
+      val builder = TxBuilder()
+      val contractId = builder.newCid
+      val createNode = builder
+        .create(
+          id = contractId,
+          templateId = "M:T",
+          argument = Value.ValueUnit,
+          signatories = Set("signatory"),
+          observers = Set("observer"),
+        )
+
+      val update = state.Update.RepairParticipantEventUpdate(
+        updateId = updateId,
+        workflowId = Some(someWorkflowId),
+        synchronizerId = someSynchronizerId1,
+        recordTime = CantonTimestamp.ofEpochMicro(120),
+        events = Seq(
+          ParticipantEvent.Removed(
+            contractId = contractId,
+            templateId = createNode.templateId,
+            packageName = createNode.packageName,
+            stakeholders =
+              List("signatory12", "observer23", "asdasdasd").map(Ref.Party.assertFromString),
+            nodeId = 0,
+            reassignmentCounter = 1500L,
+            keyOpt = createNode.keyOpt,
+            signatories = Some(Set(Ref.Party.assertFromString("signatory12"))),
+          )
+        ),
+        category = PersistentParticipantEventUpdateCategory.Purge,
+        traceContext = TraceContext.empty,
+        repairCounter = RepairCounter(15L),
+      )
+
+      val dtos = updateToDtos(update)
+
+      dtos.head shouldEqual DbDto.EventDeactivate(
+        event_offset = someOffset.unwrap,
+        update_id = update.updateId.toProtoPrimitive.toByteArray,
+        workflow_id = Some(someWorkflowId),
+        command_id = None,
+        submitters = None,
+        record_time = 120L,
+        synchronizer_id = someSynchronizerId1,
+        trace_context = serializedEmptyTraceContext,
+        external_transaction_hash = None,
+        traffic_cost = None,
+        event_type = PersistentEventType.Remove.asInt,
+        event_sequential_id = 0,
+        node_id = 0,
+        deactivated_event_sequential_id = None,
+        additional_witnesses = None,
+        exercise_choice = None,
+        exercise_choice_interface_id = None,
+        exercise_argument = None,
+        exercise_result = None,
+        exercise_actors = Some(Set(Ref.Party.assertFromString("signatory12"))),
+        exercise_last_descendant_node_id = None,
+        exercise_argument_compression = None,
+        exercise_result_compression = None,
+        reassignment_id = None,
+        assignment_exclusivity = None,
+        target_synchronizer_id = None,
+        reassignment_counter = Some(1500L),
+        participant_event_category = Some(1),
+        contract_id = createNode.coid,
+        internal_contract_id = None,
+        template_id = templateIdWithPackageName(createNode),
+        package_id = createNode.templateId.packageId,
+        stakeholders = Set("signatory12", "observer23", "asdasdasd"),
+        ledger_effective_time = None,
+        notPersistedContractKey = createNode.keyOpt.map(_.globalKey),
+      )
+      dtos(4) shouldEqual DbDto.TransactionMeta(
+        update_id = updateIdByteArray,
+        event_offset = someOffset.unwrap,
+        publication_time = 0,
+        record_time = 120L,
+        synchronizer_id = SynchronizerId.tryFromString("x::synchronizer1"),
+        event_sequential_id_first = 0,
+        event_sequential_id_last = 0,
+        transaction_hash = None,
+      )
+      Set(dtos(1), dtos(2), dtos(3)) should contain theSameElementsAs Set(
+        DbDto.IdFilterDeactivateStakeholder(
+          IdFilter(
+            0L,
+            templateIdWithPackageName(createNode),
+            "signatory12",
+            first_per_sequential_id = true,
+          )
+        ),
+        DbDto.IdFilterDeactivateStakeholder(
+          IdFilter(
+            0L,
+            templateIdWithPackageName(createNode),
+            "observer23",
+            first_per_sequential_id = false,
+          )
+        ),
+        DbDto.IdFilterDeactivateStakeholder(
+          IdFilter(
+            0L,
+            templateIdWithPackageName(createNode),
+            "asdasdasd",
+            first_per_sequential_id = false,
+          )
+        ),
+      )
+      dtos.size shouldEqual 5
     }
 
     "handle TopologyTransactionEffective - PartyToParticipantAuthorization" in {

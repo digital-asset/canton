@@ -30,9 +30,6 @@ object BaseCantonConfig {
       deriveReader[BatchAggregatorConfig]
     }
 
-    lazy implicit final val batchingReader: ConfigReader[BatchingConfig] =
-      deriveReader[BatchingConfig]
-
     lazy implicit final val connectionAllocationReader: ConfigReader[ConnectionAllocation] =
       deriveReader[ConnectionAllocation]
 
@@ -58,9 +55,6 @@ object BaseCantonConfig {
         deriveWriter[BatchAggregatorConfig.NoBatching]
       deriveWriter[BatchAggregatorConfig]
     }
-
-    lazy implicit final val batchingWriter: ConfigWriter[BatchingConfig] =
-      deriveWriter[BatchingConfig]
 
     lazy implicit final val connectionAllocationWriter: ConfigWriter[ConnectionAllocation] =
       deriveWriter[ConnectionAllocation]

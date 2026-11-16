@@ -5,13 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.syntax.option.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
-import com.digitalasset.canton.config.{
-  DbLockedConnectionPoolConfig,
-  NonNegativeFiniteDuration,
-  PositiveDurationSeconds,
-  PositiveFiniteDuration,
-  StorageConfig,
-}
+import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveDurationSeconds}
 import com.digitalasset.canton.sequencer.admin.v30 as adminProto
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -31,7 +25,6 @@ import com.digitalasset.canton.synchronizer.sequencer.DatabaseSequencerConfig.{
   TestingInterceptor,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
-import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.ReferenceSequencerDriver
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.nonempty.NonEmpty
 import pureconfig.generic.semiauto.{deriveReader, deriveWriter}
@@ -43,23 +36,6 @@ sealed trait SequencerConfig
 
 object SequencerConfig {
 
-  final case class Database(
-      writer: SequencerWriterConfig = SequencerWriterConfig.LowLatency(),
-      reader: SequencerReaderConfig = SequencerReaderConfig(),
-      highAvailability: Option[SequencerHighAvailabilityConfig] = None,
-      testingInterceptor: Option[DatabaseSequencerConfig.TestingInterceptor] = None,
-      pruning: SequencerPruningConfig = SequencerPruningConfig(),
-  ) extends SequencerConfig
-      with DatabaseSequencerConfig {
-    override def highAvailabilityEnabled: Boolean = highAvailability.exists(_.isEnabled)
-  }
-
-  // TODO(#29603): remove this option once the reference sequencer is no longer used
-  final case class External(
-      block: BlockSequencerConfig,
-      config: ReferenceSequencerDriver.Config[StorageConfig],
-  ) extends SequencerConfig
-
   final case class BftSequencer(
       // To avoid having to include an empty "block" node if defaults are fine
       block: BlockSequencerConfig = BlockSequencerConfig(),
@@ -67,63 +43,9 @@ object SequencerConfig {
       config: BftBlockOrdererConfig = BftBlockOrdererConfig(),
   ) extends SequencerConfig
 
-  def default: SequencerConfig =
-    External(
-      BlockSequencerConfig(),
-      ReferenceSequencerDriver.Config(storage = StorageConfig.Memory()),
-    )
+  def default: SequencerConfig = BftSequencer()
 
   final case class DeprecatedSequencerConfig(sequencerType: String) extends SequencerConfig
-
-  /** Configuration for how many sequencers are concurrently operating within the synchronizer.
-    * @param enabled
-    *   Set to Some(true) to enable HA for the sequencer. If None it will be enabled if the storage
-    *   supports replication.
-    * @param totalNodeCount
-    *   how many sequencer writers will there ever be in this synchronizer. recommend setting to a
-    *   value larger than the current topology to allow for expansion.
-    * @param keepAliveInterval
-    *   how frequently will we ensure the sequencer watermark is updated to ensure it still appears
-    *   alive
-    * @param onlineCheckInterval
-    *   how frequently should this sequencer check that nodes are still online
-    * @param offlineDuration
-    *   how long should a sequencer watermark be lagging for it to be flagged as offline
-    * @param connectionPool
-    *   configuration of the write connection pool used by an HA sequencer instance.
-    */
-  final case class SequencerHighAvailabilityConfig(
-      // Optional to be able to know if the value has been set in the config file. This is useful to apply
-      // default values later on, based on the type of storage used.
-      enabled: Option[Boolean] = None,
-      totalNodeCount: PositiveInt = PositiveInt.tryCreate(10),
-      keepAliveInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(50L),
-      onlineCheckInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5L),
-      offlineDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(8L),
-      connectionPool: DbLockedConnectionPoolConfig = DbLockedConnectionPoolConfig(),
-      exclusiveStorage: DatabaseSequencerExclusiveStorageConfig =
-        DatabaseSequencerExclusiveStorageConfig(),
-  ) {
-    lazy val isEnabled: Boolean = enabled.contains(true)
-    def toOnlineSequencerCheckConfig: OnlineSequencerCheckConfig =
-      OnlineSequencerCheckConfig(onlineCheckInterval, offlineDuration)
-  }
-
-  /** Configuration for exclusive database sequencer storage
-    * @param connectionPool
-    *   configuration of the exclusive write connection pool.
-    * @param maxConnections
-    *   maximum read plus write connections.
-    */
-  final case class DatabaseSequencerExclusiveStorageConfig(
-      connectionPool: DbLockedConnectionPoolConfig =
-        DbLockedConnectionPoolConfig(healthCheckPeriod =
-          // high default check period to reduce overhead as liveness is less critical for pruning and config changes
-          PositiveFiniteDuration.ofSeconds(60)
-        ),
-      // by default provide one connection each for reads and writes to keep exclusive storage light-weight.
-      maxConnections: PositiveInt = PositiveInt.tryCreate(2),
-  )
 
 }
 
@@ -135,7 +57,6 @@ trait DatabaseSequencerConfig {
   val reader: SequencerReaderConfig
   val testingInterceptor: Option[DatabaseSequencerConfig.TestingInterceptor]
   val pruning: SequencerPruningConfig
-  def highAvailabilityEnabled: Boolean
 }
 
 object DatabaseSequencerConfig {
@@ -194,8 +115,6 @@ final case class BlockSequencerConfig(
     override val testingInterceptor: Option[TestingInterceptor] = self.testingInterceptor
     // TODO(#15987): Take pruning config from BlockSequencerConfig once block sequencer supports pruning.
     override val pruning: SequencerPruningConfig = SequencerPruningConfig()
-
-    override def highAvailabilityEnabled: Boolean = false
   }
 }
 

@@ -158,8 +158,12 @@ final class ProtobufCompatibilityReaderTest
       """daml/platform/v1/page_tokens.proto:Previously present field "2" with name "valid_at_event_seq_id" on message "ListPartiesPageTokenPayload" was deleted.""",
       """daml/platform/v1/page_tokens.proto:Previously present field "3" with name "version" on message "ListPartiesPageTokenPayload" was deleted.""",
       """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
+      // Added `min_stable_duration` field to `SequencerConnectionPoolDelays` for connection stability configuration
+      """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "5" with name "min_stable_duration" on message "SequencerConnectionPoolDelays" was deleted.""",
     ),
     (3, 5) -> Seq(
+      // Added LF-Value(s)
+      """com/digitalasset/daml/lf/value.proto:Previously present field "17" with name "uint256" on message "Value" was deleted.""",
       // Added ML-DSA support to 3.6, crypto handshake handles missing schemes with 3.5
       """com/digitalasset/canton/crypto/v30/crypto.proto:Previously present enum value "5" on enum "SigningKeySpec" was deleted.""",
       """com/digitalasset/canton/crypto/v30/crypto.proto:Previously present enum value "4" on enum "SigningAlgorithmSpec" was deleted.""",
@@ -240,8 +244,12 @@ final class ProtobufCompatibilityReaderTest
       """daml/platform/v1/page_tokens.proto:Previously present field "2" with name "valid_at_event_seq_id" on message "ListPartiesPageTokenPayload" was deleted.""",
       """daml/platform/v1/page_tokens.proto:Previously present field "3" with name "version" on message "ListPartiesPageTokenPayload" was deleted.""",
       """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
+      // Added `min_stable_duration` field to `SequencerConnectionPoolDelays` for connection stability configuration
+      """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "5" with name "min_stable_duration" on message "SequencerConnectionPoolDelays" was deleted.""",
     ),
     (3, 6) -> Seq(
+      // Added LF-Vlue(s)
+      """com/digitalasset/daml/lf/value.proto:Previously present field "17" with name "uint256" on message "Value" was deleted.""",
       // Daml-LF archive backward compatibility is checked separately
       """<input>:1:1:Previously present file "com/digitalasset/daml/lf/archive/daml_lf.proto" was deleted.""",
       """<input>:1:1:Previously present file "com/digitalasset/daml/lf/archive/daml_lf1.proto" was deleted.""",
@@ -283,8 +291,12 @@ final class ProtobufCompatibilityReaderTest
       """daml/platform/v1/page_tokens.proto:Previously present field "2" with name "valid_at_event_seq_id" on message "ListPartiesPageTokenPayload" was deleted.""",
       """daml/platform/v1/page_tokens.proto:Previously present field "3" with name "version" on message "ListPartiesPageTokenPayload" was deleted.""",
       """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
+      // Added `min_stable_duration` field to `SequencerConnectionPoolDelays` for connection stability configuration
+      """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "5" with name "min_stable_duration" on message "SequencerConnectionPoolDelays" was deleted.""",
     ),
     (3, 7) -> Seq(
+      // Added LF-Value(s)
+      """com/digitalasset/daml/lf/value.proto:Previously present field "17" with name "uint256" on message "Value" was deleted.""",
       // Added `sequencer_connection_penalty_config` to `SequencerConnections` for sequencer connections penalty mechanism configuration
       """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "7" with name "sequencer_connection_penalty_config" on message "SequencerConnections" was deleted.""",
       // Added new StaticSynchronizerParameters in v33
@@ -300,6 +312,10 @@ final class ProtobufCompatibilityReaderTest
       """daml/platform/v1/page_tokens.proto:Previously present field "2" with name "valid_at_event_seq_id" on message "ListPartiesPageTokenPayload" was deleted.""",
       """daml/platform/v1/page_tokens.proto:Previously present field "3" with name "version" on message "ListPartiesPageTokenPayload" was deleted.""",
       """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
+      // Added `synchronizer_id` to allow streaming initialization of sequencers during onboarding or LSUs.
+      """com/digitalasset/canton/sequencer/admin/v31/sequencer_administration_service.proto:Previously present field "4" with name "synchronizer_id" on message "OnboardingStateForSequencerV2" was deleted.""",
+      // Added `min_stable_duration` field to `SequencerConnectionPoolDelays` for connection stability configuration
+      """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "5" with name "min_stable_duration" on message "SequencerConnectionPoolDelays" was deleted.""",
     ),
   )
 
@@ -376,6 +392,19 @@ final class ProtobufCompatibilityReaderTest
   private def removalOfPv34(majorMinor: (Int, Int)): Seq[String] =
     if (Ordering[(Int, Int)].lt(majorMinor, (3, 7))) removalOfPv34Changes else Seq.empty
 
+  private val reassignmentSubmissionTrackingChanges = Seq(
+    // reassignment added to the SubmissionTrackingData oneof in 3.8; participant-local storage, older binaries cannot read reassignment entries
+    """com/digitalasset/canton/participant/protocol/v30/submission_tracking.proto:Previously present field "2" with name "reassignment" on message "SubmissionTrackingData" was deleted.""",
+    // RejectionCause moved to a top-level message shared by transactions and reassignments; the wire format is unchanged
+    """com/digitalasset/canton/participant/protocol/v30/submission_tracking.proto:Field "2" with name "rejection_cause" on message "TransactionSubmissionTrackingData" changed type from "com.digitalasset.canton.participant.protocol.v30.TransactionSubmissionTrackingData.RejectionCause" to "com.digitalasset.canton.participant.protocol.v30.RejectionCause".""",
+    """com/digitalasset/canton/participant/protocol/v30/submission_tracking.proto:Field "2" with name "rejection_cause" on message "TransactionSubmissionTrackingData" changed type from "com.digitalasset.canton.participant.protocol.v30.RejectionCause" to "com.digitalasset.canton.participant.protocol.v30.TransactionSubmissionTrackingData.RejectionCause".""",
+  )
+
+  // Reassignment submission tracking data is added in 3.8
+  private def reassignmentSubmissionTracking(majorMinor: (Int, Int)): Seq[String] =
+    if (Ordering[(Int, Int)].lt(majorMinor, (3, 8))) reassignmentSubmissionTrackingChanges
+    else Seq.empty
+
   "protobuf" should {
 
     val current = ReleaseVersion.current
@@ -416,7 +445,8 @@ final class ProtobufCompatibilityReaderTest
                 majorMinor,
                 Nil,
               ) ++ googleProtobufBreakingChanges(majorMinor) ++ removalOfPv34(majorMinor) ++
-                transactionProtoMovedToSnapshot(majorMinor)
+                transactionProtoMovedToSnapshot(majorMinor) ++
+                reassignmentSubmissionTracking(majorMinor)
 
             val unacceptableBreakages = errorOutput.filter(!acceptedBreakingChanges.contains(_))
             if (unacceptableBreakages.nonEmpty) {

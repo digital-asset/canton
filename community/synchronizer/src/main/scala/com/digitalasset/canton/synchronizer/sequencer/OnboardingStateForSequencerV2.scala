@@ -9,6 +9,7 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencer.admin.{v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
 import com.digitalasset.canton.version.*
@@ -18,6 +19,7 @@ final case class OnboardingStateForSequencerV2(
     topologySnapshot: Option[GenericStoredTopologyTransaction],
     staticSynchronizerParameters: Option[StaticSynchronizerParameters],
     sequencerSnapshot: Option[SequencerSnapshot],
+    synchronizerId: Option[SynchronizerId],
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       OnboardingStateForSequencerV2.type
@@ -41,6 +43,7 @@ final case class OnboardingStateForSequencerV2(
       topologySnapshot.map(_.toByteString(representativeProtocolVersion.representative)),
       staticSynchronizerParameters.map(_.toByteString),
       sequencerSnapshot.map(_.toProtoV31),
+      synchronizerId.map(_.toProtoPrimitive),
     )
 }
 
@@ -55,11 +58,13 @@ object OnboardingStateForSequencerV2
       topologySnapshot: Option[GenericStoredTopologyTransaction],
       staticSynchronizerParameters: Option[StaticSynchronizerParameters],
       sequencerSnapshot: Option[SequencerSnapshot],
+      synchronizerId: Option[SynchronizerId],
       protocolVersion: ProtocolVersion,
   ): OnboardingStateForSequencerV2 = OnboardingStateForSequencerV2(
     topologySnapshot,
     staticSynchronizerParameters,
     sequencerSnapshot,
+    synchronizerId,
   )(protocolVersionRepresentativeFor(protocolVersion))
 
   override val versioningTable: VersioningTable = VersioningTable(
@@ -76,7 +81,8 @@ object OnboardingStateForSequencerV2
       topologyTransaction: Option[ByteString],
       staticSynchronizerParameters: Option[ByteString],
       sequencerSnapshot: Option[ProtoSnapshot],
-      snapshotFn: (ProtocolVersion, ProtoSnapshot) => ParsingResult[SequencerSnapshot],
+      synchronizerIdP: Option[String],
+      snapshotFn: (ProtocolVersionValidation, ProtoSnapshot) => ParsingResult[SequencerSnapshot],
       protoVersion: ProtoVersion,
   ): ParsingResult[OnboardingStateForSequencerV2] = {
 
@@ -85,7 +91,7 @@ object OnboardingStateForSequencerV2
       case (Some(paramsP), Some(snapshotP)) =>
         for {
           params <- StaticSynchronizerParameters.fromTrustedByteString(paramsP)
-          snapshot <- snapshotFn(params.protocolVersion, snapshotP)
+          snapshot <- snapshotFn(ProtocolVersionValidation(params.protocolVersion), snapshotP)
         } yield Some((params, snapshot))
       case _ =>
         Left(
@@ -100,11 +106,15 @@ object OnboardingStateForSequencerV2
       paramsAndSnapshotP <- paramsAndSnapshotEO
       staticSynchronizerParams = paramsAndSnapshotP.map(_._1)
       sequencerSnapshot = paramsAndSnapshotP.map(_._2)
+      synchronizerId <- synchronizerIdP.traverse(
+        SynchronizerId.fromProtoPrimitive(_, "synchronizer_id")
+      )
       rpv <- protocolVersionRepresentativeFor(protoVersion)
     } yield OnboardingStateForSequencerV2(
       topologySnapshot,
       staticSynchronizerParams,
       sequencerSnapshot,
+      synchronizerId,
     )(rpv)
   }
 
@@ -115,6 +125,7 @@ object OnboardingStateForSequencerV2
       value.topologyTransaction,
       value.staticSynchronizerParameters,
       value.sequencerSnapshot,
+      synchronizerIdP = None,
       SequencerSnapshot.fromProtoV30,
       ProtoVersion(30),
     )
@@ -126,6 +137,7 @@ object OnboardingStateForSequencerV2
       value.topologyTransaction,
       value.staticSynchronizerParameters,
       value.sequencerSnapshot,
+      value.synchronizerId,
       SequencerSnapshot.fromProtoV31,
       ProtoVersion(31),
     )

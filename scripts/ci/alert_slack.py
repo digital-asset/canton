@@ -37,6 +37,9 @@ from flaky_common import (
 )
 
 REPO_URL = "https://github.com/DACH-NY/canton"
+# Slack's maximum length for the text of a section block, and blocks per message.
+SLACK_SECTION_TEXT_LIMIT = 3000
+SLACK_MAX_BLOCKS = 50
 
 
 def _redact(text: str) -> str:
@@ -105,7 +108,7 @@ def _notify_alert_post_failure(token: str, reason: str) -> None:
     )
 
 
-def send_duplicate_summary(duplicates: list[tuple[str, str, str]]) -> None:
+def send_duplicate_summary(duplicates: list[tuple[str, str, str, str | None]]) -> None:
     """Post a single summary to the team Slack channel when tests fail repeatedly."""
     token = os.environ.get('SLACK_BOT_QA_NOTIFICATIONS', '')
     channel = os.environ.get('SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS', '')
@@ -151,9 +154,27 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]) -> None:
         description = f"Flaky tests have failed on several consecutive commits ending at {commit_link} on branch `{branch}`."
         prompt = "Main may be broken, can you have a look?"
     issue_lines = []
-    for idx, title, _ in duplicates:
+    for idx, title, _, streak in duplicates:
         issue_url = f"{REPO_URL}/issues/{idx}"
-        issue_lines.append(f"• <{issue_url}|#{idx}> {title}")
+        line = f"• <{issue_url}|#{idx}> {title}"
+        if streak is not None:
+            # The alert repeats every threshold-th commit, this shows how long it has been left broken.
+            line += f" (failed on {streak} consecutive commits)"
+        issue_lines.append(line)
+    # Slack rejects a section whose text is over 3000 characters, or a message over 50 blocks,
+    # which would lose the whole alert when many tests streak at once. So spread the list
+    # over as many sections as it needs, and past the block limit end with how many are left.
+    max_sections = SLACK_MAX_BLOCKS - 2  # the header and description blocks
+    sections, length = [["*Affected tests:*"]], len("*Affected tests:*")
+    for listed, line in enumerate(issue_lines):
+        if length + 1 + len(line) > SLACK_SECTION_TEXT_LIMIT:
+            if len(sections) == max_sections:
+                sections[-1][-1] = f"…and {len(issue_lines) - listed + 1} more"
+                break
+            sections.append([])
+            length = -1
+        sections[-1].append(line)
+        length += 1 + len(line)
     blocks = [
         {
             "type": "header",
@@ -163,10 +184,9 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]) -> None:
             "type": "section",
             "text": {"type": "mrkdwn", "text": f"{mention}{description}\n{prompt}"},
         },
-        {
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": "*Affected tests:*\n" + "\n".join(issue_lines)},
-        },
+    ] + [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(section)}}
+        for section in sections
     ]
     payload = json.dumps(
         {
@@ -275,7 +295,7 @@ def self_test() -> None:
     try:
         os.environ["SLACK_BOT_QA_NOTIFICATIONS"] = "xoxb-test"
         os.environ["SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS"] = "C123"
-        duplicates = [("123", "Some Test", "cause")]
+        duplicates = [("123", "Some Test", "cause", 3)]
 
         with (
             patch(f"{__name__}.select_rota", return_value=[]),
@@ -301,6 +321,58 @@ def self_test() -> None:
             assert len(post_failure_calls) == 1, post_failure_calls
             assert post_failure_calls[0][0] == "xoxb-test"
             assert "network down" in post_failure_calls[0][1]
+
+            # Each affected test shows how long its streak is, so a test left broken reads
+            # as more urgent on every repeat alert (#34016). A lower bound shows as "N+",
+            # nightly streaks (no commit count) show nothing.
+            sent = []
+
+            def _capture(req, timeout):
+                sent.append(json.loads(req.data))
+                return _FakeResp(b'{"ok": true}')
+
+            with patch("urllib.request.urlopen", side_effect=_capture):
+                send_duplicate_summary(
+                    [
+                        ("1", "Six", "c", "6"),
+                        ("2", "Long", "c", "30+"),
+                        ("3", "Nightly", "c", None),
+                    ]
+                )
+            tests = sent[0]["blocks"][2]["text"]["text"]
+            assert "Six (failed on 6 consecutive commits)" in tests, tests
+            assert "Long (failed on 30+ consecutive commits)" in tests, tests
+            assert tests.endswith("> Nightly"), tests
+
+            # Slack rejects a section over 3000 characters, losing the whole alert, so a
+            # long list of affected tests must be spread over several sections, none lost.
+            sent.clear()
+            many = [(str(i), "T" * 80 + str(i), "c", "30+") for i in range(100)]
+            with patch("urllib.request.urlopen", side_effect=_capture):
+                send_duplicate_summary(many)
+            sections = [b["text"]["text"] for b in sent[0]["blocks"][2:]]
+            assert len(sections) > 1, len(sections)
+            assert all(len(s) <= SLACK_SECTION_TEXT_LIMIT for s in sections), [
+                len(s) for s in sections
+            ]
+            listed = "\n".join(sections)
+            assert all(f"{'T' * 80}{i} " in listed for i in range(100)), "Expected every test"
+            assert sections[0].startswith("*Affected tests:*"), sections[0][:40]
+
+            # Past Slack's 50-block limit the list is cut short, saying how many are left,
+            # rather than the whole alert being rejected.
+            sent.clear()
+            storm = [(str(i), "T" * 120 + str(i), "c", "3") for i in range(2000)]
+            with patch("urllib.request.urlopen", side_effect=_capture):
+                send_duplicate_summary(storm)
+            blocks = sent[0]["blocks"]
+            assert len(blocks) == SLACK_MAX_BLOCKS, len(blocks)
+            sections = [b["text"]["text"] for b in blocks[2:]]
+            assert all(len(s) <= SLACK_SECTION_TEXT_LIMIT for s in sections), [
+                len(s) for s in sections
+            ]
+            shown = sum(s.count("\n• ") + s.startswith("• ") for s in sections)
+            assert sections[-1].endswith(f"…and {2000 - shown} more"), sections[-1][-40:]
     finally:
         for k, v in saved_env.items():
             if v is None:

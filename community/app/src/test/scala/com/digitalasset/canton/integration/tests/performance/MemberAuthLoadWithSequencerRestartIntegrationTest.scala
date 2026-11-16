@@ -150,6 +150,13 @@ abstract class MemberAuthLoadWithSequencerRestartIntegrationTest
             "Connection is not started",
             // The performance runner wraps this error in a "Failed to submit" warning.
             "UNKNOWN_CONTRACT_SYNCHRONIZERS",
+            // Both connections can be down at once: the reconnect to the previously restarted
+            // sequencer can still be backing off when the next one is stopped.
+            "RequestFailed(No connection available)",
+            // Closing a direct sequencer subscription while its sequencer stops can time out, which
+            // logs the following three warnings together.
+            "flushing direct-sequencer-subscription",
+            "Failed to close sequencer subscription",
           ),
           additionalNonRetryable = Seq(),
         )

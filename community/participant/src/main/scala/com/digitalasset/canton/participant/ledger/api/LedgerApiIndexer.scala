@@ -216,6 +216,10 @@ object LedgerApiIndexer {
         contractStore,
         disableMergeAndHashJoins =
           ledgerApiIndexerConfig.serverConfig.indexService.disableMergeAndHashJoins,
+        dbQueueMetricsOpt = ledgerApiStore.storageMetricsOpt.map(_.indexer),
+        logQueryCostOpt = ledgerApiStore.logQueryCostOpt,
+        dbParametersConfigOpt = Some(ledgerApiIndexerConfig.storageConfig.parameters),
+        schedulerOpt = ledgerApiStore.schedulerOpt,
       ).initialized()
       normalIndexerCreateFunction =
         (commit: Commit) =>

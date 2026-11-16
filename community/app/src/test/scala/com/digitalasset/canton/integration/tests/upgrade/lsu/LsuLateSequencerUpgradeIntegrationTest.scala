@@ -15,7 +15,7 @@ import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSeq
 import com.digitalasset.canton.integration.{ConfigTransforms, *}
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
-import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{admin, config}
 
@@ -61,7 +61,6 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase with HasSimCl
         Set("sequencer1", "sequencer2", "sequencer3", "sequencer4"),
         Set("sequencer5", "sequencer6", "sequencer7", "sequencer8"),
       ),
-      // Disable blacklisting via config if testing on PV34
       sequencingParameters =
         Some(createSequencingParametersShortViewChangeTimeoutNoBlacklisting(testedProtocolVersion)),
     )
@@ -138,13 +137,12 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase with HasSimCl
     "disable blacklisting for post-LSU" in { implicit env =>
       import env.*
 
-      // Not using the fixture because it assumes the upgrade time has already been set
+      // Do not create the fixture yet: `fixtureWithDefaults` in `LsuBase` reads `upgradeTime`,
+      //  which will be set only after the successor sequencing parameters become effective below.
       val sequencingParametersShortViewChangeTimeoutNoBlacklisting =
         createSequencingParametersShortViewChangeTimeoutNoBlacklisting(DefaultNewPV)
 
-      // Prepare sequencing parameters with no blacklisting for post-LSU;
-      //  if testing with PV34, the blacklisting is disabled via config already,
-      //  and the topology settings will be ignored as unparseable do to an unexpected PV
+      // Explicitly propose the no-blacklisting parameters before setting the upgrade time.
       val sequencingParametersShortViewChangeTimeoutNoBlacklistingByteString =
         sequencingParametersShortViewChangeTimeoutNoBlacklisting.toByteString
       synchronizerOwners1.foreach(
@@ -156,15 +154,10 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase with HasSimCl
         )
       )
 
-      // Ensure the sequencing parameters are effective
+      // Wait until both topology state and BFT ordering use the successor-version parameters
+      //  before setting the upgrade time, so LSU cannot start with the default blacklisting policy.
       eventually(maxPollInterval = 10.millis) {
         environment.simClock.value.advance(10.millis.toJava)
-        // We need the sequencing parameters to be part of the Canton topology as well,
-        //  because with PV34 (predecessor synchronizer, if the test is run with PV34,
-        //  but never successor synchronizer that uses always PVdev) the ordering topology
-        //  ignores the sequencing parameters from the Canton topology,
-        //  so otherwise we may LSU to PV35 before we have the sequencing parameters
-        //  in the topology state.
         oldSynchronizerNodes.sequencers.forall(s =>
           s.topology.sequencing_parameters
             .get_sequencing_parameters(synchronizer1Id)
@@ -227,18 +220,10 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase with HasSimCl
       // All successors are announced
       newOldSequencers.foreach {
         case (newNodeName, oldNodeName) =>
-          runAsyncAndAdvanceClockUntilFinished(
-            // Because we are using a simclock, the BFT rate limiter can make the test flaky by dropping retransmissions with
-            // "Dropped a retransmission request ... due to rate limiting" and prevent `propose_successor` from completing.
-            // To avoid this, we advance the clock in the background while proposing the successor.
-            s(oldNodeName).topology.lsu.sequencer_successors.propose_successor(
-              sequencerId = s(oldNodeName).id,
-              endpoints = s(newNodeName).sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-              successorSynchronizerId = fixture.newPsid,
-            ),
-            clock = env.environment.simClock.value,
-            deltaTime = NonNegativeFiniteDuration.tryOfMillis(100),
-            maxPollInterval = 100.millis,
+          s(oldNodeName).topology.lsu.sequencer_successors.propose_successor(
+            sequencerId = s(oldNodeName).id,
+            endpoints = s(newNodeName).sequencerConnection.endpoints.map(_.toURI(useTls = false)),
+            successorSynchronizerId = fixture.newPsid,
           )
 
         case _ => ()

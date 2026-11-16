@@ -4,7 +4,7 @@
 package com.digitalasset.canton.topology.client
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.CachingConfigs
+import com.digitalasset.canton.config.TestCachingConfigs
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.topology.DefaultTestIdentities.*
@@ -92,7 +92,7 @@ class FreezeIgnoringHostingViewAccessorTest
   private def caching(parent: TopologySnapshotLoader): CachingTopologySnapshot =
     new CachingTopologySnapshot(
       parent,
-      CachingConfigs.testing,
+      TestCachingConfigs(),
       loggerFactory,
       FutureSupervisor.Noop,
     )

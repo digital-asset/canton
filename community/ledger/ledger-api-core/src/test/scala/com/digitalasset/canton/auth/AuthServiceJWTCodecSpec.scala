@@ -657,5 +657,41 @@ class AuthServiceJWTCodecSpec
         )
       }
     }
+
+    "guessing the user id" should {
+      val participantAudience = "https://daml.com/jwt/aud/participant/someParticipantId"
+
+      "yield the sub of a token with a participant audience" in {
+        AuthServiceJWTCodec.guessUserId(
+          s"""{"aud": "$participantAudience", "sub": "someUserId"}"""
+        ) shouldBe Some("someUserId")
+      }
+
+      "yield the sub of a token with a custom audience and scope" in {
+        AuthServiceJWTCodec.guessUserId(
+          """{"aud": "someTargetAudience", "scope": "someTargetScope", "sub": "someUserId"}"""
+        ) shouldBe Some("someUserId")
+      }
+
+      "yield no user id for a token without a sub" in {
+        AuthServiceJWTCodec.guessUserId(
+          """{"aud": "someTargetAudience", "scope": "someTargetScope"}"""
+        ) shouldBe None
+        AuthServiceJWTCodec.guessUserId(s"""{"aud": "$participantAudience"}""") shouldBe None
+      }
+
+      "yield the sub of a token that only the audience-based reader can read" in {
+        // A self-issued token whose daml.com block holds a non-string user id makes the general
+        // reader throw
+        AuthServiceJWTCodec.guessUserId(
+          """{"iss": "someUserId", "sub": "someUserId", "aud": "someTargetAudience", "daml.com": {"usr": 1}}"""
+        ) shouldBe Some("someUserId")
+      }
+
+      "yield no user id for a payload that is not a JSON object" in {
+        AuthServiceJWTCodec.guessUserId("not json") shouldBe None
+        AuthServiceJWTCodec.guessUserId("[]") shouldBe None
+      }
+    }
   }
 }

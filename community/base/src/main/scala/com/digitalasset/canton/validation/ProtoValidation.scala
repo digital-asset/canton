@@ -155,7 +155,7 @@ object ProtoValidation {
     *   the largest accepted byte size, per protocol version
     */
   def validateLength(
-      bytes: ByteString,
+      bytes: ProtoUnvalidatedByteString,
       field: String,
       pvv: ProtocolVersionValidation,
       maxLength: ValidationParam[PositiveInt],
@@ -164,13 +164,29 @@ object ProtoValidation {
       pvv,
       maxLength,
     )(
-      max => bytes.size() <= max.value,
+      max => bytes.unvalidated.size() <= max.value,
       max =>
         InvariantViolation(
           field,
-          s"Byte length for $field (${bytes.size()} bytes) exceeds maximum limit of ${max.value} bytes",
+          s"Byte length for $field (${bytes.unvalidated.size()} bytes) exceeds maximum limit of ${max.value} bytes",
         ),
-    ).map(_ => bytes)
+    ).map(_ => bytes.unvalidated)
+
+  def validateLength(
+      optionalBytes: Option[ProtoUnvalidatedByteString],
+      field: String,
+      pvv: ProtocolVersionValidation,
+      maxLength: ValidationParam[PositiveInt],
+  ): ParsingResult[Option[ByteString]] =
+    optionalBytes.traverse(validateLength(_, field, pvv, maxLength))
+
+  def validateLengthThen[B](
+      bytes: ProtoUnvalidatedByteString,
+      field: String,
+      pvv: ProtocolVersionValidation,
+      maxLength: ValidationParam[PositiveInt],
+  )(parse: ByteString => ParsingResult[B]): ParsingResult[B] =
+    validateLength(bytes, field, pvv, maxLength).flatMap(parse)
 
   /** The value a check runs with, or `None` when it does not run: `PV(pv)` takes the value listed
     * for `pv`, `NoValidation` always skips, `AlwaysValidation` takes the value of the newest listed
@@ -255,12 +271,4 @@ object ProtoValidation {
   ): ParsingResult[Seq[B]] =
     validate(seq, field, pvv, maxLength).flatMap(_.traverse(parse(_, field)))
 
-  /** `validateLength` of a ByteString, then `parse` it. */
-  def validateLengthThen[B](
-      bytes: ByteString,
-      field: String,
-      pvv: ProtocolVersionValidation,
-      maxLength: ValidationParam[PositiveInt],
-  )(parse: ByteString => ParsingResult[B]): ParsingResult[B] =
-    validateLength(bytes, field, pvv, maxLength).flatMap(parse)
 }

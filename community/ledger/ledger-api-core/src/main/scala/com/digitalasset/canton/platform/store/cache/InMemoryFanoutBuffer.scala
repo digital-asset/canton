@@ -284,6 +284,8 @@ class InMemoryFanoutBuffer(
         Some(topologyTx.updateId -> topologyTx)
       case _: TransactionLogUpdate.TransactionRejected => None
       case _: TransactionLogUpdate.ReceivedAcsCommitment => None
+      case participantEvent: TransactionLogUpdate.ParticipantEventUpdate =>
+        Some(participantEvent.update.updateId.toHexString -> participantEvent)
     }
 
   private def extractHashFromEntry(

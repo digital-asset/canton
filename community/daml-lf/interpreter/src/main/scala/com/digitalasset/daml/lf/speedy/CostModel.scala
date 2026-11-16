@@ -56,6 +56,7 @@ abstract class CostModel {
   val BTextToInt64: CostFunction1[Text]
   val BTextToNumeric: CostFunction2[Int, Text]
   val BTextToCodePoints: CostFunction1[Text]
+  val BTextToContractId: CostFunction1[Text]
   val BSHA256Text: CostFunction1[Text]
   val BSHA256Hex: CostFunction1[Text]
   val BKECCAK256Text: CostFunction1[Text]
@@ -269,6 +270,7 @@ object CostModel {
     override val BTextToParty: CostFunction1[Text] = CostFunction1.Null
     override val BTextToInt64: CostFunction1[Text] = CostFunction1.Null
     override val BTextToNumeric: CostFunction2[Int, Text] = CostFunction2.Null
+    override val BTextToContractId: CostFunction1[Text] = CostFunction1.Null
     override val BTextToCodePoints: CostFunction1[Text] = CostFunction1.Null
     override val BSHA256Text: CostFunction1[Text] = CostFunction1.Null
     override val BSHA256Hex: CostFunction1[Text] = CostFunction1.Null
@@ -843,6 +845,8 @@ object CostModel {
       val poly = LinearPolynomial(SListSize.a, FrontStackSize.b + SInt64Size)
       (text: String) => poly.calculate(text.length)
     }
+    override val BTextToContractId: CostFunction1[Text] =
+      CostFunction1.Constant(SOptionalSize + SContractIdWrapperSize)
     override val BSHA256Text: CostFunction1[Text] =
       CostFunction1.Constant(STextWrapperSize + AsciiStringSize.calculate(64))
     override val BSHA256Hex: CostFunction1[Text] =

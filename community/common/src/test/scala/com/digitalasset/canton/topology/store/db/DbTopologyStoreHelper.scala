@@ -4,8 +4,8 @@
 package com.digitalasset.canton.topology.store.db
 
 import com.digitalasset.canton.TestEssentials
-import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.TestBatchingConfig
 import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -39,15 +39,15 @@ trait DbTopologyStoreHelper {
         storesToCleanup = Nil
       }
 
-  protected val batchingConfig: BatchingConfig =
-    BatchingConfig(
+  protected val batchingConfig: TestBatchingConfig =
+    TestBatchingConfig(
       maxItemsInBatch = PositiveInt.tryCreate(2),
       parallelism = PositiveInt.one,
       maxTopologyUpdateBatchSize = PositiveInt.tryCreate(2),
       maxTopologyWriteBatchSize = PositiveInt.tryCreate(2),
     )
 
-  private lazy val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 10)
+  private lazy val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 100)
 
   protected def mkStore(
       synchronizerId: PhysicalSynchronizerId,

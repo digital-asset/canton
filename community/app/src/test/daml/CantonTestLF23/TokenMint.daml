@@ -1,0 +1,59 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module TokenMint where
+
+import DA.ContractKeys
+
+template Rules
+  with
+    issuer : Party
+    amount : Int
+  where
+    signatory issuer
+    key issuer : Party
+    maintainer key
+
+template Token
+  with
+    issuer : Party
+    minter : Party
+    amount : Int
+    rulesIssuer : Party
+  where
+    signatory issuer
+    observer minter
+
+template TokenFactory
+  with
+    issuer : Party
+    minter : Party
+  where
+    signatory issuer
+    observer minter
+
+    nonconsuming choice Mint : Optional Int
+      controller minter
+      do
+        res <- lookupNByKey @Rules 1 issuer
+        case res of
+          [] -> pure None
+          (_, rules) :: _ -> do
+            _ <- create Token with
+              issuer
+              minter
+              amount = rules.amount
+              rulesIssuer = rules.issuer
+            pure (Some rules.amount)
+
+    nonconsuming choice MintF : Int
+      controller minter
+      do
+        (_, rules) <- fetchByKey @Rules issuer
+        _ <- create Token with
+          issuer
+          minter
+          amount = rules.amount
+          rulesIssuer = rules.issuer
+        pure rules.amount
+

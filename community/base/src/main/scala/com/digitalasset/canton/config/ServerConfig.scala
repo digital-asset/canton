@@ -205,6 +205,7 @@ object AdminServerConfig {
         TopologyManagerReadServiceGrpc.METHOD_SEQUENCER_LSU_STATE.getFullMethodName,
         ParticipantRepairServiceGrpc.METHOD_EXPORT_ACS.getFullMethodName,
         PartyManagementServiceGrpc.METHOD_EXPORT_PARTY_ACS.getFullMethodName,
+        PartyManagementServiceGrpc.METHOD_GET_REMOTE_ACS.getFullMethodName,
         ParticipantInspectionServiceGrpc.METHOD_OPEN_COMMITMENT.getFullMethodName,
         ParticipantInspectionServiceGrpc.METHOD_INSPECT_COMMITMENT_CONTRACTS.getFullMethodName,
         StatusServiceGrpc.METHOD_HEALTH_DUMP.getFullMethodName,
@@ -352,6 +353,22 @@ final case class SequencerApiClientConfig(
 }
 
 /** Configuration for jwks cache underpinning JWT token validation.
+  *
+  * @param cacheMaxSize
+  *   Maximum number of JWKS URLs whose JWKS documents are cached.
+  * @param cacheExpiration
+  *   Maximum time to keep a fetched JWKS document in the cache.
+  * @param connectionTimeout
+  *   Timeout for connecting to a JWKS URL.
+  * @param readTimeout
+  *   Timeout for reading from a JWKS URL.
+  * @param autoRefreshAfter
+  *   When greater than zero, a cached JWKS document is refreshed in the background this long after
+  *   it was fetched, while the old keys are still served.
+  * @param minRefreshInterval
+  *   Minimum time between two fetches of the same JWKS URL, be it for a token with an unknown key
+  *   id, a background refresh, or a retry after a failure. Bounds the load that clients can cause
+  *   with unknown key ids, and the delay with which new keys are picked up.
   */
 final case class JwksCacheConfig(
     cacheMaxSize: Long = JwksCacheConfig.DefaultCacheMaxSize,
@@ -359,6 +376,7 @@ final case class JwksCacheConfig(
     connectionTimeout: NonNegativeFiniteDuration = JwksCacheConfig.DefaultConnectionTimeout,
     readTimeout: NonNegativeFiniteDuration = JwksCacheConfig.DefaultReadTimeout,
     autoRefreshAfter: NonNegativeFiniteDuration = JwksCacheConfig.DefaultAutoRefreshAfter,
+    minRefreshInterval: NonNegativeFiniteDuration = JwksCacheConfig.DefaultMinRefreshInterval,
 )
 
 object JwksCacheConfig {
@@ -378,6 +396,8 @@ object JwksCacheConfig {
     */
   private val DefaultAutoRefreshAfter: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(0)
+  private val DefaultMinRefreshInterval: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofSeconds(30)
 }
 
 /** Configuration for admin-token based authorization.

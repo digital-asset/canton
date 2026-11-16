@@ -30,6 +30,13 @@ trait AcsReplicationTestInterceptor {
   def onTargetParticipantProgress(progress: AcsReplicationStatus.AcsReplicationProgress)(implicit
       traceContext: TraceContext
   ): ProceedOrWait = Proceed
+
+  /** Specifies whether the TP processes or ignores EndOfAcs received from the SP.
+    * @return
+    *   Proceed to process the end of the ACS as normal or Wait to ignore it.
+    */
+  def onTargetParticipantReceivedEndOfAcs()(implicit traceContext: TraceContext): ProceedOrWait =
+    Proceed
 }
 
 object AcsReplicationTestInterceptor {

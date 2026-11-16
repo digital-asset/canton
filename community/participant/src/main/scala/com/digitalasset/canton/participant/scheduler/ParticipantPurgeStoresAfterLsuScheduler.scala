@@ -100,7 +100,6 @@ object ParticipantPurgeStoresAfterLsuScheduler {
       synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
       syncPersistentStateManager: SyncPersistentStateManager,
       batchingConfig: BatchingConfig,
-      acsDigestProcessorEnabled: Boolean,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -110,7 +109,6 @@ object ParticipantPurgeStoresAfterLsuScheduler {
     val purgeableStoresComputation = new PostLsuPurgeableStoresComputation(
       synchronizerConnectionConfigStore,
       syncPersistentStateManager,
-      acsDigestProcessorEnabled,
       loggerFactory,
     )
 

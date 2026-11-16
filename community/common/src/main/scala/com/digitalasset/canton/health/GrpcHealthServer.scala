@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.health
 
+import com.daml.metrics.grpc.DamlGrpcServerMetrics
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.lifecycle.LifeCycle.toCloseableServer
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.tracing.TracingConfig
 import io.grpc.protobuf.services.ProtoReflectionServiceV1
@@ -20,7 +20,7 @@ class GrpcHealthServer(
     override val loggerFactory: NamedLoggerFactory,
     apiConfig: ApiLoggingConfig,
     tracingConfig: TracingConfig,
-    grpcMetrics: GrpcServerMetricsX,
+    grpcMetrics: DamlGrpcServerMetrics,
     override val timeouts: ProcessingTimeout,
     healthManager: io.grpc.protobuf.services.HealthStatusManager,
 ) extends NamedLogging

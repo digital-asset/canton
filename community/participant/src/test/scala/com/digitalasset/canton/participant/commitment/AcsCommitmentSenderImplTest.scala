@@ -8,12 +8,14 @@ import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.base.error.ErrorCategory
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
 import com.digitalasset.canton.crypto.{SyncCryptoApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory}
 import com.digitalasset.canton.participant.commitment.AcsCommitmentSender.{
+  AcsCommitmentSenderError,
   RetryStrategy,
   randomDelay,
 }
@@ -50,7 +52,11 @@ import com.digitalasset.canton.protocol.messages.{
   DigestForCounterparticipant,
   ProtocolMessage,
 }
-import com.digitalasset.canton.protocol.{AcsCommitmentLimits, TestSynchronizerParameters}
+import com.digitalasset.canton.protocol.{
+  AcsCommitmentLimits,
+  OnboardingRestriction,
+  TestSynchronizerParameters,
+}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend.Request
 import com.digitalasset.canton.sequencing.client.{SendResult, TestSequencerClientSend}
@@ -71,7 +77,18 @@ import com.digitalasset.canton.topology.DefaultTestIdentities.{
   participant4,
   physicalSynchronizerId,
 }
-import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, ParticipantPermission}
+import com.digitalasset.canton.topology.client.{
+  StoreBasedTopologySnapshot,
+  SynchronizerTopologyClient,
+}
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.NoPackageDependencies
+import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
+import com.digitalasset.canton.topology.transaction.{
+  ParticipantAttributes,
+  ParticipantPermission,
+  ParticipantSynchronizerPermission,
+}
 import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory, TestingTopology}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
@@ -197,64 +214,142 @@ trait AcsCommitmentSenderImplTest
       assertCounterMetricValue(metrics.sendAttemptCount, 1)
     }
 
-    "skip the updates for inactive participants and include them in unsent digests" in {
-      val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
-      val cryptoApi = mkCryptoApi(
-        mkTopology(
-          Seq(participant1, participant4) // Not including participants 2 and 3 on purpose
-        ),
-        loggerFactory,
-      )
-      val syncCryptoApi = cryptoApi.snapshot(t3).futureValueUS
-      val metrics = mkMetrics()
-      val (digestStore, watermarkStore, sender) =
-        mkStoresAndSender(sequencerClient, metrics, cryptoApi)
+    Seq(
+      "inactive participants" -> false,
+      "participants with revoked permission but retained trust certificates on a restricted synchronizer" -> true,
+    ).foreach { case (description, revokePermissions) =>
+      s"skip the updates for $description and include them in unsent digests" in {
+        // Revocation with retained trust certificates produces expected warnings. Capture them
+        //  to avoid leaking into concurrent log assertions; participant iteration order is unspecified.
+        def assertMissingPermissionWarnings[A](action: => A): A =
+          loggerFactory.assertLoggedWarningsAndErrorsSeq(
+            action,
+            entries =>
+              entries.map(_.warningMessage) should contain theSameElementsAs
+                Seq(participant2, participant3).map(participant =>
+                  s"Unable to find ParticipantSynchronizerPermission for participant $participant on synchronizer ${psid.logical} with onboarding restrictions RestrictedOpen at $t3"
+                ),
+          )
 
-      digestStore.participant.upsertDigestUpdates(Seq(updateP2, updateP3, updateP4)).futureValueUS
+        val sequencerClient =
+          new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
+        val cryptoApi = if (revokePermissions) {
+          val identityFactory = TestingIdentityFactory(
+            allParticipantsTopology,
+            loggerFactory,
+            initialSynchronizerParameters.tryUpdate(
+              onboardingRestriction = OnboardingRestriction.RestrictedOpen
+            ),
+          )
+          val store = identityFactory.topologyStore(psid.logical, t3)
+          def snapshot(timestamp: CantonTimestamp) =
+            new StoreBasedTopologySnapshot(
+              psid,
+              timestamp,
+              store,
+              NoPackageDependencies,
+              loggerFactory,
+            )
 
-      assertWatermarkValue(watermarkStore, None)
-      assertInitialEmptyMetricValues(metrics)
+          snapshot(t1).activeParticipants(Seq(participant2, participant3)).futureValueUS shouldBe
+            Seq(participant2, participant3)
+          store
+            .update(
+              SequencedTime(t2),
+              EffectiveTime(t2),
+              removals = Seq(participant2, participant3).map { participant =>
+                ParticipantSynchronizerPermission(
+                  psid.logical,
+                  participant,
+                  ParticipantPermission.Submission,
+                  limits = None,
+                  loginAfter = None,
+                ).uniqueKey -> (Some(PositiveInt.one), Set.empty[TxHash])
+              }.toMap,
+              additions = Seq.empty,
+            )
+            .futureValueUS
+          val revokedSnapshot = snapshot(t3)
+          revokedSnapshot.areMembersKnown(Set(participant2, participant3)).futureValueUS shouldBe
+            Set(participant2, participant3)
+          assertMissingPermissionWarnings {
+            revokedSnapshot
+              .activeParticipants(Seq(participant2, participant3))
+              .futureValueUS shouldBe empty
+          }
 
-      sender.sendAcsCommitments(sendTimepoint).futureValueUS
+          val client = spy(identityFactory.forOwnerAndSynchronizer(participant1, psid))
+          val topologyClient = org.mockito.Mockito.mock(
+            classOf[SynchronizerTopologyClient],
+            org.mockito.AdditionalAnswers.delegatesTo(client.ips),
+          )
+          val _ = doReturn(FutureUnlessShutdown.pure(revokedSnapshot))
+            .when(topologyClient)
+            .currentSnapshotApproximation
+          when(client.ips).thenReturn(topologyClient)
+          client
+        } else
+          mkCryptoApi(
+            mkTopology(
+              Seq(participant1, participant4) // Not including participants 2 and 3 on purpose
+            ),
+            loggerFactory,
+          )
+        val syncCryptoApi = cryptoApi.snapshot(t3).futureValueUS
+        val metrics = mkMetrics()
+        val (digestStore, watermarkStore, sender) =
+          mkStoresAndSender(sequencerClient, metrics, cryptoApi)
 
-      val requests = sequencerClient.requests.toSeq
-      requests.length shouldBe 1
+        digestStore.participant.upsertDigestUpdates(Seq(updateP2, updateP3, updateP4)).futureValueUS
 
-      val request = requests.head
-      val (acsCommitmentMessages, acsCommitmentSummaryMessage) = splitMessages(request.batch)
-      val acsCommitments = acsCommitmentMessages.map(_.acsCommitment)
+        assertWatermarkValue(watermarkStore, None)
+        assertInitialEmptyMetricValues(metrics)
 
-      acsCommitmentMessages.foreach(assertCommitmentMessageValidSignature(syncCryptoApi, _))
-      assertCommitmentSummaryMessageValidSignature(
-        syncCryptoApi,
-        acsCommitmentSummaryMessage,
-      )
+        if (revokePermissions)
+          assertMissingPermissionWarnings {
+            sender.sendAcsCommitments(sendTimepoint).futureValueUS
+          }
+        else sender.sendAcsCommitments(sendTimepoint).futureValueUS
 
-      acsCommitments shouldBe List(
-        acsCommitmentP4
-      )
+        val requests = sequencerClient.requests.toSeq
+        requests.length shouldBe 1
 
-      acsCommitmentSummaryMessage.acsCommitmentSummary shouldBe mkAcsCommitmentSummary(
-        participants = Seq(participant4),
-        commitmentTick = sendTimestamp,
-        unsentDigests = Seq(
-          DigestForCounterparticipant
-            .create(testedProtocolVersionValidation, hashedDigest0, participant2.toLf)
-            .value,
-          DigestForCounterparticipant
-            .create(testedProtocolVersionValidation, hashedDigest1, participant3.toLf)
-            .value,
-        ),
-      )
+        val request = requests.head
+        val (acsCommitmentMessages, acsCommitmentSummaryMessage) = splitMessages(request.batch)
+        val acsCommitments = acsCommitmentMessages.map(_.acsCommitment)
 
-      assertWatermarkValue(watermarkStore, sendTimepoint.some)
-      assertWatermarkMetricsValue(metrics, sendTimepoint.some)
+        acsCommitmentMessages.foreach(assertCommitmentMessageValidSignature(syncCryptoApi, _))
+        assertCommitmentSummaryMessageValidSignature(
+          syncCryptoApi,
+          acsCommitmentSummaryMessage,
+        )
 
-      assertCounterMetricValue(metrics.sentBatchCount, 1)
-      assertCounterMetricValue(metrics.sentCommitmentCount, 1)
-      assertCounterMetricValue(metrics.batchSendingErrorCount, 0)
-      assertCounterMetricValue(metrics.sendFailureCount, 0)
-      assertCounterMetricValue(metrics.sendAttemptCount, 1)
+        acsCommitments shouldBe List(
+          acsCommitmentP4
+        )
+
+        acsCommitmentSummaryMessage.acsCommitmentSummary shouldBe mkAcsCommitmentSummary(
+          participants = Seq(participant4),
+          commitmentTick = sendTimestamp,
+          unsentDigests = Seq(
+            DigestForCounterparticipant
+              .create(testedProtocolVersionValidation, hashedDigest0, participant2.toLf)
+              .value,
+            DigestForCounterparticipant
+              .create(testedProtocolVersionValidation, hashedDigest1, participant3.toLf)
+              .value,
+          ),
+        )
+
+        assertWatermarkValue(watermarkStore, sendTimepoint.some)
+        assertWatermarkMetricsValue(metrics, sendTimepoint.some)
+
+        assertCounterMetricValue(metrics.sentBatchCount, 1)
+        assertCounterMetricValue(metrics.sentCommitmentCount, 1)
+        assertCounterMetricValue(metrics.batchSendingErrorCount, 0)
+        assertCounterMetricValue(metrics.sendFailureCount, 0)
+        assertCounterMetricValue(metrics.sendAttemptCount, 1)
+      }
     }
 
     "send nothing if all updates have empty digests" in {
@@ -486,6 +581,92 @@ trait AcsCommitmentSenderImplTest
       assertCounterMetricValue(metrics.sentBatchCount, 1)
       assertCounterMetricValue(metrics.sentCommitmentCount, 3)
       assertCounterMetricValue(metrics.batchSendingErrorCount, 2)
+      assertCounterMetricValue(metrics.sendFailureCount, 0)
+      assertCounterMetricValue(metrics.sendAttemptCount, 1)
+    }
+
+    "retry only the rejected batch with a delay when permission is revoked between filtering and sequencing" in {
+      val snapshot = spy(defaultCryptoApi.ips.currentSnapshotApproximation.futureValueUS)
+      val cryptoApi = spy(defaultCryptoApi)
+      val topologyClient = org.mockito.Mockito.mock(
+        classOf[SynchronizerTopologyClient],
+        org.mockito.AdditionalAnswers.delegatesTo(cryptoApi.ips),
+      )
+      val _ = doReturn(FutureUnlessShutdown.pure(snapshot))
+        .when(topologyClient)
+        .currentSnapshotApproximation
+      when(cryptoApi.ips).thenReturn(topologyClient)
+
+      val revokedPermissionResult: Request => UnlessShutdown[SendResult] = { request =>
+        // Filtering has already selected participant4, but sequencing now rejects it.
+        when(snapshot.activeParticipants(Seq(participant4)))
+          .thenReturn(FutureUnlessShutdown.pure(Seq.empty))
+        val error = SendResult.Error(
+          DeliverError.create(
+            previousTimestamp = None,
+            timestamp = request.maxSequencingTime,
+            synchronizerId = psid,
+            messageId = MessageId.randomMessageId(),
+            sequencerError = SequencerErrors.UnauthorizedRecipients(Seq(participant4)),
+            trafficReceipt = None,
+            protocolVersion = testedProtocolVersion,
+          )
+        )
+        AcsCommitmentSenderError.SendResultError(error).retryStrategy shouldBe RetryStrategy(
+          retryDelay = ErrorCategory.TransientServerFailure.retryable.map(_.duration),
+          useExponentialBackoff = false,
+        )
+        UnlessShutdown.Outcome(error)
+      }
+      val sequencerClient = new TestSequencerClientSend(
+        wallClock,
+        consecutiveSendResultsFactory(
+          Seq(
+            successfulSendResultFactory,
+            revokedPermissionResult,
+            successfulSendResultFactory,
+          )
+        ).some,
+      )
+      val metrics = mkMetrics()
+      val (digestStore, watermarkStore, sender) =
+        mkStoresAndSender(
+          sequencerClient,
+          metrics,
+          cryptoApi,
+          maxBatchSize = PositiveInt.tryCreate(2),
+        )
+      digestStore.participant.upsertDigestUpdates(Seq(updateP2, updateP3, updateP4)).futureValueUS
+
+      sender.sendAcsCommitments(sendTimepoint).futureValueUS
+
+      val batches = sequencerClient.requests.toSeq.map(request => splitMessages(request.batch))
+      batches.map(_._1.map(_.acsCommitment)) shouldBe Seq(
+        List(acsCommitmentP2, acsCommitmentP3),
+        List(acsCommitmentP4),
+        List.empty,
+      )
+      batches.map(_._2.acsCommitmentSummary.batchIndex) shouldBe Seq(
+        NonNegativeInt.zero,
+        NonNegativeInt.one,
+        NonNegativeInt.one,
+      )
+      batches.last._2.acsCommitmentSummary shouldBe mkAcsCommitmentSummary(
+        participants = Seq.empty,
+        commitmentTick = sendTimestamp,
+        batchIndex = NonNegativeInt.one,
+        lastBatch = true,
+        unsentDigests = Seq(
+          DigestForCounterparticipant
+            .create(testedProtocolVersionValidation, hashedDigest2, participant4.toLf)
+            .value
+        ),
+      )
+      assertWatermarkValue(watermarkStore, sendTimepoint.some)
+      assertWatermarkMetricsValue(metrics, sendTimepoint.some)
+      assertCounterMetricValue(metrics.sentBatchCount, 2)
+      assertCounterMetricValue(metrics.sentCommitmentCount, 2)
+      assertCounterMetricValue(metrics.batchSendingErrorCount, 1)
       assertCounterMetricValue(metrics.sendFailureCount, 0)
       assertCounterMetricValue(metrics.sendAttemptCount, 1)
     }

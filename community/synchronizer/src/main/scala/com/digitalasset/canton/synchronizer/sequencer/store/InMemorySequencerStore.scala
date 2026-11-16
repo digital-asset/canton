@@ -4,13 +4,10 @@
 package com.digitalasset.canton.synchronizer.sequencer.store
 
 import cats.data.EitherT
-import cats.syntax.bifunctor.*
-import cats.syntax.either.*
-import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.syntax.order.*
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -21,6 +18,7 @@ import com.digitalasset.canton.synchronizer.block.UninitializedBlockHeight
 import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.*
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerBatchingConfig
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
@@ -47,7 +45,6 @@ class UniqueKeyViolationException(message: String) extends RuntimeException(mess
 class InMemorySequencerStore(
     protocolVersion: ProtocolVersion,
     override val sequencerMember: Member,
-    override val blockSequencerMode: Boolean,
     protected val loggerFactory: NamedLoggerFactory,
     protected override val timeouts: ProcessingTimeout,
     override protected val sequencerMetrics: SequencerMetrics,
@@ -56,7 +53,7 @@ class InMemorySequencerStore(
 ) extends SequencerStore
     with FlagCloseable {
 
-  override protected val batchingConfig: BatchingConfig = BatchingConfig()
+  override protected val batchingConfig: SequencerBatchingConfig = SequencerBatchingConfig()
 
   private case class StoredPayload(instanceDiscriminator: UUID, content: ByteString)
 
@@ -157,27 +154,12 @@ class InMemorySequencerStore(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SavePayloadsError, Unit] =
-    MonadUtil
-      .sequentialTraverse(payloadsToInsert.toNEF) { case BytesPayload(id, content) =>
-        Option(payloads.putIfAbsent(id.unwrap, StoredPayload(instanceDiscriminator, content)))
-          .flatMap { existingPayload =>
-            // if we found an existing payload it must have a matching instance discriminator
-            if (existingPayload.instanceDiscriminator == instanceDiscriminator) None // no error
-            else {
-              if (blockSequencerMode) {
-                None
-              } else {
-                SavePayloadsError
-                  .ConflictingPayloadId(id, existingPayload.instanceDiscriminator)
-                  .some
-              }
-            }
-          }
-          .toLeft(())
-          .leftWiden[SavePayloadsError]
-          .toEitherT[FutureUnlessShutdown]
+    EitherT.pure[FutureUnlessShutdown, SavePayloadsError](
+      payloadsToInsert.foreach { case BytesPayload(id, content) =>
+        // payloads that already exist are left untouched
+        val _ = payloads.putIfAbsent(id.unwrap, StoredPayload(instanceDiscriminator, content))
       }
-      .void
+    )
 
   override def saveEvents(instanceIndex: Int, eventsToInsert: NonEmpty[Seq[Sequenced[PayloadId]]])(
       implicit traceContext: TraceContext

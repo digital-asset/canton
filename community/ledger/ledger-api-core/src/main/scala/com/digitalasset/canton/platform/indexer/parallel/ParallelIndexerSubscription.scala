@@ -12,6 +12,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update.{CommitRepair, ContractInfo}
 import com.digitalasset.canton.ledger.participant.state.{
+  ParticipantEvent,
   Reassignment,
   SynchronizerIndex,
   SynchronizerUpdate,
@@ -202,6 +203,7 @@ private[platform] final case class ParallelIndexerSubscription[Batch](
             logger = logger,
             ledgerEndCache = persistedLedgerEndCache,
             activeContracts = mutable.LinkedHashMap.empty,
+            executionContext = executionContext,
           ),
           dbPrepareParallelism = dbPrepareParallelism,
           dbPrepare = dbPrepare(
@@ -248,16 +250,16 @@ private[platform] final case class ParallelIndexerSubscription[Batch](
           ),
           tailConflateFlow = Flow
             .apply[DbBatch[Batch]]
-            .batch(maxTailerBatchSize.toLong, Vector(_))(_ :+ _)
-            .mapConcat(batches => conflateCompletedBatches(batches.flatMap(_.completedBatches))),
-          ingestTail = if (repairMode) { (tailBatch: TailBatch) =>
-            aggregateLedgerEndForRepair(aggregatedLedgerEndForRepair)(tailBatch.updateBatch)
-            Future.successful(tailBatch)
-          } else { (tailBatch: TailBatch) =>
-            storeLedgerEndF(tailBatch.updateBatch.ledgerEnd).map(_ => tailBatch)(executionContext)
-          },
+            .batch(maxTailerBatchSize.toLong, Vector(_))(_ :+ _),
+          ingestTail = ingestTail(
+            repairMode = repairMode,
+            aggregatedLedgerEndForRepair = aggregatedLedgerEndForRepair,
+            storeLedgerEndF = storeLedgerEndF,
+            executionContext = executionContext,
+          ),
         )
       )
+      .mapConcat(identity)
       .async
       .map(sequentialPostProcess(sequentialPostProcessor))
       .mapAsync(postProcessingParallelism)(
@@ -349,7 +351,6 @@ private[platform] final case class ParallelIndexerSubscription[Batch](
         new PekkoSourceQueueToFutureQueue(
           sourceQueue = sourceQueue,
           sourceDone = sourceDone,
-          loggerFactory = loggerFactory,
         ),
     )
   }
@@ -399,14 +400,10 @@ object ParallelIndexerSubscription {
       contractStateEvents: Vector[ContractStateEvent],
   )
 
-  /** @param updateBatch
-    *   The conflated batch of the completed batches.
-    * @param postPublishData
-    *   The post-publish data of the completed batches, each with its own publication time.
-    */
   final case class TailBatch(
-      updateBatch: UpdateBatch,
-      postPublishData: Vector[PostPublishData],
+      ledgerEnd: LedgerEnd,
+      batchTraceContext: TraceContext,
+      completedBatches: Vector[UpdateBatch],
   )
 
   final case class DbBatch[+T](
@@ -575,6 +572,10 @@ object ParallelIndexerSubscription {
         reassignment.reassignment.reassignments.view.collect { case assign: Reassignment.Assign =>
           assign.persistedContractInstance.inst.contractId -> assign.persistedContractInstance
         }
+      case (_, participantEventUpdate: Update.ParticipantEventUpdate) =>
+        participantEventUpdate.events.view.collect { case added: ParticipantEvent.Added =>
+          added.contractInstance.inst.contractId -> added.contractInstance
+        }
       case (_, _) => Nil
     }.toMap
 
@@ -625,6 +626,24 @@ object ParallelIndexerSubscription {
       Reassignment.Batch(reassignments)
     }
 
+    def fixParticipantEvents(
+        overrides: Map[ContractId, Long]
+    ): Seq[ParticipantEvent] => Seq[ParticipantEvent] = { old =>
+      old.map {
+        case added: ParticipantEvent.Added =>
+          overrides.get(added.contractInstance.inst.contractId) match {
+            case Some(newInternalContractId) =>
+              added.copy(
+                contractInstance = added.contractInstance.copy(
+                  internalContractId = newInternalContractId
+                )
+              )
+            case None => added
+          }
+        case removed: ParticipantEvent.Removed => removed
+      }
+    }
+
     def fixUpdate(overrides: Map[ContractId, Long]): Update => Update = {
       case u: Update.SequencedTransactionAccepted =>
         u.copy(
@@ -654,6 +673,10 @@ object ParallelIndexerSubscription {
       case u: Update.SequencerIndexMoved => u
       case u: Update.TopologyTransactionEffective => u
       case u: Update.ReceivedAcsCommitment => u
+      case u: Update.OnlinePartyReplicationParticipantEventUpdate =>
+        u.copy(events = fixParticipantEvents(overrides)(u.events))
+      case u: Update.RepairParticipantEventUpdate =>
+        u.copy(events = fixParticipantEvents(overrides)(u.events))
     }
 
     for {
@@ -779,12 +802,14 @@ object ParallelIndexerSubscription {
       logger: TracedLogger,
       ledgerEndCache: LedgerEndCache,
       activeContracts: mutable.LinkedHashMap[SynCon, ActivationRef],
+      executionContext: ExecutionContext,
   )(
       previous: ProcessingBatch[Vector[DbDto]],
       current: ProcessingBatch[Vector[DbDto]],
-  ): ProcessingBatch[Vector[DbDto]] =
-    Timed.value(
-      metrics.indexer.seqMapping.duration, {
+  ): Future[ProcessingBatch[Vector[DbDto]]] =
+    Timed.future(
+      metrics.indexer.seqMapping.duration,
+      Future {
         val publicationTime = {
           val now = clock.monotonicTime()
           val next = Ordering[CantonTimestamp].max(
@@ -910,7 +935,7 @@ object ParallelIndexerSubscription {
           missingDeactivatedActivations = missingDeactivatedActivationsBuilder.toVector,
           distinctRawStrings = Nil, // not needed anymore
         )
-      },
+      }(executionContext),
     )
 
   @SuppressWarnings(Array("org.wartremover.warts.While"))
@@ -1203,37 +1228,55 @@ object ParallelIndexerSubscription {
           }
       }
 
+  def ingestTail[Batch](
+      repairMode: Boolean,
+      aggregatedLedgerEndForRepair: AtomicReference[Option[LedgerEnd]],
+      storeLedgerEndF: LedgerEnd => Future[Unit],
+      executionContext: ExecutionContext,
+  ): Vector[DbBatch[Batch]] => Future[Option[TailBatch]] = { (batches: Vector[DbBatch[Batch]]) =>
+    implicit val ec = executionContext
+    Future {
+      val completedBatches = batches.flatMap(_.completedBatches)
+      for {
+        ledgerEnd <- completedBatches.lastOption.map(last =>
+          completedBatches
+            .map(_.ledgerEnd)
+            .reduceOption(LedgerEnd.combineUpdates)
+            .getOrElse(last.ledgerEnd)
+        )
+        batchTraceContext <- completedBatches.lastOption.map(_.batchTraceContext)
+      } yield TailBatch(ledgerEnd, batchTraceContext, completedBatches)
+    }.flatMap {
+      case Some(tailBatch) =>
+        if (repairMode) {
+          aggregateLedgerEndForRepair(aggregatedLedgerEndForRepair)(tailBatch.ledgerEnd)
+          Future.successful(Some(tailBatch))
+        } else {
+          storeLedgerEndF(tailBatch.ledgerEnd).map(_ => Some(tailBatch))
+        }
+      case None => Future.successful(None)
+    }
+  }
+
   def aggregateLedgerEndForRepair(
       aggregatedLedgerEnd: AtomicReference[
         Option[LedgerEnd]
       ]
-  ): UpdateBatch => Unit = batch =>
+  ): LedgerEnd => Unit = batchLedgerEnd =>
     discard(
       aggregatedLedgerEnd.updateAndGet(aggregated =>
-        Some(LedgerEnd.update(aggregated, batch.ledgerEnd))
+        Some(LedgerEnd.update(aggregated, batchLedgerEnd))
       )
     )
 
-  /** Conflates the completed batches into one batch for the tail of the pipeline. The post-publish
-    * data is derived per completed batch, so that each offset carries the publication time it was
-    * ingested with: crash recovery replays the post-processing with the publication times of the
-    * stored completions, and they must match.
-    */
-  def conflateCompletedBatches(completedBatches: Vector[UpdateBatch]): Option[TailBatch] =
-    completedBatches.lastOption.map(last =>
-      TailBatch(
-        updateBatch = UpdateBatch(
-          ledgerEnd = completedBatches
-            .map(_.ledgerEnd)
-            .reduceOption(LedgerEnd.combineUpdates)
-            .getOrElse(last.ledgerEnd),
-          batchSize = completedBatches.map(_.batchSize).sum,
-          offsetsUpdates = completedBatches.flatMap(_.offsetsUpdates),
-          eventCount = completedBatches.map(_.eventCount).sum,
-          batchTraceContext = last.batchTraceContext,
-          contractStateEvents = completedBatches.flatMap(_.contractStateEvents),
-        ),
-        postPublishData = completedBatches.flatMap(batch =>
+  private[parallel] def postProcess(
+      processor: (Vector[PostPublishData], TraceContext) => Future[Unit],
+      executionContext: ExecutionContext,
+  ): TailBatch => Future[UpdateBatch] = { tailBatch =>
+    implicit val ec: ExecutionContext = executionContext
+    for {
+      postPublishData <- Future {
+        tailBatch.completedBatches.flatMap(batch =>
           batch.offsetsUpdates.flatMap { case (offset, update) =>
             PostPublishData.from(
               update,
@@ -1241,22 +1284,24 @@ object ParallelIndexerSubscription {
               batch.ledgerEnd.lastPublicationTime,
             )
           }
-        ),
-      )
+        )
+      }
+      _ <- processor(postPublishData, tailBatch.batchTraceContext)
+    } yield UpdateBatch(
+      ledgerEnd = tailBatch.ledgerEnd,
+      batchSize = tailBatch.completedBatches.view.map(_.batchSize).sum,
+      offsetsUpdates = tailBatch.completedBatches.flatMap(_.offsetsUpdates),
+      eventCount = tailBatch.completedBatches.view.map(_.eventCount).sum,
+      batchTraceContext = tailBatch.batchTraceContext,
+      contractStateEvents = tailBatch.completedBatches.flatMap(_.contractStateEvents),
     )
 
-  private def postProcess(
-      processor: (Vector[PostPublishData], TraceContext) => Future[Unit],
-      executionContext: ExecutionContext,
-  ): TailBatch => Future[UpdateBatch] = { tailBatch =>
-    processor(tailBatch.postPublishData, tailBatch.updateBatch.batchTraceContext)
-      .map(_ => tailBatch.updateBatch)(executionContext)
   }
 
   def sequentialPostProcess(
       sequentialPostProcessor: Update => Unit
   ): TailBatch => TailBatch = { tailBatch =>
-    tailBatch.updateBatch.offsetsUpdates.foreach { case (_, update) =>
+    tailBatch.completedBatches.flatMap(_.offsetsUpdates).foreach { case (_, update) =>
       sequentialPostProcessor(update)
     }
     tailBatch

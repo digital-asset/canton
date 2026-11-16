@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Unified central bookkeeping of all P2P gRPC connections in the BFT orderer.
   */
-final class P2PGrpcConnectionState(
+class P2PGrpcConnectionState(
     private val thisNode: BftNodeId, // Useful when debugging
     override val loggerFactory: NamedLoggerFactory,
 ) extends P2PConnectionState
@@ -111,6 +111,11 @@ final class P2PGrpcConnectionState(
   override def getNetworkRef(bftNodeId: BftNodeId): Option[P2PNetworkRef[BftOrderingMessage]] =
     stateRef.get().bftNodeIdToNetworkRef.get(bftNodeId)
 
+  private[grpc] def ownsNetworkRef(
+      addressId: P2PAddress.Id,
+      networkRef: P2PNetworkRef[BftOrderingMessage],
+  ): Boolean = stateRef.get().ownsNetworkRef(addressId, networkRef)
+
   def getSender(
       p2pAddressId: P2PAddress.Id
   ): Option[PeerSender] = {
@@ -150,6 +155,56 @@ final class P2PGrpcConnectionState(
   }
 
   def associateP2PEndpointIdToBftNodeId(
+      p2pAddress: P2PAddress,
+      owningNetworkRef: P2PNetworkRef[BftOrderingMessage],
+  )(implicit traceContext: TraceContext): Option[P2PEndpointIdAssociationResult[Unit]] = {
+    // Validate ownership in the same CAS as association: a separate check would let a removed
+    //  actor recreate an endpoint-to-node mapping after teardown, without any network ref.
+    val (result, refsToClose) = AtomicUtil
+      .updateAndGetComputed(stateRef) { state =>
+        if (!state.ownsNetworkRef(p2pAddress.id, owningNetworkRef))
+          state -> ResultWithLogs(
+            (
+              None: Option[P2PEndpointIdAssociationResult[Unit]],
+              Iterable.empty[
+                (P2PEndpoint.Id, P2PNetworkRef[BftOrderingMessage])
+              ],
+            ),
+            Level.DEBUG -> (() =>
+              s"Not associating $p2pAddress because its network ref no longer belongs to the requesting actor"
+            ),
+          )
+        else
+          p2pAddress.maybeP2PEndpoint
+            .flatMap(endpoint => p2pAddress.maybeBftNodeId.map(endpoint.id -> _))
+            .fold(
+              state -> ResultWithLogs(
+                (
+                  Some(Right(())): Option[P2PEndpointIdAssociationResult[Unit]],
+                  Iterable.empty[
+                    (P2PEndpoint.Id, P2PNetworkRef[BftOrderingMessage])
+                  ],
+                )
+              )
+            ) { case (endpointId, nodeId) =>
+              val (newState, association) =
+                state.associateP2PEndpointIdToBftNodeId(thisNode, endpointId, nodeId)
+              val (_, _, result, refsToClose) = association.result
+              newState -> ResultWithLogs(
+                (
+                  Some(result.map(_ => ())): Option[P2PEndpointIdAssociationResult[Unit]],
+                  refsToClose,
+                ),
+                association.logs*
+              )
+            }
+      }
+      .logAndExtract(logger, prefix = s"Associating $p2pAddress for its owning network ref: ")
+    closeDuplicateNetworkRefs(refsToClose)
+    result
+  }
+
+  def associateP2PEndpointIdToBftNodeId(
       p2pEndpointId: P2PEndpoint.Id,
       bftNodeId: BftNodeId,
   )(implicit traceContext: TraceContext): P2PEndpointIdAssociationResult[Unit] = {
@@ -163,12 +218,7 @@ final class P2PGrpcConnectionState(
           prefix = s"Associating P2P endpoint $p2pEndpointId to BFT node ID $bftNodeId: ",
         )
 
-    refsToClose.foreach { case (endpointId, networkRef) =>
-      logger.info(
-        s"Closing duplicate network ref ${objId(networkRef)} for endpoint $endpointId after re-association"
-      )
-      networkRef.close()
-    }
+    closeDuplicateNetworkRefs(refsToClose)
     if (result.getOrElse(false)) { // Changes made
       val trimmedPrevState = prevState.only(p2pEndpointId, bftNodeId)
       val trimmedNewState = newState.only(p2pEndpointId, bftNodeId)
@@ -184,6 +234,16 @@ final class P2PGrpcConnectionState(
     }
     result.map(_ => ())
   }
+
+  private def closeDuplicateNetworkRefs(
+      refsToClose: Iterable[(P2PEndpoint.Id, P2PNetworkRef[BftOrderingMessage])]
+  )(implicit traceContext: TraceContext): Unit =
+    refsToClose.foreach { case (endpointId, networkRef) =>
+      logger.info(
+        s"Closing duplicate network ref ${objId(networkRef)} for endpoint $endpointId after re-association"
+      )
+      networkRef.close()
+    }
 
   /** Adds a new sender or completes the endpoint information if already present, returning `false`
     * in that case; called by the connection manager when a new P2P connection is established.
@@ -289,11 +349,16 @@ final class P2PGrpcConnectionState(
     *     endpoint ID if the endpoint had no association to a BFT node ID; the caller is responsible
     *     for notifying the disconnection of each of them, so as to keep the P2P network out
     *     module's `connectedP2PEndpointIds` in sync.
+    *
+    * When `expectedNetworkRefO` is supplied, teardown is conditional on that ref still owning the
+    * address. The ownership check and cleanup are atomic, so a stopping actor cannot erase a
+    * replacement ref without closing it.
     */
   def shutdownConnectionAndReturnPeerSender(
       p2pAddressId: P2PAddress.Id,
       clearNetworkRefAssociations: Boolean,
       closeNetworkRef: Boolean,
+      expectedNetworkRefO: Option[P2PNetworkRef[BftOrderingMessage]] = None,
   )(implicit traceContext: TraceContext): (Option[PeerSender], Seq[P2PEndpoint.Id]) = {
     require(
       clearNetworkRefAssociations || !closeNetworkRef,
@@ -302,13 +367,21 @@ final class P2PGrpcConnectionState(
 
     val (prevState, newState, peerSenderO, networkRefO, affectedP2PEndpointIds) =
       AtomicUtil
-        .updateAndGetComputed(stateRef)(
-          _.shutdownConnectionAndReturnPeerSender(
-            p2pAddressId,
-            clearNetworkRefAssociations,
-            closeNetworkRef,
-          )
-        )
+        .updateAndGetComputed(stateRef) { state =>
+          if (expectedNetworkRefO.forall(state.ownsNetworkRef(p2pAddressId, _)))
+            state.shutdownConnectionAndReturnPeerSender(
+              p2pAddressId,
+              clearNetworkRefAssociations,
+              closeNetworkRef,
+            )
+          else
+            state -> ResultWithLogs(
+              (state, state, None, None, Seq.empty[P2PEndpoint.Id]),
+              Level.DEBUG -> (() =>
+                s"Not shutting down $p2pAddressId because its network ref no longer belongs to the closing actor"
+              ),
+            )
+        }
         .logAndExtract(
           logger,
           prefix = s"Shutting down connection for $p2pAddressId: ",
@@ -515,6 +588,21 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
         (this, updatedState, result),
         Level.DEBUG -> (() => annotation),
       )
+    }
+
+    def ownsNetworkRef(
+        p2pAddressId: P2PAddress.Id,
+        networkRef: P2PNetworkRef[BftOrderingMessage],
+    ): Boolean = {
+      val currentNetworkRefO = p2pAddressId match {
+        case Right(bftNodeId) => bftNodeIdToNetworkRef.get(bftNodeId)
+        case Left(endpointId) =>
+          p2pEndpointIdToBftNodeId
+            .get(endpointId)
+            .flatMap(bftNodeIdToNetworkRef.get)
+            .orElse(p2pEndpointIdToNetworkRef.get(endpointId))
+      }
+      currentNetworkRefO.contains(networkRef)
     }
 
     // Shuts down the connection to the node,

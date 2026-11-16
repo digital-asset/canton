@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.protocol
 
-import com.digitalasset.canton.data.PathRollbackContextFactory
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
@@ -101,7 +100,6 @@ class ExampleTransactionFactoryTest extends AnyWordSpec with BaseTest with HasEx
                     reinterpretedTx,
                     metadata,
                     WithoutSuffixes,
-                    PathRollbackContextFactory,
                   )
                 }
             }

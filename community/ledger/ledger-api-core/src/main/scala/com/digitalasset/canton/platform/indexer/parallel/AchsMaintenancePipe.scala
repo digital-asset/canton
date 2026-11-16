@@ -162,6 +162,7 @@ object AchsMaintenancePipe {
       fullDrain: Boolean,
   ): Flow[T, AchsWorkRange, NotUsed] =
     Flow[T]
+      // TODO(#37916): full async ACHS processing
       // Stage 0: Convert to work distance, accumulate, and drain threshold-sized AchsWorkRange chunks.
       .map(toAchsWork)
       .statefulMap(create = () => initialAchsState -> initialWork)(

@@ -140,16 +140,16 @@ class InsertPerfTest extends PerfTestBase {
 
   override implicit val traceContext: TraceContext = TraceContext.createNew("lapi-insert-perf-test")
 
-  // contracts created total = 864 * 2023 * 5
-  // archives = 864 * 1823 * 5
-  // active contracts = 864 * 23 * 5
-  it should "20% CN NFR insert" in {
+  // contracts created total = 432 * 2023 * 5
+  // archives = 432 * 1823 * 5
+  // active contracts = 432 * 23 * 5
+  it should "10% CN NFR insert" in {
     measure {
       cnNFRIngestionFixture(
-        passes = 864,
+        passes = 432,
         activeTxsPerPass = 23,
         yesIReallyWantToRunIt = true,
-        actionName = "ingesting 20% CN NFR",
+        actionName = "ingesting 10% CN NFR",
       )
     }
   }

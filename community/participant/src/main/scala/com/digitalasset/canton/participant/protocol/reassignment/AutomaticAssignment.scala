@@ -14,7 +14,7 @@ import com.digitalasset.canton.config.{
   ReassignmentsConfig,
 }
 import com.digitalasset.canton.crypto.PseudoRandom
-import com.digitalasset.canton.data.{CantonTimestamp, ReassignmentSubmitterMetadata}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonBaseError.isStatusErrorCode
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -98,7 +98,7 @@ private[participant] object AutomaticAssignment {
         submissionResult <- reassignmentCoordination
           .assign(
             targetSynchronizer,
-            ReassignmentSubmitterMetadata(
+            ReassignmentSubmissionInfo(
               assignmentSubmitter,
               participantId,
               commandId(id),
@@ -111,7 +111,11 @@ private[participant] object AutomaticAssignment {
             SubmissionAccounting.participantAdmin(participantId.adminParty.toLf),
           )
           .mapK(FutureUnlessShutdown.outcomeK)
-        AssignmentProcessingSteps.SubmissionResult(completionF) = submissionResult
+        completionF <- EitherT.fromEither[FutureUnlessShutdown](submissionResult match {
+          case AssignmentProcessingSteps.AssignmentSubmitted(completionF) => Right(completionF)
+          case notSubmitted =>
+            Left(AssignmentNotSubmitted(notSubmitted): ReassignmentProcessorError)
+        })
         status <- EitherT.right(completionF).mapK(FutureUnlessShutdown.outcomeK)
         _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
           status.code == Code.OK_VALUE,
@@ -123,10 +127,18 @@ private[participant] object AutomaticAssignment {
       def message = s"Assignment of $id failed due to: $status"
     }
 
+    final case class AssignmentNotSubmitted(result: AssignmentProcessingSteps.SubmissionResult)
+        extends ReassignmentProcessorError {
+      def message = s"Assignment of $id was not submitted: $result"
+    }
+
     def performAutoAssignmentRepeatedly
         : EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] = {
+      // SUBMISSION_ALREADY_IN_FLIGHT is retried: the entry of an earlier attempt is deleted only once its completion is indexed
+      // TODO(#15875): Wait for the completion of the earlier attempt on the Ledger API before retrying
       implicit val StopRetry: Success[Either[ReassignmentProcessorError, Unit]] = Success {
         case Left(e: AssignmentFailed) => !isStatusErrorCode(MediatorError.Timeout, e.status)
+        case Left(_: ReassignmentSubmissionErrors.SubmissionAlreadyInFlight) => false
         case _ => true
       }
 

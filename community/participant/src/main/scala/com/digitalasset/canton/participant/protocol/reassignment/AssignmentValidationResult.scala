@@ -27,7 +27,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{Activenes
 import com.digitalasset.canton.participant.protocol.validation.AuthenticationError
 import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.protocol.{ReassignmentId, RootHash, UpdateId}
-import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -92,8 +92,8 @@ final case class AssignmentValidationResult private[reassignment] (
     *
     * @param targetSynchronizer
     *   the synchronizer the contracts are assigned to
-    * @param participantId
-    *   the id of the local participant
+    * @param shouldEmitCompletion
+    *   whether the event carries the command completion of the submitting participant
     * @param recordTime
     *   record time of the assignment
     * @param trafficCost
@@ -104,7 +104,7 @@ final case class AssignmentValidationResult private[reassignment] (
     */
   private[reassignment] def createReassignmentAccepted(
       targetSynchronizer: Target[SynchronizerId],
-      participantId: ParticipantId,
+      shouldEmitCompletion: Boolean,
       recordTime: CantonTimestamp,
       trafficCost: NonNegativeLong,
       storedInReassignmentStore: Boolean,
@@ -113,7 +113,7 @@ final case class AssignmentValidationResult private[reassignment] (
   ): AcsChangeFactory => InternalContractIds => SequencedEventUpdate = {
     val updateId = rootHash
     val completionInfo =
-      Option.when(participantId == submitterMetadata.submittingParticipant)(
+      Option.when(shouldEmitCompletion)(
         CompletionInfo(
           actAs = List(submitterMetadata.submitter),
           userId = submitterMetadata.userId,
@@ -178,6 +178,7 @@ object AssignmentValidationResult {
       submitterCheckResult: Option[ReassignmentValidationError],
       reassignmentIdResult: Option[ReassignmentValidationError],
       multiSynchronizerFeatureFlagCheckResult: Option[ReassignmentValidationError],
+      replayCheckResult: Option[ReassignmentValidationError],
   ) extends ReassignmentValidationResult.CommonValidationResult
 
   final case class ReassigningParticipantValidationResult(

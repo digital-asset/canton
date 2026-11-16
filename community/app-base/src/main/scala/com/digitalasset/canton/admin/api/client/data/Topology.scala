@@ -114,7 +114,7 @@ object ListKeyOwnersResult {
           "signing_keys",
           AdminApiResponseValidation.Trusted,
           AdminApiResponseValidation.NoLengthLimit,
-        )((entry, _) => SigningPublicKey.fromProtoV30(entry))
+        )((entry, _) => SigningPublicKey.fromProtoV30(AdminApiResponseValidation.Trusted, entry))
       encryptionKeys <- ProtoValidation
         .validateLengthThen(
           value.encryptionKeys,

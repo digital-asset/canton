@@ -25,7 +25,7 @@ object AutomaticAssignment {
       owners: Iterable[InstanceReference],
       synchronizerId: SynchronizerId,
   ): Unit =
-    if (BaseTest.testedProtocolVersion <= ProtocolVersion.v36) {
+    if (BaseTest.testedProtocolVersion == ProtocolVersion.v36) {
       owners.foreach(owner =>
         owner.topology.synchronizer_parameters.propose_update(
           synchronizerId,

@@ -89,6 +89,18 @@ class ValueSpec
     }
   }
 
+  "ValueUint256" - {
+    "equality and hashing" in {
+      val a = ValueUint256(data.Uint256.assertFromLong(42L))
+      val b = ValueUint256(data.Uint256.assertFromLong(42L))
+      val c = ValueUint256(data.Uint256.ZERO)
+
+      a shouldBe b
+      a.hashCode shouldBe b.hashCode
+      a should not be c
+    }
+  }
+
   // XXX can factor like FlatSpecCheckLaws
 
 }

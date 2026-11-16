@@ -151,10 +151,11 @@ object CryptoProvider {
     *
     * We select [[com.digitalasset.canton.crypto.SigningAlgorithmSpec.EcDsaSha256]] and
     * [[com.digitalasset.canton.crypto.EncryptionAlgorithmSpec.RsaOaepSha256]] as the default
-    * signing/encryption algorithm specifications for a KMS provider, because some proprietary KMS
-    * instances, such as AWS, do not support `Ed25519` or `Ecies` crypto algorithms. The same
-    * applies to the key specifications. However, if the chosen KMS supports any of these
-    * algorithms, the default scheme can be configured accordingly.
+    * signing/encryption algorithm specifications for a KMS provider. Neither AWS nor GCP KMS
+    * supports `Ecies`. `EcDsaSha256` is the default for historical reasons, as AWS and GCP KMS
+    * initially did not support `Ed25519`. The same applies to the key specifications. If the chosen
+    * KMS supports other algorithms, such as `Ed25519`, the default scheme can be configured
+    * accordingly.
     */
   case object Kms extends CryptoProvider {
     override def name: String = "KMS"

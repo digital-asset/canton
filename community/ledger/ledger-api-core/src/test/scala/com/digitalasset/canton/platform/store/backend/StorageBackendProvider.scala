@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.store.backend
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.platform.store.PruningOffsetService
@@ -19,6 +20,7 @@ import com.digitalasset.canton.platform.store.backend.postgresql.PostgresStorage
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.platform.store.testing.postgresql.PostgresAroundAll
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Ref
 import org.mockito.MockitoSugar.mock
 import org.scalatest.Suite
@@ -32,6 +34,20 @@ trait StorageBackendProvider {
   protected def jdbcUrl: String
   protected def lockIdSeed: Int
   protected def backend: TestBackend
+
+  protected final def interning: MockStringInterning = backend.stringInterningSupport
+
+  protected implicit class PartyInterning(party: Party) {
+    def interned: Int = interning.party.internalize(party)
+  }
+
+  protected implicit class ParticipantInterning(participant: ParticipantId) {
+    def interned: Int = interning.participantId.internalize(participant.unwrap)
+  }
+
+  protected implicit class SynchronizerInterning(synchronizerId: SynchronizerId) {
+    def interned: Int = interning.synchronizerId.internalize(synchronizerId)
+  }
 
   protected final def ingest(dbDtos: Vector[DbDto], connection: Connection): Unit = {
     def typeBoundIngest[T](ingestionStorageBackend: IngestionStorageBackend[T]): Unit =

@@ -41,21 +41,39 @@ trait SandboxRequiringAuthorizationFuns {
 
   protected val participantAdmin = UserManagementStore.DefaultParticipantAdminUserId
 
+  /** The format of the tokens minted by [[standardToken]] and [[emptyToken]]; the suites that still
+    * exercise the deprecated scope-only tokens override it, see
+    * [[com.digitalasset.canton.integration.tests.ledgerapi.auth.ScopeOnlyJwtSuite]].
+    */
+  // TODO (i#33090): remove the format switch together with the scope-only token format
+  protected def defaultTokenFormat: StandardJWTTokenFormat = StandardJWTTokenFormat.Audience
+
+  /** The scope of the tokens minted by [[standardToken]] and [[emptyToken]] in the
+    * [[StandardJWTTokenFormat.Scope]] format.
+    */
   val defaultScope: String = AuthServiceJWTCodec.scopeLedgerApiFull
 
-  // TODO (i#33090): Switch to audience-based tokens in a future Canton release and update tests accordingly
+  // an audience-based token for a specific participant carries the participant audience
+  // `https://daml.com/jwt/aud/participant/<id>`, which the codec writes when the audiences are empty
+  private def defaultAudiences(participantId: Option[String]): List[String] =
+    if (defaultTokenFormat == StandardJWTTokenFormat.Audience && participantId.isEmpty)
+      List(ExpectedAudience)
+    else List.empty
+
+  private def defaultTokenScope: Option[String] =
+    Option.when(defaultTokenFormat == StandardJWTTokenFormat.Scope)(defaultScope)
+
   protected def emptyToken: StandardJWTPayload = StandardJWTPayload(
     issuer = None,
     userId = "",
     participantId = None,
     exp = None,
-    format = StandardJWTTokenFormat.Scope,
-    audiences = List.empty,
-    scope = Some(defaultScope),
+    format = defaultTokenFormat,
+    audiences = defaultAudiences(participantId = None),
+    scope = defaultTokenScope,
   )
 
   def defaultExpiresIn = Duration.ofMinutes(5)
-  // TODO (i#33090): Switch to audience-based tokens in a future Canton release and update tests accordingly
   protected def standardToken(
       userId: String,
       expiresIn: Option[Duration] = Some(defaultExpiresIn),
@@ -67,9 +85,9 @@ trait SandboxRequiringAuthorizationFuns {
       participantId = participantId,
       userId = userId,
       exp = expiresIn.map(delta => Instant.now().plusNanos(delta.toNanos)),
-      format = StandardJWTTokenFormat.Scope,
-      audiences = List.empty,
-      scope = Some(defaultScope),
+      format = defaultTokenFormat,
+      audiences = defaultAudiences(participantId),
+      scope = defaultTokenScope,
     )
 
   protected def audienceToken(
@@ -100,9 +118,6 @@ trait SandboxRequiringAuthorizationFuns {
 
   protected def forIssuer(id: String, p: StandardJWTPayload): StandardJWTPayload =
     p.copy(issuer = Some(id))
-
-  protected def forParticipantId(id: String, p: StandardJWTPayload): StandardJWTPayload =
-    p.copy(participantId = Some(id))
 
   protected def forUserId(id: String, p: StandardJWTPayload): StandardJWTPayload =
     p.copy(userId = id)

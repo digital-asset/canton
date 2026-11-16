@@ -68,9 +68,8 @@ object AggregationBySender extends PrettyPrintingCompanion[AggregationBySender] 
 
 /** Raw aggregation rule shipped on the wire
   *
-  * Before PV35, we used to ship a lot of UIDs as part of our aggregation rules. With PV35, we
-  * stopped this and group recipients such that we can minimize the payload (as verdict payloads
-  * seemed to be ~ 2/3 made out of aggregation rules)
+  * We group recipients such that we can minimize the payload (as verdict payloads seemed to be ~
+  * 2/3 made out of aggregation rules)
   *
   * This however means that we need to resolve the aggregation rules against the topology snapshot.
   * Now, which snapshot we use doesn't matter much:

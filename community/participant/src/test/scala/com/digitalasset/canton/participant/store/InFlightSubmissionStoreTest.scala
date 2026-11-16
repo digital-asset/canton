@@ -43,13 +43,13 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
   private lazy val trackingData1 =
     TransactionSubmissionTrackingData.create(
       completionInfo,
-      TransactionSubmissionTrackingData.TimeoutCause,
+      SubmissionTrackingData.TimeoutCause,
       SynchronizerId.tryFromString("da::default").toPhysical,
       transactionHash = Some(TestHash.digest("in-flight-tx-hash")),
     )
   private lazy val trackingData3 = TransactionSubmissionTrackingData.create(
     completionInfo,
-    TransactionSubmissionTrackingData.CauseWithTemplate(
+    SubmissionTrackingData.CauseWithTemplate(
       SequencerErrors
         .SubmissionRequestRefused("Some invalid batch")
         .rpcStatusWithoutLoggingContext()

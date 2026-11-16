@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.teststores
 
 import com.digitalasset.canton.TestEssentials
-import com.digitalasset.canton.config.BatchingConfig
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.store.db.{DbActiveContractStore, DbReassignmentStore}
 import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.store.teststores.H2StoresTest
@@ -23,7 +23,7 @@ trait H2ParticipantStoresWithIndexedStringDependency extends H2StoresTest {
       indexedSynchronizer = indexedSynchronizer,
       enableAdditionalConsistencyChecks = Some(20),
       batchingParametersConfig = PrunableByTimeParameters.testingParams,
-      batchingConfig = BatchingConfig(),
+      batchingConfig = ParticipantBatchingConfig(),
       indexedStringStore = createIndexedStringStore(),
       timeouts = timeouts,
       loggerFactory = loggerFactory,
@@ -37,7 +37,7 @@ trait H2ParticipantStoresWithIndexedStringDependency extends H2StoresTest {
     indexedStringStore = createIndexedStringStore(),
     futureSupervisor = futureSupervisor,
     exitOnFatalFailures = false,
-    batchingConfig = new BatchingConfig,
+    batchingConfig = new ParticipantBatchingConfig,
     participantId = DefaultTestIdentities.participant1,
     offlineTopologyLookup = new FailingOfflineTopologyLookup(),
     timeouts = timeouts,

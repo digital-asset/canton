@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.jsonapi
 
 import com.daml.jwt.AuthServiceJWTCodec.JsonImplicits.*
 import com.daml.jwt.{
-  AuthServiceJWTCodec,
   AuthServiceJWTPayload,
   DecodedJwt,
   Jwt,
@@ -62,7 +61,8 @@ object HttpServiceTestFixture {
   val userId: UserId = UserId("test")
 
   def jwtForUser(
-      user: Option[String]
+      user: Option[String],
+      audience: String,
   ): Jwt = {
     val standardJwtPayload: AuthServiceJWTPayload =
       StandardJWTPayload(
@@ -70,9 +70,9 @@ object HttpServiceTestFixture {
         userId = user.getOrElse(userId.unwrap),
         participantId = None,
         exp = None,
-        format = StandardJWTTokenFormat.Scope,
-        audiences = List.empty,
-        scope = Some(AuthServiceJWTCodec.scopeLedgerApiFull),
+        format = StandardJWTTokenFormat.Audience,
+        audiences = List(audience),
+        scope = None,
       )
 
     val payloadString: String = standardJwtPayload.asJson.noSpaces
@@ -92,8 +92,9 @@ object HttpServiceTestFixture {
   }
 
   def headersWithUserAuth(
-      user: Option[String]
-  ): List[HttpHeader] = authorizationHeader(jwtForUser(user))
+      user: Option[String],
+      audience: String,
+  ): List[HttpHeader] = authorizationHeader(jwtForUser(user, audience))
 
   def authorizationHeader(token: Jwt): List[HttpHeader] =
     List(Authorization(OAuth2BearerToken(token.value)))

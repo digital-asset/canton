@@ -5,10 +5,10 @@ package com.digitalasset.canton.networking.grpc.ratelimiting
 
 import com.daml.metrics.api.MetricHandle.Gauge
 import com.daml.metrics.api.MetricsContext
+import com.daml.metrics.grpc.DamlGrpcServerMetrics
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.ActiveRequestsMetrics
 import com.digitalasset.canton.networking.grpc.ratelimiting.ActiveRequestCounterInterceptor.Limited
 import com.digitalasset.canton.networking.grpc.ratelimiting.LimitResult.FullMethodName
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, GrpcAddressHelper}
@@ -37,7 +37,7 @@ class ActiveRequestCounterInterceptor(
     initialLimits: Map[FullMethodName, NonNegativeInt],
     warnOnUnconfiguredLimits: Boolean,
     maxLoggingRatePerSecond: NonNegativeInt,
-    metrics: ActiveRequestsMetrics,
+    metrics: DamlGrpcServerMetrics,
     val loggerFactory: NamedLoggerFactory,
 ) extends ServerInterceptor
     with NamedLogging {

@@ -271,7 +271,7 @@ object ProtocolVersion {
     s"stable protocol versions $stable should be in sync with build info $releaseStable",
   )
 
-  val alpha: List[AlphaProtocolVersion] = List(ProtocolVersion.almostDev)
+  val alpha: List[AlphaProtocolVersion] = List(ProtocolVersion.v38, ProtocolVersion.almostDev)
 
   val beta: List[BetaProtocolVersion] =
     parseFromBuildInfo(BuildInfo.betaProtocolVersions)
@@ -360,6 +360,9 @@ object ProtocolVersion {
 
   lazy val v37: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] =
     ProtocolVersion.createStable(37)
+
+  lazy val v38: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
+    ProtocolVersion.createAlpha(38)
 
   // Minimum stable protocol version introduced
   lazy val minimum: ProtocolVersion = v36

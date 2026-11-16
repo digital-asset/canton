@@ -40,6 +40,7 @@ import com.digitalasset.daml.lf.value.test.ValueGenerators.SerializationVersionG
 import magnolify.scalacheck.auto.genArbitrary
 import org.scalacheck.Arbitrary.arbitrary
 import org.scalacheck.{Arbitrary, Gen}
+import org.scalatest.EitherValues.*
 
 import scala.jdk.CollectionConverters.*
 import scala.util.Random
@@ -172,7 +173,7 @@ final class GeneratorsInteractiveSubmission(
     Gen
       .choose(1, 200L)
       .map(PositiveFiniteDuration.ofMinutes)
-      .map(d => DeduplicationPeriod.DeduplicationDuration(d.asJava))
+      .map(d => DeduplicationPeriod.DeduplicationDuration.create(d.asJava).value)
   private implicit val genDeduplicationOffset: Gen[DeduplicationPeriod.DeduplicationOffset] =
     Arbitrary
       .arbitrary[PositiveLong]

@@ -50,6 +50,8 @@ final case class ParticipantNodeParameters(
     enableRepairService: Boolean,
     damlTopUpEnabled: Boolean,
     alphaAcsReplicationSupport: Option[AlphaAcsReplicationConfig],
+    override val batchingConfig: ParticipantBatchingConfig = ParticipantBatchingConfig(),
+    override val cachingConfigs: ParticipantCachingConfigs = ParticipantCachingConfigs(),
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
@@ -77,12 +79,8 @@ object ParticipantNodeParameters {
       enablePreviewFeatures = false,
       enableTestingFeatures = false,
       enableKeyDownload = false,
+      enableScopeOnlyJwt = false,
       nonStandardConfig = false,
-      cachingConfigs = CachingConfigs(),
-      batchingConfig = BatchingConfig(
-        maxPruningBatchSize = PositiveNumeric.tryCreate(10),
-        aggregator = BatchAggregatorConfig.defaultsForTesting,
-      ),
       sequencerClient = SequencerClientConfig(),
       dbMigrateAndStart = false,
       exitOnFatalFailures = true,
@@ -132,5 +130,10 @@ object ParticipantNodeParameters {
     enableRepairService = false,
     damlTopUpEnabled = false,
     alphaAcsReplicationSupport = None,
+    batchingConfig = ParticipantBatchingConfig(
+      maxPruningBatchSize = PositiveNumeric.tryCreate(10),
+      aggregator = BatchAggregatorConfig.defaultsForTesting,
+    ),
+    cachingConfigs = ParticipantCachingConfigs(),
   )
 }

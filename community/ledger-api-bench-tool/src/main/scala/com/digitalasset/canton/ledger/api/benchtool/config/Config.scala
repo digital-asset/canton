@@ -18,6 +18,7 @@ final case class Config(
     maxInFlightCommands: Int,
     submissionBatchSize: Int,
     authorizationTokenSecret: Option[String],
+    authorizationTokenAudience: Option[String],
     latencyTest: Boolean,
     maxLatencyObjectiveMillis: Long,
 ) {
@@ -57,6 +58,7 @@ object Config {
       maxInFlightCommands = 100,
       submissionBatchSize = 100,
       authorizationTokenSecret = None,
+      authorizationTokenAudience = None,
       latencyTest = false,
       maxLatencyObjectiveMillis = 1000L,
     )

@@ -236,6 +236,16 @@ final class Authorizer(
       case RequiredClaim.ListTrafficAccounts(acceptExecuteRights) =>
         claims.canListTrafficAccounts(acceptExecuteRights).map(_ => req)
 
+      case RequiredClaim.AdminOrDebitTrafficFrom(accountId, acceptExecuteRights) =>
+        claims.isAdmin
+          .orElse(claims.canDebitTrafficFrom(accountId, acceptExecuteRights))
+          .map(_ => req)
+
+      case RequiredClaim.AdminOrListTrafficAccounts(acceptExecuteRights) =>
+        claims.isAdmin
+          .orElse(claims.canListTrafficAccounts(acceptExecuteRights))
+          .map(_ => req)
+
       case RequiredClaim.MatchIdentityProviderId(_) =>
         val identityProviderIdL = requiredClaim.requestStringL
         val modifiedRequest = implyIdentityProviderIdFromClaims(identityProviderIdL, claims, req)
@@ -392,6 +402,10 @@ object RequiredClaim {
   final case class DebitTrafficFrom[Req](accountId: String, acceptExecuteRights: Boolean)
       extends RequiredClaim[Req]
   final case class ListTrafficAccounts[Req](acceptExecuteRights: Boolean) extends RequiredClaim[Req]
+  final case class AdminOrDebitTrafficFrom[Req](accountId: String, acceptExecuteRights: Boolean)
+      extends RequiredClaim[Req]
+  final case class AdminOrListTrafficAccounts[Req](acceptExecuteRights: Boolean)
+      extends RequiredClaim[Req]
   final case class MatchIdentityProviderId[Req](override val requestStringL: Lens[Req, String])
       extends RequiredClaim[Req]
   final case class MatchUserId[Req](

@@ -47,6 +47,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueue}
 import com.digitalasset.nonempty.NonEmpty
 import com.digitalasset.nonempty.NonEmptyReturningOps.*
+import org.apache.pekko.stream.Materializer
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.{ExecutionContext, Future}
@@ -433,6 +434,7 @@ object TopologyTransactionProcessor {
     )(implicit
         traceContext: TraceContext,
         executionContext: ExecutionContext,
+        materializer: Materializer,
     ): FutureUnlessShutdown[TopologyTransactionProcessor]
   }
 

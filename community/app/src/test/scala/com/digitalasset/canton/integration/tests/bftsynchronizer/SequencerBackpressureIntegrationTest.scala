@@ -7,7 +7,7 @@ import com.daml.metrics.api.MetricQualification
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.TestSequencerClientFor
+import com.digitalasset.canton.config.{NonNegativeFiniteDuration, TestSequencerClientFor}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.examples.java.iou
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -52,6 +52,11 @@ trait SequencerBackpressureIntegrationTest extends CommunityIntegrationTest with
       // The test creates many contracts, which is slowed down by the additional consistency checks
       .addConfigTransform(
         ConfigTransforms.disableAdditionalConsistencyChecks
+      )
+      // participant2 lags on purpose (by up to three 20s `eventually` blocks), so avoid
+      // "Detected late processing" warnings when its delay crosses the default 20s threshold.
+      .addConfigTransform(
+        ConfigTransforms.setDelayLoggingThreshold(NonNegativeFiniteDuration.ofMinutes(2))
       )
       // Set up the delayed sequencer client for participant2
       .updateTestingConfig(
@@ -116,7 +121,7 @@ trait SequencerBackpressureIntegrationTest extends CommunityIntegrationTest with
     // Helper to get the sequencer's messageSentSize metric for the subscription.
     def getMessageSentSize: Long = sequencer1.metrics
       .get_histogram(
-        sequencer1.underlying.value.sequencer.metrics.grpcMetrics._1.messagesSentSize.info.name
+        sequencer1.underlying.value.sequencer.metrics.grpcMetrics.messagesSentSize.info.name
           .toString(),
         Map(
           "grpc_service_name" -> "com.digitalasset.canton.sequencer.api.v30.SequencerService",

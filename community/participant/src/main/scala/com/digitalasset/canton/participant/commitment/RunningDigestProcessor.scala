@@ -170,7 +170,14 @@ class RunningDigestProcessorImpl(
       },
       DigestProcessorTopologyLookupImpl.TopologyLookupRetryPolicy,
     )
-    FutureUnlessShutdown(finalResult)
+    FutureUnlessShutdown(finalResult).transform {
+      // The retry policy retries a TopologyLookupException forever, so the retry loop only gives up
+      // with such an exception when the digest processor is being stopped. Stopping is not a failure of
+      // the pipeline: report it as a shutdown so that the pipeline drains instead of failing.
+      case Failure(_: TopologyLookupException) if closeContextForTopologyLookupRetries.isClosing =>
+        scala.util.Success(UnlessShutdown.AbortedDueToShutdown)
+      case otherwise => otherwise
+    }
   }
 
   /** Inserts a checkpointing fence into the processing pipeline in the following scenarios:

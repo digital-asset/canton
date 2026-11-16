@@ -16,7 +16,10 @@ import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TracingConfig
 
-trait CantonNodeParameters extends CantonNodeParameters.General with CantonNodeParameters.Protocol
+trait CantonNodeParameters extends CantonNodeParameters.General with CantonNodeParameters.Protocol {
+  def cachingConfigs: CachingConfigs
+  def batchingConfig: BatchingConfig
+}
 
 object CantonNodeParameters {
   trait General {
@@ -27,10 +30,9 @@ object CantonNodeParameters {
     def enablePreviewFeatures: Boolean
     def enableTestingFeatures: Boolean
     def enableKeyDownload: Boolean
+    def enableScopeOnlyJwt: Boolean
     def processingTimeouts: ProcessingTimeout
     def sequencerClient: SequencerClientConfig
-    def cachingConfigs: CachingConfigs
-    def batchingConfig: BatchingConfig
     def nonStandardConfig: Boolean
     def dbMigrateAndStart: Boolean
     def exitOnFatalFailures: Boolean
@@ -48,10 +50,9 @@ object CantonNodeParameters {
         override val enablePreviewFeatures: Boolean,
         override val enableTestingFeatures: Boolean,
         override val enableKeyDownload: Boolean,
+        override val enableScopeOnlyJwt: Boolean,
         override val processingTimeouts: ProcessingTimeout,
         override val sequencerClient: SequencerClientConfig,
-        override val cachingConfigs: CachingConfigs,
-        override val batchingConfig: BatchingConfig,
         override val nonStandardConfig: Boolean,
         override val dbMigrateAndStart: Boolean,
         override val exitOnFatalFailures: Boolean,
@@ -90,10 +91,9 @@ trait HasGeneralCantonNodeParameters extends CantonNodeParameters.General {
   override def enablePreviewFeatures: Boolean = general.enablePreviewFeatures
   override def enableTestingFeatures: Boolean = general.enableTestingFeatures
   override def enableKeyDownload: Boolean = general.enableKeyDownload
+  override def enableScopeOnlyJwt: Boolean = general.enableScopeOnlyJwt
   override def processingTimeouts: ProcessingTimeout = general.processingTimeouts
   override def sequencerClient: SequencerClientConfig = general.sequencerClient
-  override def cachingConfigs: CachingConfigs = general.cachingConfigs
-  override def batchingConfig: BatchingConfig = general.batchingConfig
   override def nonStandardConfig: Boolean = general.nonStandardConfig
   override def dbMigrateAndStart: Boolean = general.dbMigrateAndStart
   override def exitOnFatalFailures: Boolean = general.exitOnFatalFailures

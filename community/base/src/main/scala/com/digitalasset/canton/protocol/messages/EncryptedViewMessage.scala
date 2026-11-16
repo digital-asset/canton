@@ -395,7 +395,7 @@ object EncryptedViewMessage
         "encryptionScheme",
       )
 
-      signature <- signatureP.traverse(Signature.fromProtoV30)
+      signature <- signatureP.traverse(Signature.fromProtoV30(pvv, _))
       viewHashesSeqP <- ProtoValidation.validateLength(
         viewHashesP,
         "view_hashes",

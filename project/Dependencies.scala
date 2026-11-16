@@ -53,14 +53,14 @@ object Dependencies {
   lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
   lazy val dropwizard_version = "4.1.33"
   lazy val flyway_version = "12.0.2"
-  // google-cloud-kms and google-cloud-storage share the same compatibility matrix:
-  // https://github.com/googleapis/google-cloud-java/blob/main/README.md
+  // From https://github.com/googleapis/google-cloud-java/releases/tag/libraries-bom/v26.93.0
+  // kms 2.105.0 and storage 2.78.0 are part of the same GCP Libraries BOM
   // We should switch to using the BOM versioning system for these deps
   // https://docs.cloud.google.com/java/docs/bom
-  lazy val google_cloud_kms_version = "2.103.0"
-  lazy val google_cloud_storage_version = "2.76.0"
-  lazy val zstd_version = "1.5.7-12"
-  lazy val gson_version = "2.14.0"
+  lazy val google_cloud_kms_version = "2.105.0"
+  lazy val google_cloud_storage_version = "2.78.0"
+  lazy val zstd_version = "1.5.7-26"
+  lazy val gson_version = "2.15.0"
   lazy val gson_fire_version = "1.9.0"
   lazy val h2_version = "2.2.224"
   lazy val janino_version = "3.1.12"
@@ -76,14 +76,14 @@ object Dependencies {
   lazy val munit_version = "1.3.6"
   private val opentelemetry_version = "1.67.0"
   private val opentelemetry_alpha_version = "1.67.0-alpha"
-  private val otel_instrumentation_version = "2.33.0"
+  private val otel_instrumentation_version = "2.33.1"
   private val otel_instrumentation_alpha_version = "2.33.0-alpha"
   lazy val grpc_version = io_grpc_grpc_api.revision
 
   lazy val pekko_http_backend_version = "3.11.0"
   lazy val protostuff_version = "3.1.40"
   lazy val postgres_version = "42.7.11"
-  lazy val pprint_version = "0.9.3"
+  lazy val pprint_version = "0.9.6"
   lazy val protoc_gen_doc_version = "1.5.1"
   lazy val pureconfig_version = "0.14.0"
   lazy val reflections_version = "0.10.2"

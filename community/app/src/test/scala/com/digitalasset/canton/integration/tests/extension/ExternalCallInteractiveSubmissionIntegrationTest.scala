@@ -23,7 +23,6 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.ExternalParty
 import com.digitalasset.canton.util.HexString
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 import java.util.UUID
@@ -55,29 +54,29 @@ class ExternalCallInteractiveSubmissionIntegrationTest
       .withSetup { implicit env =>
         import env.*
         participant1.synchronizers.connect_local(sequencer1, alias = daName)
-        if (testedProtocolVersion >= ProtocolVersion.v36) {
-          participant1.dars.upload(BaseTest.ExternalCallTestPath)
-          aliceE = participant1.parties.testing.external.enable("Alice")
-          // An externally-signed submission must be a single view, so the tests cannot use
-          // create-and-exercise: create the contract up front and prepare standalone exercises.
-          tester = inside(
-            participant1.ledger_api.javaapi.commands
-              .submit(
-                Seq(aliceE),
-                Seq(
-                  new M.externalcalltest.ExternalCallTester(
-                    aliceE.toProtoPrimitive
-                  ).create.commands.loneElement
-                ),
-              )
-              .getEvents
-              .loneElement
-          ) { case created: JCreatedEvent =>
-            JavaDecodeUtil
-              .decodeCreated(M.externalcalltest.ExternalCallTester.COMPANION)(created)
-              .value
-          }
+
+        participant1.dars.upload(BaseTest.ExternalCallTestPath)
+        aliceE = participant1.parties.testing.external.enable("Alice")
+        // An externally-signed submission must be a single view, so the tests cannot use
+        // create-and-exercise: create the contract up front and prepare standalone exercises.
+        tester = inside(
+          participant1.ledger_api.javaapi.commands
+            .submit(
+              Seq(aliceE),
+              Seq(
+                new M.externalcalltest.ExternalCallTester(
+                  aliceE.toProtoPrimitive
+                ).create.commands.loneElement
+              ),
+            )
+            .getEvents
+            .loneElement
+        ) { case created: JCreatedEvent =>
+          JavaDecodeUtil
+            .decodeCreated(M.externalcalltest.ExternalCallTester.COMPANION)(created)
+            .value
         }
+
       }
 
   private def callExtensionCommand =

@@ -15,7 +15,6 @@ import com.digitalasset.canton.data.{
   CantonTimestamp,
   ContractReassignment,
   ContractsReassignmentBatch,
-  ReassignmentSubmitterMetadata,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
@@ -30,6 +29,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 }
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend.TrafficRegistration
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.protocol.{
   ContractInstance,
@@ -133,23 +133,34 @@ class AssignmentProcessor private (
       submissionParam: AssignmentProcessingSteps.SubmissionParam
   ): MetricsContext =
     MetricsContext(
-      "user-id" -> submissionParam.submitterMetadata.userId,
+      "user-id" -> submissionParam.submissionInfo.userId,
       "type" -> "assignment",
     )
 
-  override protected def validateLocalTrafficCost(
-      submissionParam: AssignmentProcessingSteps.SubmissionParam
-  )(
+  override protected def registerTrafficCost(
+      submissionParam: AssignmentProcessingSteps.SubmissionParam,
       trafficCost: Long,
-      traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, RpcError, Option[TrafficRegistration]] =
     ReassignmentProcessingSteps.registerWithTrafficEnforcement(
       trafficEnforcementBackendO,
-      submissionParam.submitterMetadata,
+      submissionParam.submissionInfo,
       submissionParam.accounting,
       trafficCost,
       logger,
-    )(traceContext, ec)
+    )
+
+  override protected def releaseTrafficRegistration(registration: TrafficRegistration)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    trafficEnforcementBackendO.fold(FutureUnlessShutdown.unit)(
+      _.releaseSubmission(
+        registration.changeId,
+        registration.submissionId,
+        registration.registeredAt,
+      )
+    )
 
   /** Builds a submission batch for cost estimation.
     *
@@ -159,7 +170,7 @@ class AssignmentProcessor private (
     *   A collection of contracts with common stakeholders.
     */
   def buildSubmissionBatchForCostEstimation(
-      submitterMetadata: ReassignmentSubmitterMetadata,
+      submissionInfo: ReassignmentSubmissionInfo,
       contracts: Seq[ContractInstance],
       sourceSynchronizer: Source[PhysicalSynchronizerId],
       sourceSnapshot: Source[TopologySnapshot],
@@ -200,7 +211,7 @@ class AssignmentProcessor private (
 
       data <- assignmentSteps.buildSubmissionData(
         reassignmentId,
-        submitterMetadata,
+        submissionInfo,
         batch,
         sourceSynchronizer,
         mediator,

@@ -18,6 +18,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccept
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
 import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils
+import com.digitalasset.canton.platform.store.backend.PersistentParticipantEventUpdateCategory
 import com.digitalasset.canton.protocol.{LfHash, UpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.transaction.{
@@ -348,6 +349,7 @@ object Update {
       )
   }
 
+  // TODO(#37949) remove
   final case class RepairTransactionAccepted(
       transactionMeta: TransactionMeta,
       transactionInfo: TransactionAccepted.TransactionInfo,
@@ -448,6 +450,7 @@ object Update {
       )
   }
 
+  // TODO(#37949) remove
   final case class RepairReassignmentAccepted(
       workflowId: Option[Ref.WorkflowId],
       updateId: UpdateId,
@@ -479,6 +482,7 @@ object Update {
       )
   }
 
+  // TODO(#37949) remove
   final case class OnPRReassignmentAccepted(
       workflowId: Option[Ref.WorkflowId],
       updateId: UpdateId,
@@ -525,6 +529,90 @@ object Update {
           Logging.optionalTrafficCost(reassignmentAccepted.paidTrafficCost),
         )
     }
+  }
+
+  sealed trait ParticipantEventUpdate extends SynchronizerUpdate {
+    def workflowId: Option[Ref.WorkflowId]
+    def updateId: UpdateId
+    def events: Seq[ParticipantEvent]
+    def category: PersistentParticipantEventUpdateCategory
+    def withEvents(events: Seq[ParticipantEvent]): ParticipantEventUpdate
+  }
+
+  object ParticipantEventUpdate {
+    implicit val `ParticipantEventUpdate to LoggingValue`
+        : ToLoggingValue[ParticipantEventUpdate] = { case addRemove: ParticipantEventUpdate =>
+      LoggingValue.Nested.fromEntries(
+        Logging.recordTime(addRemove.recordTime.toLf),
+        Logging.updateId(addRemove.updateId),
+        Logging.workflowIdOpt(addRemove.workflowId),
+        Logging.synchronizerId(addRemove.synchronizerId),
+        Logging.participantEventCategory(addRemove.category),
+        Logging.eventCount(addRemove.events.size),
+      )
+    }
+  }
+
+  final case class RepairParticipantEventUpdate(
+      updateId: UpdateId,
+      workflowId: Option[Ref.WorkflowId],
+      synchronizerId: SynchronizerId,
+      recordTime: CantonTimestamp,
+      events: Seq[ParticipantEvent],
+      category: PersistentParticipantEventUpdateCategory,
+      traceContext: TraceContext,
+      repairCounter: RepairCounter,
+  ) extends ParticipantEventUpdate
+      with RepairUpdate {
+    override protected def pretty: Pretty[RepairParticipantEventUpdate] =
+      RepairParticipantEventUpdate.pretty
+
+    override def withEvents(events: Seq[ParticipantEvent]): ParticipantEventUpdate =
+      copy(events = events)
+  }
+
+  object RepairParticipantEventUpdate extends PrettyUtil with ShowUtil {
+    val pretty: Pretty[RepairParticipantEventUpdate] =
+      prettyOfClass(
+        param("recordTime", _.recordTime),
+        param("repairCounter", _.repairCounter),
+        param("updateId", _.updateId.tryAsLedgerTransactionId),
+        param("category", _.category.toString.unquoted),
+        param("synchronizerId", _.synchronizerId),
+        param("eventCount", _.events.size),
+        indicateOmittedFields,
+      )
+  }
+
+  final case class OnlinePartyReplicationParticipantEventUpdate(
+      updateId: UpdateId,
+      workflowId: Option[Ref.WorkflowId],
+      synchronizerId: SynchronizerId,
+      recordTime: CantonTimestamp,
+      events: Seq[ParticipantEvent],
+      category: PersistentParticipantEventUpdateCategory,
+      traceContext: TraceContext,
+      acsChangeFactory: AcsChangeFactory,
+      watermark: IndexingWatermark,
+  ) extends ParticipantEventUpdate
+      with AcsChangeSequencedUpdate
+      with FloatingUpdate {
+    override protected def pretty: Pretty[OnlinePartyReplicationParticipantEventUpdate] =
+      OnlinePartyReplicationParticipantEventUpdate.pretty
+    override def withEvents(events: Seq[ParticipantEvent]) = copy(events = events)
+  }
+
+  object OnlinePartyReplicationParticipantEventUpdate extends PrettyUtil with ShowUtil {
+    val pretty: Pretty[OnlinePartyReplicationParticipantEventUpdate] =
+      prettyOfClass(
+        param("recordTime", _.recordTime),
+        param("watermark", _.watermark),
+        param("updateId", _.updateId.tryAsLedgerTransactionId),
+        param("category", _.category.toString.unquoted),
+        param("synchronizerId", _.synchronizerId),
+        param("eventCount", _.events.size),
+        indicateOmittedFields,
+      )
   }
 
   /** Signal that a command submitted via [[SyncService]] was rejected.
@@ -777,6 +865,8 @@ object Update {
       LoggingValue.Empty
     case update: ReceivedAcsCommitment =>
       ReceivedAcsCommitment.`ReceivedAcsCommitment to LoggingValue`.toLoggingValue(update)
+    case update: ParticipantEventUpdate =>
+      ParticipantEventUpdate.`ParticipantEventUpdate to LoggingValue`.toLoggingValue(update)
   }
 
   private object Logging {
@@ -800,6 +890,12 @@ object Update {
 
     def updateId(id: UpdateId): LoggingEntry =
       "updateId" -> id.toHexString
+
+    def participantEventCategory(category: PersistentParticipantEventUpdateCategory): LoggingEntry =
+      "category" -> category.toString
+
+    def eventCount(count: Int): LoggingEntry =
+      "eventCount" -> count
 
     def userId(id: Ref.UserId): LoggingEntry =
       "userId" -> id

@@ -1,0 +1,88 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- Accounts identified by a key, used through every by-key operation.
+module Keys where
+
+import DA.ContractKeys (lookupAllByKey, lookupNByKey)
+
+template Account
+  with
+    bank : Party
+    owner : Party
+    number : Text
+    balance : Int
+  where
+    signatory bank
+    observer owner
+    key (bank, number) : (Party, Text)
+    maintainer key._1
+
+    choice Deposit : ContractId Account
+      with
+        amount : Int
+      controller bank
+      do create this with balance = balance + amount
+
+    choice Close : ()
+      controller bank
+      do pure ()
+
+template Bank
+  with
+    bank : Party
+  where
+    signatory bank
+
+    nonconsuming choice OpenIfAbsent : Optional (ContractId Account)
+      with
+        owner : Party
+        number : Text
+      controller bank
+      do
+        existing <- lookupByKey @Account (bank, number)
+        case existing of
+          Some _ -> pure None
+          None -> Some <$> create Account with bank; owner; number; balance = 0
+
+    nonconsuming choice Transfer : ()
+      with
+        from : Text
+        to : Text
+        amount : Int
+      controller bank
+      do
+        _ <- exerciseByKey @Account (bank, from) Deposit with amount = negate amount
+        _ <- exerciseByKey @Account (bank, to) Deposit with amount
+        pure ()
+
+    nonconsuming choice Balance : Int
+      with
+        number : Text
+      controller bank
+      do
+        (_, account) <- fetchByKey @Account (bank, number)
+        pure account.balance
+
+    nonconsuming choice Exists : Bool
+      with
+        number : Text
+      controller bank
+      do visibleByKey @Account (bank, number)
+
+    -- keys aren't unique: sums the balances of every account with this number
+    nonconsuming choice TotalBalance : Int
+      with
+        number : Text
+      controller bank
+      do
+        accounts <- lookupAllByKey @Account (bank, number)
+        pure $ sum [account.balance | (_, account) <- accounts]
+
+    nonconsuming choice FirstTwo : Int
+      with
+        number : Text
+      controller bank
+      do
+        accounts <- lookupNByKey @Account 2 (bank, number)
+        pure $ length accounts

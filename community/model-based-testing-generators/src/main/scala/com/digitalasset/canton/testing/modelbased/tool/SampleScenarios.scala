@@ -26,7 +26,6 @@ object SampleScenarios {
 
   final case class Config(
       contractKeys: Boolean = true,
-      readOnlyRollbacks: Boolean = true,
       numParties: Int = 3,
       numPackages: Int = 1,
       numParticipants: Int = 3,
@@ -47,12 +46,6 @@ object SampleScenarios {
       opt[Boolean]("contract-keys")
         .text("Enable contract keys (default: true)")
         .action((v, c) => c.copy(contractKeys = v))
-    }
-
-    discard {
-      opt[Boolean]("read-only-rollbacks")
-        .text("Enable read-only rollbacks (default: true)")
-        .action((v, c) => c.copy(readOnlyRollbacks = v))
     }
 
     discard {
@@ -132,10 +125,7 @@ object SampleScenarios {
     }
 
   private def run(config: Config): Unit = {
-    val generators = new ConcreteGenerators(
-      contractKeys = config.contractKeys,
-      readOnlyRollbacks = config.readOnlyRollbacks,
-    )
+    val generators = new ConcreteGenerators(contractKeys = config.contractKeys)
 
     val generator = generators.validScenarioGenerator(
       numParties = config.numParties,

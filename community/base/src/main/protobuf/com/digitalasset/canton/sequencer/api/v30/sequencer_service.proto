@@ -110,7 +110,7 @@ service SequencerService {
 
 message SendAsyncRequest {
   // Contains a versioned SignedContent which itself contains a versioned SubmissionRequest.
-  // TODO(i17383): Have exactly one signature instead of multiple signatures.
+  // The SignedContent must have exactly one signature.
   bytes signed_submission_request = 1;
 }
 
@@ -174,8 +174,7 @@ message AcknowledgeResponse {}
 
 message AcknowledgeSignedRequest {
   // contains a versioned AcknowledgeRequest
-  // TODO(i17383): Have exactly one signature instead of multiple signatures.
-  // Serialized SignedContent[AcknowledgeRequest]
+  // Serialized SignedContent[AcknowledgeRequest] with exactly one signature
   bytes signed_acknowledge_request = 1;
 }
 

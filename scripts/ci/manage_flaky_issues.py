@@ -21,7 +21,6 @@ import re
 import subprocess
 import sys
 import tempfile
-from itertools import groupby
 from typing import Optional
 from unittest.mock import patch
 
@@ -44,6 +43,7 @@ from flaky_common import (
     milestone,
     CONSECUTIVE_FAILURES_THRESHOLD,
     CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE,
+    STREAK_COUNT_LIMIT,
     NIGHTLY_CONSECUTIVE_FAILURES,
     NIGHTLY_BROKEN_LABEL,
     NIGHTLY_CRON_HOUR_UTC,
@@ -526,6 +526,21 @@ def extract_commit_hashes_from_body(body: str) -> list[str]:
     return re.findall(r'commit/([0-9a-f]{40})', body)
 
 
+def _first_failure_dates(body: str) -> dict[str, Optional[str]]:
+    """UTC date each recorded commit first failed on, in first-failure order.
+
+    Later rows of the same commit (multi-shard failures, retries, a rerun of an older
+    commit) keep its first place and date. The date is None for rows without a timestamp.
+    """
+    first: dict[str, Optional[str]] = {}
+    for line in body.splitlines():
+        for commit in re.findall(r'commit/([0-9a-f]{40})', line):
+            if commit not in first:
+                date = _ROW_DATE_RE.match(line)
+                first[commit] = date.group(1) if date else None
+    return first
+
+
 # --- nightly streak detection ---------------------------------------------
 #
 # Nightly runs are days apart and land on non-adjacent commits, so the per-commit
@@ -716,17 +731,52 @@ def flake_predates_close(idx: str, commit_hash: str) -> bool:
         return False
 
 
-def are_consecutive_commits(older_hash: str, newer_hash: str) -> bool:
-    """Returns True if newer_hash is a direct child of older_hash in git history."""
-    result = run_gh_with_retries(
-        ["api", f"repos/DACH-NY/canton/commits/{newer_hash}", "--jq", ".parents[].sha"]
-    )
-    if result.returncode != 0:
-        print(
-            f"are_consecutive_commits: gh api failed for {newer_hash[:8]}: {result.stderr.strip()}"
+# Parents of each commit looked up so far. They never change, and on main many issues walk
+# the same commits in one run, so each is fetched once per run. None marks a lookup that
+# failed even after run_gh_with_retries, so an outage does not repeat it for every issue.
+_commit_parents_cache: dict[str, Optional[list[str]]] = {}
+
+# gh API statuses meaning the commit is gone for good (force-pushed away, bad sha), a break.
+_COMMIT_GONE_HTTP_CODES = ("HTTP 404", "HTTP 422")
+
+
+def are_consecutive_commits(older_hash: str, newer_hash: str) -> Optional[bool]:
+    """Returns True if newer_hash is a direct child of older_hash in git history.
+
+    None when the gh API call fails for any other reason than the commit being gone, so a
+    caller can tell an unknown (outage, rate limit) from a break.
+    """
+    if newer_hash not in _commit_parents_cache:
+        result = run_gh_with_retries(
+            ["api", f"repos/DACH-NY/canton/commits/{newer_hash}", "--jq", ".parents[].sha"]
         )
-        return False
-    return older_hash in result.stdout.splitlines()
+        if result.returncode == 0:
+            _commit_parents_cache[newer_hash] = result.stdout.splitlines()
+        else:
+            print(
+                f"are_consecutive_commits: gh api failed for {newer_hash[:8]}: {result.stderr.strip()}"
+            )
+            gone = any(code in result.stderr + result.stdout for code in _COMMIT_GONE_HTTP_CODES)
+            _commit_parents_cache[newer_hash] = [] if gone else None
+    parents = _commit_parents_cache[newer_hash]
+    return None if parents is None else older_hash in parents
+
+
+def _streak_length(commits: list[str], limit: int) -> tuple[int, bool]:
+    """How many commits, ending at the last one, are each a direct child of the one before,
+    and whether that count is exact. It is not when a gh API error cut the walk short.
+
+    Counts back at most `limit` commits, since each step costs a gh API call.
+    """
+    streak = 1
+    while streak < min(limit, len(commits)):
+        consecutive = are_consecutive_commits(commits[-streak - 1], commits[-streak])
+        if consecutive is None:
+            return streak, False
+        if not consecutive:
+            break
+        streak += 1
+    return streak, True
 
 
 # Header rows of the pre-Cause (five-column) failure-history table. Existing
@@ -791,6 +841,11 @@ HISTORY_KEEP_DAYS = 90
 HISTORY_MAX_CHARS = 200_000
 
 _TRUNCATED_RE = re.compile(r'^<!-- flaky-truncated (\d+) -->$')
+
+
+def _history_truncated(body: str) -> bool:
+    """True if truncate_history has cut rows from the body's failure-history table."""
+    return any(_TRUNCATED_RE.match(line) for line in body.splitlines())
 
 
 def truncate_history(body: str, today: Optional[datetime.date] = None) -> str:
@@ -879,7 +934,7 @@ def update_issue(
     has_assignee: bool = False,
     assigned_at: Optional[datetime.datetime] = None,
     has_broken_nightly_label: bool = False,
-) -> Optional[tuple[str, str, str]]:
+) -> Optional[tuple[str, str, str, Optional[str]]]:
     job = get_ci_job_name()
     threshold = (
         CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE
@@ -898,6 +953,12 @@ def update_issue(
         return None
 
     consecutive_streak = False
+    # Consecutive failing commits for the alert, e.g. "6", or "30+" when only a lower bound
+    # is known. None for nightly streaks (counted in nightly runs).
+    streak = None
+    # Why a streak on an unassigned issue does not alert on this run, None if it does. Nightly
+    # runs are a day apart, so every nightly streak does.
+    skip_reason: Optional[str] = None
     nightly = is_nightly_job(job)
 
     if commit_hash != 'unknown':
@@ -906,23 +967,55 @@ def update_issue(
             # the test failed on each of the last N nightly runs instead.
             consecutive_streak = nightly_streak(body)
         else:
-            # Collapse consecutive same-commit entries (multi-shard / retries) so they
-            # don't shadow the check: are_consecutive_commits(X, X) is always False.
-            distinct = [
-                c for c, _ in groupby(extract_commit_hashes_from_body(body) + [commit_hash])
-            ]
-            recent = distinct[-threshold:]
-            if len(recent) >= threshold and all(
-                are_consecutive_commits(a, b) for a, b in zip(recent, recent[1:])
-            ):
-                consecutive_streak = True
+            # One entry per commit, in first-failure order, so repeated rows (multi-shard,
+            # retries, reruns) don't shadow the check: are_consecutive_commits(X, X) is False.
+            first_failed = _first_failure_dates(body)
+            rerun = commit_hash in first_failed
+            # A rerun keeps its commit's place, so it never breaks the streak up to the
+            # newest commit, and only a rerun of the newest commit is judged on it, as before.
+            distinct = list(first_failed) + ([] if rerun else [commit_hash])
+            count, exact = _streak_length(distinct, STREAK_COUNT_LIMIT + 1)
+            consecutive_streak = count >= threshold and commit_hash == distinct[-1]
+            # The streak is only a lower bound past STREAK_COUNT_LIMIT, where counting stops,
+            # when a gh API error cut the count short, or when the kept rows prove one that
+            # runs into rows truncate_history cut (the marker shows rows were cut, not how
+            # many of them belong to this streak). An error before `threshold` proves no
+            # streak, so it alerts as little as before.
+            if count > STREAK_COUNT_LIMIT:
+                count, at_least = STREAK_COUNT_LIMIT, True
+            else:
+                at_least = consecutive_streak and (
+                    not exact or (count == len(distinct) and _history_truncated(body))
+                )
+            streak = f"{count}+" if at_least else str(count)
+            # An unbroken streak would match on every new failing commit, so it alerts only
+            # on every `threshold`-th one (#34016), escalating while nobody picks it up. With
+            # only a lower bound that cadence is unknown, so fall back to the first new
+            # failing commit of each UTC day. A rerun of a recorded commit never re-alerts,
+            # nor does its row dated today count as that day's alert. A count cut short by a
+            # gh API error skips the alert, since during an outage the daily fallback would page
+            # for every streaking issue at once. The alert is dropped, not deferred: the next
+            # one comes at the next cadence point, or the next UTC day for a lower bound.
+            today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+            if rerun:
+                skip_reason = f"rerun of recorded commit {commit_hash[:8]}"
+            elif not exact:
+                skip_reason = f"streak length unknown (gh API error after {count} commit(s))"
+            elif not at_least:
+                if count % threshold:
+                    skip_reason = f"streak of {count} is between alerts (every {threshold})"
+            elif today in first_failed.values():
+                skip_reason = f"streak of {streak} already had its alert point today"
 
     notify = False
     if consecutive_streak:
         if nightly:
             add_broken_nightly_label(idx)
         if not has_assignee:
-            notify = True
+            if skip_reason is None:
+                notify = True
+            else:
+                print(f"Issue #{idx} {skip_reason}, skipping Slack notification.")
         elif _within_assignment_grace(assigned_at):
             grace_hours = int(ASSIGNMENT_SLACK_GRACE.total_seconds() // 3600)
             print(
@@ -948,7 +1041,7 @@ def update_issue(
     gh_issue_edit_cmd(idx, title, truncate_history(unlink_evidence(new_body, deleted_urls)))
     print(f"Updated issue: https://github.com/DACH-NY/canton/issues/{idx}")
     if notify:
-        return (idx, title, commit_hash)
+        return (idx, title, commit_hash, streak)
     return None
 
 
@@ -1014,6 +1107,8 @@ def self_test():
     test_report_issue_assignment_grace_period()
     test_report_issue_finds_flaky_project_among_other_projects()
     test_update_issue_assigned_daily_cap()
+    test_update_issue_unassigned_alerts_every_nth_commit()
+    test_are_consecutive_commits_caches_parents()
     test_nightly_streak_detection()
     test_recent_nightly_commits_counts_current_run_once()
     test_update_issue_nightly_streak_labels_and_returns()
@@ -1896,7 +1991,8 @@ def _check_update_issue_returns_consecutive_streak_info(job: str, threshold: int
     ):
         result = update_issue("42", "Flaky test", make_body(prior))
         assert result is not None, f"Expected streak with {threshold} consecutive commits (CCI)"
-        idx, title, commit = result
+        idx, title, commit, streak = result
+        assert streak == str(threshold), f"Expected streak {threshold}, got: {streak}"
         assert idx == "42", f"Expected issue idx '42', got: {idx}"
         assert commit == current, f"Expected current commit in result, got: {commit}"
 
@@ -1938,7 +2034,8 @@ def _check_update_issue_returns_consecutive_streak_info(job: str, threshold: int
     ):
         result = update_issue("42", "Flaky test", make_body(prior))
         assert result is not None, f"Expected streak with {threshold} consecutive commits (GHA)"
-        idx, title, commit = result
+        idx, title, commit, streak = result
+        assert streak == str(threshold), f"Expected streak {threshold}, got: {streak}"
         assert idx == "42", f"Expected issue idx '42', got: {idx}"
         assert commit == current, f"Expected current commit in result, got: {commit}"
 
@@ -2222,9 +2319,166 @@ def test_update_issue_assigned_daily_cap():
     result, _ = run(todays_body)
     assert result is None, "Expected no repeat alert later the same UTC day"
 
-    # unassigned issue: never rate-limited by day, keeps alerting regardless of same-day history.
+    # unassigned issue: the daily cap does not apply, but a rerun of a commit already in the
+    # history must not alert again (see test_update_issue_unassigned_alerts_every_nth_commit).
     result, _ = run(todays_body, has_assignee=False)
-    assert result is not None, "Expected unassigned issues to keep alerting on every streak"
+    assert result is None, "Expected no repeat alert for a rerun of an already recorded commit"
+
+
+def test_update_issue_unassigned_alerts_every_nth_commit():
+    # #34016: an unbroken streak matches on every new failing commit, which re-posted the
+    # same Slack alert on main for every merge while nobody was assigned. It must alert on
+    # every threshold-th commit of the streak instead, carrying the streak length so a test
+    # left broken reads as more urgent each time, and never on a rerun of a recorded commit.
+    n = CONSECUTIVE_FAILURES_THRESHOLD
+    commits = [format(i, '040x') for i in range(STREAK_COUNT_LIMIT + 3 * n)]
+    header = "| Date | Job | Node | Build | Commit | Cause |\n|---|---|---|---|---|---|"
+    all_consecutive = set(zip(commits, commits[1:]))
+
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+
+    def run(
+        prior,
+        current=None,
+        consecutive_pairs=all_consecutive,
+        failed_today=False,
+        rerun_of=None,
+        truncated=False,
+        api_error_at=None,
+        assigned=False,
+    ):
+        # One history row per prior commit, then the current run on the next commit. With
+        # failed_today, the newest prior row is from today, the others from long ago.
+        # rerun_of adds a row dated today for that earlier commit, after the others.
+        # truncated puts truncate_history's marker above the table. api_error_at makes the
+        # parents lookup of that commit fail. assigned gives the issue an assignee past the
+        # grace window.
+        def row(i, date):
+            c = commits[i]
+            return f"| {date} 12:00:00 | test | 1 | [{i}](url) | [{c[:8]}](https://github.com/DACH-NY/canton/commit/{c}) | regular |"
+
+        rows = "\n".join(
+            row(i, today if failed_today and i == prior - 1 else "2026-04-20") for i in range(prior)
+        )
+        if rerun_of is not None:
+            rows += "\n" + row(rerun_of, today)
+        marker = "<!-- flaky-truncated 7 -->\n_7 earlier rows truncated._\n\n" if truncated else ""
+        current = current or commits[prior]
+        env = {
+            'CIRCLECI': 'true',
+            'GITHUB_ACTIONS': 'false',
+            'CIRCLE_SHA1': current,
+            'CIRCLE_JOB': 'test_job',
+            'CIRCLE_NODE_INDEX': '0',
+            'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+        }
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch(f'{__name__}.gh_issue_edit_cmd'),
+            patch(f'{__name__}.flake_predates_close', return_value=False),
+            patch(
+                f'{__name__}.are_consecutive_commits',
+                side_effect=lambda a, b: None if b == api_error_at else (a, b) in consecutive_pairs,
+            ),
+        ):
+            return update_issue(
+                "42",
+                "Flaky test",
+                marker + header + "\n" + rows,
+                has_assignee=assigned,
+                assigned_at=datetime.datetime.now(datetime.timezone.utc)
+                - datetime.timedelta(days=3),
+            )
+
+    assert run(n - 1)[3] == str(n), "Expected an alert carrying the streak when it reaches N"
+    assert run(n) is None, "Expected no alert on the streak's N+1-th commit"
+    assert run(2 * n - 2) is None, "Expected no alert before the streak's 2N-th commit"
+    assert run(2 * n - 1)[3] == str(2 * n), "Expected a repeat alert on the streak's 2N-th commit"
+    assert run(n, current=commits[n - 1]) is None, "Expected no alert on a rerun"
+    assert run(2 * n, current=commits[1]) is None, "Expected no alert on an older rerun"
+    # A rerun row of an older commit sits out of order in the table, yet must not break the
+    # streak nor shift its cadence.
+    assert run(2 * n - 1, rerun_of=1)[3] == str(2 * n), "Expected an older rerun not to break it"
+    # An older failure that does not chain into the streak must not shift the cadence.
+    broken = set(zip(commits[1:], commits[2:]))
+    assert run(n, consecutive_pairs=broken)[3] == str(n), "Expected a fresh streak to alert at N"
+    # Past STREAK_COUNT_LIMIT the streak is no longer counted, and truncate_history keeps the
+    # table from counting it, yet it must not go silent: it alerts on the first failure of
+    # each UTC day, from the newest rows, which trimming always keeps.
+    past_limit = STREAK_COUNT_LIMIT + n
+    first_today = run(past_limit)
+    assert first_today is not None, "Expected an alert on the day's first failure past the limit"
+    assert first_today[3] == f"{STREAK_COUNT_LIMIT}+", "Expected an uncounted streak"
+    assert run(past_limit, failed_today=True) is None, "Expected one alert per day past the limit"
+    # A rerun today was suppressed itself, so it must not use up the day's alert.
+    assert run(past_limit, rerun_of=past_limit - 1) is not None, (
+        "Expected a rerun row dated today not to count as the day's alert"
+    )
+    # A streak that runs into rows truncate_history cut has an unknown length, so it must
+    # use the daily fallback and show the kept chain as a lower bound. The marker does not
+    # prove the streak runs past STREAK_COUNT_LIMIT, so it must not claim "30+" either.
+    truncated = run(2 * n, truncated=True)
+    assert truncated is not None, "Expected the daily fallback for a streak into cut rows"
+    assert truncated[3] == f"{2 * n + 1}+", "Expected the kept chain as a lower bound"
+    # Kept rows that show fewer than N consecutive commits prove no streak, cut rows or not.
+    assert run(n - 2, truncated=True) is None, "Expected no streak from a short kept chain"
+    # A streak that starts after the oldest kept row is still counted exactly.
+    assert run(2 * n, truncated=True, consecutive_pairs=broken)[3] == str(2 * n), (
+        "Expected an exact count for a streak within the kept rows"
+    )
+    # A gh API error mid-count is not a break. Read as one, a 2N+1 streak cut short at N
+    # would alert on the cadence of N. Unassigned, it skips the alert for this run, as a
+    # daily fallback would page for every streaking issue at once during an outage.
+    assert run(2 * n, api_error_at=commits[n + 1]) is None, "Expected no alert on an unknown count"
+    # Assigned (already capped to once a day), it still alerts, with the count as a lower bound.
+    cut = run(2 * n, api_error_at=commits[n + 1], assigned=True)
+    assert cut is not None and cut[3] == f"{n}+", f"Expected a lower bound, got: {cut}"
+    # An error before N, down to the current commit's own lookup, proves no streak.
+    assert run(2 * n, api_error_at=commits[2 * n - 1], assigned=True) is None, "Expected no streak"
+    assert run(2 * n, api_error_at=commits[2 * n], assigned=True) is None, "Expected no streak"
+    # The log must give the real reason an unassigned streak was skipped, never claiming an
+    # alert went out when it may have been dropped, and log nothing when nothing was skipped.
+    skip = "skipping Slack notification"
+    for prior, kwargs, expected in (
+        (2 * n, {"api_error_at": commits[n + 1]}, "streak length unknown (gh API error after"),
+        (n, {}, f"streak of {n + 1} is between alerts (every {n})"),
+        (n, {"current": commits[n - 1]}, f"rerun of recorded commit {commits[n - 1][:8]}"),
+        (past_limit, {"failed_today": True}, "already had its alert point today"),
+        (2 * n, {"api_error_at": commits[n + 1], "assigned": True}, None),
+        (2 * n, {"api_error_at": commits[2 * n - 1]}, None),
+    ):
+        with patch("builtins.print") as log:
+            run(prior, **kwargs)
+        logged = " ".join(str(c.args[0]) for c in log.call_args_list if c.args)
+        if expected is None:
+            assert skip not in logged, f"Expected no skip logged for {kwargs}: {logged}"
+        else:
+            assert expected in logged and skip in logged, f"Expected {expected!r}: {logged}"
+        assert "already alerted on" not in logged, f"Expected no unproven claim: {logged}"
+
+
+def test_are_consecutive_commits_caches_parents():
+    # On main many issues walk the same commits in one run, so each commit's parents must be
+    # fetched once, which bounds the gh API calls #37480 added. That holds for a failed lookup
+    # too, which run_gh_with_retries already retried: during an outage every issue would
+    # otherwise repeat the retries on the same commit.
+    older, newer, other = "a" * 40, "b" * 40, "c" * 40
+    ok = subprocess.CompletedProcess([], 0, stdout=f"{older}\n", stderr="")
+    outage = subprocess.CompletedProcess([], 1, stdout="", stderr="gh: Bad Gateway (HTTP 502)")
+    gone = subprocess.CompletedProcess([], 1, stdout="", stderr="gh: Not Found (HTTP 404)")
+    with (
+        patch.dict(_commit_parents_cache, clear=True),
+        patch(f'{__name__}.run_gh_with_retries', side_effect=[ok, outage, gone]) as gh,
+    ):
+        assert are_consecutive_commits(older, newer) is True
+        assert are_consecutive_commits(other, newer) is False
+        # An outage or rate limit is an unknown, not a break, for every issue this run.
+        assert are_consecutive_commits(older, other) is None, "Expected None on an outage"
+        assert are_consecutive_commits(newer, other) is None
+        # A commit that is gone for good can never be in a streak, so it is a break, as
+        # before, not an unknown that would leave the streak a lower bound forever.
+        assert are_consecutive_commits(older, "d" * 40) is False, "Expected a break when gone"
+        assert gh.call_count == 3, f"Expected each commit fetched once, got {gh.call_count}"
 
 
 def _history_body(dates: list, pad: str = "") -> str:

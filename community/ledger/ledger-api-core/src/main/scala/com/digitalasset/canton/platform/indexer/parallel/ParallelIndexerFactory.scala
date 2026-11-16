@@ -5,10 +5,11 @@ package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.executors.InstrumentedExecutors
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
+import com.digitalasset.canton.config.{DbParametersConfig, QueryCostMonitoringConfig}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.metrics.{DbQueueMetrics, LedgerApiServerMetrics}
 import com.digitalasset.canton.platform.ResourceOwnerOps
 import com.digitalasset.canton.platform.config.ServerRole
 import com.digitalasset.canton.platform.indexer.ha.{
@@ -35,6 +36,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder
 import org.apache.pekko.Done
 import org.apache.pekko.stream.{KillSwitch, Materializer}
 
+import java.util.concurrent.ScheduledExecutorService
 import java.util.{Timer, concurrent}
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
@@ -57,6 +59,10 @@ object ParallelIndexerFactory {
       loggerFactory: NamedLoggerFactory,
       indexerDbDispatcherOverride: Option[DbDispatcher],
       clock: Clock,
+      dbQueueMetricsOpt: Option[DbQueueMetrics],
+      logQueryCostOpt: Option[QueryCostMonitoringConfig],
+      dbParametersConfigOpt: Option[DbParametersConfig],
+      schedulerOpt: Option[ScheduledExecutorService],
   )(implicit traceContext: TraceContext): ResourceOwner[Indexer] = {
     val logger = TracedLogger(loggerFactory.getLogger(getClass))
     for {
@@ -151,6 +157,10 @@ object ParallelIndexerFactory {
                       connectionPoolSize = dbConfig.connectionPool.connectionPoolSize,
                       connectionTimeout = dbConfig.connectionPool.connectionTimeout,
                       metrics = metrics,
+                      dbQueueMetricsOpt = dbQueueMetricsOpt,
+                      logQueryCostOpt = logQueryCostOpt,
+                      dbParametersConfigOpt = dbParametersConfigOpt,
+                      schedulerOpt = schedulerOpt,
                       loggerFactory = loggerFactory,
                     )
                     .afterReleased(logger.debug("Indexing DbDispatcher released"))

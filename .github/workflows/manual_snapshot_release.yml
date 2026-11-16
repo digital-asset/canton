@@ -93,6 +93,7 @@ jobs:
     permissions:
       actions: write
       contents: read
+      id-token: write
       issues: write
     secrets: inherit
     with:
@@ -107,6 +108,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      id-token: write
     secrets: inherit
     with:
       is_nightly_workflow: false
@@ -119,6 +121,7 @@ jobs:
     uses: ./.github/workflows/_publish_libraries.yml
     permissions:
       contents: read
+      id-token: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -137,6 +140,10 @@ jobs:
       - compile
       - release_test
     uses: ./.github/workflows/_publish_release.yml
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}

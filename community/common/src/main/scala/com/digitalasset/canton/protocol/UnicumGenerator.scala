@@ -203,6 +203,7 @@ class UnicumGenerator(cryptoOps: HashOps & HmacOps) {
     * @param cantonContractIdVersion
     *   the contract id versioning
     */
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   @VisibleForTesting
   def recomputeUnicum(
       contractInstance: FatContractInstance,

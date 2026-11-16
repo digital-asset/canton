@@ -47,8 +47,7 @@ class ContractKeyHashMismatchSpec
     s"'${id.packageId}':${id.qualifiedName}"
   }
 
-  private val pkg =
-    p"""
+  private val pkg = p"""
     metadata ( 'key-mismatch-test-pkg' : '1.0.0' )
     module M {
       record @serializable View = { };
@@ -105,9 +104,7 @@ class ContractKeyHashMismatchSpec
   private val participantId = Ref.ParticipantId.assertFromString("participant")
   private val submissionSeed = Hash.hashPrivateKey("ContractKeyMismatchSpec")
   private val let = Time.Timestamp.now()
-
   private def id(name: String) = Ref.Identifier(pkgId, Ref.QualifiedName.assertFromString(name))
-
   private val templateId = id("M:T")
   private val interfaceId = id("M:I")
   private val helperId = id("M:Helper")
@@ -194,6 +191,7 @@ class ContractKeyHashMismatchSpec
   private def run(
       cmd: ApiCommand,
       declaredKey: GlobalKeyWithMaintainers,
+      errorOnContractKeyHashMismatch: Boolean,
   ) = {
     val inst = contract(declaredKey)
     newEngine()
@@ -205,7 +203,8 @@ class ContractKeyHashMismatchSpec
         participantId = participantId,
         submissionSeed = submissionSeed,
         contractIdVersion = ContractIdVersion.V1,
-        interpretationConfig = InterpretationConfig.Dev,
+        interpretationConfig = InterpretationConfig.Dev
+          .copy(errorOnContractKeyHashMismatch = errorOnContractKeyHashMismatch),
         prefetchKeys = Seq.empty,
       )
       // The key handler always returns the contract under test, whatever the key being asked.
@@ -214,9 +213,7 @@ class ContractKeyHashMismatchSpec
         lookupHandler(
           pcs = Map(cid -> inst),
           pkgs = allPkgs,
-          keys = { case _ =>
-            Vector(inst)
-          },
+          keys = { case _ => Vector(inst) },
         )
       )
   }
@@ -224,9 +221,10 @@ class ContractKeyHashMismatchSpec
   private def expectValidationFailed(
       cmd: ApiCommand,
       declaredKey: GlobalKeyWithMaintainers,
+      errorOnContractKeyHashMismatch: Boolean,
       expectedMsg: String,
   ) =
-    inside(run(cmd, declaredKey)) {
+    inside(run(cmd, declaredKey, errorOnContractKeyHashMismatch)) {
       case Left(
             IErr(IErr.DamlException(IE.Upgrade(validationFailed: IE.Upgrade.ValidationFailed)), _)
           ) =>
@@ -236,43 +234,69 @@ class ContractKeyHashMismatchSpec
         validationFailed.msg should include(expectedMsg)
     }
 
-  operations.foreach { case (operation, cmd) =>
-    operation should {
+  List(true, false).foreach { errorOnContractKeyHashMismatch =>
+    s"errorOnContractKeyHashMismatch = $errorOnContractKeyHashMismatch" when {
+      operations.foreach { case (operation, cmd) =>
+        operation should {
 
-      "accept a correct key" in {
-        inside(run(cmd, correctKey))
-      }
+          "accept a correct key" in {
+            inside(run(cmd, correctKey, errorOnContractKeyHashMismatch)) { case Right((_, meta)) =>
+              meta.contractKeyMismatches shouldBe empty
+            }
+          }
 
-      "reject a wrong key hash" in {
-        inside(run(cmd, wrongHashKey)) {
-          case Left(
-                IErr(
-                  IErr.DamlException(
-                    IE.Upgrade(error: IE.Upgrade.ValidationFailed)
-                  ),
-                  _,
-                )
-              ) =>
-            error.coid shouldBe cid
-            error.originalKeyOpt.map(_.globalKey.hash) shouldBe Some(wrongHashKey.globalKey.hash)
-            error.recomputedKeyOpt.map(_.globalKey.hash) shouldBe Some(correctKey.globalKey.hash)
+          if (errorOnContractKeyHashMismatch)
+            "reject a wrong key hash" in {
+              inside(run(cmd, wrongHashKey, errorOnContractKeyHashMismatch)) {
+                case Left(
+                      IErr(
+                        IErr.DamlException(
+                          IE.Upgrade(error: IE.Upgrade.ValidationFailed)
+                        ),
+                        _,
+                      )
+                    ) =>
+                  error.coid shouldBe cid
+                  error.originalKeyOpt.map(_.globalKey.hash) shouldBe Some(
+                    wrongHashKey.globalKey.hash
+                  )
+                  error.recomputedKeyOpt.map(_.globalKey.hash) shouldBe Some(
+                    correctKey.globalKey.hash
+                  )
+              }
+            }
+          else if (operation.contains("by-key"))
+            "crash on a wrong key hash" in {
+              inside(run(cmd, wrongHashKey, errorOnContractKeyHashMismatch)) {
+                case Left(IErr(IErr.Internal(_, _, _), _)) =>
+              }
+            }
+          else
+            "accept and record a wrong key hash" in {
+              inside(run(cmd, wrongHashKey, errorOnContractKeyHashMismatch)) {
+                case Right((_, meta)) =>
+                  meta.contractKeyMismatches.keySet shouldBe Set(cid)
+              }
+            }
+
+          "reject a wrong key value" in {
+            expectValidationFailed(
+              cmd,
+              wrongValueKey,
+              errorOnContractKeyHashMismatch,
+              "key value mismatch",
+            )
+          }
+
+          "reject wrong key maintainers" in {
+            expectValidationFailed(
+              cmd,
+              wrongMaintainersKey,
+              errorOnContractKeyHashMismatch,
+              "key maintainers mismatch",
+            )
+          }
         }
-      }
-
-      "reject a wrong key value" in {
-        expectValidationFailed(
-          cmd,
-          wrongValueKey,
-          "key value mismatch",
-        )
-      }
-
-      "reject wrong key maintainers" in {
-        expectValidationFailed(
-          cmd,
-          wrongMaintainersKey,
-          "key maintainers mismatch",
-        )
       }
     }
   }

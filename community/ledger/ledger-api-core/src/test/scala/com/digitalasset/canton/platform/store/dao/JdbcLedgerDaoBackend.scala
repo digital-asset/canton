@@ -111,6 +111,10 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
         metrics = metrics,
         dbConfig = dbConfig,
         disableMergeAndHashJoins = true,
+        dbQueueMetricsOpt = None,
+        logQueryCostOpt = None,
+        dbParametersConfigOpt = None,
+        schedulerOpt = None,
         loggerFactory = loggerFactory,
       )
       contractLoader <- ContractLoader.create(

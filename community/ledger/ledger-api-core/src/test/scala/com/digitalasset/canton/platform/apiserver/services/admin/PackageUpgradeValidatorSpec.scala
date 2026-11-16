@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.platform.apiserver.services.admin
 
-import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.participant.config.PackageUpgradeCacheConfig
 import com.digitalasset.canton.topology.TopologyManagerError.ParticipantTopologyManagerError.*
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, LfPackageName, LfPackageVersion}
 import com.digitalasset.daml.lf.data.Ref
@@ -18,7 +18,10 @@ class PackageUpgradeValidatorSpec
     with Matchers
     with BaseTest {
   private val packageUpgradeValidator =
-    new PackageUpgradeValidator(CachingConfigs.defaultPackageUpgradeCache, loggerFactory)
+    new PackageUpgradeValidator(
+      PackageUpgradeCacheConfig.defaultPackageUpgradeCache,
+      loggerFactory,
+    )
 
   protected implicit val loggingContextWithTrace: LoggingContextWithTrace =
     LoggingContextWithTrace.ForTesting

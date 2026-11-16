@@ -3,7 +3,15 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.digitalasset.base.error.{
+  Alarm,
+  AlarmErrorCode,
+  ErrorCategory,
+  ErrorCode,
+  Explanation,
+  Resolution,
+}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerSubscriptionErrorGroup
@@ -12,6 +20,7 @@ import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsy
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.{Future, Promise}
 
@@ -88,6 +97,11 @@ trait SequencerSubscription[HandlerError] extends FlagCloseableAsync with NamedL
   private[canton] def complete(reason: SubscriptionCloseReason[HandlerError])(implicit
       traceContext: TraceContext
   ): Unit
+
+  /** Fails the subscription with the given exception, as if it had failed unexpectedly. */
+  @VisibleForTesting
+  private[sequencing] def failForTesting(exception: Throwable): Unit =
+    closeReasonPromise.tryFailure(exception).discard
 }
 
 object SequencerSubscriptionError extends SequencerSubscriptionErrorGroup {
@@ -169,4 +183,61 @@ object SequencerSubscriptionError extends SequencerSubscriptionErrorGroup {
         ErrorCategory.SystemInternalAssumptionViolated,
       )
 
+  @Explanation(
+    """This error is logged when a sequencer client has detected that the number of sequencers that have
+      |caused failures since the last successfully processed event has reached the trust threshold.
+      |Either the node has a local problem such as database corruption, or more sequencers are faulty
+      |than the trust threshold tolerates.
+      |"""
+  )
+  @Resolution(
+    """If the node is connected to sufficiently many healthy sequencers, it will continue processing events.
+      |Otherwise, an investigation is recommended. If the problem is local, operator intervention is likely required.
+      |If the problem is due to faulty or malicious sequencers, fixing or replacing the sequencers is required.
+      |The node will recover automatically if the failures stop.
+      |"""
+  )
+  object TrustAssumptionViolated
+      extends AlarmErrorCode(id = "SEQUENCER_TRUST_ASSUMPTION_VIOLATED") {
+    final case class Failure(faultySequencerIds: Set[SequencerId])(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends Alarm(
+          cause =
+            s"Since the last successfully processed event, ${faultySequencerIds.size} sequencer(s) have caused failures," +
+              s" which is the trust threshold."
+        )
+  }
+
+  @Explanation(
+    """This error is logged when a sequencer client has detected that the number of sequencers that remain
+      |available for processing events is below the trust threshold, due to too many failing sequencers.
+      |This can happen even if the number of failing sequencers does not violate the trust assumption (i.e.
+      |remaining under the trust threshold), if the total number of sequencer connections available to the node
+      |is insufficient. It can be due either to a local problem such as database corruption, or to faulty
+      |or malicious sequencers.
+      |The node will keep retrying and recover automatically if the failures stop.
+      |"""
+  )
+  @Resolution(
+    """An investigation is recommended. If the problem is local, operator intervention is likely required, and a
+      |restart may help. If the problem is due to faulty or malicious sequencers, fixing or replacing
+      |the sequencers is required.
+      |The node will keep retrying and recover automatically if the failures stop.
+      |"""
+  )
+  object UnreachableTrustThreshold
+      extends ErrorCode(
+        id = "SEQUENCER_UNREACHABLE_TRUST_THRESHOLD",
+        ErrorCategory.BackgroundProcessDegradationWarning,
+      ) {
+    final case class Failure(
+        faultySequencerIds: Set[SequencerId],
+        trustThreshold: PositiveInt,
+        nbRemaining: Int,
+    )(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause = s"The trust threshold of $trustThreshold cannot currently be reached:" +
+            s" $nbRemaining remaining sequencer(s), ${faultySequencerIds.size} faulty."
+        )
+  }
 }

@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.synchronizer.sequencing.traffic
 
-import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.sequencing.traffic.EventCostCalculator
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerBatchingConfig
 import com.digitalasset.canton.synchronizer.sequencer.store.InMemorySequencerStore
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.synchronizer.sequencing.traffic.store.memory.{
@@ -27,7 +27,6 @@ trait RateLimitManagerTesting { this: BaseTest & HasExecutionContext =>
   private val sequencerStore = new InMemorySequencerStore(
     protocolVersion = testedProtocolVersion,
     sequencerMember = DefaultTestIdentities.sequencerId,
-    blockSequencerMode = true,
     loggerFactory = loggerFactory,
     timeouts = timeouts,
     sequencerMetrics = SequencerMetrics.noop("rate-limit-manager-testing"),
@@ -61,7 +60,7 @@ trait RateLimitManagerTesting { this: BaseTest & HasExecutionContext =>
       trafficConsumedStore,
       loggerFactory,
       timeouts,
-      BatchingConfig(),
+      SequencerBatchingConfig(),
       SequencerMetrics.noop("sequencer-rate-limit-manager-test"),
       cryptoClient,
       testedProtocolVersion,
@@ -76,7 +75,7 @@ trait RateLimitManagerTesting { this: BaseTest & HasExecutionContext =>
       trafficConsumedStore,
       loggerFactory,
       timeouts,
-      BatchingConfig(),
+      SequencerBatchingConfig(),
       SequencerMetrics.noop("sequencer-rate-limit-manager-test"),
       cryptoClient,
       testedProtocolVersion,
@@ -95,7 +94,7 @@ trait RateLimitManagerTesting { this: BaseTest & HasExecutionContext =>
       trafficConsumedStore,
       loggerFactory,
       timeouts,
-      BatchingConfig(),
+      SequencerBatchingConfig(),
       SequencerMetrics.noop("sequencer-rate-limit-manager-test"),
       cryptoClient,
       testedProtocolVersion,

@@ -285,7 +285,7 @@ class SynchronizerMigration(
       target: Target[SynchronizerConnectionConfig],
       targetPsid: Target[PhysicalSynchronizerId],
       forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
-      commitmentProcessorManager: Option[AcsCommitmentProcessorManager],
+      commitmentProcessorManager: AcsCommitmentProcessorManager,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SynchronizerMigrationError, Unit] = {
@@ -300,9 +300,8 @@ class SynchronizerMigration(
         sourcePsid <- checkMigrationRequest(source, target, targetPsid.map(_.logical))
 
         // stop the commitment pipeline for the source synchronizer
-        _ = commitmentProcessorManager.zip(sourcePsid.unwrap.toOption).foreach {
-          case (commitmentProcessorManager, source) =>
-            commitmentProcessorManager.closePipelineForSynchronizer(source.logical)
+        _ = sourcePsid.unwrap.toOption.foreach { source =>
+          commitmentProcessorManager.closePipelineForSynchronizer(source.logical)
         }
 
         // check if the target alias already exists.

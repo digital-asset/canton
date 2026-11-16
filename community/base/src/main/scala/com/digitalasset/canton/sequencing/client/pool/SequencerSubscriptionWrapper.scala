@@ -24,6 +24,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, LoggerUtil, SingleUseCell}
+import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext
 import scala.util.Try
@@ -132,10 +133,17 @@ class SequencerSubscriptionWrapperImpl private[sequencing] (
   override def onClosed(): Unit =
     LifeCycle.close(LifeCycle.toCloseableOption(subscriptionRef.get), handler)(logger)
 
-  private def completeSubscription(
+  @VisibleForTesting
+  private[sequencing] def completeSubscription(
       reason: SubscriptionCloseReason[SequencerClientSubscriptionError]
   )(implicit traceContext: TraceContext): Unit =
     subscriptionRef.getOrElse(ErrorUtil.invalidState("No subscription")).complete(reason)
+
+  @VisibleForTesting
+  private[sequencing] def failSubscription(exception: Throwable)(implicit
+      traceContext: TraceContext
+  ): Unit =
+    subscriptionRef.getOrElse(ErrorUtil.invalidState("No subscription")).failForTesting(exception)
 
   override def toString: String = s"Subscription over ${connection.name}"
 

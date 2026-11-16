@@ -132,6 +132,21 @@ class RichTrafficServiceClient(
       // Even a bare UNAVAILABLE can arrive after TEA stored the submission, so a retry could report a false conflict.
       retryPolicy = CantonGrpcUtil.RetryPolicy.noRetry,
     )
+
+  def releaseSubmission(
+      request: ReleaseSubmissionRequest
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, GrpcError, ReleaseSubmissionResponse] =
+    CantonGrpcUtil.sendGrpcRequest(submissionAccountingClient, serverName)(
+      _.releaseSubmission(request),
+      requestDescription = "release-submission",
+      timeout = accountLookupTimeout.duration,
+      logger = logger,
+      logPolicy = RichTrafficServiceClient.doNotLogTeaErrors,
+      // The delete matches the registration time, so a retry can't remove a newer correlation.
+      retryPolicy = RichTrafficServiceClient.retryUnlessClientGaveUp,
+    )
 }
 
 object RichTrafficServiceClient {

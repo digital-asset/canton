@@ -113,7 +113,11 @@ object UnassignmentData
       unassignmentRequest: FullUnassignmentTree,
       unassignmentTs: CantonTimestamp,
   ): UnassignmentData = UnassignmentData(
-    submitterMetadata = unassignmentRequest.submitterMetadata,
+    // UnassignmentData synchronizes the unassignment with the assignment, which does not use the
+    // max sequencing time
+    // TODO(#37510): Store only what the assignment needs, and take the submitter metadata used by
+    // the unassignment validation from the view tree
+    submitterMetadata = unassignmentRequest.submitterMetadata.copy(maxSequencingTime = None),
     contractsBatch = unassignmentRequest.contracts,
     reassigningParticipants = unassignmentRequest.reassigningParticipants,
     sourcePsid = unassignmentRequest.sourceSynchronizer,

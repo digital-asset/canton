@@ -4,6 +4,7 @@
 package com.digitalasset.canton.crypto.kms.driver.testing.v1
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.crypto.kms.driver.api.v1.{KmsDriverFactory, KmsDriverHealth}
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.Logger

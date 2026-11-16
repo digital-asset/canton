@@ -114,7 +114,6 @@ object LedgerApiServer {
       partyReplicationEndpointsO: Option[PartyReplicationEndpoints],
       trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
       pruningConfig: ParticipantStoreConfig,
-      warnOnJwtScopeUsage: Boolean,
       extensionServiceManagerO: Option[ExtensionServiceManager],
   )(implicit
       actorSystem: ActorSystem,
@@ -199,7 +198,7 @@ object LedgerApiServer {
               serverConfig.jwksCacheConfig,
               serverConfig.jwtTimestampLeeway,
               loggerFactory,
-              warnOnJwtScopeUsage,
+              parameters.enableScopeOnlyJwt,
               serverConfig.maxTokenLifetime,
             )
           )
@@ -209,6 +208,7 @@ object LedgerApiServer {
         cacheExpiration = serverConfig.jwksCacheConfig.cacheExpiration.underlying,
         connectionTimeout = serverConfig.jwksCacheConfig.connectionTimeout.underlying,
         readTimeout = serverConfig.jwksCacheConfig.readTimeout.underlying,
+        minRefreshInterval = serverConfig.jwksCacheConfig.minRefreshInterval.underlying,
         jwtTimestampLeeway = serverConfig.jwtTimestampLeeway,
         maxTokenLife = serverConfig.maxTokenLifetime.toMillisOrNone(),
         autoRefreshAfter = serverConfig.jwksCacheConfig.autoRefreshAfter.underlying,
@@ -288,7 +288,7 @@ object LedgerApiServer {
             cfg.active,
             cfg.warnOnUndefinedLimits,
             cfg.throttleLoggingRatePerSecond,
-            metrics.requests,
+            metrics.grpc,
             loggerFactory,
           )
         )
@@ -427,6 +427,7 @@ object LedgerApiServer {
         maxDeduplicationDuration = maxDeduplicationDuration,
         authServices = authServices,
         jwtVerifierLoader = jwtVerifierLoader,
+        enableScopeOnlyJwt = parameters.enableScopeOnlyJwt,
         jwtTimestampLeeway = serverConfig.jwtTimestampLeeway,
         tokenExpiryGracePeriodForStreams =
           parameters.ledgerApiServerParameters.tokenExpiryGracePeriodForStreams,

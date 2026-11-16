@@ -74,7 +74,7 @@ class GrpcSequencerAuthenticationService(
       member <- eitherT(deserializeMember(memberStr))
       signature <- eitherT(
         ProtoConverter
-          .parseRequired(Signature.fromProtoV30, "signature", request.signature)
+          .parseRequired(Signature.fromProtoV30(pvv, _), "signature", request.signature)
           .leftMap(err => (Status.INVALID_ARGUMENT.withDescription(err.toString), true))
       )
       providedNonce <- eitherT(

@@ -39,7 +39,6 @@ import com.digitalasset.canton.synchronizer.mediator.{
   RemoteMediatorConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
-import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.SequencerHighAvailabilityConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.{
   AlphaSequencerChannelConfig,
@@ -85,22 +84,6 @@ class ConfigValidationsTest extends BaseTestWordSpec {
     }
   }
 
-  "ha sequencer total node count validation" should {
-    "complain if we're above the maximum configured" in {
-      val config = mkHASequencerEnvironmentConfig(
-        SequencerHighAvailabilityConfig(
-          enabled = Some(true),
-          // a valid total node counter should be less than this constant
-          totalNodeCount = PositiveInt.tryCreate(DbLockConfig.MAX_SEQUENCER_WRITERS_AVAILABLE),
-        )
-      )
-
-      assertErrors(config)(
-        "Sequencer node s1 sets sequencer HA total node count to 32. Must be less than 32."
-      )
-    }
-  }
-
   "replication should default to true only if unset and for supported storage" in {
     val h2Config = DbConfig.H2(ConfigFactory.empty())
     val postgresConfig = DbConfig.Postgres(ConfigFactory.empty())
@@ -126,14 +109,6 @@ class ConfigValidationsTest extends BaseTestWordSpec {
             replication = Some(ReplicationConfig(enabled = enabledReplication)),
           )
         ),
-        sequencers = Map(
-          instanceName -> SequencerNodeConfig(
-            storage = storageConfig,
-            sequencer = SequencerConfig.Database(
-              highAvailability = Some(SequencerHighAvailabilityConfig(enabled = enabledReplication))
-            ),
-          )
-        ),
       ).withDefaults(Some(DefaultPorts.create()))
 
     val defaultEnabledMatrix: TableFor2[StorageConfig, Boolean] = Table(
@@ -142,23 +117,12 @@ class ConfigValidationsTest extends BaseTestWordSpec {
       (postgresConfig, true),
     )
 
-    def dbSequencerStorageCheck(config: SequencerConfig, enabled: Boolean) =
-      config match {
-        case db: SequencerConfig.Database =>
-          db.highAvailabilityEnabled shouldBe enabled
-        case _ =>
-      }
-
     forAll(defaultEnabledMatrix) { case (storage, expected) =>
       makeConfig(None, storage)
         .participants(instanceName)
         .replication
         .exists(_.isEnabled) shouldBe expected
       makeConfig(None, storage).mediators(instanceName).replicationEnabled shouldBe expected
-      dbSequencerStorageCheck(
-        makeConfig(None, storage).sequencers(instanceName).sequencer,
-        expected,
-      )
     }
 
     val explicitEnabledConfig = Table("enabled", true, false)
@@ -174,10 +138,6 @@ class ConfigValidationsTest extends BaseTestWordSpec {
         config
           .mediators(instanceName)
           .replicationEnabled shouldBe enabled
-        dbSequencerStorageCheck(
-          config.sequencers(instanceName).sequencer,
-          enabled,
-        )
       }
     }
   }
@@ -200,54 +160,6 @@ class ConfigValidationsTest extends BaseTestWordSpec {
       "Participant node p1 must be configured to use Postgres for storage to use replication"
     )
   }
-
-  "ha sequencer is using supported storage validation" should {
-    val validConfig = mkHASequencerEnvironmentConfig()
-
-    "not complain if configured correctly" in assertValid(validConfig)
-
-    "complain if nodes are not using a supported storage configuration" in {
-      // switch to using a memory based storage
-      val config = ConfigTransforms.allInMemory(validConfig)
-
-      assertErrors(config)(
-        "Sequencer node s1 must be configured to use Postgres for storage to use the highly available database sequencer"
-      )
-    }
-
-    "not complain if using sequencers without HA and without a locking supporting database" in {
-      def disableHASequencer: SequencerConfig = SequencerConfig.Database(
-        highAvailability = Some(SequencerHighAvailabilityConfig(enabled = Some(false)))
-      )
-      val config = ConfigTransforms.allInMemory
-        .andThen(
-          ConfigTransforms.updateSequencerConfig("s1")(
-            _.focus(_.sequencer).replace(disableHASequencer)
-          )
-        )(validConfig)
-
-      assertValid(config)
-    }
-  }
-
-  private def mkHASequencerEnvironmentConfig(
-      haConfig: SequencerHighAvailabilityConfig =
-        SequencerHighAvailabilityConfig(enabled = Some(true))
-  ): CantonConfig =
-    CantonConfig(
-      // DB Sequencer is currently marked as experimental, enabling non-standard config to allow it
-      parameters = CantonParameters(nonStandardConfig = true),
-      sequencers = Map(
-        InstanceName.tryCreate("s1") -> SequencerNodeConfig(
-          storage = DbConfig.Postgres(ConfigFactory.empty()),
-          sequencer = SequencerConfig.Database(
-            highAvailability = Some(haConfig)
-          ),
-          publicApi = PublicServerConfig(internalPort = Port.tryCreate(2000).some),
-          adminApi = AdminServerConfig(internalPort = Port.tryCreate(2001).some),
-        )
-      ),
-    )
 
   "generic config validations" should {
     "complain if config is empty" in {
@@ -330,19 +242,6 @@ class ConfigValidationsTest extends BaseTestWordSpec {
         "canton.participants.p1.http-ledger-api.port not set. " +
         "Either set a port (canton.participants.p1.http-ledger-api.port = <port>) " +
         "or disable the service (canton.participants.p1.http-ledger-api.enabled = false)."
-    }
-
-    "prevent DB sequencer in sequencer configuration without non-standard config option" in {
-      val config = CantonConfig(
-        parameters = CantonParameters(),
-        sequencers = Map(
-          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
-            sequencer = SequencerConfig.Database()
-          )
-        ),
-      )
-      assertErrors(config)(dbSequencerRequiresNonStandardError("s1"))
-      assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
     }
 
     "prevent BftBlockOrdering standalone mode in sequencer configuration without non-standard config option" in {
@@ -1212,17 +1111,23 @@ class ConfigValidationsTest extends BaseTestWordSpec {
       )
     val (mySecret, mySecret2) =
       (NonEmptyString.tryCreate("pyjama"), NonEmptyString.tryCreate("longjohns"))
+    // TODO (i#33090): remove together with the scope-only token format
+    // a target scope without a target audience is only valid with scope-only JWTs enabled
     "allow two authorization services with different scopes" in {
-      val config = createConfig(
-        authService(mySecret, scope = Some("scope1")),
-        authService(mySecret2, scope = Some("scope2"), privileged = true),
+      val config = ConfigTransforms.enableScopeOnlyJwt(
+        createConfig(
+          authService(mySecret, scope = Some("scope1")),
+          authService(mySecret2, scope = Some("scope2"), privileged = true),
+        )
       )
       assertValid(config)
     }
     "prevent two authorization services with the same scope" in {
-      val config = createConfig(
-        authService(mySecret, scope = Some("scope1")),
-        authService(mySecret2, scope = Some("scope1"), privileged = true),
+      val config = ConfigTransforms.enableScopeOnlyJwt(
+        createConfig(
+          authService(mySecret, scope = Some("scope1")),
+          authService(mySecret2, scope = Some("scope1"), privileged = true),
+        )
       )
       assertErrors(config)("Multiple authorization service configured with the same scope in p1")
     }
@@ -1394,6 +1299,38 @@ class ConfigValidationsTest extends BaseTestWordSpec {
         )
       )
       assertErrors(config)(serverFlowControlError("s1", "peer-to-peer"))
+    }
+  }
+
+  "jwksCacheMinRefreshInterval" should {
+    def configWith(jwksCacheConfig: JwksCacheConfig) =
+      CantonConfig(
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            ledgerApi = LedgerApiServerConfig(jwksCacheConfig = jwksCacheConfig)
+          )
+        )
+      )
+    val prefix = "gRPC server config ('p1', ledger-api) has jwks-cache-config"
+
+    "reject a min-refresh-interval not less than cache-expiration" in {
+      assertValid(configWith(JwksCacheConfig()))
+      assertErrors(
+        configWith(JwksCacheConfig(cacheExpiration = NonNegativeFiniteDuration.ofSeconds(30)))
+      )(
+        s"$prefix.min-refresh-interval (30 seconds) not less than cache-expiration (30 seconds), so keys expire before they can be refetched."
+      )
+    }
+
+    "reject an auto-refresh-after less than min-refresh-interval" in {
+      assertValid(
+        configWith(JwksCacheConfig(autoRefreshAfter = NonNegativeFiniteDuration.ofSeconds(30)))
+      )
+      assertErrors(
+        configWith(JwksCacheConfig(autoRefreshAfter = NonNegativeFiniteDuration.ofSeconds(10)))
+      )(
+        s"$prefix.auto-refresh-after (10 seconds) less than min-refresh-interval (30 seconds), so background refreshes would only happen every min-refresh-interval."
+      )
     }
   }
 

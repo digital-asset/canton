@@ -5,7 +5,8 @@ package com.digitalasset.canton.participant.teststores
 
 import cats.Eval
 import com.digitalasset.canton.TestEssentials
-import com.digitalasset.canton.config.{BatchAggregatorConfig, BatchingConfig}
+import com.digitalasset.canton.config.BatchAggregatorConfig
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.store.db.*
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.store.teststores.H2StoresTest
@@ -35,7 +36,7 @@ trait H2ParticipantStores extends H2StoresTest {
       timeouts = timeouts,
       loggerFactory = loggerFactory,
       stringInterningEval = stringInterning,
-      batchingConfig = BatchingConfig(),
+      batchingConfig = ParticipantBatchingConfig(),
     )(h2InMemoryEc)
 
   def createInFlightSubmissionStore(): DbInFlightSubmissionStore =

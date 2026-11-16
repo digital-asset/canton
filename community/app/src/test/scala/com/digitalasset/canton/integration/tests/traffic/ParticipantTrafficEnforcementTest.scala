@@ -6,6 +6,8 @@ package com.digitalasset.canton.integration.tests.traffic
 import anorm.SqlStringInterpolation
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.CostEstimationHints
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters}
+import com.digitalasset.base.error.ErrorCode
+import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -22,10 +24,9 @@ import com.digitalasset.canton.examples.java.cycle.Cycle
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.http.json.v2.JsTrafficServiceCodecs.*
 import com.digitalasset.canton.integration.*
-import com.digitalasset.canton.integration.plugins.UsePostgres
+import com.digitalasset.canton.integration.plugins.{UsePostgres, UseProgrammableSequencer}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.ledgerapi.DbLockingSupport
-import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.integration.util.{PartiesAllocator, TestUtils, TrafficControlUtils}
 import com.digitalasset.canton.ledger.error.CommonErrors.ServiceNotRunning
 import com.digitalasset.canton.lifecycle.CloseContext
@@ -38,6 +39,7 @@ import com.digitalasset.canton.platform.config.{
   TrafficEnforcementServerConfig,
 }
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.tea.TrafficEnforcementErrors.{
   CorrelationConflict,
   InsufficientBalance,
@@ -61,6 +63,7 @@ import com.digitalasset.canton.tea.v1.{
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ExternalParty, PartyId}
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import io.circe.parser.decode
 import io.circe.syntax.*
 import io.grpc.Status
@@ -945,13 +948,9 @@ final class ParticipantTrafficEnforcementRejectMultiPartyTest
   */
 final class ParticipantTrafficEnforcementWithAuthTest extends ParticipantTrafficEnforcementTest {
   private val jwtSecret = NonEmptyString.tryCreate("tea-auth-test-secret")
+  private val audience = "tea-auth-test-audience"
 
   registerPlugin(new UsePostgres(loggerFactory))
-
-  override def beforeAll(): Unit =
-    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
-      super.beforeAll()
-    }
 
   override protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.updateParticipantConfig("participant1")(
@@ -960,7 +959,7 @@ final class ParticipantTrafficEnforcementWithAuthTest extends ParticipantTraffic
           Seq(
             AuthServiceConfig.UnsafeJwtHmac256(
               secret = jwtSecret,
-              targetAudience = None,
+              targetAudience = Some(audience),
               targetScope = None,
             )
           )
@@ -987,7 +986,11 @@ final class ParticipantTrafficEnforcementWithAuthTest extends ParticipantTraffic
             .id
           val client = ExternalLedgerApiClient.forReference(
             participant1,
-            JwtTokenUtilities.buildUnsafeToken(jwtSecret.unwrap, userId = Some(userId)),
+            JwtTokenUtilities.buildUnsafeToken(
+              jwtSecret.unwrap,
+              userId = Some(userId),
+              audience = audience,
+            ),
           )
 
           val balance = client.ledger_api.traffic.get_account(alice).balance
@@ -1130,8 +1133,10 @@ final class ParticipantTrafficEnforcementDegradationTest
 }
 
 final class ParticipantTrafficEnforcementReassignmentTest
-    extends ParticipantTrafficEnforcementTest {
+    extends ParticipantTrafficEnforcementTest
+    with HasProgrammableSequencer {
   registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 
   private var bob: PartyId = _
 
@@ -1223,10 +1228,35 @@ final class ParticipantTrafficEnforcementReassignmentTest
           val accountBalance = balance(participant1, accountId)
           val charlieBalance = balance(participant1, charlie)
 
-          assertThrowsAndLogsCommandFailures(
-            participant1.ledger_api.commands.submit_unassign_async(dan, Seq(cid), daId, acmeId),
-            _.shouldBeCantonErrorCode(InsufficientBalance),
-          )
+          // Tracked reassignments report the rejection as a completion, untracked ones synchronously
+          def assertRejected(
+              submitter: PartyId,
+              errorCode: ErrorCode,
+              commandId: String = UUID.randomUUID().toString,
+              submissionId: String = UUID.randomUUID().toString,
+          ): Assertion = {
+            def submit() = participant1.ledger_api.commands.submit_unassign_async(
+              submitter,
+              Seq(cid),
+              daId,
+              acmeId,
+              commandId = commandId,
+              submissionId = submissionId,
+            )
+            if (testedProtocolVersion >= ProtocolVersion.v38) {
+              val ledgerEnd = participant1.ledger_api.state.end()
+              submit()
+              val status = participant1.ledger_api.completions
+                .list(submitter, 1, ledgerEnd, filter = _.commandId == commandId)
+                .loneElement
+                .status
+                .value
+              DecodedCantonError.fromGrpcStatus(status).value.code.id shouldBe errorCode.id
+            } else
+              assertThrowsAndLogsCommandFailures(submit(), _.shouldBeCantonErrorCode(errorCode))
+          }
+
+          assertRejected(dan, InsufficientBalance)
 
           val conflictingCommandId = UUID.randomUUID().toString
           val conflictingSubmissionId = UUID.randomUUID().toString
@@ -1236,16 +1266,11 @@ final class ParticipantTrafficEnforcementReassignmentTest
             conflictingSubmissionId,
             Some(charlie.toProtoPrimitive),
           )
-          assertThrowsAndLogsCommandFailures(
-            participant1.ledger_api.commands.submit_unassign_async(
-              charlie,
-              Seq(cid),
-              daId,
-              acmeId,
-              commandId = conflictingCommandId,
-              submissionId = conflictingSubmissionId,
-            ),
-            _.shouldBeCantonErrorCode(CorrelationConflict),
+          assertRejected(
+            charlie,
+            CorrelationConflict,
+            commandId = conflictingCommandId,
+            submissionId = conflictingSubmissionId,
           )
 
           // Dan has no balance, so this only passes if the participant checks the account instead.
@@ -1261,19 +1286,42 @@ final class ParticipantTrafficEnforcementReassignmentTest
           participant1.ledger_api.traffic
             .update_account(dan.toProtoPrimitive, balanceDelta = Some(1_000_000L))
           val danBalance = balance(participant1, dan)
-          val assigned = participant1.ledger_api.commands.submit_assign(
+          val assignCommandId = UUID.randomUUID().toString
+          val assignSubmissionId = UUID.randomUUID().toString
+          def submitAssign(): Unit = participant1.ledger_api.commands.submit_assign_async(
             dan,
             unassigned.reassignmentId,
             daId,
             acmeId,
+            commandId = assignCommandId,
+            submissionId = assignSubmissionId,
           )
+          val ledgerEnd = participant1.ledger_api.state.end()
+          getProgrammableSequencer(sequencer2.name).withSendPolicy_(
+            "refuse the assignment",
+            {
+              case request if request.sender == participant1.id && request.isConfirmationRequest =>
+                SendDecision.Reject()
+              case _ => SendDecision.Process
+            },
+          ) {
+            loggerFactory.assertThrowsAndLogsUnordered[CommandFailure](
+              submitAssign(),
+              _.warningMessage should include("Failed to submit submission due to"),
+              _.commandFailureMessage should include("Message rejected by send policy"),
+            )
+          }
+          // Without the release, this fails with TRAFFIC_CORRELATION_CONFLICT.
+          submitAssign()
 
           awaitCharged(participant1, unassigned.reassignment.commandId, Set(dan))
-          awaitCharged(participant1, assigned.reassignment.commandId, Set(dan))
+          awaitCharged(participant1, assignCommandId, Set(dan))
+          val assignCompletion = participant1.ledger_api.completions
+            .list(dan, 1, ledgerEnd, filter = _.commandId == assignCommandId)
+            .loneElement
           balance(participant1, accountId) shouldBe accountBalance -
             unassigned.reassignment.paidTrafficCost.value
-          balance(participant1, dan) shouldBe danBalance -
-            assigned.reassignment.paidTrafficCost.value
+          balance(participant1, dan) shouldBe danBalance - assignCompletion.paidTrafficCost
           balance(participant1, charlie) shouldBe charlieBalance
       }
 

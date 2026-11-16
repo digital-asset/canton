@@ -323,7 +323,6 @@ private[lf] object IdeLedgerRunner {
       initialSeeding = InitialSeeding.TransactionSeed(seed),
       expr = SEApp(compiledCommands, ArraySeq(SValue.SToken)),
       committers = committers,
-      commitLocation = location,
       limits = interpretation.LimitConfig.Off,
       interpretationConfig = interpretationConfig,
       logger = machineLogger,
@@ -511,7 +510,7 @@ private[lf] object IdeLedgerRunner {
           Interruption(continue)
         case SResult.SResultFinal(_) =>
           ledgerMachine.finish match {
-            case Right(result @ Speedy.UpdateMachine.Result(tx, _, locationInfo, _, _, _)) =>
+            case Right(result @ Speedy.UpdateMachine.Result(tx, _, locationInfo, _, _, _, _)) =>
               val committedTx = CommittedTransaction(enrich(suffixer.suffixCids(tx)))
               ledger.commit(committers, readAs, location, committedTx, locationInfo) match {
                 case Left(err) => submissionError(err)

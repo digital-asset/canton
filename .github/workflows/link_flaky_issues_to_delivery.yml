@@ -1,0 +1,55 @@
+name: Link flaky issues to delivery
+
+# Attaches flaky-test issues to monthly issues under https://github.com/DACH-NY/delivery/issues/503,
+# see scripts/ci/link_flaky_issues_to_delivery.py. Runs on manual dispatch. A failure pages the
+# CI rota.
+on:
+  # Enable once a manual dry run and a real run on main look right.
+  # schedule:
+  #   - cron: '30 5 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Only print what would be created and linked'
+        type: boolean
+        default: true
+
+# The script is the only writer to the delivery repo. One run at a time keeps a month from being
+# created twice.
+concurrency:
+  group: link-flaky-issues-to-delivery
+  cancel-in-progress: false
+
+jobs:
+  link-flaky-issues:
+    name: Link flaky issues to the delivery tracking issue
+    runs-on: dach-ny-canton
+    # Internal-only: touches the private flaky-test and delivery issues. Skip on the OSS mirror.
+    if: github.repository == 'DACH-NY/canton'
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      # github.token cannot reach DACH-NY/delivery. This token has Issues read and write there
+      # and Issues read on DACH-NY/canton.
+      GH_TOKEN: ${{ secrets.DELIVERY_ISSUES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Link flaky issues
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: python3 scripts/ci/link_flaky_issues_to_delivery.py ${{ inputs.dry_run == true && '--dry-run' || '' }}
+
+  notify:
+    name: Notify on Failure
+    needs:
+      - link-flaky-issues
+    # A dry run writes nothing, so its failure does not page.
+    if: |
+      always() && inputs.dry_run != true &&
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    uses: ./.github/workflows/_notify.yml
+    secrets: inherit
+    with:
+      needs_json: ${{ toJSON(needs) }}

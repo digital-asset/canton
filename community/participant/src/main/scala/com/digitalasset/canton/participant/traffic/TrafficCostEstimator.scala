@@ -16,12 +16,7 @@ import com.digitalasset.canton.crypto.provider.jce.JceSecurityProvider
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.signer.{SyncCryptoSigner, SyncCryptoSignerWithSessionKeys}
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
-import com.digitalasset.canton.data.{
-  CantonTimestamp,
-  ReassignmentSubmitterMetadata,
-  RollbackContextFactory,
-  ViewPosition,
-}
+import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.ledger.participant.state.SyncService.SubmissionCostEstimation
 import com.digitalasset.canton.ledger.participant.state.{SubmitterInfo, TransactionMeta}
@@ -32,10 +27,14 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentProcessingSteps.SubmissionParam as UnassignmentSubmissionParam
 import com.digitalasset.canton.participant.protocol.reassignment.{
   AssignmentProcessor,
+  ReassignmentSubmissionInfo,
   UnassignmentProcessor,
 }
-import com.digitalasset.canton.participant.protocol.submission.TransactionConfirmationRequestFactory
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.ContractInstanceOfId
+import com.digitalasset.canton.participant.protocol.submission.{
+  ChangeIdHash,
+  TransactionConfirmationRequestFactory,
+}
 import com.digitalasset.canton.participant.store.ContractStore
 import com.digitalasset.canton.participant.traffic.TrafficCostEstimator.*
 import com.digitalasset.canton.platform.apiserver.services.command.SubmissionAccounting
@@ -161,7 +160,6 @@ class TrafficCostEstimator(
             transaction,
             transactionMetadata,
             WithoutSuffixes,
-            RollbackContextFactory(psid.protocolVersion),
           )
         )
         disclosedContractInstances <- EitherT.fromEither[FutureUnlessShutdown](
@@ -211,7 +209,7 @@ class TrafficCostEstimator(
       val snapshot = topologySnapshot()
       val submissionParam: UnassignmentSubmissionParam =
         UnassignmentSubmissionParam(
-          submitterMetadata = ReassignmentSubmitterMetadata(
+          submissionInfo = ReassignmentSubmissionInfo(
             submitter = submitter,
             submittingParticipant = participantId,
             commandId = submitterInfo.commandId,
@@ -223,8 +221,15 @@ class TrafficCostEstimator(
           targetSynchronizer = targetSynchronizer,
           overrideSourceValidationPkgIds = Source(Map.empty),
           overrideTargetValidationPkgIds = Target(Map.empty),
+          validatedContractPackageIds = Map.empty,
           // Estimation never sends the batch, so the traffic hook never reads this.
           accounting = SubmissionAccounting.NoAccount,
+          changeIdHash = ChangeIdHash.routedUnassignment(
+            submitterInfo.userId,
+            submitterInfo.commandId,
+            submitter,
+            contractIds.toSet,
+          ),
         )
 
       val client = cryptoClient(snapshot)
@@ -256,7 +261,7 @@ class TrafficCostEstimator(
       val snapshot = topologySnapshot()
       val client = cryptoClient(snapshot)
 
-      val submitterMetadata = ReassignmentSubmitterMetadata(
+      val submissionInfo = ReassignmentSubmissionInfo(
         submitter = submitter,
         submittingParticipant = participantId,
         commandId = submitterInfo.commandId,
@@ -266,7 +271,7 @@ class TrafficCostEstimator(
       )
 
       estimateAssignmentRequestCost(
-        submitterMetadata,
+        submissionInfo,
         contracts = contracts,
         sourceSynchronizer = sourceSynchronizer,
         sourceSnapshot = sourceSnapshot,
@@ -286,7 +291,7 @@ class TrafficCostEstimator(
     }
 
   private[traffic] def estimateAssignmentRequestCost(
-      submitterMetadata: ReassignmentSubmitterMetadata,
+      submissionInfo: ReassignmentSubmissionInfo,
       contracts: Seq[ContractInstance],
       sourceSynchronizer: Source[PhysicalSynchronizerId],
       sourceSnapshot: Source[TopologySnapshot],
@@ -296,7 +301,7 @@ class TrafficCostEstimator(
     for {
       batch <- assignmentProcessor
         .buildSubmissionBatchForCostEstimation(
-          submitterMetadata,
+          submissionInfo,
           contracts,
           sourceSynchronizer,
           sourceSnapshot,

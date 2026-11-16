@@ -234,7 +234,7 @@ class GrpcVaultService(
           ProtoConverter
             .parse(
               cryptoproto.PublicKey.parseFrom,
-              PublicKey.fromProtoPublicKeyV30,
+              PublicKey.fromProtoPublicKeyV30(ProtocolVersionValidation.AlwaysValidation, _),
               request.publicKey,
             )
             .valueOr(err => throw ProtoDeserializationFailure.WrapNoLogging(err).toGrpcError)
@@ -299,7 +299,10 @@ class GrpcVaultService(
       usage <- Future(
         // for commands, we should not default to All; instead, the request should fail because usage is now a mandatory parameter.
         SigningKeyUsage
-          .fromProtoListWithoutDefaultV30(request.usageV30)
+          .fromProtoListWithoutDefaultV30(
+            ProtocolVersionValidation.AlwaysValidation,
+            request.usageV30,
+          )
           .valueOr(err => throw ProtoDeserializationFailure.WrapNoLogging(err).toGrpcError)
       )
       name <- Future(
@@ -406,7 +409,7 @@ class GrpcVaultService(
   ): Future[v30.RegisterKmsSigningKeyResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val usage = SigningKeyUsage
-      .fromProtoListWithoutDefaultV30(request.usageV30)
+      .fromProtoListWithoutDefaultV30(ProtocolVersionValidation.AlwaysValidation, request.usageV30)
       .leftMap(ProtoDeserializationFailure.WrapNoLogging.apply)
 
     val res = for {

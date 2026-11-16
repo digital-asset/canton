@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.lifecycle.PromiseUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
@@ -18,13 +19,13 @@ import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
 
 class P2PGrpcStreamingReceiverTest extends AnyWordSpec with BftSequencerBaseTest {
 
   // Direct execution context is crucial for the tests to verify entire code paths.
-  implicit private val executionContext: ExecutionContext = DirectExecutionContext(noTracingLogger)
+  implicit private val directExecutionContextImplicit: DirectExecutionContext =
+    directExecutionContext
 
   "P2PGrpcStreamingReceiver" should {
     "throw an exception if received gRPC message before authentication was completed" in {

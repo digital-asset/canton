@@ -10,10 +10,13 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.participant.GeneratorsParticipant
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
-import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.acsreplication.{
   AcsReplicationSourceParticipantMessage,
   AcsReplicationTargetParticipantMessage,
+}
+import com.digitalasset.canton.participant.protocol.party.{
+  FreezingToOnboardingOperation,
+  OnboardingClearanceOperation,
 }
 import com.digitalasset.canton.participant.protocol.submission.SubmissionTrackingData
 import com.digitalasset.canton.participant.synchronizer.{
@@ -180,29 +183,29 @@ final class SerializationDeserializationTest
         test(DynamicSynchronizerParameters, version)
         test(SequencingParameters, version)
 
-        if (version >= ProtocolVersion.v36) {
-          test(AcsCommitment, version)
-          testContext(
-            AcsCommitmentProtocolMessage,
-            AcsCommitmentDeserializationContext(testedSynchronizerLimits),
-            version,
-          )
+        test(AcsCommitment, version)
+        testContext(
+          AcsCommitmentProtocolMessage,
+          AcsCommitmentDeserializationContext(testedSynchronizerLimits),
+          version,
+        )
 
-          testContext(
-            AcsCommitmentSummary,
-            AcsCommitmentDeserializationContext(testedSynchronizerLimits),
-            version,
-          )
-          testContext(
-            AcsCommitmentSummaryProtocolMessage,
-            AcsCommitmentDeserializationContext(testedSynchronizerLimits),
-            version,
-          )
+        testContext(
+          AcsCommitmentSummary,
+          AcsCommitmentDeserializationContext(testedSynchronizerLimits),
+          version,
+        )
+        testContext(
+          AcsCommitmentSummaryProtocolMessage,
+          AcsCommitmentDeserializationContext(testedSynchronizerLimits),
+          version,
+        )
+
+        if (version < ProtocolVersion.v38) {
+          test(LegacyAcsCommitmentProtocolMessage, version)
+          test(LegacyAcsCommitment, version)
         }
 
-        test(LegacyAcsCommitmentProtocolMessage, version)
-
-        test(LegacyAcsCommitment, version)
         test(LsuSequencingTestMessage, version)
         test(LsuSequencingTestMessageContent, version)
         test(Verdict, version)
@@ -220,6 +223,9 @@ final class SerializationDeserializationTest
         test(PendingLsuOperation, version)
         test(PendingOnboardingTransactions, version)
         test(OnboardingClearanceOperation, version)
+        if (version >= ProtocolVersion.v37) {
+          test(FreezingToOnboardingOperation, version)
+        }
 
         test(AcknowledgeRequest, version)
         test(AggregationRule, version)
@@ -248,13 +254,13 @@ final class SerializationDeserializationTest
         )
 
         testContext(RootHashMessage, SerializedRootHashMessagePayload.fromByteString, version)
-        testContext(AssignmentMediatorMessage, (TestHash, Target(pvv)), version)(
+        testContext(AssignmentMediatorMessage, TestHash, version)(
           assignmentMediatorMessageArb,
           getByteStringId,
         )
         testContext(
           UnassignmentMediatorMessage,
-          (TestHash, Source(pvv)),
+          TestHash,
           version,
         )(
           unassignmentMediatorMessageArb,
@@ -280,7 +286,7 @@ final class SerializationDeserializationTest
         testContext(TopologyTransactionsBroadcast, testedTopologyTransactionContext, version)
         testContext(SignedTopologyTransaction, testedTopologyTransactionContext, version)
         testContext(SignedTopologyTransactions, testedTopologyTransactionContext, version)
-        testContext(SequencerSnapshot, version, version)
+        test(SequencerSnapshot, version)
         test(OnboardingStateForSequencerV2, version)
         test(LsuTrafficState, version)
         test(SynchronizerPredecessor, version)
@@ -359,7 +365,8 @@ final class SerializationDeserializationTest
                   )
               ),
         )
-        test(SignedContent, version)
+        testContext(SignedContent, SignatureCountCheck.Strict, version)
+        test(AggregatedSignedContent, version)
         testContext(
           TransactionView,
           TransactionViewDeserializationContext(
@@ -419,12 +426,34 @@ final class SerializationDeserializationTest
         test(AggregatedSignaturesOfSender, version)
 
         // CantonBFT messages
+        val availabilityContext =
+          bftmodules.Availability.RemoteDissemination
+            .AvailabilityDeserializationContext(actualSender, BftOrdererLimits.default)
+        val consensusSegmentContext =
+          bftmodules.ConsensusSegment.ConsensusMessage
+            .ConsensusSegmentDeserializationContext(
+              actualSender,
+              Some(actualSender),
+              BftOrdererLimits.default,
+            )
+        val consensusContext =
+          bftmodules.Consensus.StateTransferMessage
+            .ConsensusDeserializationContext(actualSender, BftOrdererLimits.default)
         test(bft.topology.SequencingParameters, version)
         test(BlacklistLeaderSelectionPolicyState, version)
-        test(OrderingRequestBatch, version)
-        testContext(bftmodules.ConsensusStatus.EpochStatus, actualSender, version)
+        testContext(OrderingRequestBatch, BftOrdererLimits.default, version)
+        testContext(
+          bftmodules.ConsensusStatus.EpochStatus,
+          bftmodules.ConsensusStatus
+            .ConsensusStatusDeserializationContext(actualSender, BftOrdererLimits.default),
+          version,
+        )
 
-        testContext(bftmodules.Availability.RemoteDissemination.RemoteBatch, actualSender, version)
+        testContext(
+          bftmodules.Availability.RemoteDissemination.RemoteBatch,
+          availabilityContext,
+          version,
+        )
         testContext(
           bftmodules.Availability.RemoteDissemination.RemoteBatchAcknowledged,
           actualSender,
@@ -432,7 +461,7 @@ final class SerializationDeserializationTest
         )
         testContext(
           bftmodules.Availability.RemoteOutputFetch.RemoteBatchDataFetched,
-          actualSender,
+          availabilityContext,
           version,
         )
         testContext(
@@ -466,7 +495,7 @@ final class SerializationDeserializationTest
         )
         testContext(
           bftmodules.ConsensusSegment.ConsensusMessage.PrePrepare,
-          (actualSender, Some(actualSender)),
+          consensusSegmentContext,
           version,
         )(
           arb = Arbitrary(prePrepareArb.arbitrary.map(prePrepareWithOriginator(_, actualSender))),
@@ -474,7 +503,7 @@ final class SerializationDeserializationTest
         )
         testContext(
           bftmodules.ConsensusSegment.ConsensusMessage.ViewChange,
-          (actualSender, Some(actualSender)),
+          consensusSegmentContext,
           version,
         )(
           arb = Arbitrary(viewChangeArb.arbitrary.map(viewChangeWithOriginator(_, actualSender))),
@@ -482,7 +511,7 @@ final class SerializationDeserializationTest
         )
         testContext(
           bftmodules.ConsensusSegment.ConsensusMessage.NewView,
-          (actualSender, Some(actualSender)),
+          consensusSegmentContext,
           version,
         )(
           arb = Arbitrary(newViewArb.arbitrary.map(newViewWithOriginator(_, actualSender))),
@@ -491,13 +520,13 @@ final class SerializationDeserializationTest
         if (version < ProtocolVersion.v37) {
           testContext(
             bftmodules.Consensus.StateTransferMessage.BlockTransferResponse30,
-            actualSender,
+            consensusContext,
             version,
           )
         } else {
           testContext(
             bftmodules.Consensus.StateTransferMessage.BlockTransferResponse31,
-            actualSender,
+            consensusContext,
             version,
           )
         }
@@ -638,7 +667,7 @@ final class SerializationDeserializationTest
       inside(
         recreateWith(
           None,
-          Some(CreatedContract.tryCreate(vDevContract, consumedInCore = false, rolledBack = false)),
+          Some(CreatedContract.tryCreate(vDevContract, consumedInCore = false)),
         )
       ) { case Left(err) =>
         err should include(

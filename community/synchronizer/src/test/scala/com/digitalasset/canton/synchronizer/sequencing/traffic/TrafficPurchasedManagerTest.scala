@@ -60,7 +60,6 @@ class TrafficPurchasedManagerTest
     val sequencerStore = new InMemorySequencerStore(
       protocolVersion = testedProtocolVersion,
       sequencerMember = DefaultTestIdentities.sequencerId,
-      blockSequencerMode = true,
       loggerFactory = loggerFactory,
       timeouts = timeouts,
       sequencerMetrics = sequencerMetrics,

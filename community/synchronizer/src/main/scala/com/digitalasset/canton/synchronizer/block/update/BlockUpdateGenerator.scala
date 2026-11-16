@@ -26,9 +26,10 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.*
 import com.digitalasset.canton.synchronizer.block.data.{BlockEphemeralState, BlockInfo}
-import com.digitalasset.canton.synchronizer.block.{BlockEvents, LedgerBlockEvent, RawLedgerBlock}
+import com.digitalasset.canton.synchronizer.block.{BlockEvents, LedgerBlockEvent}
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
+import com.digitalasset.canton.synchronizer.sequencer.block.RawLedgerBlock
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   InvalidLedgerEvent,
   SequencingTimeNotAdmissible,
@@ -136,9 +137,11 @@ object BlockUpdateGenerator {
   ) extends BlockChunk
 
   /** @param baseBlockSequencingTime
-    *   See [[RawLedgerBlock.baseSequencingTimeMicrosFromEpoch]]
+    *   See
+    *   [[com.digitalasset.canton.synchronizer.sequencer.block.RawLedgerBlock#baseSequencingTimeMicrosFromEpoch]]
     * @param tickTopologyAtLeastAt
-    *   See [[RawLedgerBlock.tickTopologyAtMicrosFromEpoch]]
+    *   See
+    *   [[com.digitalasset.canton.synchronizer.sequencer.block.RawLedgerBlock#tickTopologyAtMicrosFromEpoch]]
     */
   final case class MaybeTopologyTickChunk(
       blockHeight: Long,
@@ -261,7 +264,6 @@ class BlockUpdateGeneratorImpl(
           block.blockHeight,
           CantonTimestamp.assertFromLong(block.baseSequencingTimeMicrosFromEpoch),
           // Reorder block events according to BlockReorderer priority before constructing BlockEvents.
-          // (starting with pv35)
           reorderer.reordered(ledgerBlockEvents)(blockTraceContext),
           tickTopologyAtLeastAt =
             block.tickTopologyAtMicrosFromEpoch.map(CantonTimestamp.assertFromLong),
@@ -406,9 +408,15 @@ class BlockUpdateGeneratorImpl(
           //    If T2 becomes effective on the same block as T1, then it makes no difference.
           //    If T2 becomes effective on the next block from where T1 becomes effective, then it means T1's tick will get
           //    delayed by one block and that, in general, fewer ticks are potentially created, which is a desirable outcome.
+          //
+          // If the block orderer requests a tick at or after the effective time, that tick must be broadcast too:
+          //  otherwise it would advance `lastBlockTs` to or past the effective time with only the sequencers
+          //  observing it, and no later block would create a tick for this topology transaction.
           val latestTopologyTransactionEffectiveTime = ts + epsilon
           val blockEnd = state.lastChunkTs.immediateSuccessor.max(baseBlockSequencingTime)
-          state.lastBlockTs < latestTopologyTransactionEffectiveTime && latestTopologyTransactionEffectiveTime < blockEnd
+          state.lastBlockTs < latestTopologyTransactionEffectiveTime &&
+          (latestTopologyTransactionEffectiveTime < blockEnd ||
+            tickTopologyAtLeastAt.exists(latestTopologyTransactionEffectiveTime <= _))
         }
 
         getAnnouncedLsu match {

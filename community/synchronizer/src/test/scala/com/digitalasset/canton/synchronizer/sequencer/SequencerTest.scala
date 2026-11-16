@@ -4,26 +4,35 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.syntax.parallel.*
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{
-  BatchingConfig,
-  CachingConfigs,
-  DefaultProcessingTimeouts,
-  ProcessingTimeout,
-}
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
 import com.digitalasset.canton.crypto.{HashPurpose, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.messages.{EnvelopeContent, UnsignedProtocolMessage}
 import com.digitalasset.canton.protocol.v32
 import com.digitalasset.canton.resource.MemoryStorage
-import com.digitalasset.canton.sequencing.SequencedSerializedEvent
+import com.digitalasset.canton.sequencing.ConnectionSerializedEvent
 import com.digitalasset.canton.sequencing.client.RequestSigner
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.synchronizer.block.AsyncWriterParameters
+import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
-import com.digitalasset.canton.synchronizer.sequencer.store.{InMemorySequencerStore, SequencerStore}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerLsuConfig,
+  SequencerNodeParameters,
+  TimeAdvancingTopologyConfig,
+}
+import com.digitalasset.canton.synchronizer.sequencer.store.InMemorySequencerStore
+import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, ParticipantPermission}
@@ -31,11 +40,16 @@ import com.digitalasset.canton.version.{
   IgnoreInSerializationTestExhaustivenessCheck,
   RepresentativeProtocolVersion,
 }
-import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, config}
+import com.digitalasset.canton.{
+  BaseTest,
+  FailOnShutdown,
+  HasExecutionContext,
+  MockedNodeParameters,
+  config,
+}
 import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigFactory
 import org.apache.pekko.actor.ActorSystem
-import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
@@ -75,11 +89,9 @@ class SequencerTest
       None,
       Some(parallelExecutionContext),
     )
-    private val materializer = implicitly[Materializer]
     val store = new InMemorySequencerStore(
       protocolVersion = testedProtocolVersion,
       sequencerMember = topologyClientMember,
-      blockSequencerMode = true,
       loggerFactory = loggerFactory,
       timeouts = timeouts,
       sequencerMetrics = SequencerMetrics.noop("sequencer-test"),
@@ -114,56 +126,68 @@ class SequencerTest
 
     val metrics: SequencerMetrics = SequencerMetrics.noop("sequencer-test")
 
-    val dbConfig = SequencerConfig.Database()
-    val storage = new MemoryStorage(loggerFactory, timeouts)
-    val sequencerStore = SequencerStore(
-      storage,
-      testedProtocolVersion,
-      bufferedEventsMaxMemory = SequencerWriterConfig.DefaultBufferedEventsMaxMemory,
-      bufferedEventsPreloadBatchSize = SequencerWriterConfig.DefaultBufferedEventsPreloadBatchSize,
-      timeouts = timeouts,
-      loggerFactory = loggerFactory,
-      sequencerMember = topologyClientMember,
-      blockSequencerMode = false,
-      cachingConfigs = CachingConfigs(),
-      batchingConfig = BatchingConfig(),
-      sequencerMetrics = SequencerMetrics.noop("sequencer-test"),
+    private val nodeParameters = SequencerNodeParameters(
+      general = MockedNodeParameters.cantonNodeParameters(ProcessingTimeout()),
+      protocol = CantonNodeParameters.Protocol.Impl(
+        devVersionSupport = false,
+        alphaVersionSupport = false,
+        betaVersionSupport = true,
+        dontWarnOnDeprecatedPV = false,
+      ),
+      maxConfirmationRequestsBurstFactor = PositiveDouble.tryCreate(1.0),
+      asyncWriter = AsyncWriterParameters(),
+      timeAdvancingTopology = TimeAdvancingTopologyConfig(),
+      delayRequestsBeforeLsuTrafficInit = false,
+      lsuConfig = SequencerLsuConfig(),
     )
 
-    val sequencer: DatabaseSequencer =
-      DatabaseSequencer.single(
-        dbConfig,
-        None,
-        DefaultProcessingTimeouts.testing,
-        storage,
-        sequencerStore,
-        lsuSequencingBounds = None,
-        drSequencingTimeUpperBound = None,
-        clock,
-        topologyClientMember,
-        crypto,
-        metrics,
-        loggerFactory,
-      )(parallelExecutionContext, tracer, materializer)
+    private val factory = new BftSequencerFactory(
+      BftBlockOrdererConfig(),
+      PublicServerConfig(),
+      BlockSequencerConfig(),
+      health = None,
+      new MemoryStorage(loggerFactory, timeouts),
+      testedProtocolVersion,
+      topologyClientMember,
+      nodeParameters,
+      metrics,
+      new ExecutorServiceMetrics(NoOpMetricsFactory),
+      loggerFactory,
+      None,
+    )
+
+    val sequencer: Sequencer =
+      factory
+        .create(
+          topologyClientMember,
+          clock,
+          crypto,
+          FutureSupervisor.Noop,
+          SequencerTrafficConfig(),
+          lsuSequencingBounds = None,
+          drSequencingTimeUpperBound = None,
+          runtimeReady = FutureUnlessShutdown.unit,
+        )
+        .futureValueUS
 
     def readAsSeq(
         member: Member,
         limit: Int,
         startingTimestamp: Option[CantonTimestamp] = None,
-    ): FutureUnlessShutdown[Seq[SequencedSerializedEvent]] =
-      FutureUnlessShutdown.outcomeF(
-        valueOrFail(sequencer.readInternal(member, startingTimestamp).failOnShutdown)(
-          s"read for $member"
-        ) flatMap {
-          _.take(limit.toLong)
+    ): FutureUnlessShutdown[Seq[ConnectionSerializedEvent]] =
+      for {
+        source <- valueOrFail(sequencer.read(member, startingTimestamp))(s"read for $member")
+        events <- FutureUnlessShutdown.outcomeF(
+          source
+            .take(limit.toLong)
             .map {
               case Right(event) => event
-              case Left(err) => fail(s"The DatabaseSequencer does not emit tombstone-errors: $err")
+              case Left(err) => fail(s"The sequencer does not emit tombstone-errors: $err")
             }
             .idleTimeout(30.seconds)
             .runWith(Sink.seq)
-        }
-      )
+        )
+      } yield events
 
     def asDeliverEvent(
         event: DecompressedSequencedEvent[ClosedEnvelope]
@@ -175,6 +199,7 @@ class SequencerTest
 
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(
       SyncCloseable("sequencer", sequencer.close()),
+      SyncCloseable("factory", factory.close()),
       AsyncCloseable(
         "actorSystem",
         actorSystem.terminate(),
@@ -242,8 +267,7 @@ class SequencerTest
       for {
         _ <- valueOrFail(
           List(alice, bob, carole, topologyClientMember).parTraverse(
-            TestDatabaseSequencerWrapper(sequencer)
-              .registerMemberInternal(_, CantonTimestamp.Epoch)
+            sequencer.registerMemberInternal(_, CantonTimestamp.Epoch)
           )
         )(
           "member registration"

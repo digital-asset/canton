@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.indexer.parallel
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.Update.{
   SequencedCommandRejected,
+  SequencedReassignmentAccepted,
   SequencedTransactionAccepted,
   UnSequencedCommandRejected,
 }
@@ -26,6 +27,7 @@ final case class PostPublishData(
     publicationTime: CantonTimestamp,
     submissionId: Option[Ref.SubmissionId],
     accepted: Boolean,
+    isTransaction: Boolean,
     traceContext: TraceContext,
 )
 
@@ -40,6 +42,7 @@ object PostPublishData {
         publishSource: PublishSource,
         completionInfo: CompletionInfo,
         accepted: Boolean,
+        isTransaction: Boolean,
     ): PostPublishData =
       PostPublishData(
         submissionSynchronizerId = synchronizerId,
@@ -51,11 +54,12 @@ object PostPublishData {
         publicationTime = publicationTime,
         submissionId = completionInfo.submissionId,
         accepted = accepted,
+        isTransaction = isTransaction,
         traceContext = update.traceContext,
       )
 
     update match {
-      // please note: we pass into deduplication and inflight tracking only the transactions and not the reassignments at acceptance
+      // isTransaction keeps the reassignments out of command deduplication, see InFlightSubmissionTracker
       case u: SequencedTransactionAccepted =>
         u.completionInfoO.map(completionInfo =>
           from(
@@ -63,21 +67,33 @@ object PostPublishData {
             publishSource = PublishSource.Sequencer(u.recordTime),
             completionInfo = completionInfo,
             accepted = true,
+            isTransaction = true,
           )
         )
 
-      // but: we pass into deduplication and inflight tracking both the transactions and the reassignments upon rejection
-      case u: SequencedCommandRejected if u.isTransaction =>
+      case u: SequencedReassignmentAccepted =>
+        u.optCompletionInfo.map(completionInfo =>
+          from(
+            synchronizerId = u.synchronizerId,
+            publishSource = PublishSource.Sequencer(u.recordTime),
+            completionInfo = completionInfo,
+            accepted = true,
+            isTransaction = false,
+          )
+        )
+
+      case u: SequencedCommandRejected =>
         Some(
           from(
             synchronizerId = u.synchronizerId,
             publishSource = PublishSource.Sequencer(u.recordTime),
             completionInfo = u.completionInfo,
             accepted = false,
+            isTransaction = u.isTransaction,
           )
         )
 
-      case u: UnSequencedCommandRejected if u.isTransaction =>
+      case u: UnSequencedCommandRejected =>
         Some(
           from(
             synchronizerId = u.synchronizerId,
@@ -86,6 +102,7 @@ object PostPublishData {
             ),
             completionInfo = u.completionInfo,
             accepted = false,
+            isTransaction = u.isTransaction,
           )
         )
 

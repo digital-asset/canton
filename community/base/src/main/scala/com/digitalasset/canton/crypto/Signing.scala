@@ -329,25 +329,29 @@ object Signature
     )
   val noSignatures: NonEmpty[Seq[Signature]] = NonEmpty(Seq, noSignature)
 
+  // TODO(#34479): HasVersionedWrapper deserializers do not get a pvv.
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
       ProtocolVersion.v36,
-      supportedProtoVersion(v30.Signature)(fromProtoV30),
+      supportedProtoVersion(v30.Signature)(fromProtoV30(ProtocolVersionValidation.NoValidation, _)),
       _.toProtoV30,
     )
   )
 
   override def name: String = "signature"
 
-  def fromProtoV30(signatureP: v30.Signature): ParsingResult[Signature] =
+  def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      signatureP: v30.Signature,
+  ): ParsingResult[Signature] =
     for {
       format <- SignatureFormat.fromProtoEnum(signatureP.format, "format")
       signature = signatureP.signature
-      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
       longTermKeyId <- ProtoValidation.validateThen(
         signatureP.signedBy,
         "signed_by",
-        ProtocolVersionValidation.NoValidation,
+        pvv,
       )(Fingerprint.fromProtoPrimitive)
       // ensures compatibility with previous signature versions where the signing algorithm specification is not set
       signingAlgorithmSpecO <- SigningAlgorithmSpec.fromProtoEnumOption(
@@ -876,14 +880,14 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     * allowing all usages to maintain backward compatibility.
     */
   def fromProtoListWithDefaultV30(
-      usages: ProtoUnvalidatedSeq[v30.SigningKeyUsage]
+      pvv: ProtocolVersionValidation,
+      usages: ProtoUnvalidatedSeq[v30.SigningKeyUsage],
   ): ParsingResult[NonEmpty[Set[SigningKeyUsage]]] =
     ProtoValidation
-      // TODO(#34479): validate the crypto key usage once the negotiated pvv is threaded here.
       .validateLengthThen(
         usages,
         "usage",
-        ProtocolVersionValidation.NoValidation,
+        pvv,
         ProtoValidation.MaxCollectionSize,
       )(SigningKeyUsage.fromProtoEnumV30)
       .map(listUsages => NonEmpty.from(listUsages.flatten.toSet).getOrElse(SigningKeyUsage.All))
@@ -892,14 +896,14 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     * This is used for command requests, where `usage` is mandatory.
     */
   def fromProtoListWithoutDefaultV30(
-      usages: ProtoUnvalidatedSeq[v30.SigningKeyUsage]
+      pvv: ProtocolVersionValidation,
+      usages: ProtoUnvalidatedSeq[v30.SigningKeyUsage],
   ): ParsingResult[NonEmpty[Set[SigningKeyUsage]]] =
     ProtoValidation
-      // TODO(#34479): validate the crypto key usage once the negotiated pvv is threaded here.
       .validateLengthThen(
         usages,
         "usage",
-        ProtocolVersionValidation.NoValidation,
+        pvv,
         ProtoValidation.MaxCollectionSize,
       )(SigningKeyUsage.fromProtoEnumV30)
       .flatMap(listUsages =>
@@ -1513,10 +1517,14 @@ object SigningPublicKey
     with PrettyPrintingCompanion[SigningPublicKey] {
   override def name: String = "signing public key"
 
+  // TODO(#34479): HasVersionedWrapper deserializers do not get a pvv.
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
       ProtocolVersion.v36,
-      supportedProtoVersion(v30.SigningPublicKey)(fromProtoV30),
+      supportedProtoVersion(v30.SigningPublicKey)(
+        fromProtoV30(ProtocolVersionValidation.NoValidation, _)
+      ),
       _.toProtoV30,
     )
   )
@@ -1588,7 +1596,8 @@ object SigningPublicKey
   @nowarn("cat=deprecation")
   // If we end up deserializing from a proto version that does not have any usage, set it to `All`.
   def fromProtoV30(
-      publicKeyP: v30.SigningPublicKey
+      pvv: ProtocolVersionValidation,
+      publicKeyP: v30.SigningPublicKey,
   ): ParsingResult[SigningPublicKey] =
     for {
       format <- CryptoKeyFormat.fromProtoEnum(publicKeyP.format, "format")
@@ -1596,7 +1605,7 @@ object SigningPublicKey
         publicKeyP.keySpec,
         publicKeyP.scheme,
       )
-      usage <- SigningKeyUsage.fromProtoListWithDefaultV30(publicKeyP.usage)
+      usage <- SigningKeyUsage.fromProtoListWithDefaultV30(pvv, publicKeyP.usage)
       signingPublicKey <- SigningPublicKey
         .create(
           format,
@@ -1790,12 +1799,13 @@ object SigningPrivateKey extends HasVersionedMessageCompanionE[SigningPrivateKey
       validatedKey <- keyAfterMigration.validated
     } yield validatedKey
 
+  // TODO(#34479): pass the pvv once it is threaded into the private key parsers.
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   @nowarn("cat=deprecation")
   def fromProtoV30(
       privateKeyP: v30.SigningPrivateKey
   ): ParsingResult[SigningPrivateKey] =
     for {
-      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
       id <- ProtoValidation.validateThen(
         privateKeyP.id,
         "id",
@@ -1806,7 +1816,10 @@ object SigningPrivateKey extends HasVersionedMessageCompanionE[SigningPrivateKey
         privateKeyP.keySpec,
         privateKeyP.scheme,
       )
-      usage <- SigningKeyUsage.fromProtoListWithDefaultV30(privateKeyP.usage)
+      usage <- SigningKeyUsage.fromProtoListWithDefaultV30(
+        ProtocolVersionValidation.NoValidation,
+        privateKeyP.usage,
+      )
       key <- SigningPrivateKey
         .create(id, format, privateKeyP.privateKey, keySpec, usage)
         .leftMap(err =>
@@ -2428,7 +2441,7 @@ object SigningKeysWithThreshold {
         )
       keysNE <-
         ProtoConverter.parseRequiredNonEmpty(
-          SigningPublicKey.fromProtoV30,
+          SigningPublicKey.fromProtoV30(pvv, _),
           "keys",
           keysSeqP,
         )

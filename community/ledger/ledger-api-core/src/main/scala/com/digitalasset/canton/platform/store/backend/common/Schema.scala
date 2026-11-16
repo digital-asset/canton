@@ -175,6 +175,9 @@ private[backend] object AppendOnlySchema {
         "representative_package_id" -> fieldStrategy.int(stringInterning =>
           dbDto => stringInterning.packageId.unsafe.internalize(dbDto.representative_package_id)
         ),
+        "participant_event_category" -> fieldStrategy.smallintOptional(_ =>
+          _.participant_event_category
+        ),
 
         // contract related columns
         "internal_contract_id" -> fieldStrategy.bigint(_ => _.internal_contract_id),
@@ -233,6 +236,9 @@ private[backend] object AppendOnlySchema {
           _.target_synchronizer_id.map(stringInterning.synchronizerId.internalize)
         ),
         "reassignment_counter" -> fieldStrategy.bigintOptional(_ => _.reassignment_counter),
+        "participant_event_category" -> fieldStrategy.smallintOptional(_ =>
+          _.participant_event_category
+        ),
 
         // contract related columns
         "contract_id" -> fieldStrategy.bytea(_ => _.contract_id.toBytes.toByteArray),

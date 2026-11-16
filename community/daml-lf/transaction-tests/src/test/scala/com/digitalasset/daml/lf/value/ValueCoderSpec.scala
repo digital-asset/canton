@@ -173,6 +173,45 @@ class ValueCoderSpec
       }
     }
 
+    "do Uint256" in {
+      import java.math.BigInteger
+      val uint256Version = SerializationVersion.minUint256
+      val testCases = Table(
+        "uint256 value",
+        Uint256.ZERO,
+        Uint256.ONE,
+        Uint256.MaxValue,
+        Uint256.assertFromBigInteger(BigInteger.TWO.pow(128)),
+        Uint256.assertFromLong(42L),
+      )
+      forEvery(testCases) { u =>
+        val value = ValueUint256(u)
+        val encoded = assertRight(
+          ValueCoder
+            .encodeValue(
+              valueVersion = uint256Version,
+              v0 = value,
+            )
+        )
+        val decoded = ValueCoder.decodeValue(
+          version = uint256Version,
+          bytes = encoded,
+        )
+        decoded shouldBe Right(value)
+      }
+    }
+
+    "reject Uint256 on pre-uint256 versions" in {
+      import scala.Ordering.Implicits.*
+      val preVersions = SerializationVersion.All.filter(_ < SerializationVersion.minUint256)
+      whenever(preVersions.nonEmpty) {
+        val value = ValueUint256(Uint256.ONE)
+        preVersions.foreach { v =>
+          ValueCoder.encodeValue(valueVersion = v, v0 = value) shouldBe a[Left[?, ?]]
+        }
+      }
+    }
+
     "do Text" in {
       forAll("Text (String) invariant", SerializationVersionGen())((t, v) =>
         testRoundTrip(ValueText(t), v)

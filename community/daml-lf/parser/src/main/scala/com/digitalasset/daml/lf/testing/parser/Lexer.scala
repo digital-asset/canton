@@ -91,6 +91,7 @@ private[parser] object Lexer extends RegexParsers {
       """\"([^\\\"]|\\n|\\r|\\\"|\\\'|\\\\)*\"""".r >> toText |
       """\d+-\d+-\d+T\d+:\d+:\d+(\.\d+)?Z""".r >> toTimestamp |
       """\d{4}-\d{2}-\d{2}""".r >> toDate |
+      """0x[0-9a-fA-F]+""".r >> toUint256 |
       """-?\d+\.\d*""".r >> toNumeric |
       """-?\d+""".r >> toNumber
 
@@ -123,6 +124,16 @@ private[parser] object Lexer extends RegexParsers {
         case Right(x) => Success(Numeric(x), in)
         case Left(_) => Error(s"cannot interpret $s as a Numeric", in)
       }
+
+  private def toUint256(s: String): Parser[Uint256] =
+    (in: Input) => {
+      val hex = s.drop(2) // drop "0x" prefix
+      val bi = new java.math.BigInteger(hex, 16)
+      data.Uint256.fromBigInteger(bi) match {
+        case Right(x) => Success(Uint256(x), in)
+        case Left(err) => Error(s"cannot interpret $s as a Uint256: $err", in)
+      }
+    }
 
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
   private def toNumber(s: String): Parser[Number] =

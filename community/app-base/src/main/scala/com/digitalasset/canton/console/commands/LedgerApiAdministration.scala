@@ -6,14 +6,7 @@ package com.digitalasset.canton.console.commands
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.daml.jwt.{
-  AuthServiceJWTCodec,
-  JwksUrl,
-  Jwt,
-  JwtDecoder,
-  PartyJWTPayload,
-  StandardJWTPayload,
-}
+import com.daml.jwt.{AuthServiceJWTCodec, JwksUrl, Jwt, JwtDecoder}
 import com.daml.ledger.api.v2.admin.command_inspection_service.CommandState
 import com.daml.ledger.api.v2.admin.package_management_service.{
   PackageDetails,
@@ -163,11 +156,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
 
   private[canton] lazy val userId: String = ledgerApiToken
     .flatMap(encodedToken => JwtDecoder.decode(Jwt(encodedToken)).toOption)
-    .flatMap(decodedToken => AuthServiceJWTCodec.readFromString(decodedToken.payload).toOption)
-    .map {
-      case s: StandardJWTPayload => s.userId
-      case s: PartyJWTPayload => s.userId
-    }
+    .flatMap(decodedToken => AuthServiceJWTCodec.guessUserId(decodedToken.payload))
     .getOrElse(LedgerApiCommands.defaultUserId)
 
   private def eventFormatAllParties(includeCreatedEventBlob: Boolean = false): Option[EventFormat] =

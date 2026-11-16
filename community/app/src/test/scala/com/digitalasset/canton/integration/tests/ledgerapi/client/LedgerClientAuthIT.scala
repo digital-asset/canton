@@ -4,12 +4,10 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.client
 
 import com.daml.grpc.GrpcException
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
-import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
-  AuthInterceptorSuppressionRule,
-  AuthStartupConfigSuppressionRule,
-}
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthInterceptorSuppressionRule
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.{
   CantonFixture,
   CreatesParties,
@@ -41,11 +39,7 @@ final class LedgerClientAuthIT extends CantonFixture with CreatesParties with Cr
   private val someUser = UUID.randomUUID.toString
 
   override def beforeAll(): Unit = {
-    // TODO (i#33090): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
-    //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
-    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
-      super.beforeAll()
-    }
+    super.beforeAll()
     val token = Some(toHeader(adminToken))
     createPrerequisiteParties(token, List(someParty))(
       directExecutionContext

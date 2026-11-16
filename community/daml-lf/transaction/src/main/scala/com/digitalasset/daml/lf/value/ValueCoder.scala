@@ -222,7 +222,6 @@ class ValueCoder(allowNullCharacters: Boolean) {
             identity,
           )
 
-      @scala.annotation.nowarn("cat=unused")
       def assertSince(minVersion: SerializationVersion, description: => String) =
         if (version < minVersion)
           throw Err(s"$description is not supported by serialization version $version")
@@ -263,6 +262,11 @@ class ValueCoder(allowNullCharacters: Boolean) {
               Numeric
                 .fromString(protoValue.getNumeric)
                 .fold(e => throw Err("error decoding numeric: " + e), ValueNumeric.apply)
+            case proto.Value.SumCase.UINT256 =>
+              assertSince(SerializationVersion.minUint256, "Uint256 values")
+              Uint256
+                .fromByteString(protoValue.getUint256)
+                .fold(e => throw Err("error decoding uint256: " + e), ValueUint256.apply)
             case proto.Value.SumCase.PARTY =>
               val party = Party.fromString(protoValue.getParty)
               party.fold(e => throw Err("error decoding party: " + e), ValueParty.apply)
@@ -362,7 +366,6 @@ class ValueCoder(allowNullCharacters: Boolean) {
     ): Either[EncodeError, ByteString] = {
       case class Err(msg: String) extends Throwable(null, null, true, false)
 
-      @scala.annotation.nowarn("cat=unused")
       def assertSince(minVersion: SerializationVersion, description: => String) =
         if (valueVersion < minVersion)
           throw Err(s"$description is not supported by value version $valueVersion")
@@ -391,6 +394,9 @@ class ValueCoder(allowNullCharacters: Boolean) {
               builder.setInt64(i).build()
             case ValueNumeric(d) =>
               builder.setNumeric(Numeric.toString(d)).build()
+            case ValueUint256(u) =>
+              assertSince(SerializationVersion.minUint256, "Uint256 values")
+              builder.setUint256(Uint256.toByteString(u)).build()
             case ValueText(t) =>
               builder.setText(ensuresNoNullCharacters(t)).build()
             case ValueParty(p) =>

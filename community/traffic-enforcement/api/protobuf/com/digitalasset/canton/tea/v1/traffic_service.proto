@@ -11,7 +11,8 @@ import "google/protobuf/timestamp.proto";
 service TrafficService {
   // Get account state for a given account ID.
   // Permissioned to users with CanDebitTrafficFrom for the account ID, CanDebitTrafficFromAnyAccount,
-  // ActAsAnyParty, ExecuteAsAnyParty, or ActAs or ExecuteAs rights for the party with the same ID.
+  // ActAsAnyParty, ExecuteAsAnyParty, ActAs or ExecuteAs rights for the party with the same ID,
+  // or Ledger API admin users.
   rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
 
   // Update account state for a given account ID.
@@ -31,7 +32,8 @@ service TrafficService {
   // List accounts and their details.
   // Accounts that were never credited or debited are not listed.
   //
-  // Permissioned to users holding CanActAsAnyParty, CanExecuteAsAnyParty or CanDebitTrafficFromAnyAccount rights.
+  // Permissioned to users holding CanActAsAnyParty, CanExecuteAsAnyParty or CanDebitTrafficFromAnyAccount rights,
+  // or Ledger API admin users.
   rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
 
   // Deprecated since Canton 3.7, disabled by default since Canton 3.8 and removed in Canton 3.9.

@@ -91,6 +91,10 @@ trait PersistentStoreSpecBase extends BaseTest with BeforeAndAfterEach with Befo
         serverRole = ServerRole.Testing(getClass),
         metrics = LedgerApiServerMetrics.ForTesting,
         disableMergeAndHashJoins = true,
+        dbQueueMetricsOpt = None,
+        logQueryCostOpt = None,
+        dbParametersConfigOpt = None,
+        schedulerOpt = None,
         loggerFactory = loggerFactory,
       )
       .acquire()

@@ -3,6 +3,9 @@
 
 package com.digitalasset.canton.topology.store.memory
 
+import cats.data.EitherT
+import cats.syntax.apply.*
+import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import com.digitalasset.canton.config.CantonRequireTypes.{String185, String300}
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -14,10 +17,14 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.*
-import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
+import com.digitalasset.canton.topology.store.StoredTopologyTransaction.{
+  GenericStoredTopologyTransaction,
+  PositiveStoredTopologyTransaction,
+}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.{
   GenericStoredTopologyTransactions,
   NegativeStoredTopologyTransactions,
@@ -38,7 +45,7 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
   TxHash,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, Mutex, PekkoUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, Mutex, PekkoUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.digitalasset.nonempty.NonEmptyReturningOps.`NE Iterable Ops`
@@ -804,7 +811,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
 
   override def findEffectiveStateChanges(
       fromEffectiveInclusive: CantonTimestamp,
-      filterTypes: Option[Seq[TopologyMapping.Code]],
+      filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]],
       onlyAtEffective: Boolean,
   )(implicit
       traceContext: TraceContext
@@ -915,4 +922,121 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     }
 
   }
+
+  override def findEffectiveStateChangesAtTopologyInit(
+      fromExclusive: EffectiveTime,
+      toInclusive: EffectiveTime,
+      filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]],
+  )(implicit traceContext: TraceContext): Source[PositiveStoredTopologyTransaction, NotUsed] = {
+    val result = lock.exclusive {
+      topologyTransactionStore.view
+        .filter(tx =>
+          tx.from > fromExclusive && tx.from <= toInclusive &&
+            tx.until.forall(
+              _ > toInclusive
+            ) && tx.rejected.isEmpty && !tx.transaction.isProposal && tx.operation == TopologyChangeOp.Replace &&
+            filterTypes.forall(_.contains(tx.mapping.code))
+        )
+        .flatMap(e =>
+          StoredTopologyTransaction(e.sequenced, e.from, e.until, e.transaction, e.rejected)
+            .selectOp[TopologyChangeOp.Replace]
+        )
+        .toSeq
+    }
+    Source(result)
+  }
+
+  override def checkConsistency(
+      synchronizerParameters: StaticSynchronizerParameters,
+      ignoreLsuPsidCheck: Boolean,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
+    for {
+      genesisState <- EitherT.right(
+        filteredState(
+          lock.exclusive(topologyTransactionStore.toSeq),
+          _ => true,
+        )
+      )
+      psidO = storeId.forSynchronizer.map(psid =>
+        // preparation for the store to become logical
+        PhysicalSynchronizerId(psid.logical, synchronizerParameters)
+      )
+      expectedUpgradePsidO = genesisState
+        .collectOfMapping[LsuAnnouncement]
+        .filter(entry => !entry.transaction.isProposal)
+        .collectLatestByUniqueKey
+        .collectOfType[
+          TopologyChangeOp.Replace
+        ] // must happen after collectLatestByUniqueKey, not to miss a possible LSU cancellation
+        .result
+        .map(_.mapping.successorSynchronizerId)
+        .headOption
+
+      // If there's an announcement in the topology snapshot, we expect that the sequencer being initialized is the successor
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        (psidO, expectedUpgradePsidO).tupled.traverse_ { case (actualPsid, expectedUpgradePsid) =>
+          Either.cond(
+            ignoreLsuPsidCheck || expectedUpgradePsid == actualPsid.opaque,
+            (),
+            TopologyManagerError.InconsistentTopologySnapshot.UnexpectedPhysicalSynchronizerId(
+              actualPsid,
+              expectedUpgradePsid,
+            ),
+          )
+        }
+      )
+
+      // check that the snapshot is consistent with respect to effective proposals and effective fully authorized transactions
+      multipleEffectivePerUniqueKey = genesisState.result
+        .groupBy(_.transaction.mapping.uniqueKey)
+        // only retain effective transactions
+        .values
+        .toSeq
+        .flatMap { topoTxs =>
+          val (proposals, fullyAuthorized) =
+            topoTxs.filter(tx => tx.validUntil.isEmpty).partition(_.transaction.isProposal)
+
+          val maxFullyAuthorizedSerialO = fullyAuthorized.view.map(_.serial).maxOption
+
+          val allProposalsLessThanOrEqualMaxSerial = {
+            val unexpectedEffectiveProposals = maxFullyAuthorizedSerialO.toList.flatMap {
+              maxFullyAuthorizedSerial => proposals.filter(_.serial <= maxFullyAuthorizedSerial)
+            }
+            if (unexpectedEffectiveProposals.nonEmpty) {
+              Seq(
+                "effective proposals with serial less than or equal to the highest fully authorized transaction" -> unexpectedEffectiveProposals
+              )
+            } else Seq.empty
+          }
+
+          val multipleEffectiveProposalsWithDifferentSerials =
+            if (proposals.map(_.serial).distinct.sizeIs > 1) {
+              Seq("multiple effective proposals with different serials" -> proposals)
+            } else Seq.empty
+
+          val multipleEffectiveProposalsForSameTransactionHash =
+            proposals
+              .groupBy(_.hash)
+              .filter(_._2.sizeIs > 1)
+              .values
+              .map(
+                "multiple effective proposals for the same transaction hash" -> _
+              )
+
+          val multipleFullyAuthorized = if (fullyAuthorized.sizeIs > 1) {
+            Seq("concurrently effective transactions with the same unique key" -> fullyAuthorized)
+          } else Seq.empty
+
+          multipleFullyAuthorized ++ multipleEffectiveProposalsForSameTransactionHash ++ allProposalsLessThanOrEqualMaxSerial ++ multipleEffectiveProposalsWithDifferentSerials
+        }
+
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        multipleEffectivePerUniqueKey.isEmpty,
+        TopologyManagerError.InconsistentTopologySnapshot.MultipleEffectiveMappingsPerUniqueKey(
+          multipleEffectivePerUniqueKey
+        ): TopologyManagerError,
+      )
+    } yield ()
 }

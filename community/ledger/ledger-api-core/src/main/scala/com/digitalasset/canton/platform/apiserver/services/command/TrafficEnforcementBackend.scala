@@ -11,9 +11,15 @@ import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorServic
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveDouble}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.ChangeId
 import com.digitalasset.canton.ledger.participant.state.SyncService.CostEstimateWithReassignments
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  LifeCycle,
+  UnlessShutdown,
+}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.*
 import com.digitalasset.canton.networking.grpc.GrpcError
@@ -22,7 +28,11 @@ import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforc
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
 import com.digitalasset.canton.tea.v1.RegisterSubmissionRequest.ChargedAccount
-import com.digitalasset.canton.tea.v1.{GetAccountRequest, RegisterSubmissionRequest}
+import com.digitalasset.canton.tea.v1.{
+  GetAccountRequest,
+  RegisterSubmissionRequest,
+  ReleaseSubmissionRequest,
+}
 import com.digitalasset.canton.tracing.Spanning.SpanWrapper
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.ShowUtil.*
@@ -30,19 +40,31 @@ import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.ExecutionContext
+import scala.util.control.NonFatal
 
 trait TrafficEnforcementBackend {
 
   /** Stores the account to charge and checks if its balance covers `trafficCost` when enforced and
     * `checkBalance` is set. Called just before sending the confirmation request. TEA errors return
     * as `Left`, not failed futures.
+    *
+    * Returns once TEA has stored the correlation, so the caller can release it. Returns `None` if
+    * we let the submission through after a TEA failure, or if the response has no valid
+    * `registered_at`. In either case, we have no correlation to release.
     */
   def registerSubmission(
       info: SubmissionAccountingInfo,
       trafficCost: Long,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, RpcError, Unit]
+  ): EitherT[FutureUnlessShutdown, RpcError, Option[CantonTimestamp]]
+
+  /** Deletes the correlation stored at `registeredAt`. We only log a warning on failure. */
+  def releaseSubmission(
+      changeId: ChangeId,
+      submissionId: Ref.SubmissionId,
+      registeredAt: CantonTimestamp,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
   /** Checks if the selected account's balance covers the total estimated cost, scaled using
     * [[scaleEstimate]], without storing anything. Used during interactive preparation and before
@@ -114,7 +136,7 @@ class TrafficEnforcementBackendImpl(
       trafficCost: Long,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, RpcError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, RpcError, Option[CantonTimestamp]] = {
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)
     metrics.enforcementCheckDuration.timeEitherFUSWithLabels(
@@ -138,7 +160,7 @@ class TrafficEnforcementBackendImpl(
   )(implicit
       traceContext: TraceContext,
       errorLoggingContext: ErrorLoggingContext,
-  ): EitherT[FutureUnlessShutdown, RpcError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, RpcError, Option[CantonTimestamp]] = {
     logger.debug(
       s"Registering submission ${info.submissionId} with ${info.accounting.selection}, checkBalance: ${info.accounting.checkBalance}, trafficCost: $trafficCost"
     )
@@ -147,7 +169,7 @@ class TrafficEnforcementBackendImpl(
         requiredBalance: Option[Long],
         outcome: String,
         reason: Option[String],
-    ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+    ): EitherT[FutureUnlessShutdown, RpcError, Option[CantonTimestamp]] =
       sendRegistration(
         RegisterSubmissionRequest(
           changeIdHash = info.changeId.hash.toHexString,
@@ -159,7 +181,9 @@ class TrafficEnforcementBackendImpl(
         reason,
       )
 
-    def forAccount(accountId: String): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+    def forAccount(
+        accountId: String
+    ): EitherT[FutureUnlessShutdown, RpcError, Option[CantonTimestamp]] =
       if (enforceCostOnSubmissions)
         send(
           Some(accountId),
@@ -189,7 +213,7 @@ class TrafficEnforcementBackendImpl(
           Some(TrafficEnforcementOutcome.AdminParty),
         )
       case TrafficAccountSelection.NoAccount if rejectMultiPartySubmissions =>
-        EitherT.leftT[FutureUnlessShutdown, Unit](
+        EitherT.leftT[FutureUnlessShutdown, Option[CantonTimestamp]](
           rejectNoAccount(
             span,
             show"Traffic enforcement rejected submission with non-singleton actAs parties: ${info.changeId.actAs.toSeq}",
@@ -216,11 +240,12 @@ class TrafficEnforcementBackendImpl(
   )(implicit
       traceContext: TraceContext,
       errorLoggingContext: ErrorLoggingContext,
-  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+  ): EitherT[FutureUnlessShutdown, RpcError, Option[CantonTimestamp]] =
     EitherT(trafficServiceClient.registerSubmission(request).value.map {
-      case Right(_) =>
+      case Right(response) =>
         recordOutcome(span, successOutcome, successReason)
-        Right(())
+        // Without a valid time we still succeed, but can't release the correlation later.
+        Right(response.registeredAt.flatMap(CantonTimestamp.fromProtoTimestamp(_).toOption))
       case Left(grpcError) => registrationFailure(request, grpcError, span)
     })
 
@@ -231,10 +256,10 @@ class TrafficEnforcementBackendImpl(
   )(implicit
       traceContext: TraceContext,
       errorLoggingContext: ErrorLoggingContext,
-  ): Either[RpcError, Unit] = {
+  ): Either[RpcError, Option[CantonTimestamp]] = {
     val teaErrorId = grpcError.decodedCantonError.map(_.code.id)
 
-    def reject(outcome: String, reason: String): Either[RpcError, Unit] = {
+    def reject(outcome: String, reason: String): Either[RpcError, Option[CantonTimestamp]] = {
       recordOutcome(span, outcome, Some(reason))
       Left(RichTrafficServiceClient.normalizeTeaErrorToRpcError(grpcError))
     }
@@ -251,7 +276,7 @@ class TrafficEnforcementBackendImpl(
           s"Failed to store the no-account marker for submission ${request.submissionId};" +
             " allowing the submission to proceed without it.",
         )
-        Right(())
+        Right(None)
       case Some(_) if teaErrorId.contains(TrafficEnforcementErrors.InsufficientBalance.id) =>
         reject(TrafficEnforcementOutcome.Rejected, TrafficEnforcementOutcome.InsufficientBalance)
       case Some(accountId)
@@ -266,11 +291,38 @@ class TrafficEnforcementBackendImpl(
           s"Traffic enforcement submission registration failed for account $accountId;" +
             " degrading and allowing the submission to proceed without a balance check.",
         )
-        Right(())
+        Right(None)
       case Some(_) =>
         span.recordException(grpcError.asRuntimeException)
         reject(TrafficEnforcementOutcome.Failed, TrafficEnforcementOutcome.LookupFailed)
     }
+  }
+
+  override def releaseSubmission(
+      changeId: ChangeId,
+      submissionId: Ref.SubmissionId,
+      registeredAt: CantonTimestamp,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    val failureMessage =
+      s"Failed to release the traffic correlation of submission $submissionId; it stays until pruned."
+    trafficServiceClient
+      .releaseSubmission(
+        ReleaseSubmissionRequest(
+          changeIdHash = changeId.hash.toHexString,
+          submissionId = submissionId,
+          registeredAt = Some(registeredAt.toProtoTimestamp),
+        )
+      )
+      .value
+      .map {
+        case Right(_) => ()
+        case Left(grpcError) => logger.warn(s"$failureMessage\n$grpcError")
+      }
+      // We catch release failures so the caller still gets the original send error.
+      .recover { case NonFatal(e) =>
+        logger.warn(failureMessage, e)
+        UnlessShutdown.unit
+      }
   }
 
   private def degrade(
@@ -471,6 +523,13 @@ object TrafficEnforcementBackend {
       case _: GrpcError.GrpcRequestRefusedAlreadyExists => false
     })
 
+  /** A submission correlation stored by TEA that the caller can release. */
+  final case class TrafficRegistration(
+      changeId: ChangeId,
+      submissionId: Ref.SubmissionId,
+      registeredAt: CantonTimestamp,
+  )
+
   def registerIfEnabled(
       backendO: Option[TrafficEnforcementBackend],
       changeId: ChangeId,
@@ -480,14 +539,18 @@ object TrafficEnforcementBackend {
   )(implicit
       errorLoggingContext: ErrorLoggingContext,
       ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
-    backendO.fold(EitherT.rightT[FutureUnlessShutdown, RpcError](())) { backend =>
+  ): EitherT[FutureUnlessShutdown, RpcError, Option[TrafficRegistration]] =
+    backendO.fold(
+      EitherT.rightT[FutureUnlessShutdown, RpcError](Option.empty[TrafficRegistration])
+    ) { backend =>
       for {
         info <- EitherT.fromEither[FutureUnlessShutdown](
           SubmissionAccountingInfo.create(changeId, submissionId, accounting).leftWiden[RpcError]
         )
-        _ <- backend.registerSubmission(info, trafficCost)(errorLoggingContext.traceContext)
-      } yield ()
+        registeredAt <- backend.registerSubmission(info, trafficCost)(
+          errorLoggingContext.traceContext
+        )
+      } yield registeredAt.map(TrafficRegistration(info.changeId, info.submissionId, _))
     }
 
   def apply(

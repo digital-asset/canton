@@ -101,6 +101,9 @@ object GenValue {
   final case class Numeric(value: data.Numeric) extends CidLessAtom with CidContainer[Numeric] {
     override def nonVerboseWithoutTrailingNones: this.type = this
   }
+  final case class Uint256(value: data.Uint256) extends CidLessAtom with CidContainer[Uint256] {
+    override def nonVerboseWithoutTrailingNones: this.type = this
+  }
   // Note that Text are assume to be UTF8
   final case class Text(value: String) extends CidLessAtom with CidContainer[Text] {
     override def nonVerboseWithoutTrailingNones: this.type = this
@@ -248,6 +251,9 @@ object Value {
   type ValueNumeric = GenValue.Numeric
   val ValueNumeric: GenValue.Numeric.type = GenValue.Numeric
 
+  type ValueUint256 = GenValue.Uint256
+  val ValueUint256: GenValue.Uint256.type = GenValue.Uint256
+
   type ValueText = GenValue.Text
   val ValueText: GenValue.Text.type = GenValue.Text
 
@@ -301,6 +307,7 @@ object Value {
       case v: ValueContractId => Right(v)
       case v: ValueInt64 => Right(v)
       case v: ValueNumeric => Right(v)
+      case v: ValueUint256 => Right(v)
       case v: ValueText => Right(v)
       case v: ValueTimestamp => Right(v)
       case v: ValueDate => Right(v)
@@ -309,6 +316,19 @@ object Value {
       case v: ValueUnit => Right(v)
     }
   }
+
+  private[lf] def hasUint256(value: Value): Boolean =
+    value match {
+      case _: ValueUint256 => true
+      case ValueRecord(_, fields) => fields.iterator.exists(field => hasUint256(field._2))
+      case ValueVariant(_, _, arg) => hasUint256(arg)
+      case ValueList(elems) => elems.iterator.exists(hasUint256)
+      case ValueOptional(opt) => opt.exists(hasUint256)
+      case ValueTextMap(entries) => entries.iterator.exists(entry => hasUint256(entry._2))
+      case ValueGenMap(entries) =>
+        entries.iterator.exists { case (k, v) => hasUint256(k) || hasUint256(v) }
+      case _ => false
+    }
 
   class ValueArithmeticError(stablePackages: StablePackages) {
     val tyCon: TypeConId = stablePackages.ArithmeticError

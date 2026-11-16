@@ -1,19 +1,43 @@
 name: Setup GCP credentials for GAR
-description: Prepare a temporary Google credentials file for GAR publishing
+description: Authenticate to GCP with workload identity for publishing to da-images, and export the credentials file for sbt
 
-inputs:
-  gac_json:
-    description: GCP service account key JSON for GAR
-    required: true
+outputs:
+  access_token:
+    description: Short-lived access token for Google Artifact Registry
+    value: ${{ steps.auth.outputs.access_token }}
 
 runs:
   using: composite
   steps:
-    - name: Prepare GAR credentials file
+    - name: Check the repository has a workload identity provider
+      if: ${{ github.repository != 'DACH-NY/canton' && github.repository != 'digital-asset/canton' }}
+      shell: bash
+      run: |
+        echo "::error::No workload identity provider for ${GITHUB_REPOSITORY}, add one in setup_gcp_gar"
+        exit 1
+
+    # Each repo has its own provider and service account. The calling job needs `id-token: write`.
+    - name: Authenticate to Google Cloud with workload identity
+      id: auth
+      uses: google-github-actions/auth@v3
+      with:
+        token_format: access_token
+        workload_identity_provider: >-
+          ${{
+            github.repository == 'DACH-NY/canton' && 'projects/794775982379/locations/global/workloadIdentityPools/github-actions/providers/dny-provider' ||
+            github.repository == 'digital-asset/canton' && 'projects/794775982379/locations/global/workloadIdentityPools/github-actions/providers/da-provider' ||
+            ''
+          }}
+        service_account: >-
+          ${{
+            github.repository == 'DACH-NY/canton' && 'gh-dny-canton@da-images.iam.gserviceaccount.com' ||
+            github.repository == 'digital-asset/canton' && 'gh-da-canton@da-images.iam.gserviceaccount.com' ||
+            ''
+          }}
+
+    - name: Export credentials file for sbt
       shell: bash
       env:
-        GAC_JSON: ${{ inputs.gac_json }}
+        CREDENTIALS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
       run: |
-        key=$(mktemp)
-        printf '%s' "$GAC_JSON" > "$key"
-        echo "GOOGLE_CREDENTIALS_FILE=$key" >> "$GITHUB_ENV"
+        echo "GOOGLE_CREDENTIALS_FILE=$CREDENTIALS_FILE" >> "$GITHUB_ENV"

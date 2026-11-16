@@ -71,6 +71,12 @@ object ComposableQuery {
     (stringParts.toSeq, valueParts.toSeq)
   }
 
+  implicit class OptionCompositeSqlOps(private val value: Option[CompositeSql]) extends AnyVal {
+
+    /** The SQL if present, or empty SQL otherwise. */
+    def foldToEmptyQuery: CompositeSql = value.getOrElse(cSQL"")
+  }
+
   implicit class CompositConcatenationOps(val composits: Iterable[CompositeSql]) extends AnyVal {
     def mkComposite(start: String, sep: String, end: String): CompositeSql = {
       require(composits.nonEmpty, "composits must be non-empty")

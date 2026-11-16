@@ -11,7 +11,6 @@ import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessage
 import com.digitalasset.canton.protocol.{SynchronizerLimits, v32}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.TopologyTransactionDeserializationContext
-import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
@@ -79,13 +78,9 @@ object EnvelopeContent
             messageP,
           )
         case Content.UnassignmentMediatorMessage(messageP) =>
-          UnassignmentMediatorMessage.fromProtoV30(
-            (hashOps, Source(pvv))
-          )(messageP)
+          UnassignmentMediatorMessage.fromProtoV30(pvv, hashOps, messageP)
         case Content.AssignmentMediatorMessage(messageP) =>
-          AssignmentMediatorMessage.fromProtoV30(
-            (hashOps, Target(pvv))
-          )(messageP)
+          AssignmentMediatorMessage.fromProtoV30(pvv, hashOps, messageP)
         case Content.RootHashMessage(messageP) =>
           RootHashMessage.fromProtoV30(
             pvv,

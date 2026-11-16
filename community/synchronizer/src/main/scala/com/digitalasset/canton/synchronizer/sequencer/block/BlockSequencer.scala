@@ -62,12 +62,12 @@ import com.digitalasset.canton.sequencing.traffic.{
 }
 import com.digitalasset.canton.sequencing.{GroupAddressResolver, GrpcSequencerConnection}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
+import com.digitalasset.canton.synchronizer.block.BlockSequencerStateManagerBase
 import com.digitalasset.canton.synchronizer.block.data.SequencerBlockStore
 import com.digitalasset.canton.synchronizer.block.update.{
   BlockProcessingParameters,
   BlockUpdateGeneratorImpl,
 }
-import com.digitalasset.canton.synchronizer.block.{BlockSequencerStateManagerBase, RawLedgerBlock}
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.PruningError.UnsafePruningPoint
@@ -164,7 +164,6 @@ class BlockSequencer(
       SequencerWriterStoreFactory.singleInstance,
       dbSequencerStore,
       blockSequencerConfig.toDatabaseSequencerConfig,
-      None,
       TotalNodeCountValues.SingleSequencerTotalNodeCount,
       new LocalEventSignaller[SequencerMemberId, Unit](
         "member",
@@ -172,17 +171,14 @@ class BlockSequencer(
         loggerFactory,
       ),
       None,
-      None,
       parameters.processingTimeouts,
       storage,
-      None,
       health,
       clock,
       sequencerId,
       cryptoApi,
       metrics,
       loggerFactory,
-      blockSequencerMode = true,
       blockProcessingParameters.lsuSequencingBounds,
       parameters.drSequencingTimeUpperBound,
       rateLimitManagerO = Some(blockRateLimitManager),
@@ -338,7 +334,7 @@ class BlockSequencer(
         }
       }
 
-    val driverSource = {
+    val blockOrdererSource = {
       val step1 = Source
         .futureSource(runtimeReady.unwrap.map {
           case UnlessShutdown.AbortedDueToShutdown =>
@@ -372,7 +368,7 @@ class BlockSequencer(
         }
     }
     PekkoUtil.runSupervised(
-      driverSource.toMat(Sink.ignore)(Keep.both),
+      blockOrdererSource.toMat(Sink.ignore)(Keep.both),
       errorLogMessagePrefix = "Fatally failed to handle state changes",
     )
   }
@@ -785,6 +781,7 @@ class BlockSequencer(
           trafficParams.readVsWriteScalingFactor,
           groupToMembers,
           trafficParams.baseEventCost,
+          protocolVersion,
         )
       } yield eventCost
     }

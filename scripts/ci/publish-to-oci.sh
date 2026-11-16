@@ -65,7 +65,9 @@ artifact_path[open-source]="lib/canton-open-source-${current_version}.jar"
 _print_header "Publish ${c_yellow}canton${c_reset} to OCI registry"
 # Hiding the cursor.
 printf '\e[?25l'
-if [[ "x$CI" != "x" ]]; then
+# Log in with the service account key when one is given (CircleCI). On GHA the workflow logs Docker in
+# with workload identity before calling this script.
+if [[ "x$CI" != "x" && -n "${GAC_JSON:-}" ]]; then
 # Authorize in GCP
 info_step "Login ${c_lyellow}GCP ${c_lwhite}${OCI_REGISTRY}${c_reset}"
 # Hide login output, print only login failed

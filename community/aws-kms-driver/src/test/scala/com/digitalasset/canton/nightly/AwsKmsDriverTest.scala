@@ -7,6 +7,7 @@ import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.KmsConfig
+import com.digitalasset.canton.crypto.kms.Kms
 import com.digitalasset.canton.crypto.kms.aws.AwsKms
 import com.digitalasset.canton.crypto.kms.driver.api.v1.{
   EncryptionKeySpec,
@@ -32,6 +33,8 @@ class AwsKmsDriverInternalTest
     with HasPredefinedAwsKmsKeys {
 
   override type KmsType = DriverKms
+
+  override protected def supportedSchemes: Kms.SupportedSchemes = defaultKms
 
   override protected def defaultKmsConfig: KmsConfig.Driver = {
     import pureconfig.generic.auto.*

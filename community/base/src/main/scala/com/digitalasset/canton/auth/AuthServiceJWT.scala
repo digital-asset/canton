@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.auth
 
-import com.daml.jwt.AuthServiceJWTCodec.AuthServiceJWTPayloadCodec
 import com.daml.jwt.{
   AuthServiceJWTCodec,
   AuthServiceJWTPayload,
@@ -12,7 +11,9 @@ import com.daml.jwt.{
   JwtVerifierBase,
   PartyJWTPayload,
   StandardJWTPayload,
+  StandardJWTTokenFormat,
 }
+import com.digitalasset.canton.config.DeprecatedFeaturesConfig
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import io.circe.parser
@@ -33,13 +34,17 @@ final case class AuthorizedUser(
 )
 
 /** An AuthService that reads a JWT token from a `Authorization: Bearer` HTTP header. The token is
-  * expected to use the format as defined in [[com.daml.jwt.AuthServiceJWTPayload]]:
+  * expected to use the format as defined in [[com.daml.jwt.AuthServiceJWTPayload]].
+  *
+  * @param enableScopeOnlyJwt
+  *   whether scope-only tokens (a scope but no audience) are accepted, see
+  *   [[com.digitalasset.canton.config.DeprecatedFeaturesConfig.enableScopeOnlyJwt]]
   */
 abstract class AuthServiceJWTBase(
     verifier: JwtVerifierBase,
     targetAudience: Option[String],
     targetScope: Option[String],
-    generalImplicitDecoder: AuthServiceJWTPayloadCodec,
+    enableScopeOnlyJwt: Boolean,
 ) extends AuthService
     with NamedLogging {
 
@@ -70,6 +75,11 @@ abstract class AuthServiceJWTBase(
 
     parsed.toEither.left
       .map(t => Error(Symbol("parsePayload"), "Could not parse JWT token: " + t.getMessage))
+      // precedes the target check so that a disabled scope-only token is reported as such; with a
+      // target audience the parser never yields the scope-only format, and a target scope with the
+      // flag off is refused by the config validation, so in practice this is the no-target case
+      // TODO (i#33090): remove together with the scope-only token format
+      .flatMap(AuthServiceJWT.rejectScopeOnlyJwtUnlessEnabled(_, enableScopeOnlyJwt))
       .flatMap(checkAudienceAndScope)
   }
 
@@ -94,7 +104,7 @@ abstract class AuthServiceJWTBase(
     }
 
   private[this] def parseAuthServicePayload(jwtPayload: String): AuthServiceJWTPayload = {
-    import generalImplicitDecoder.*
+    import AuthServiceJWTCodec.JsonImplicits.*
     parser.decode(jwtPayload).fold(throw _, identity)
   }
 
@@ -130,12 +140,12 @@ class AuthServiceJWT(
     targetAudience: Option[String],
     targetScope: Option[String],
     val loggerFactory: NamedLoggerFactory,
-    warnOnJwtScopeUsage: Boolean,
+    enableScopeOnlyJwt: Boolean,
 ) extends AuthServiceJWTBase(
       verifier,
       targetAudience,
       targetScope,
-      AuthServiceJWTCodec.jsonImplicits(warnOnJwtScopeUsage),
+      enableScopeOnlyJwt,
     ) {
   protected[this] def payloadToClaims(serviceName: String): AuthServiceJWTPayload => ClaimSet = {
     case payload: StandardJWTPayload =>
@@ -155,12 +165,12 @@ class UserConfigAuthService private[auth] (
     targetScope: Option[String],
     users: Seq[AuthorizedUser],
     val loggerFactory: NamedLoggerFactory,
-    warnOnJwtScopeUsage: Boolean,
+    enableScopeOnlyJwt: Boolean,
 ) extends AuthServiceJWTBase(
       verifier,
       targetAudience,
       targetScope,
-      AuthServiceJWTCodec.jsonImplicits(warnOnJwtScopeUsage),
+      enableScopeOnlyJwt,
     ) {
   protected[this] def payloadToClaims(serviceName: String): AuthServiceJWTPayload => ClaimSet = {
     case payload: PartyJWTPayload => ClaimSet.Unauthenticated
@@ -179,12 +189,12 @@ class AuthServicePrivilegedJWT private[auth] (
     targetScope: Option[String],
     accessLevel: AccessLevel,
     val loggerFactory: NamedLoggerFactory,
-    warnOnJwtScopeUsage: Boolean,
+    enableScopeOnlyJwt: Boolean,
 ) extends AuthServiceJWTBase(
       verifier = verifier,
       targetAudience = targetAudience,
       targetScope = targetScope,
-      AuthServiceJWTCodec.jsonImplicits(warnOnJwtScopeUsage),
+      enableScopeOnlyJwt = enableScopeOnlyJwt,
     ) {
 
   private def claims = accessLevel match {
@@ -206,6 +216,27 @@ class AuthServicePrivilegedJWT private[auth] (
 }
 
 object AuthServiceJWT {
+
+  /** Rejects a scope-only token unless `enableScopeOnlyJwt` is set and passes every other payload
+    * through.
+    */
+  // TODO (i#33090): remove together with the scope-only token format
+  def rejectScopeOnlyJwtUnlessEnabled(
+      payload: AuthServiceJWTPayload,
+      enableScopeOnlyJwt: Boolean,
+  ): Either[Error, AuthServiceJWTPayload] =
+    payload match {
+      case payload: StandardJWTPayload
+          if payload.format == StandardJWTTokenFormat.Scope && !enableScopeOnlyJwt =>
+        Left(
+          Error(
+            Symbol("scopeOnlyJwtDisabled"),
+            DeprecatedFeaturesConfig.ScopeOnlyJwtDisabledMessage,
+          )
+        )
+      case _ => Right(payload)
+    }
+
   def apply(
       verifier: JwtVerifierBase,
       targetAudience: Option[String],
@@ -214,32 +245,12 @@ object AuthServiceJWT {
       accessLevel: AccessLevel,
       loggerFactory: NamedLoggerFactory,
       users: Seq[AuthorizedUser],
-      warnOnJwtScopeUsage: Boolean,
+      enableScopeOnlyJwt: Boolean,
   ): AuthServiceJWTBase = {
     val logger = loggerFactory.getTracedLogger(getClass)
-    import com.digitalasset.canton.tracing.TraceContext
     implicit val traceContext: TraceContext = TraceContext.empty
 
-    // TODO (i#33090):  Add Canton version to the method signature. For versions 3.5 and below keep the logic as-is.
-    //  Once audience-based tokens are enforced in version 3.7,
-    //  - At startup: enforce the safe default or an explicitly configured value.
-    //  - Do not allow scope-only configs.
-    //  - Remove warning for when both audience and scope are defined as scope will be an additional optional field.
-
-    if (targetScope.isDefined && targetAudience.isEmpty) {
-      logger.warn(
-        "Scope-based tokens have been configured (targetScope is set without a targetAudience). " +
-          "This feature is deprecated in Canton 3.5 and will be removed in version 3.7. " +
-          "Please migrate to audience-based tokens."
-      )
-    }
-    if (targetScope.isDefined && targetAudience.isDefined) {
-      logger.warn(
-        "Ambiguous configuration: both targetScope and targetAudience have been specified. Canton versions 3.5 and below support " +
-          "one of these, but not both. " + "Please configure exactly one."
-      )
-    }
-    (privileged, targetScope, targetAudience, users) match {
+    val authService = (privileged, targetScope, targetAudience, users) match {
       case (_, _, _, authorizedUsers) if authorizedUsers.nonEmpty =>
         new UserConfigAuthService(
           verifier,
@@ -247,7 +258,7 @@ object AuthServiceJWT {
           targetScope,
           authorizedUsers,
           loggerFactory,
-          warnOnJwtScopeUsage,
+          enableScopeOnlyJwt,
         )
       case (true, Some(scope), _, _) =>
         new AuthServicePrivilegedJWT(
@@ -256,7 +267,7 @@ object AuthServiceJWT {
           Some(scope),
           accessLevel,
           loggerFactory,
-          warnOnJwtScopeUsage,
+          enableScopeOnlyJwt,
         )
       case (true, None, Some(audience), _) =>
         new AuthServicePrivilegedJWT(
@@ -265,7 +276,7 @@ object AuthServiceJWT {
           None,
           accessLevel,
           loggerFactory,
-          warnOnJwtScopeUsage,
+          enableScopeOnlyJwt,
         )
       case (true, None, None, _) =>
         throw new IllegalArgumentException(
@@ -277,8 +288,29 @@ object AuthServiceJWT {
           targetAudience,
           targetScope,
           loggerFactory,
-          warnOnJwtScopeUsage,
+          enableScopeOnlyJwt,
         )
     }
+
+    // TODO (i#33090): Once the scope-only token format is removed, reject a target scope without a
+    //  target audience and drop these warnings; a target scope then only restricts audience-based
+    //  tokens further, so configuring both is no longer ambiguous.
+    (targetScope, targetAudience) match {
+      case (Some(_), Some(_)) =>
+        logger.warn(
+          "Ambiguous configuration: both targetScope and targetAudience have been specified. " +
+            "Canton versions 3.5 and below support one of these, but not both. Please configure exactly one."
+        )
+      // The config validation rejects a target scope without a target audience unless the flag is set
+      case (_, None) if enableScopeOnlyJwt =>
+        logger.warn(
+          s"Scope-only JWTs are enabled (${DeprecatedFeaturesConfig.EnableScopeOnlyJwtKey} = true) and " +
+            "no targetAudience is configured, so the deprecated scope-only tokens are accepted. " +
+            "This feature will be removed in a future version. Please migrate to audience-based tokens."
+        )
+      case _ => ()
+    }
+
+    authService
   }
 }

@@ -68,6 +68,11 @@ trait TeaTrafficStore {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[SubmissionCorrelation]]
 
+  /** Deletes only the row with this insert time, so a retry can't delete a newer row. */
+  def deleteCorrelation(key: CorrelationKey, insertedAt: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Unit]
+
   /** Prune events, correlations and uncharged completions at the given timestamp in one
     * transaction. This is used to keep the tables from growing indefinitely. This does not affect
     * the account balance.

@@ -4,12 +4,21 @@
 package com.digitalasset.daml.lf
 package crypto
 
-import com.digitalasset.daml.lf.crypto.Hash.{Purpose, noCid2String}
+import com.digitalasset.daml.lf.crypto.Hash.{HashingError, Purpose, noCid2String}
 import com.digitalasset.daml.lf.data.Ref.PackageName
-import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Numeric, Ref, SortedLookupList, Time}
+import com.digitalasset.daml.lf.data.{
+  Bytes,
+  FrontStack,
+  ImmArray,
+  Numeric,
+  Ref,
+  SortedLookupList,
+  Time,
+}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.*
 import com.digitalasset.daml.lf.value.test.TypedValueGenerators.ValueAddend as VA
+import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
@@ -19,7 +28,7 @@ import shapeless.{HNil, Coproduct as HSum}
 
 import scala.language.implicitConversions
 
-class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks {
+class HashSpec extends AnyWordSpec with Inside with Matchers with TableDrivenPropertyChecks {
 
   private val packageId0 = Ref.PackageId.assertFromString("package")
   private val packageName0 = Ref.PackageName.assertFromString("package-name-0")
@@ -1048,7 +1057,6 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
         )
       }
     }
-
   }
 
   "Hash.fromString" should {
@@ -1187,17 +1195,17 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
   "Hash.hashAssignmentReassignmentId" should {
 
-    val reassignmentId = Ref.HexString.assertFromString("00" + "a" * 64)
+    val reassignmentId = Bytes.assertFromString("00" + "a" * 64)
 
     "not produce collisions" in {
       Hash.hashAssignmentReassignmentId(reassignmentId) should not be
-        Hash.hashAssignmentReassignmentId(Ref.HexString.assertFromString("00" + "b" * 64))
+        Hash.hashAssignmentReassignmentId(Bytes.assertFromString("00" + "b" * 64))
     }
 
     "be stable" in {
       Hash.hashAssignmentReassignmentId(reassignmentId) shouldBe
         Hash.assertFromString(
-          "38efc06b129aac674e2f14bd553908eea3bfaec39490e9b7fd26013e41767930"
+          "8f6059a96730efcc7ff4138c8769f1277478e9ee60c590421e465d25cbae5a77"
         )
     }
   }
@@ -1232,6 +1240,48 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       h1 shouldBe h2
     }
 
+  }
+
+  "legacy and upgradeFriendly hashing" should {
+    "reject UInt256 values" in {
+      import scala.util.{Failure, Success, Try}
+
+      def hashUpgradeFriendly(value: Value) = Try(
+        Hash
+          .builder(Hash.Purpose.Testing, Hash.aCid2Bytes, upgradeFriendlyUnsafe = true)
+          .addTypedValue(value)
+          .build
+      )
+
+      def hashLegacy(value: Value) = Try(
+        Hash
+          .builder(Hash.Purpose.Testing, Hash.aCid2Bytes, upgradeFriendlyUnsafe = false)
+          .addTypedValue(value)
+          .build
+      )
+
+      def record(value: Value): ValueRecord = ValueRecord(None, ImmArray(None -> value))
+
+      val validValue = Value.ValueInt64(1)
+      val faultyValue = Value.ValueUint256(data.Uint256.ONE)
+
+      inside(hashLegacy(validValue)) { case Success(_) => }
+      inside(hashLegacy(record(validValue))) { case Success(_) => }
+      inside(hashLegacy(faultyValue)) { case Failure(f) => f shouldBe a[HashingError.Unsupported] }
+      inside(hashLegacy(record(faultyValue))) { case Failure(f) =>
+        f shouldBe a[HashingError.Unsupported]
+      }
+
+      inside(hashUpgradeFriendly(validValue)) { case Success(_) => }
+      inside(hashUpgradeFriendly(record(validValue))) { case Success(_) => }
+      inside(hashUpgradeFriendly(faultyValue)) { case Failure(f) =>
+        f shouldBe a[HashingError.Unsupported]
+      }
+      inside(hashUpgradeFriendly(record(faultyValue))) { case Failure(f) =>
+        f shouldBe a[HashingError.Unsupported]
+      }
+
+    }
   }
 
   private def defRef(module: String = "Module", name: String): Ref.Identifier =

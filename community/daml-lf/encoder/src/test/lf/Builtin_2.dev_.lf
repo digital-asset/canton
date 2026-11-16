@@ -87,6 +87,8 @@ module BuiltinMod {
     TEXT_TO_NUMERIC;
   val textToCodePoints: Text -> List Int64 =
     TEXT_TO_CODE_POINTS;
+  val textToContractId: forall (a: *). Text -> Option (ContractId a) =
+    TEXT_TO_CONTRACT_ID;
   val sha256Text: Text -> Text =
     SHA256_TEXT;
   val sha256Hex: Text -> Text =
@@ -159,4 +161,59 @@ module BuiltinMod {
     FAIL_WITH_STATUS;
   val externalCall: Text -> Text -> Text -> Text -> Update Text =
     EXTERNAL_CALL;
+
+  // Uint256 unsafe modular arithmetic
+  val addUint256: Uint256 -> Uint256 -> Uint256 =
+    ADD_UINT256;
+  val subUint256: Uint256 -> Uint256 -> Uint256 =
+    SUB_UINT256;
+  val mulUint256: Uint256 -> Uint256 -> Uint256 =
+    MUL_UINT256;
+  val divUint256: Uint256 -> Uint256 -> Uint256 =
+    DIV_UINT256;
+  val modUint256: Uint256 -> Uint256 -> Uint256 =
+    MOD_UINT256;
+  val expUint256: Uint256 -> Uint256 -> Uint256 =
+    EXP_UINT256;
+  // Uint256 bitwise operations
+  val andUint256: Uint256 -> Uint256 -> Uint256 =
+    AND_UINT256;
+  val orUint256: Uint256 -> Uint256 -> Uint256 =
+    OR_UINT256;
+  val xorUint256: Uint256 -> Uint256 -> Uint256 =
+    XOR_UINT256;
+  val notUint256: Uint256 -> Uint256 =
+    NOT_UINT256;
+  val shlUint256: Uint256 -> Uint256 -> Uint256 =
+    SHL_UINT256;
+  val shrUint256: Uint256 -> Uint256 -> Uint256 =
+    SHR_UINT256;
+  // Uint256 conversions
+  val uint256ToText: Uint256 -> Text =
+    UINT256_TO_TEXT;
+  val textToUint256: Text -> Option Uint256 =
+    TEXT_TO_UINT256;
+  val int64ToUint256: Int64 -> Uint256 =
+    INT64_TO_UINT256;
+  val uint256ToInt64: Uint256 -> Int64 =
+    UINT256_TO_INT64;
+  // Uint256 EVM-specific operations
+  val addModUint256: Uint256 -> Uint256 -> Uint256 -> Uint256 =
+    ADDMOD_UINT256;
+  val mulModUint256: Uint256 -> Uint256 -> Uint256 -> Uint256 =
+    MULMOD_UINT256;
+  val sDivUint256: Uint256 -> Uint256 -> Uint256 =
+    SDIV_UINT256;
+  val sModUint256: Uint256 -> Uint256 -> Uint256 =
+    SMOD_UINT256;
+  val sltUint256: Uint256 -> Uint256 -> Bool =
+    SLT_UINT256;
+  val sgtUint256: Uint256 -> Uint256 -> Bool =
+    SGT_UINT256;
+  val sarUint256: Uint256 -> Uint256 -> Uint256 =
+    SAR_UINT256;
+  val byteUint256: Uint256 -> Uint256 -> Uint256 =
+    BYTE_UINT256;
+  val signExtendUint256: Uint256 -> Uint256 -> Uint256 =
+    SIGNEXTEND_UINT256;
 }

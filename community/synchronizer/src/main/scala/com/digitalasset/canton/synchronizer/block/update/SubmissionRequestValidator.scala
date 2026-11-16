@@ -30,6 +30,7 @@ import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberValidator
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, TracedPossiblyPrevalidated}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -126,23 +127,32 @@ private[update] final class SubmissionRequestValidator(
   ): SequencedEventValidation[PrevalidationOutcome] = {
     val submissionRequest = signedSubmissionRequest.value.content
     for {
-      isSenderRegistered <-
-        EitherT
-          .right(
-            memberValidator.isMemberRegisteredAt(submissionRequest.sender, sequencingTimestamp)
-          )
-          .mapK(validationFUSK)
+      senderIsAuthorized <- EitherT
+        .right(
+          if (protocolVersion > ProtocolVersion.v37)
+            isSenderAuthorized(
+              submissionRequest.sender,
+              sequencingSnapshot.ipsSnapshot,
+              sequencingTimestamp,
+            )
+          else memberValidator.isMemberRegisteredAt(submissionRequest.sender, sequencingTimestamp)
+        )
+        .mapK(validationFUSK)
       _ <- EitherTUtil
         .condUnitET[FutureUnlessShutdown](
-          isSenderRegistered,
-          // we expect callers to validate the sender exists before queuing requests on their behalf
-          // if we hit this case here it likely means the caller didn't check, or the member has subsequently
-          // been deleted.
-          {
-            logger.warn(
-              s"Sender [${submissionRequest.sender}] of send request [${submissionRequest.messageId}] " +
-                "is not registered so cannot send or receive events. Dropping send request."
-            )
+          senderIsAuthorized, {
+            if (protocolVersion > ProtocolVersion.v37)
+              logger.warn(
+                s"Sender [${submissionRequest.sender}] " +
+                  s"of submission request [${submissionRequest.messageId}] is not authorized " +
+                  s"by the topology snapshot at ${sequencingSnapshot.ipsSnapshot.timestamp} " +
+                  "to send. Dropping submission request."
+              )
+            else
+              logger.warn(
+                s"Sender [${submissionRequest.sender}] of send request [${submissionRequest.messageId}] " +
+                  "is not registered so cannot send or receive events. Dropping send request."
+              )
             SubmissionOutcome.Discard
           },
         )
@@ -190,9 +200,13 @@ private[update] final class SubmissionRequestValidator(
           ),
         )
         .mapK(validationFUSK)
-      _ <- checkRecipientsAreKnown(
+      // Check members addressed directly in the batch. Group recipients are expanded later and
+      //  their members are checked during resolution.
+      _ <- checkRecipientsAreAuthorized(
         submissionRequest,
         sequencingTimestamp,
+        sequencingSnapshot.ipsSnapshot,
+        submissionRequest.batch.allMembers,
       ).mapK(validationFUSK)
 
       _ <- checkClosedEnvelopesSignatures(
@@ -218,6 +232,44 @@ private[update] final class SubmissionRequestValidator(
         .mapK(validationFUSK)
     } yield PrevalidationOutcome(recipients, aggregationInfo)
   }
+
+  private def isSenderAuthorized(
+      sender: Member,
+      topologySnapshot: TopologySnapshot,
+      sequencingTimestamp: CantonTimestamp,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Boolean] =
+    sender match {
+      case participantId: ParticipantId =>
+        // Transaction-submission permissions are enforced by the protocol, not the sequencer.
+        topologySnapshot.isParticipantActiveAndCanLoginAt(participantId, sequencingTimestamp)
+      case mediatorId: MediatorId => topologySnapshot.isMediatorActive(mediatorId)
+      case sequencerId: SequencerId => topologySnapshot.isSequencerActive(sequencerId)
+    }
+
+  private def isRecipientAuthorized(
+      member: Member,
+      topologySnapshot: TopologySnapshot,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[Boolean] =
+    member match {
+      case participantId: ParticipantId =>
+        // Login restrictions do not prevent events from being addressed to an active participant.
+        topologySnapshot.isParticipantActive(participantId)
+      case mediatorId: MediatorId => topologySnapshot.isMediatorActive(mediatorId)
+      case sequencerId: SequencerId =>
+        // Passive sequencers may receive events even though they are not authorized senders.
+        topologySnapshot
+          .sequencerGroup()
+          .map(
+            _.exists(group =>
+              group.active.contains(sequencerId) || group.passive.contains(sequencerId)
+            )
+          )
+    }
 
   // TODO(#18401): This method should be harmonized with the GroupAddressResolver
   private def resolveSubmissionRequestRecipients(
@@ -287,7 +339,19 @@ private[update] final class SubmissionRequestValidator(
               )(group => Right((group.active.forgetNE ++ group.passive).toSet[Member]))
             )
         )
-      } yield Map((SequencersOfSynchronizer: GroupRecipient) -> sequencers).values.toSet.flatten
+        _ <-
+          // Gate registration checks too: through PV 37, expanded sequencers were unchecked.
+          //  Checking them could fork a synchronizer running mixed-version sequencers.
+          if (protocolVersion > ProtocolVersion.v37)
+            // Group addresses are excluded from batch.allMembers, so check the expanded members.
+            checkRecipientsAreAuthorized(
+              submissionRequest,
+              sequencingTimestamp,
+              topologyOrSequencingSnapshot.ipsSnapshot,
+              sequencers,
+            )
+          else EitherT.rightT[FutureUnlessShutdown, SubmissionOutcome](())
+      } yield sequencers
     } else
       EitherT.rightT[FutureUnlessShutdown, SubmissionOutcome](
         Set.empty[Member]
@@ -326,30 +390,38 @@ private[update] final class SubmissionRequestValidator(
             ): SubmissionOutcome
           )
         _ <- MonadUtil.parTraverseWithLimit(parallelism)(groups) { group =>
-          val nonRegisteredF =
-            memberValidator
-              .areMembersRegisteredAt(group.active ++ group.passive, sequencingTimestamp)
-              .map(_.flatMap {
-                case (member, false) => Some(member)
-                case (_, true) => None
-              })
-
-          EitherT(
-            nonRegisteredF.map { nonRegistered =>
-              Either.cond(
-                nonRegistered.isEmpty,
-                (),
-                // TODO(#14322): review if still applicable and consider an error code (SequencerDeliverError)
-                SubmissionOutcome.Reject.logAndCreate(
-                  submissionRequest,
-                  sequencingTimestamp,
-                  SequencerErrors.SubmissionRequestRefused(
-                    s"The mediator group ${group.index} contains non registered mediators $nonRegistered"
-                  ),
-                ): SubmissionOutcome,
-              )
-            }
-          )
+          // Group members are not included in batch.allMembers, so validate the expanded members
+          //  here rather than relying on checkRecipientsAreAuthorized.
+          val members = group.active.forgetNE ++ group.passive
+          if (protocolVersion > ProtocolVersion.v37)
+            checkRecipientsAreAuthorized(
+              submissionRequest,
+              sequencingTimestamp,
+              topologyOrSequencingSnapshot.ipsSnapshot,
+              members.toSet,
+            )
+          else
+            EitherT(
+              memberValidator
+                .areMembersRegisteredAt(members, sequencingTimestamp)
+                .map { registered =>
+                  val nonRegistered = registered.flatMap {
+                    case (member, false) => Some(member)
+                    case (_, true) => None
+                  }
+                  Either.cond(
+                    nonRegistered.isEmpty,
+                    (),
+                    SubmissionOutcome.Reject.logAndCreate(
+                      submissionRequest,
+                      sequencingTimestamp,
+                      SequencerErrors.SubmissionRequestRefused(
+                        s"The mediator group ${group.index} contains non registered mediators $nonRegistered"
+                      ),
+                    ): SubmissionOutcome,
+                  )
+                }
+            )
         }
       } yield GroupAddressResolver.asGroupRecipientsToMembers(groups).values.toSet.flatten
   }
@@ -397,33 +469,53 @@ private[update] final class SubmissionRequestValidator(
         )
       }
 
-  private def checkRecipientsAreKnown(
+  /** Checks registration at every PV and topology authorization only above PV 37, so direct
+    * recipients can be checked unconditionally. Expanded group recipients need caller-side gating
+    * where legacy registration checks differed.
+    */
+  private def checkRecipientsAreAuthorized(
       submissionRequest: SubmissionRequest,
       sequencingTimestamp: CantonTimestamp,
+      topologySnapshot: TopologySnapshot,
+      members: Set[Member],
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, SubmissionOutcome, Unit] =
-    // group addresses checks are covered separately later on
     for {
-      unknownRecipients <-
-        EitherT
-          .right(
-            memberValidator
-              .areMembersRegisteredAt(submissionRequest.batch.allMembers.toSeq, sequencingTimestamp)
-              .map(_.flatMap {
-                case (_, true) => None
-                case (member, false) => Some(member)
-              }.toSeq)
-          )
-
-      res <- EitherT.cond[FutureUnlessShutdown](
+      registeredRecipients <- EitherT.right(
+        memberValidator.areMembersRegisteredAt(members.toSeq, sequencingTimestamp)
+      )
+      unknownRecipients = registeredRecipients.collect { case (member, false) => member }.toSeq
+      _ <- EitherT.cond[FutureUnlessShutdown](
         unknownRecipients.isEmpty,
         (),
         SubmissionOutcome.Reject.logAndCreate(
           submissionRequest,
           sequencingTimestamp,
           SequencerErrors.UnknownRecipients(unknownRecipients),
+        ): SubmissionOutcome,
+      )
+      unauthorizedRecipients <-
+        EitherT
+          .right(
+            if (protocolVersion > ProtocolVersion.v37)
+              MonadUtil
+                .parTraverseWithLimit(parallelism)(members.toSeq) { member =>
+                  isRecipientAuthorized(member, topologySnapshot)
+                    .map(member -> _)
+                }
+                .map(_.collect { case (member, false) => member })
+            else FutureUnlessShutdown.pure(Seq.empty[Member])
+          )
+
+      res <- EitherT.cond[FutureUnlessShutdown](
+        unauthorizedRecipients.isEmpty,
+        (),
+        SubmissionOutcome.Reject.logAndCreate(
+          submissionRequest,
+          sequencingTimestamp,
+          SequencerErrors.UnauthorizedRecipients(unauthorizedRecipients),
         ): SubmissionOutcome,
       )
     } yield res

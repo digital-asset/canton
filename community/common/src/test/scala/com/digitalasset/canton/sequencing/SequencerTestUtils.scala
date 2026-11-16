@@ -8,6 +8,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestRefused
 import com.digitalasset.canton.sequencing.protocol.{
+  AggregatedSignedContent,
   Batch,
   ClosedUncompressedEnvelope,
   Deliver,
@@ -19,7 +20,10 @@ import com.digitalasset.canton.sequencing.protocol.{
   SignedContent,
 }
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
-import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
+import com.digitalasset.canton.serialization.{
+  HasCryptographicEvidence,
+  ProtocolVersionedMemoizedEvidence,
+}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, PhysicalSynchronizerId}
 import com.google.protobuf.ByteString
 
@@ -32,6 +36,16 @@ object SequencerTestUtils extends BaseTest {
 
   def sign[M <: ProtocolVersionedMemoizedEvidence](content: M): SignedContent[M] =
     SignedContent(content, SymbolicCrypto.emptySignature, None, testedProtocolVersion)
+
+  /** The signed content as the sequencer aggregator emits it for a single sequencer. */
+  def aggregate[A <: HasCryptographicEvidence](
+      signed: SignedContent[A]
+  ): AggregatedSignedContent[A] =
+    AggregatedSignedContent(
+      signed.content,
+      signed.signature,
+      signed.representativeProtocolVersion.representative,
+    )
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   def mockDeliverClosedEnvelope(

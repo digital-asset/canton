@@ -12,7 +12,6 @@ class JsonDecodingTest extends AnyWordSpecLike with Matchers with EitherValues {
   import com.digitalasset.canton.http.json.v2.JsSchema.JsServicesCommonCodecs.*
   "json decoders" should {
     "decode structure with only required properties" in {
-      // TODO (i25144) as of now we do not require any properties - it may change in the future
       val json =
         """
            {

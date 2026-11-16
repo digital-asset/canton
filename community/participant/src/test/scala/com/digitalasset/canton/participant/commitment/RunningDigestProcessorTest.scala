@@ -175,7 +175,6 @@ class RunningDigestProcessorTest
       participant,
       synchronizerId = DefaultTestIdentities.synchronizerId,
       AcsCommitmentConfig(
-        enableNewAcsCommitmentProcessor = true,
         maxNumUpdatesBetweenCheckpoints = maxNumUpdatesBetweenCheckpoints,
         counterpartyBatchSize = PositiveInt.tryCreate(counterpartyBatchSize),
         tracing = AcsDigestTracingMode.Disabled,
@@ -1685,14 +1684,10 @@ class RunningDigestProcessorTest
       // signal the shutdown of the digest processor. this checks that the retry loop terminates when the processor
       // is being shut down
       rdp.stop().futureValueUS
-      expectedExceptionO match {
-        case Some(expectedException) =>
-          // if the topology snapshot lookup resulted in an exception, this exception will be the result of the pipeline
-          result.failed.futureValue shouldBe expectedException
-        case None =>
-          // if the topology snapshot lookup resulted in an AbortedDueToShutdown, the result will be empty
-          result.futureValue shouldBe empty
-      }
+      // stopping the processor while the lookup is being retried is not a failure of the pipeline,
+      // irrespective of whether the last lookup attempt failed with an exception or was aborted due to shutdown:
+      // the pipeline drains and completes without an error.
+      result.futureValue shouldBe empty
     }
   }
 

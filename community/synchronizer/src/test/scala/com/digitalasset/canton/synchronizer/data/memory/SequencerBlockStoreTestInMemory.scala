@@ -23,7 +23,6 @@ class SequencerBlockStoreTestInMemory
       val sequencerStore = new InMemorySequencerStore(
         testedProtocolVersion,
         sequencerId,
-        blockSequencerMode = true,
         loggerFactory,
         timeouts,
         sequencerMetrics = SequencerMetrics.noop("db-sequencer-block-store-test"),

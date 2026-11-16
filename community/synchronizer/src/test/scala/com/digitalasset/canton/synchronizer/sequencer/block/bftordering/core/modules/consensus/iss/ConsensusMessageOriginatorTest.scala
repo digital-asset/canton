@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss
 
 import com.digitalasset.canton.crypto.Signature
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.bfttime.CanonicalCommitSet
@@ -14,6 +15,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.{
   Commit,
+  ConsensusSegmentDeserializationContext,
   NewView,
   PbftNetworkMessage,
   PrePrepare,
@@ -25,6 +27,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   GeneratorsBftOrdering,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import org.scalatest.wordspec.AnyWordSpec
 
 final class ConsensusMessageOriginatorTest extends AnyWordSpec with BftSequencerBaseTest {
@@ -84,13 +87,20 @@ final class ConsensusMessageOriginatorTest extends AnyWordSpec with BftSequencer
       Some(actualSender),
     )(synchronizerProtocolVersion)
 
+  private val pvv = ProtocolVersionValidation.AlwaysValidation
+  private val limits = BftOrdererLimits.default
+  private val segmentContext =
+    ConsensusSegmentDeserializationContext(claimedOriginator, Some(actualSender), limits)
+
   private def assertNetworkOriginatorBinding(message: PbftNetworkMessage): Unit = {
     message.from should not be actualSender
     val signedProto = SignedMessage(message, Signature.noSignature).toProtoV1
 
-    IssConsensusModule.parseNetworkMessage(signedProto, actualSender).isRight shouldBe true
     IssConsensusModule
-      .parseNetworkMessage(signedProto.copy(from = forgedOriginator), actualSender)
+      .parseNetworkMessage(pvv, limits, signedProto, actualSender)
+      .isRight shouldBe true
+    IssConsensusModule
+      .parseNetworkMessage(pvv, limits, signedProto.copy(from = forgedOriginator), actualSender)
       .isLeft shouldBe true
   }
 
@@ -136,7 +146,7 @@ final class ConsensusMessageOriginatorTest extends AnyWordSpec with BftSequencer
       val protoNewView = newView.toProto
 
       val parsedNewView = NewView
-        .fromProtoConsensusMessage((claimedOriginator, Some(actualSender)), protoNewView)(
+        .fromProtoConsensusMessage(pvv, segmentContext, protoNewView)(
           newView.getCryptographicEvidence
         )
         .value
@@ -159,7 +169,7 @@ final class ConsensusMessageOriginatorTest extends AnyWordSpec with BftSequencer
         )
       )
       NewView
-        .fromProtoConsensusMessage((claimedOriginator, Some(actualSender)), mismatchedViewChange)(
+        .fromProtoConsensusMessage(pvv, segmentContext, mismatchedViewChange)(
           newView.getCryptographicEvidence
         )
         .isLeft shouldBe true
@@ -175,7 +185,7 @@ final class ConsensusMessageOriginatorTest extends AnyWordSpec with BftSequencer
         )
       )
       NewView
-        .fromProtoConsensusMessage((claimedOriginator, Some(actualSender)), mismatchedPrePrepare)(
+        .fromProtoConsensusMessage(pvv, segmentContext, mismatchedPrePrepare)(
           newView.getCryptographicEvidence
         )
         .isLeft shouldBe true
@@ -195,31 +205,37 @@ final class ConsensusMessageOriginatorTest extends AnyWordSpec with BftSequencer
       val signedCommit = SignedMessage(commit, Signature.noSignature)
 
       val prepareCertificate = PrepareCertificate(signedPrePrepare, Seq(signedPrepare)).toProto
-      val parsedPrepareCertificate = PrepareCertificate.fromProto(prepareCertificate).value
+      val parsedPrepareCertificate =
+        PrepareCertificate.fromProto(pvv, limits, prepareCertificate).value
       parsedPrepareCertificate.prePrepare.message.actualSender shouldBe None
       parsedPrepareCertificate.prePrepare.from shouldBe claimedOriginator
       parsedPrepareCertificate.prepares.map(_.message.actualSender) shouldBe Seq(None)
       parsedPrepareCertificate.prepares.map(_.from) shouldBe Seq(claimedOriginator)
       PrepareCertificate
         .fromProto(
+          pvv,
+          limits,
           prepareCertificate.copy(
             prepares = prepareCertificate.prepares.updated(
               0,
               prepareCertificate.prepares.head.copy(from = forgedOriginator),
             )
-          )
+          ),
         )
         .isLeft shouldBe true
       PrepareCertificate
         .fromProto(
+          pvv,
+          limits,
           prepareCertificate.copy(
             prePrepare = Some(prepareCertificate.prePrepare.value.copy(from = forgedOriginator))
-          )
+          ),
         )
         .isLeft shouldBe true
 
       val commitCertificate = CommitCertificate(signedPrePrepare, Seq(signedCommit)).toProto
-      val parsedCommitCertificate = CommitCertificate.fromProto(commitCertificate).value
+      val parsedCommitCertificate =
+        CommitCertificate.fromProto(pvv, limits, commitCertificate).value
       parsedCommitCertificate.prePrepare.message.actualSender shouldBe None
       parsedCommitCertificate.prePrepare.from shouldBe claimedOriginator
       parsedCommitCertificate.commits.map(_.message.actualSender) shouldBe Seq(None)
@@ -235,7 +251,7 @@ final class ConsensusMessageOriginatorTest extends AnyWordSpec with BftSequencer
         Some(actualSender),
       )(synchronizerProtocolVersion)
       val parsedViewChange = ViewChange
-        .fromProtoConsensusMessage((claimedOriginator, Some(actualSender)), viewChange.toProto)(
+        .fromProtoConsensusMessage(pvv, segmentContext, viewChange.toProto)(
           viewChange.getCryptographicEvidence
         )
         .value
@@ -248,34 +264,41 @@ final class ConsensusMessageOriginatorTest extends AnyWordSpec with BftSequencer
 
       CommitCertificate
         .fromProto(
+          pvv,
+          limits,
           commitCertificate.copy(
             commits = commitCertificate.commits.updated(
               0,
               commitCertificate.commits.head.copy(from = forgedOriginator),
             )
-          )
+          ),
         )
         .isLeft shouldBe true
       CommitCertificate
         .fromProto(
+          pvv,
+          limits,
           commitCertificate.copy(
             prePrepare = Some(commitCertificate.prePrepare.value.copy(from = forgedOriginator))
-          )
+          ),
         )
         .isLeft shouldBe true
 
       val canonicalCommitSet = CanonicalCommitSet(Set(signedCommit)).toProto
-      val parsedCanonicalCommitSet = CanonicalCommitSet.fromProto(canonicalCommitSet).value
+      val parsedCanonicalCommitSet =
+        CanonicalCommitSet.fromProto(pvv, limits, canonicalCommitSet).value
       parsedCanonicalCommitSet.sortedCommits.map(_.message.actualSender) shouldBe Seq(None)
       parsedCanonicalCommitSet.sortedCommits.map(_.from) shouldBe Seq(claimedOriginator)
       CanonicalCommitSet
         .fromProto(
+          pvv,
+          limits,
           canonicalCommitSet.copy(
             canonicalCommits = canonicalCommitSet.canonicalCommits.updated(
               0,
               canonicalCommitSet.canonicalCommits.head.copy(from = forgedOriginator),
             )
-          )
+          ),
         )
         .isLeft shouldBe true
     }

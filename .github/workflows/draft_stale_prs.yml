@@ -220,3 +220,17 @@ jobs:
             if (failed.length > 0) {
               core.setFailed(`${failed.length} of ${stale.length} stale PRs could not be moved to draft.`);
             }
+
+  # A failed or cancelled scheduled run pings the CI rota in #team-canton-internal, so it is not
+  # left red in the Actions tab with nobody looking. A manual run has someone watching it.
+  notify:
+    name: Notify on Failure
+    needs: [draft-stale-prs]
+    if: >-
+      always() &&
+      github.event_name == 'schedule' &&
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    uses: ./.github/workflows/_notify.yml
+    secrets: inherit
+    with:
+      needs_json: ${{ toJSON(needs) }}

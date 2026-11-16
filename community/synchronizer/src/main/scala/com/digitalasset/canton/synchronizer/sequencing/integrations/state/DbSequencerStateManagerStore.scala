@@ -7,7 +7,7 @@ import cats.implicits.toTraverseOps
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.config.{BatchingConfig, PositiveFiniteDuration, ProcessingTimeout}
+import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -20,6 +20,7 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
 import com.digitalasset.canton.synchronizer.protocol.v30
 import com.digitalasset.canton.synchronizer.sequencer.*
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerBatchingConfig
 import com.digitalasset.canton.synchronizer.sequencer.store.{
   DbSequencerStorePruning,
   RegisteredMember,
@@ -45,7 +46,7 @@ class DbSequencerStateManagerStore(
     protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
-    override protected val batchingConfig: BatchingConfig,
+    override protected val batchingConfig: SequencerBatchingConfig,
     sequencerStore: SequencerStore,
 )(implicit ec: ExecutionContext)
     extends SequencerStateManagerStore
@@ -316,19 +317,20 @@ object DbSequencerStateManagerStore {
         ReleaseProtocolVersion(ProtocolVersion.v36),
         v30.AggregatedSignaturesOfSender,
       )(
-        supportedProtoVersion(_)(fromProtoV30),
+        supportedProtoVersionPVV(_)(fromProtoV30),
         _.toProtoV30,
       )
     )
 
     private def fromProtoV30(
-        proto: v30.AggregatedSignaturesOfSender
+        pvv: ProtocolVersionValidation,
+        proto: v30.AggregatedSignaturesOfSender,
     ): ParsingResult[AggregatedSignaturesOfSender] = {
       val v30.AggregatedSignaturesOfSender(sigsP) = proto
       for {
         sigs <- sigsP.traverse {
           case v30.AggregatedSignaturesOfSender.SignaturesForEnvelope(sigsForEnvelope) =>
-            sigsForEnvelope.traverse(Signature.fromProtoV30)
+            sigsForEnvelope.traverse(Signature.fromProtoV30(pvv, _))
         }
         rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       } yield AggregatedSignaturesOfSender(sigs)(rpv)

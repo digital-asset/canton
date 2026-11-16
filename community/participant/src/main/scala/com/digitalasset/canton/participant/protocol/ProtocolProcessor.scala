@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.data.{EitherT, Nested}
 import cats.syntax.either.*
+import cats.syntax.flatMap.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
@@ -57,10 +58,10 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
 }
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidation
 import com.digitalasset.canton.participant.protocol.submission.*
-import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.protocol.validation.RecipientsValidator
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend.TrafficRegistration
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
@@ -85,6 +86,7 @@ import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
+import org.slf4j.event.Level
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -341,11 +343,36 @@ abstract class ProtocolProcessor[
       submissionTraceContext = traceContext,
     )
     val messageId = inFlightSubmission.messageId
-    val specifiedDeduplicationPeriod = tracked.specifiedDeduplicationPeriod
     logger.debug(s"Registering the submission as in-flight")
 
-    val registeredF = inFlightSubmissionSynchronizerTracker
-      .register(inFlightSubmission, specifiedDeduplicationPeriod)
+    val registeredF = (tracked match {
+      case withDeduplication: steps.TrackedSubmissionWithDeduplication =>
+        inFlightSubmissionSynchronizerTracker
+          .register(inFlightSubmission, withDeduplication.specifiedDeduplicationPeriod)
+          .map {
+            case Left(failed) =>
+              EitherT.leftT[FutureUnlessShutdown, steps.PreparedBatch](
+                withDeduplication.commandDeduplicationFailure(failed)
+              )
+            case Right(actualDeduplicationOffset) =>
+              withDeduplication.prepareBatch(
+                actualDeduplicationOffset,
+                approximateTimestampForSigning,
+                maxSequencingTime,
+                ephemeral.sessionKeyStore,
+              )
+          }
+      case withoutDeduplication: steps.TrackedSubmissionWithoutDeduplication =>
+        inFlightSubmissionSynchronizerTracker
+          .registerWithoutDeduplication(inFlightSubmission)
+          .map(_ =>
+            withoutDeduplication.prepareBatch(
+              approximateTimestampForSigning,
+              maxSequencingTime,
+              ephemeral.sessionKeyStore,
+            )
+          )
+    })
       .leftMap(tracked.embedInFlightSubmissionTrackerError)
       .onShutdown {
         // If we abort due to a shutdown, we don't know whether the submission was registered.
@@ -366,7 +393,7 @@ abstract class ProtocolProcessor[
           newTrackingData,
           maxSequencingTime,
         )
-        .map(_ => tracked.onDefinitiveFailure)
+        .map(_ => tracked.onDefinitiveFailure(Some(newTrackingData)))
 
     // After in-flight registration, Make sure that all errors get a chance to update the tracking data and
     // instead return a `SubmissionResult` so that the submission will be acknowledged over the ledger API.
@@ -406,60 +433,60 @@ abstract class ProtocolProcessor[
       }
 
     def afterRegistration(
-        deduplicationResult: Either[DeduplicationFailed, DeduplicationPeriod.DeduplicationOffset]
-    ): FutureUnlessShutdown[SubmissionResult] = deduplicationResult match {
-      case Left(failed) =>
-        observeSubmissionError(tracked.commandDeduplicationFailure(failed))
-      case Right(actualDeduplicationOffset) =>
-        def sendBatch(
-            preparedBatch: steps.PreparedBatch
-        ): FutureUnlessShutdown[SubmissionResult] = {
-          val submittedEF = submitInternal(
-            submissionParam,
-            preparedBatch.pendingSubmissionId,
-            messageId,
-            preparedBatch.batch,
-            currentSnapshotApproximation,
-            approximateTimestampForSigning,
-            maxSequencingTime,
-            preparedBatch.embedSequencerRequestError,
-            pendingSubmission,
-          ).leftMap { submissionError =>
-            preparedBatch.logSubmissionSendError(submissionError)
-            preparedBatch.submissionErrorTrackingData(submissionError)
+        preparedBatchF: EitherT[FutureUnlessShutdown, SubmissionTrackingData, steps.PreparedBatch]
+    ): FutureUnlessShutdown[SubmissionResult] = {
+      def sendBatch(
+          preparedBatch: steps.PreparedBatch
+      ): FutureUnlessShutdown[SubmissionResult] = {
+        val submittedEF = submitInternal(
+          submissionParam,
+          preparedBatch.pendingSubmissionId,
+          messageId,
+          preparedBatch.batch,
+          currentSnapshotApproximation,
+          approximateTimestampForSigning,
+          maxSequencingTime,
+          identity[SubmissionSendFailure],
+          pendingSubmission,
+        ).leftMap { submissionError =>
+          val logLevel = submissionError match {
+            // A TEA rejection is a client error, not a participant problem.
+            case _: TrafficEnforcementRejected => Level.INFO
+            case SequencerRequestError(sendError) => SendAsyncClientError.logLevel(sendError)
           }
-
-          // As the `SendTracker` does not persist its state,
-          // we would observe the sequencing here only if the participant has not crashed.
-          // We therefore delegate observing the sequencing to the MessageDispatcher,
-          // which can rely on the SequencedEventStore for persistence.
-          unlessError(submittedEF, mayHaveBeenSent = true) { sendResult =>
-            val submissionResult = sendResult match {
-              case SendResult.Success(deliver) =>
-                steps.createSubmissionResult(deliver, pendingSubmission)
-              case _: SendResult.NotSequenced =>
-                tracked.onDefinitiveFailure
-            }
-            FutureUnlessShutdown.pure(submissionResult)
-          }
+          LoggerUtil.logAtLevel(
+            logLevel,
+            s"Failed to submit ${steps.requestKind.toLowerCase} due to $submissionError",
+          )
+          preparedBatch.submissionErrorTrackingData(submissionError)
         }
 
-        val batchF = for {
-          batch <- tracked.prepareBatch(
-            actualDeduplicationOffset,
-            approximateTimestampForSigning,
-            maxSequencingTime,
-            ephemeral.sessionKeyStore,
-          )
-          _ <- EitherT
-            .right[SubmissionTrackingData](
-              inFlightSubmissionSynchronizerTracker.updateRegistration(
-                inFlightSubmission,
-                batch.rootHash,
-              )
+        // As the `SendTracker` does not persist its state,
+        // we would observe the sequencing here only if the participant has not crashed.
+        // We therefore delegate observing the sequencing to the MessageDispatcher,
+        // which can rely on the SequencedEventStore for persistence.
+        unlessError(submittedEF, mayHaveBeenSent = true) { sendResult =>
+          val submissionResult = sendResult match {
+            case SendResult.Success(deliver) =>
+              steps.createSubmissionResult(deliver, pendingSubmission)
+            case _: SendResult.NotSequenced =>
+              tracked.onDefinitiveFailure(None)
+          }
+          FutureUnlessShutdown.pure(submissionResult)
+        }
+      }
+
+      val batchF = for {
+        batch <- preparedBatchF
+        _ <- EitherT
+          .right[SubmissionTrackingData](
+            inFlightSubmissionSynchronizerTracker.updateRegistration(
+              inFlightSubmission,
+              batch.rootHash,
             )
-        } yield batch
-        unlessError(batchF, mayHaveBeenSent = false)(sendBatch)
+          )
+      } yield batch
+      unlessError(batchF, mayHaveBeenSent = false)(sendBatch)
     }
 
     registeredF.mapK(FutureUnlessShutdown.outcomeK).map(afterRegistration)
@@ -467,16 +494,21 @@ abstract class ProtocolProcessor[
 
   protected def metricsContextForSubmissionParam(submissionParam: SubmissionParam): MetricsContext
 
-  protected def validateLocalTrafficCost(
-      submissionParam: SubmissionParam
-  )(
+  /** We release the returned registration when the send definitely wasn't sequenced. */
+  protected def registerTrafficCost(
+      submissionParam: SubmissionParam,
       trafficCost: Long,
-      traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, RpcError, Unit]
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, RpcError, Option[TrafficRegistration]]
+
+  protected def releaseTrafficRegistration(registration: TrafficRegistration)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit]
 
   /** Submit the batch to the sequencer. Also registers `submissionParam` as pending submission.
     */
-  private def submitInternal(
+  private def submitInternal[E](
       submissionParam: SubmissionParam,
       submissionId: steps.PendingSubmissionId,
       messageId: MessageId,
@@ -484,15 +516,11 @@ abstract class ProtocolProcessor[
       currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
       approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,
-      embedSubmissionError: SequencerRequestError => steps.SubmissionSendError,
+      embedSubmissionError: SubmissionSendFailure => E,
       pendingSubmission: steps.PendingSubmissionData,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[
-    FutureUnlessShutdown,
-    steps.SubmissionSendError,
-    SendResult,
-  ] = {
+  ): EitherT[FutureUnlessShutdown, E, SendResult] = {
     implicit val metricsContext: MetricsContext = metricsContextForSubmissionParam(submissionParam)
 
     def removePendingSubmission(): Unit =
@@ -500,23 +528,21 @@ abstract class ProtocolProcessor[
         .removePendingSubmission(steps.pendingSubmissions(ephemeral), submissionId)
         .discard[Option[steps.PendingSubmissionData]]
 
-    logger.info(
-      s"Phase 1 completed: Submitting ${batch.envelopes.length} envelopes for ${steps.requestKind} request, ${steps
-          .submissionDescription(submissionParam)}"
-    )
+    def removePendingOnFailure[A](
+        step: EitherT[FutureUnlessShutdown, SubmissionSendFailure, A]
+    ): EitherT[FutureUnlessShutdown, SubmissionSendFailure, A] =
+      step.thereafter {
+        case Success(UnlessShutdown.Outcome(Right(_))) => ()
+        case _ => removePendingSubmission()
+      }
 
-    // use the send callback and a promise to capture the eventual sequenced event read by the submitter
-    // We use a promise produced by the passed-in promise factory instead of `SendCallback.future` so that
-    // we stop waiting for the result as soon as the promise factory (typically the connected synchronizer) is closed.
-    // This way, we can safely wrap the submission in a `performUnlessClosing*F` call without getting into
-    // tricky shutdown order dependencies.
-    val sendResultP = promiseFactory.mkPromise[SendResult](
-      "sequenced-event-send-result",
-      futureSupervisor,
-    )
-    for {
-      _ <- sequencerClient
-        .send(
+    def prepareSend(): EitherT[
+      FutureUnlessShutdown,
+      SubmissionSendFailure,
+      SequencerClientSend.PreparedSubmission,
+    ] =
+      sequencerClient
+        .prepareSend(
           batch,
           currentSnapshotApproximation = currentSnapshotApproximation,
           timestamps = SendRequestTimestamps(
@@ -524,50 +550,92 @@ abstract class ProtocolProcessor[
             maxSequencingTime = maxSequencingTime,
           ),
           messageId = messageId,
-          trafficCostValidator = (trafficCost: Long, traceContext: TraceContext) =>
-            validateLocalTrafficCost(submissionParam)(trafficCost, traceContext),
-          amplify = true,
-          callback = res => sendResultP.trySuccess(res).discard,
+          aggregationRule = None,
         )
-        .leftMap { err =>
-          removePendingSubmission()
-          embedSubmissionError(SequencerRequestError(err))
-        }
+        .leftMap[SubmissionSendFailure](SequencerRequestError(_))
 
-      // Ensure that we will observe a timeout if there is no other activity
-      maxSequencingTimeTick = ephemeral.timeTracker.requestTick(maxSequencingTime)
+    def registerTraffic(
+        prepared: SequencerClientSend.PreparedSubmission
+    ): EitherT[FutureUnlessShutdown, SubmissionSendFailure, Option[TrafficRegistration]] =
+      prepared.trafficCost.flatTraverse(cost =>
+        registerTrafficCost(submissionParam, cost)
+          .leftMap[SubmissionSendFailure](TrafficEnforcementRejected(_))
+      )
 
-      // If we're shutting down, the sendResult below won't complete successfully (because it's wrapped in a `FutureUnlessShutdown`)
-      // We still want to clean up pending submissions in that case though so make sure we do that by adding a callback on
-      // the promise here
-      _ = sendResultP.future.onComplete {
-        case Success(UnlessShutdown.AbortedDueToShutdown) =>
-          logger.debug(s"Submission $submissionId aborted due to shutdown")
-          removePendingSubmission()
-        case _ =>
-      }
+    def sendAndWait(
+        prepared: SequencerClientSend.PreparedSubmission
+    ): EitherT[FutureUnlessShutdown, SendAsyncClientError, SendResult] = {
+      // use the send callback and a promise to capture the eventual sequenced event read by the submitter
+      // We use a promise produced by the passed-in promise factory instead of `SendCallback.future` so that
+      // we stop waiting for the result as soon as the promise factory (typically the connected synchronizer) is closed.
+      // This way, we can safely wrap the submission in a `performUnlessClosing*F` call without getting into
+      // tricky shutdown order dependencies.
+      val sendResultP = promiseFactory.mkPromise[SendResult](
+        "sequenced-event-send-result",
+        futureSupervisor,
+      )
+      for {
+        _ <- prepared
+          .sendAsync(
+            callback = res => sendResultP.trySuccess(res).discard,
+            amplify = true,
+            useConfirmationResponseAmplificationParameters = false,
+          )
+          .value
+          .flatMap(identity)
 
-      sendResult <- EitherT.right(FutureUnlessShutdown(sendResultP.future))
-      _ = {
-        SendResult.log("Submission", logger)(UnlessShutdown.Outcome(sendResult))
-        maxSequencingTimeTick.cancel()
-      }
-      _ <- EitherT.right(sendResult match {
-        case SendResult.Success(deliver) =>
-          // We only need to schedule a removal if the submission data actually contains something
-          (pendingSubmission: Option[?]) match {
-            case None => FutureUnlessShutdown.unit
-            case Some(_) =>
+        // Ensure that we will observe a timeout if there is no other activity
+        maxSequencingTimeTick = ephemeral.timeTracker.requestTick(maxSequencingTime)
+
+        sendResult <- EitherT.right[SendAsyncClientError](
+          FutureUnlessShutdown(sendResultP.future.map { result =>
+            maxSequencingTimeTick.cancel()
+            result match {
+              case UnlessShutdown.AbortedDueToShutdown =>
+                logger.debug(s"Submission $submissionId aborted due to shutdown")
+              case outcome @ UnlessShutdown.Outcome(_) =>
+                SendResult.log("Submission", logger)(outcome)
+            }
+            result
+          })
+        )
+      } yield sendResult
+    }
+
+    def sendAndCleanUp(
+        prepared: SequencerClientSend.PreparedSubmission,
+        registration: Option[TrafficRegistration],
+    ): EitherT[FutureUnlessShutdown, SubmissionSendFailure, SendResult] =
+      EitherT(sendAndWait(prepared).value.flatTap { sent =>
+        sendOutcome(sent) match {
+          case SendOutcome.Delivered(deliver) =>
+            // We only need to schedule a removal if the submission data actually contains something
+            if (pendingSubmission.isEmpty) FutureUnlessShutdown.unit
+            else
               schedulePendingSubmissionRemoval(deliver.timestamp, submissionId).map(
                 decisionTimeTick =>
                   steps.setDecisionTimeTickRequest(pendingSubmission, decisionTimeTick)
               )
-          }
-        case SendResult.Error(_) | SendResult.Timeout(_) =>
-          removePendingSubmission()
-          FutureUnlessShutdown.unit
-      })
+          case SendOutcome.NotDelivered =>
+            removePendingSubmission()
+            registration.traverse_(releaseTrafficRegistration)
+          case SendOutcome.Unknown =>
+            FutureUnlessShutdown.pure(removePendingSubmission())
+        }
+      }).leftMap[SubmissionSendFailure](SequencerRequestError(_))
+
+    logger.info(
+      s"Phase 1 completed: Submitting ${batch.envelopes.length} envelopes for ${steps.requestKind} request, ${steps
+          .submissionDescription(submissionParam)}"
+    )
+
+    val prepareAndSend = for {
+      prepared <- prepareSend()
+      registration <- registerTraffic(prepared)
+      sendResult <- sendAndCleanUp(prepared, registration)
     } yield sendResult
+
+    removePendingOnFailure(prepareAndSend).leftMap(embedSubmissionError)
   }
 
   /** Schedules removal of the pending submission once the request tracker has advanced to the
@@ -914,16 +982,35 @@ abstract class ProtocolProcessor[
                   } else {
                     // When the mediator `mediatorId` receives the root hash message,
                     // it will either lack the full informee tree or find the wrong mediator ID in it.
-                    // The submitting participant is malicious (unless the sequencer is), so it is not this participant
-                    // and therefore we don't have to output a completion event
+                    // A local submitter still needs a rejection completion for in-flight cleanup.
+                    // Other participants can wait for the mediator result and do not emit one.
                     logger.error(
                       s"Mediator $declaredMediator declared in views is not the recipient $mediator of the root hash message"
                     )
-                    EitherT
-                      .right[steps.RequestError](
-                        prepareForMediatorResultOfBadRequest(rc, sc, ts, publishUpdate)
+                    val amSubmitter = submitterMetadataO.exists(
+                      _.submissionTrackerData.exists(_.submittingParticipant == participantId)
+                    )
+                    if (amSubmitter) {
+                      // Emit a submitter rejection completion to ensure in-flight cleanup
+                      stopRequestProcessing(
+                        ts,
+                        rc,
+                        sc,
+                        requestDataHandle,
+                        submitterMetadataO,
+                        rootHash,
+                        freshOwnTimelyTxF,
+                        TransactionProcessor.SubmissionErrors.NoViewWithValidRecipients.Error(ts),
+                        publishUpdate,
+                        trafficCost,
                       )
-                      .thereafter(_ => requestDataHandle.complete(None))
+                    } else {
+                      EitherT
+                        .right[steps.RequestError](
+                          prepareForMediatorResultOfBadRequest(rc, sc, ts, publishUpdate)
+                        )
+                        .thereafter(_ => requestDataHandle.complete(None))
+                    }
                   }
 
                   for {
@@ -1005,7 +1092,9 @@ abstract class ProtocolProcessor[
 
     for {
       snapshot <- EitherT.right(crypto.awaitSnapshotUSSupervised(s"await crypto snapshot $ts")(ts))
-      multiSynchronizerEnabled <- isMultiSynchronizerEnabled(snapshot)
+      multiSynchronizerEnabled <-
+        if (multiSynchronizerFlagRequired) isMultiSynchronizerEnabled(snapshot)
+        else EitherT.rightT[FutureUnlessShutdown, steps.RequestError](true)
       result <-
         if (multiSynchronizerFlagRequired && !multiSynchronizerEnabled) {
           // Whether an alarm is raised depends on each participant's feature flag setting.
@@ -1455,6 +1544,7 @@ abstract class ProtocolProcessor[
 
   }
 
+  // TODO(#38027): Delete the in-flight entry of the submission in a crash-resilient way
   /** Updates trackers and sends confirmation responses in the case that all views are malformed. */
   private def trackAndSendResponsesMalformed(
       rc: RequestCounter,
@@ -1553,7 +1643,7 @@ abstract class ProtocolProcessor[
 
   override def processResult(
       counter: SequencerCounter,
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
   )(implicit traceContext: TraceContext): HandlerResult = {
     val content = event.event.content
     val ts = content.timestamp
@@ -1585,7 +1675,7 @@ abstract class ProtocolProcessor[
 
   @VisibleForTesting
   private[protocol] def processResultInternal1(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       result: SignedProtocolMessage[ConfirmationResultMessage],
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1685,7 +1775,7 @@ abstract class ProtocolProcessor[
     * confirmation result. The inner `EitherT` corresponds to the subsequent async stage.
     */
   private[this] def processResultInternal2(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       result: SignedProtocolMessage[ConfirmationResultMessage],
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1805,7 +1895,7 @@ abstract class ProtocolProcessor[
   // Assigning the internal contract ids to the contracts requires that all the contracts are
   // already persisted in the contract store.
   private[this] def processResultInternal3(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1845,7 +1935,7 @@ abstract class ProtocolProcessor[
                 event,
                 verdict,
                 pendingRequestData,
-                steps.pendingSubmissions(ephemeral),
+                pendingSubmissionDataO,
                 crypto.pureCrypto,
               )
           } yield {
@@ -2126,6 +2216,36 @@ abstract class ProtocolProcessor[
 
 object ProtocolProcessor {
 
+  private sealed trait SendOutcome extends Product with Serializable
+  private object SendOutcome {
+    final case class Delivered(deliver: Deliver[Batch[Envelope[?]]]) extends SendOutcome
+    // Deliver errors are sequenced and charged, but no recipient processes the request.
+    case object NotDelivered extends SendOutcome
+    // An amplified copy of this request may still be sequenced.
+    case object Unknown extends SendOutcome
+  }
+
+  private def sendOutcome(sent: Either[SendAsyncClientError, SendResult]): SendOutcome =
+    sent match {
+      case Right(SendResult.Success(deliver)) => SendOutcome.Delivered(deliver)
+      // An amplified copy of this request already reached the sequencers, so it may still be sequenced.
+      case Left(_: SendAsyncClientError.RequestAlreadyExists) => SendOutcome.Unknown
+      // The sequencer client only returns these when no attempt was accepted.
+      case Left(
+            _: SendAsyncClientError.RequestInvalid | SendAsyncClientError.DuplicateMessageId |
+            _: SendAsyncClientError.RequestFailed | _: SendAsyncClientError.RequestRefused
+          ) =>
+        SendOutcome.NotDelivered
+      case Right(SendResult.Error(error)) =>
+        error.reason match {
+          case SequencerErrors.AggregateSubmissionAlreadySent(_) => SendOutcome.Unknown
+          // An amplified copy sent before this rejection can still be delivered,
+          // and then its completion isn't charged in TEA. Will be fixed in a follow-up PR.
+          case _ => SendOutcome.NotDelivered
+        }
+      case Right(SendResult.Timeout(_)) => SendOutcome.NotDelivered
+    }
+
   sealed trait ProcessorError extends Product with Serializable with PrettyPrintingFromCompanion
 
   sealed trait SubmissionProcessingError extends ProcessorError
@@ -2136,10 +2256,14 @@ object ProtocolProcessor {
 
   sealed trait SubmissionOrTimeoutError extends SubmissionProcessingError
 
+  /** Preparing, registering, or sending the submission request failed. */
+  sealed trait SubmissionSendFailure extends SubmissionProcessingError
+
   /** We were unable to send the request to the sequencer */
   final case class SequencerRequestError(sendError: SendAsyncClientError)
       extends SubmissionOrTimeoutError
-      with RequestProcessingError {
+      with RequestProcessingError
+      with SubmissionSendFailure {
     override def prettyCompanion: PrettyPrintingCompanion[SequencerRequestError] =
       SequencerRequestError
   }
@@ -2148,12 +2272,23 @@ object ProtocolProcessor {
     override protected val pretty: Pretty[SequencerRequestError] = prettyOfParam(_.sendError)
   }
 
+  final case class TrafficEnforcementRejected(reason: RpcError) extends SubmissionSendFailure {
+    override def prettyCompanion: PrettyPrintingCompanion[TrafficEnforcementRejected] =
+      TrafficEnforcementRejected
+  }
+
+  object TrafficEnforcementRejected extends PrettyPrintingCompanion[TrafficEnforcementRejected] {
+    override protected val pretty: Pretty[TrafficEnforcementRejected] = prettyOfClass(
+      param("code", _.reason.code.id.unquoted),
+      param("cause", _.reason.cause.unquoted),
+    )
+  }
+
   /** Matches submissions rejected by TEA and passes the error to the client. */
   object TrafficEnforcementRejection {
     def unapply(error: WrapsProcessorError): Option[RpcError] =
       error.underlyingProcessorError() match {
-        case Some(SequencerRequestError(SendAsyncClientError.TrafficEnforcementRejected(reason))) =>
-          Some(reason)
+        case Some(TrafficEnforcementRejected(reason)) => Some(reason)
         case _ => None
       }
   }

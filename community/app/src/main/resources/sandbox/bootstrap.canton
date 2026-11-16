@@ -1,7 +1,7 @@
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.version.ProtocolVersion
 
-val protocol = ProtocolVersion.forSynchronizer
+val protocolVersion = ProtocolVersion.forSynchronizer
 
 case class SyncDef(
     mediator: com.digitalasset.canton.console.LocalMediatorReference,
@@ -21,7 +21,7 @@ val featureFlag = Seq(
 syncDefs.foreach { syncDef =>
   val staticSynchronizerParameters = StaticSynchronizerParameters.defaults(
     syncDef.sequencer.config.crypto,
-    protocol,
+    protocolVersion,
     topologyChangeDelay = NonNegativeFiniteDuration.Zero,
   )
   val synchronizerOwners = Seq(syncDef.sequencer, syncDef.mediator)
@@ -36,11 +36,12 @@ syncDefs.foreach { syncDef =>
 
   participants.local.foreach { p =>
     p.synchronizers.connect_local(syncDef.sequencer, syncDef.name)
-    p.topology.synchronizer_trust_certificates.propose(
-      p,
-      synchId.logical,
-      featureFlags = featureFlag,
-    )
+    if (protocolVersion < ProtocolVersion.v37)
+      p.topology.synchronizer_trust_certificates.propose(
+        p,
+        synchId.logical,
+        featureFlags = featureFlag,
+      )
   }
 }
 

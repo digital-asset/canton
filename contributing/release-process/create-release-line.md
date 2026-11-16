@@ -23,7 +23,9 @@ Note the following prerequisites to be able to have green CI on the PR:
 # Updating Dependabot
 
 The supported release lines are listed in `release/supported-release-lines.txt`
-(one `major.minor` per line), the source of truth for Dependabot coverage.
+(one `major.minor` per line), the source of truth for Dependabot coverage and
+for which release lines get the GHA nightly (`release/dispatch_nightly.py`).
+Ramping a line down also stops its nightly.
 
 Creating a release line with `propose.sh` adds the new line to this file and runs
 `release/update_dependabot.py` automatically, so `.github/dependabot.yml` is

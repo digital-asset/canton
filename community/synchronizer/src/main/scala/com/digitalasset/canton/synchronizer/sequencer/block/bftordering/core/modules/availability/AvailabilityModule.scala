@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
@@ -49,6 +50,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingRequestBatch,
   SignedMessage,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability.RemoteDissemination.AvailabilityDeserializationContext
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability.{
   LocalDissemination,
   LocalOutputFetch,
@@ -70,7 +72,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Ji
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import io.opentelemetry.api.trace.Tracer
@@ -1986,6 +1988,8 @@ final class AvailabilityModule[E <: Env[E]](
 object AvailabilityModule {
 
   private def parseAvailabilityNetworkMessage(
+      pvv: ProtocolVersionValidation,
+      limits: BftOrdererLimits,
       claimedOriginator: BftNodeId,
       message: v30.AvailabilityMessage,
       originalMessage: ByteString,
@@ -1996,12 +2000,13 @@ object AvailabilityModule {
       case v30.AvailabilityMessage.Message.Ping(_) =>
         Left(ProtoDeserializationError.OtherError("Ping Received"))
       case v30.AvailabilityMessage.Message.StoreRequest(value) =>
-        Availability.RemoteDissemination.RemoteBatch.fromProtoV30(claimedOriginator, value)(
+        val context = AvailabilityDeserializationContext(claimedOriginator, limits)
+        Availability.RemoteDissemination.RemoteBatch.fromProtoV30(pvv, context, value)(
           originalMessage
         )
       case v30.AvailabilityMessage.Message.StoreResponse(value) =>
         Availability.RemoteDissemination.RemoteBatchAcknowledged
-          .fromProtoV30(claimedOriginator, value)(
+          .fromProtoV30(pvv, claimedOriginator, value)(
             originalMessage
           )
       case v30.AvailabilityMessage.Message.BatchRequest(value) =>
@@ -2009,10 +2014,10 @@ object AvailabilityModule {
           originalMessage
         )
       case v30.AvailabilityMessage.Message.BatchResponse(value) =>
-        Availability.RemoteOutputFetch.RemoteBatchDataFetched
-          .fromProtoV30(claimedOriginator, value)(
-            originalMessage
-          )
+        val context = AvailabilityDeserializationContext(claimedOriginator, limits)
+        Availability.RemoteOutputFetch.RemoteBatchDataFetched.fromProtoV30(pvv, context, value)(
+          originalMessage
+        )
     }
 
   private[bftordering] def hasDisseminationQuorum(
@@ -2025,14 +2030,22 @@ object AvailabilityModule {
     OrderingTopology.weakQuorumSize(numberOfNodes)
 
   def parseNetworkMessage(
-      protoSignedMessage: v30.SignedMessage
+      pvv: ProtocolVersionValidation,
+      limits: BftOrdererLimits,
+      protoSignedMessage: v30.SignedMessage,
   ): ParsingResult[Availability.UnverifiedProtocolMessage] =
     SignedMessage
-      .fromProtoWithNodeId(v30.AvailabilityMessage, SupportedVersions.ProtoData30)(
+      .fromProtoWithNodeId(pvv, v30.AvailabilityMessage, SupportedVersions.ProtoData30)(
         claimedOriginator =>
           proto =>
             originalByteString =>
-              parseAvailabilityNetworkMessage(claimedOriginator, proto, originalByteString)
+              parseAvailabilityNetworkMessage(
+                pvv,
+                limits,
+                claimedOriginator,
+                proto,
+                originalByteString,
+              )
       )(protoSignedMessage)
       .map(Availability.UnverifiedProtocolMessage.apply)
 

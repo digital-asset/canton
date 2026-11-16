@@ -2,9 +2,9 @@
 """DM the people who start a rota shift about a month from now (reusing select_rota's helpers).
 
 Runs weekly. For each rotation it diffs the week LEAD_DAYS (28) ahead against the week before it
-and DMs whoever is newly on duty, so a mid-shift person is not re-pinged. A sheet-read failure or
-an unresolved name exits non-zero (a total sheet-read failure DMs the roster's fallback_pool so
-access gets fixed).
+and DMs whoever is newly on duty, so a mid-shift person is not re-pinged. A sheet-read failure, a
+header or column-count mismatch, or an unresolved name exits non-zero, and the workflow's failure
+alert is the notification. A week with no row yet is skipped quietly.
 
 Env: GCLOUD_SHEETS_SA_KEY (Viewer on the sheet), ROTA_SHEET_ID (optional override),
 SLACK_BOT_QA_NOTIFICATIONS (bot token with im:write and chat:write).
@@ -27,26 +27,25 @@ SLACK_TOKEN_ENV = select_rota.SLACK_TOKEN_ENV
 # About a month, evaluated on a weekly cron so each shift-start Monday is the target exactly once.
 LEAD_DAYS = 28
 
-# rotation -> expected sheet column count (None = skip the count check, e.g. flaky-canton pairs).
-# The DM label is ROTATION_HEADERS[rotation][0], and self_test asserts this covers every rotation.
-REMINDER_COLUMNS: dict[str, int | None] = {
-    "l3": 1,
-    "l4": 1,
-    "ci": 1,
-    "release-blackduck": 1,
-    "flaky-canton": None,
-    "flaky-sdk": 1,
-    "flaky-coordination": 1,
-    "sdk": 1,
-}
+# Rotations to remind. The DM label is ROTATION_HEADERS[rotation][0], and self_test asserts this
+# covers every rotation.
+REMINDER_ROTATIONS = (
+    "l3",
+    "l4",
+    "ci",
+    "release-blackduck",
+    "flaky-canton",
+    "flaky-sdk",
+    "flaky-coordination",
+    "sdk",
+)
 
 
-def names_for_rotation(
-    values: list[list[Any]], rotation: str, monday: dt.date, expected: int | None
-) -> list[str]:
-    """Names on the given rotation for ``monday``. Raises LookupError on a missing header/row."""
+def names_for_rotation(values: list[list[Any]], rotation: str, monday: dt.date) -> list[str]:
+    """Names on the given rotation for ``monday``. Raises LookupError on a header/column-count
+    mismatch, and its MissingWeekError subclass when the week has no row."""
     row, cols = select_rota.find_header_columns(
-        values, select_rota.ROTATION_HEADERS[rotation], expected
+        values, select_rota.ROTATION_HEADERS[rotation], select_rota.expected_columns(rotation)
     )
     return select_rota.names_for_week(values, row, cols, monday)
 
@@ -75,38 +74,6 @@ def build_reminder_message(label: str, date_str: str, sheet_url: str) -> str:
         "about a month from now. Please check it works for you and arrange a swap early if it "
         f"does not. Rota sheet: {sheet_url}"
     )
-
-
-def _notify_sheet_failure(
-    exc: Exception,
-    date_str: str,
-    sheet_url: str,
-    roster: dict[str, Any],
-    token: str | None,
-) -> int:
-    """Log a total sheet-read failure and DM the usual suspects to fix sheet access. Returns 1."""
-    select_rota.log(f"ERROR: could not read the rota sheet ({exc!r})")
-    admin_ids = select_rota.resolve_slack_ids(roster["fallback_pool"], roster["slack_id_by_name"])
-    message = (
-        f":warning: I could not read the rota sheet while preparing upcoming-rota reminders for "
-        f"the week of {date_str}. Please check the sheet and the service account's access to it: "
-        f"{sheet_url}"
-    )
-    select_rota.log(
-        f"DMing the usual suspects ({', '.join(admin_ids) or 'unset'}) "
-        f"about the sheet-read failure:"
-    )
-    select_rota.log(f"    {message}")
-    if token and admin_ids:
-        for admin_id in admin_ids:
-            try:
-                select_rota.send_dm(token, admin_id, message)
-                select_rota.log(f"    done: {admin_id}")
-            except Exception as dm_exc:
-                select_rota.log(f"    ERROR ({admin_id}): {dm_exc!r}")
-    else:
-        select_rota.log(f"    skipped: {SLACK_TOKEN_ENV} or the fallback pool is not set")
-    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -156,7 +123,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             target_values = select_rota.fetch_week_values(target_monday, sheet_id)
         except Exception as exc:
-            return _notify_sheet_failure(exc, date_str, sheet_url, roster, token)
+            select_rota.log(
+                f"ERROR: could not read the rota sheet for the week of {date_str} ({exc!r}). "
+                f"Check the sheet and the service account's access to it: {sheet_url}"
+            )
+            return 1
         # Target and prior weeks share a half-year tab except at the H1/H2 boundary: reuse if so.
         if select_rota.half_year_tab(prior_monday) == select_rota.half_year_tab(target_monday):
             prior_values = target_values
@@ -173,16 +144,21 @@ def main(argv: list[str] | None = None) -> int:
                 prior_read_failed = True
 
     exit_code = 1 if prior_read_failed else 0
-    for rotation, expected in REMINDER_COLUMNS.items():
+    for rotation in REMINDER_ROTATIONS:
         label = select_rota.ROTATION_HEADERS[rotation][0]
         try:
-            target_names = names_for_rotation(target_values, rotation, target_monday, expected)
-        except Exception as exc:
-            # silent-ok: a gap in a future week is not actionable yet (nobody to remind)
+            target_names = names_for_rotation(target_values, rotation, target_monday)
+        except select_rota.MissingWeekError as exc:
+            # silent-ok: a future week without a row yet is not actionable (nobody to remind)
             select_rota.log(f"note: no {label} assignment for the week of {date_str} yet ({exc!r})")
             continue
+        except Exception as exc:
+            # failure-surfaced: sets exit_code = 1, a header or column-count mismatch is a sheet bug
+            select_rota.log(f"warning: could not resolve target-week {label} names ({exc!r})")
+            exit_code = 1
+            continue
         try:
-            prior_names = names_for_rotation(prior_values, rotation, prior_monday, expected)
+            prior_names = names_for_rotation(prior_values, rotation, prior_monday)
         except Exception as exc:
             # failure-surfaced: sets exit_code = 1 below, may re-DM someone already mid-shift
             select_rota.log(
@@ -215,10 +191,10 @@ def main(argv: list[str] | None = None) -> int:
 
 def self_test() -> None:
     """In-memory checks of the pure helpers. No network, clock, or roster file."""
-    # REMINDER_COLUMNS must not drift out of ROTATION_HEADERS, and must cover every rotation.
-    for rotation in REMINDER_COLUMNS:
+    # REMINDER_ROTATIONS must not drift out of ROTATION_HEADERS, and must cover every rotation.
+    for rotation in REMINDER_ROTATIONS:
         assert rotation in select_rota.ROTATION_HEADERS, rotation
-    assert set(REMINDER_COLUMNS) == set(select_rota.ROTATION_HEADERS)
+    assert set(REMINDER_ROTATIONS) == set(select_rota.ROTATION_HEADERS)
 
     # newly_starting: only the target-week arrivals, accent/case-insensitive, order preserved
     assert newly_starting(["Sören", "Ada"], ["soren"]) == ["Ada"]
@@ -239,26 +215,40 @@ def self_test() -> None:
     target_monday = monday + dt.timedelta(days=LEAD_DAYS)
     prior_monday = target_monday - dt.timedelta(days=7)
     # names_for_rotation reads the right week, the diff flags the target-week arrival only
-    assert names_for_rotation(values, "ci", target_monday, 1) == ["Bo"]
-    assert names_for_rotation(values, "ci", prior_monday, 1) == ["Al"]
+    assert names_for_rotation(values, "ci", target_monday) == ["Bo"]
+    assert names_for_rotation(values, "ci", prior_monday) == ["Al"]
     assert newly_starting(
-        names_for_rotation(values, "ci", target_monday, 1),
-        names_for_rotation(values, "ci", prior_monday, 1),
+        names_for_rotation(values, "ci", target_monday),
+        names_for_rotation(values, "ci", prior_monday),
     ) == ["Bo"]
 
+    # Flaky SDK has two slots, an empty one is skipped
+    sdk = [["Week", "Flaky SDK", "Flaky SDK"], [target_serial, "", "Sd"]]
+    assert names_for_rotation(sdk, "flaky-sdk", target_monday) == ["Sd"]
+
     # main()'s DM and exit-code contract, driven through --values-file so no network is touched
-    _self_test_main(monday, header, prior_serial, target_serial)
+    _self_test_main(monday, prior_serial, target_serial)
 
     print("remind_upcoming_rota self-checks passed")
 
 
-def _self_test_main(
-    monday: dt.date, header: list[str], prior_serial: int, target_serial: int
-) -> None:
+def _self_test_main(monday: dt.date, prior_serial: int, target_serial: int) -> None:
     """DM and exit-code contract via a temp roster and stubbed send_dm (no network)."""
     import tempfile
 
-    roster = {"slack_id_by_name": {"Al": "UA", "Bo": "UB"}, "fallback_pool": ["Al"]}
+    # every rotation's header with its expected column count, only the CI slot is filled
+    header = ["Week"] + [
+        select_rota.ROTATION_HEADERS[r][0]
+        for r in REMINDER_ROTATIONS
+        for _ in range(select_rota.expected_columns(r))
+    ]
+
+    def row(serial: int, ci_name: str) -> list[Any]:
+        cells: list[Any] = [serial] + [""] * (len(header) - 1)
+        cells[header.index("CI")] = ci_name
+        return cells
+
+    roster = {"slack_id_by_name": {"Al": "UA", "Bo": "UB"}}
     date = monday.isoformat()
 
     real_send_dm = select_rota.send_dm
@@ -278,7 +268,7 @@ def _self_test_main(
             select_rota.ROSTER_PATH = roster_file
 
             # Bo starts in the target week (Al was on the prior week): exactly one DM, to Bo.
-            newly = [header, [prior_serial, "Al"], [target_serial, "Bo"]]
+            newly = [header, row(prior_serial, "Al"), row(target_serial, "Bo")]
             newly_file = Path(tmp) / "newly.json"
             newly_file.write_text(json.dumps(newly), encoding="utf-8")
             sent.clear()
@@ -288,7 +278,7 @@ def _self_test_main(
             # A per-rotation prior-week resolve failure (its row is simply missing from the
             # prior sheet) still DMs the newly-starting person, but exits 1 to flag the
             # degraded run instead of looking green.
-            prior_gap = [header, [target_serial, "Bo"]]  # no row for prior_monday
+            prior_gap = [header, row(target_serial, "Bo")]  # no row for prior_monday
             prior_gap_file = Path(tmp) / "prior_gap.json"
             prior_gap_file.write_text(json.dumps(prior_gap), encoding="utf-8")
             sent.clear()
@@ -308,7 +298,7 @@ def _self_test_main(
             assert sent == [("UB", sent[0][1])] and "CI rota" in sent[0][1], sent
 
             # Al is on both weeks (a continuing shift): no reminder.
-            cont = [header, [prior_serial, "Al"], [target_serial, "Al"]]
+            cont = [header, row(prior_serial, "Al"), row(target_serial, "Al")]
             cont_file = Path(tmp) / "cont.json"
             cont_file.write_text(json.dumps(cont), encoding="utf-8")
             sent.clear()
@@ -316,12 +306,41 @@ def _self_test_main(
             assert sent == [], sent
 
             # An unknown target-week name has no Slack id: nothing sent, exit 1.
-            unknown = [header, [prior_serial, "Al"], [target_serial, "Nobody Here"]]
+            unknown = [header, row(prior_serial, "Al"), row(target_serial, "Nobody Here")]
             unknown_file = Path(tmp) / "unknown.json"
             unknown_file.write_text(json.dumps(unknown), encoding="utf-8")
             sent.clear()
             assert main(["--date", date, "--target-values-file", str(unknown_file)]) == 1
             assert sent == [], sent
+
+            # The target week has no row yet: nothing to remind, not a failure.
+            no_target = [header, row(prior_serial, "Al")]
+            no_target_file = Path(tmp) / "no_target.json"
+            no_target_file.write_text(json.dumps(no_target), encoding="utf-8")
+            sent.clear()
+            assert main(["--date", date, "--target-values-file", str(no_target_file)]) == 0
+            assert sent == [], sent
+
+            # A column-count mismatch (Flaky SDK listed once) is a sheet bug, not "nobody
+            # assigned yet": the other rotations still DM, but the run exits 1.
+            sdk_col = header.index("Flaky SDK")
+            one_sdk = [
+                header[:sdk_col] + header[sdk_col + 1 :],
+                *(r[:sdk_col] + r[sdk_col + 1 :] for r in newly[1:]),
+            ]
+            one_sdk_file = Path(tmp) / "one_sdk.json"
+            one_sdk_file.write_text(json.dumps(one_sdk), encoding="utf-8")
+            sent.clear()
+            assert main(["--date", date, "--target-values-file", str(one_sdk_file)]) == 1
+            assert sent == [("UB", sent[0][1])] and "CI rota" in sent[0][1], sent
+
+            # A missing header (Flaky SDK deleted) is a sheet bug too: exit 1, others still DM.
+            no_sdk = [[c for c, h in zip(r, header) if h != "Flaky SDK"] for r in newly]
+            no_sdk_file = Path(tmp) / "no_sdk.json"
+            no_sdk_file.write_text(json.dumps(no_sdk), encoding="utf-8")
+            sent.clear()
+            assert main(["--date", date, "--target-values-file", str(no_sdk_file)]) == 1
+            assert sent == [("UB", sent[0][1])] and "CI rota" in sent[0][1], sent
 
             # A missing token is a hard config error: fail fast, nothing sent, exit 1.
             os.environ.pop(SLACK_TOKEN_ENV, None)

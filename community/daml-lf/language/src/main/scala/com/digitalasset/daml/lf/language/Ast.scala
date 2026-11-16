@@ -386,6 +386,7 @@ object Ast {
   case object BTRoundingMode extends BuiltinType
   case object BTBigNumeric extends BuiltinType
   case object BTFailureCategory extends BuiltinType
+  case object BTUint256 extends BuiltinType
 
   //
   // Builtin literals
@@ -403,6 +404,7 @@ object Ast {
   final case class BLDate(override val value: Time.Date) extends BuiltinLit
   final case class BLRoundingMode(override val value: java.math.RoundingMode) extends BuiltinLit
   final case class BLFailureCategory(override val value: FailureCategory) extends BuiltinLit
+  final case class BLUint256(override val value: Uint256) extends BuiltinLit
 
   sealed abstract class FailureCategory(override val toString: String, val cantonCategoryId: Int)
       extends Equals
@@ -508,6 +510,8 @@ object Ast {
   final case object BTextToInt64 extends BuiltinFunction // : Text -> Optional Int64
   final case object BTextToNumeric
       extends BuiltinFunction // :  ∀s.  Numeric s → Text -> Optional (Numeric s)
+  final case object BTextToContractId
+      extends BuiltinFunction // : forall t. Text -> Optional (ContractId t)
   final case object BTextToCodePoints extends BuiltinFunction // : Text -> List Int64
 
   final case object BSHA256Text extends BuiltinFunction // : Text -> Text
@@ -574,6 +578,41 @@ object Ast {
   // External Call
   final case object BExternalCall
       extends BuiltinFunction // : Text → Text → Text → Text → Update Text
+
+  // Uint256 unsafe modular arithmetic
+  final case object BAddUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BSubUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BMulUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BDivUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BModUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BExpUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+
+  // Uint256 bitwise operations
+  final case object BAndUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BOrUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BXorUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BNotUint256 extends BuiltinFunction // : Uint256 → Uint256
+  final case object BShlUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BShrUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+
+  // Uint256 conversions
+  final case object BUint256ToText extends BuiltinFunction // : Uint256 → Text
+  final case object BTextToUint256 extends BuiltinFunction // : Text → Optional Uint256
+  final case object BInt64ToUint256 extends BuiltinFunction // : Int64 → Uint256
+  final case object BUint256ToInt64 extends BuiltinFunction // : Uint256 → Int64
+
+  // Uint256 EVM-specific operations
+  final case object BAddModUint256
+      extends BuiltinFunction // : Uint256 → Uint256 → Uint256 → Uint256
+  final case object BMulModUint256
+      extends BuiltinFunction // : Uint256 → Uint256 → Uint256 → Uint256
+  final case object BSDivUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BSModUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BSltUint256 extends BuiltinFunction // : Uint256 → Uint256 → Bool
+  final case object BSgtUint256 extends BuiltinFunction // : Uint256 → Uint256 → Bool
+  final case object BSarUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BByteUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
+  final case object BSignExtendUint256 extends BuiltinFunction // : Uint256 → Uint256 → Uint256
 
   final case class EExperimental(name: String, typ: Type) extends Expr
 

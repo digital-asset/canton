@@ -8,7 +8,6 @@ import cats.data.EitherT
 import cats.syntax.alternative.*
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
-import cats.syntax.foldable.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.daml.metrics.CacheMetrics
@@ -18,9 +17,7 @@ import com.digitalasset.canton.caching.ScaffeineCache.TracedAsyncLoadingCache
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{
   BatchAggregatorConfig,
-  BatchingConfig,
   CacheConfigWithMemoryBounds,
-  CachingConfigs,
   ProcessingTimeout,
 }
 import com.digitalasset.canton.data.CantonTimestamp
@@ -45,6 +42,10 @@ import com.digitalasset.canton.store.db.RequiredTypesCodec.*
 import com.digitalasset.canton.synchronizer.block.UninitializedBlockHeight
 import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerBatchingConfig,
+  SequencerCachingConfigs,
+}
 import com.digitalasset.canton.synchronizer.sequencer.store.MemberLifeCycleStatus
 import com.digitalasset.canton.synchronizer.sequencer.{
   CommitMode,
@@ -59,18 +60,13 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
-import org.h2.api.ErrorCode as H2ErrorCode
-import org.postgresql.util.PSQLState
 import slick.jdbc.*
 import slick.sql.SqlStreamingAction
 
-import java.sql.SQLException
 import java.util.UUID
-import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.collection.immutable.SortedSet
 import scala.concurrent.{ExecutionContext, Future, TimeoutException}
-import scala.util.{Failure, Success}
 
 /** Database backed sequencer store. Supports many concurrent instances reading and writing to the
   * same backing database.
@@ -83,9 +79,8 @@ class DbSequencerStore(
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
     override val sequencerMember: Member,
-    override val blockSequencerMode: Boolean,
-    cachingConfigs: CachingConfigs,
-    override val batchingConfig: BatchingConfig,
+    cachingConfigs: SequencerCachingConfigs,
+    override val batchingConfig: SequencerBatchingConfig,
     override protected val sequencerMetrics: SequencerMetrics,
     overrideCloseContext: Option[CloseContext] = None,
 )(protected implicit val executionContext: ExecutionContext)
@@ -523,165 +518,10 @@ class DbSequencerStore(
   override def bufferPayload(payload: BytesPayload)(implicit tc: TraceContext): Unit =
     payloadCache.put(payload.id, payload)
 
-  /** Save the provided payloads to the store.
-    *
-    * For DB implementations we suspect that this will be a hot spot for performance primarily due
-    * to size of the payload content values being inserted. To help with this we use
-    * `storage.queryAndUpdateUnsafe` to do these inserts using the full connection pool of the node
-    * instead of the single connection that is protected with an exclusive lock in the HA sequencer
-    * setup.
-    *
-    * The downside of this optimization is that if a HA writer was to lose its lock, writes for
-    * payloads will continue regardless for a period until it shuts down. During this time another
-    * writer with the same instance index could come online. As we generate the payload id using a
-    * value generated for a partition based on the instance index this could worse case mean that
-    * two sequencer writers attempt to insert different payloads with the same id. If we use a
-    * simple idempotency method of just ignoring conflicts this could result in the active sequencer
-    * writing an event with a different payload resulting in a horrid corruption problem. This will
-    * admittedly be difficult to hit, but possible all the same.
-    *
-    * The approach we use here is to generate an ephemeral instance discriminator for each writer
-    * instance.
-    *   - We insert the payloads using a simple insert (intentionally not ignoring conflicts unlike
-    *     our other idempotent inserts). If this was successful we end here.
-    *   - If this insert hits a payload with the same id the query will blow up with a unique
-    *     constraint violation exception. Now there's a couple of reasons this may have happened:
-    *     1. Another instance is running and has inserted a conflicting payload (bad!) 2. There was
-    *        some connection issue when running this query and our storage layer didn't see a
-    *        successful result so it retried our query unaware that it did actually succeed so now
-    *        we conflicting with our own insert. (a bit of a shame but not really a problem).
-    *   - We now query filtered on the payload ids we're attempting to insert to select out which
-    *     payloads exist and their respective discriminators. For any payloads that exist we check
-    *     that the discriminators indicate that we inserted this payload, if not a
-    *     [[SavePayloadsError.ConflictingPayloadId]] error will be returned.
-    *   - Finally we filter to payloads that haven't yet been successfully inserted and go back to
-    *     the first step attempting to reinsert just this subset.
-    */
-  private def savePayloadsResolvingConflicts(
-      payloads: NonEmpty[Seq[BytesPayload]],
-      instanceDiscriminator: UUID,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SavePayloadsError, Unit] = {
-
-    // insert the provided payloads with the associated discriminator to the payload table.
-    // we're intentionally using a insert that will fail with a primary key constraint violation if rows exist
-    def insert(payloadsToInsert: NonEmpty[Seq[BytesPayload]]): FutureUnlessShutdown[Boolean] = {
-      def isConstraintViolation(batchUpdateException: SQLException): Boolean = profile match {
-        case Postgres(_) => batchUpdateException.getSQLState == PSQLState.UNIQUE_VIOLATION.getState
-        case H2(_) => batchUpdateException.getSQLState == H2ErrorCode.DUPLICATE_KEY_1.toString
-      }
-
-      // batch update exceptions can chain multiple exceptions for potentially each query
-      // only kick in to this retry if we only see constraint violations and nothing more severe
-      @tailrec
-      def areAllConstraintViolations(batchUpdateException: SQLException): Boolean =
-        if (!isConstraintViolation(batchUpdateException)) false
-        else {
-          // this one is, but are the rest?
-          val nextException = batchUpdateException.getNextException
-
-          if (nextException == null) true // no more
-          else areAllConstraintViolations(nextException)
-        }
-
-      val insertSql =
-        "insert into sequencer_payloads (id, instance_discriminator, content) values (?, ?, ?)"
-
-      storage
-        .queryAndUpdate(
-          DbStorage.bulkOperation(insertSql, payloadsToInsert, storage.profile) { pp => payload =>
-            pp >> payload.id.unwrap
-            pp >> instanceDiscriminator
-            pp >> payload.content
-          },
-          functionFullName,
-        )
-        .transform {
-          // we would typically expect a constraint violation to be thrown if there is a conflict
-          // however we double check here that each command returned a updated row and will double check if not
-          case Success(UnlessShutdown.Outcome(rowCounts)) =>
-            val allRowsInserted = rowCounts.forall(_ > 0)
-            Success(UnlessShutdown.Outcome(allRowsInserted))
-
-          case Success(UnlessShutdown.AbortedDueToShutdown) =>
-            Success(UnlessShutdown.AbortedDueToShutdown)
-
-          // if the only exceptions we received are constraint violations then just check and maybe try again
-          case Failure(batchUpdateException: java.sql.BatchUpdateException)
-              if areAllConstraintViolations(batchUpdateException) =>
-            Success(UnlessShutdown.Outcome(false))
-
-          case Failure(otherThrowable) => Failure(otherThrowable)
-        }
-    }
-
-    // work out from the provided set of payloads that we attempted to insert which are now stored successfully
-    // and which are still missing.
-    // will return an error if the payload exists but with a different uniquifier as this suggests another process
-    // has inserted a conflicting value.
-    def listMissing(): EitherT[FutureUnlessShutdown, SavePayloadsError, Seq[BytesPayload]] = {
-      val payloadIds = payloads.map(_.id)
-      val query =
-        (sql"select id, instance_discriminator from sequencer_payloads where " ++ DbStorage
-          .toInClause("id", payloadIds))
-          .as[(PayloadId, UUID)]
-
-      for {
-        inserted <- EitherT.right {
-          storage.query(query, functionFullName)
-        } map (_.toMap)
-        // take all payloads we were expecting and then look up from inserted whether they are present and if they have
-        // a matching instance discriminator (meaning we put them there)
-        missing <- payloads.toNEF
-          .foldM(Seq.empty[BytesPayload]) { (missing, payload) =>
-            inserted
-              .get(payload.id)
-              .fold[Either[SavePayloadsError, Seq[BytesPayload]]](Right(missing :+ payload)) {
-                storedDiscriminator =>
-                  // we expect the local and stored instance discriminators should match otherwise it suggests the payload
-                  // was inserted by another `savePayloads` call
-                  Either.cond(
-                    storedDiscriminator == instanceDiscriminator,
-                    missing,
-                    SavePayloadsError.ConflictingPayloadId(payload.id, storedDiscriminator),
-                  )
-              }
-          }
-          .toEitherT[FutureUnlessShutdown]
-      } yield missing
-    }
-
-    def go(
-        remainingPayloadsToInsert: NonEmpty[Seq[BytesPayload]]
-    ): EitherT[FutureUnlessShutdown, SavePayloadsError, Unit] =
-      EitherT
-        .right(insert(remainingPayloadsToInsert))
-        .flatMap { successful =>
-          if (!successful) listMissing()
-          else EitherT.pure[FutureUnlessShutdown, SavePayloadsError](Seq.empty[BytesPayload])
-        }
-        .flatMap { missing =>
-          // do we have any remaining to insert
-          NonEmpty.from(missing).fold(EitherTUtil.unitUS[SavePayloadsError]) { missing =>
-            logger.debug(
-              s"Retrying to insert ${missing.size} missing of ${remainingPayloadsToInsert.size} payloads"
-            )
-            go(missing)
-          }
-        }
-
-    go(payloads)
-  }
-
   override def savePayloads(payloads: NonEmpty[Seq[BytesPayload]], instanceDiscriminator: UUID)(
       implicit traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SavePayloadsError, Unit] =
-    if (blockSequencerMode) {
-      savePayloadsWithDiscriminator(payloads, instanceDiscriminator)
-    } else {
-      savePayloadsResolvingConflicts(payloads, instanceDiscriminator)
-    }
+    savePayloadsWithDiscriminator(payloads, instanceDiscriminator)
 
   override def saveEvents(instanceIndex: Int, events: NonEmpty[Seq[Sequenced[PayloadId]]])(implicit
       traceContext: TraceContext

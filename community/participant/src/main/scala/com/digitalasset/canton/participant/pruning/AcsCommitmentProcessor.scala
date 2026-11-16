@@ -31,7 +31,6 @@ import com.digitalasset.canton.config.RequireTypes.{
   PositiveNumeric,
 }
 import com.digitalasset.canton.config.{
-  BatchingConfig,
   CommitmentSendDelay,
   PositiveDurationSeconds,
   ProcessingTimeout,
@@ -63,6 +62,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.event.{AcsChangeListener, RecordTime}
 import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.DegradationError
@@ -246,7 +246,7 @@ class AcsCommitmentProcessor private (
     testingConfig: TestingConfigInternal,
     clock: Clock,
     exitOnFatalFailures: Boolean,
-    batchingConfig: BatchingConfig,
+    batchingConfig: ParticipantBatchingConfig,
     commitmentSendDelay: Option[CommitmentSendDelay],
     increasePerceivedComputationTimeForCommitments: Option[java.time.Duration],
     doNotAwaitOnCheckingIncomingCommitments: Boolean,
@@ -2615,7 +2615,7 @@ class AcsCommitmentProcessor private (
       activeContractStore: ActiveContractStore,
       contractStore: ContractStore,
       acsToc: TimeOfChange,
-      batchingConfig: BatchingConfig,
+      batchingConfig: ParticipantBatchingConfig,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -2699,7 +2699,7 @@ class AcsCommitmentProcessor private (
       enableAdditionalConsistencyChecks: Boolean,
       commitmentMismatchDebugging: Boolean,
       completedPeriod: LegacyCommitmentPeriod,
-      batchingConfig: BatchingConfig,
+      batchingConfig: ParticipantBatchingConfig,
       lastIntervalActivations: TrieMap[(LfContractId, ReassignmentCounter), Int],
       lastIntervalDeactivations: TrieMap[(LfContractId, ReassignmentCounter), Int],
   )(implicit
@@ -2886,7 +2886,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       testingConfig: TestingConfigInternal,
       clock: Clock,
       exitOnFatalFailures: Boolean,
-      batchingConfig: BatchingConfig,
+      batchingConfig: ParticipantBatchingConfig,
       asynchronousInitialization: Boolean,
       maxCommitmentSendDelayMillis: Option[CommitmentSendDelay] = None,
       increasePerceivedComputationTimeForCommitments: Option[java.time.Duration] = None,

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.daml.lf.data.Time.Timestamp
+import org.scalatest.EitherValues.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -17,39 +18,51 @@ class DeduplicationPeriodSpec extends AnyWordSpec with Matchers {
     "return expected result when sending duration" in {
       val deduplicateUntil = DeduplicationPeriod.deduplicateUntil(
         time,
-        DeduplicationPeriod.DeduplicationDuration(Duration.ofSeconds(3)),
+        DeduplicationPeriod.DeduplicationDuration.create(Duration.ofSeconds(3)).value,
       )
       deduplicateUntil shouldEqual Success(time.add(Duration.ofSeconds(3)))
     }
 
     "accept long durations" in {
-      noException should be thrownBy DeduplicationPeriod.DeduplicationDuration(
-        Duration.ofDays(365 * 10000)
-      )
+      val duration = Duration.ofDays(365 * 10000)
+      DeduplicationPeriod.DeduplicationDuration
+        .create(duration)
+        .value
+        .duration shouldBe duration
     }
 
     "accept zero durations" in {
-      noException should be thrownBy DeduplicationPeriod.DeduplicationDuration(
-        Duration.ZERO
-      )
+      val duration = Duration.ZERO
+      DeduplicationPeriod.DeduplicationDuration
+        .create(duration)
+        .value
+        .duration shouldBe duration
+
+      DeduplicationPeriod.DeduplicationDuration.Zero.duration shouldBe duration
     }
 
     "not accept negative durations" in {
-      an[IllegalArgumentException] should be thrownBy DeduplicationPeriod.DeduplicationDuration(
-        Duration.ofSeconds(-1)
-      )
+      val duration = Duration.ofSeconds(-1)
+      DeduplicationPeriod.DeduplicationDuration
+        .create(duration)
+        .left
+        .value should include("not be negative")
     }
 
     "accept microsecond durations" in {
-      noException should be thrownBy DeduplicationPeriod.DeduplicationDuration(
-        Duration.ofNanos(1000)
-      )
+      val duration = Duration.ofNanos(1000)
+      DeduplicationPeriod.DeduplicationDuration
+        .create(duration)
+        .value
+        .duration shouldBe duration
     }
 
     "not accept nanosecond durations" in {
-      an[IllegalArgumentException] should be thrownBy DeduplicationPeriod.DeduplicationDuration(
-        Duration.ofNanos(1001)
-      )
+      val duration = Duration.ofNanos(1001)
+      DeduplicationPeriod.DeduplicationDuration
+        .create(duration)
+        .left
+        .value should include("not use nanosecond precision")
     }
   }
 }

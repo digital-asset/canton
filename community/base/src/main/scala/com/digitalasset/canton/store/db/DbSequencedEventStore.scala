@@ -16,10 +16,10 @@ import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.{
+  AggregatedSignedContent,
   DecompressionPolicy,
   SequencedEvent,
   SequencedEventDeserializationContext,
-  SignedContent,
 }
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
 import com.digitalasset.canton.store.*
@@ -71,7 +71,7 @@ class DbSequencedEventStore(
             traceContext
           )
         case _ =>
-          val signedEvent = SignedContent
+          val signedEvent = AggregatedSignedContent
             .fromTrustedByteArray(eventBytes)
             .flatMap(
               _.deserializeContent(

@@ -62,6 +62,7 @@ final class ListAccountsAuthIT extends ServiceCallWithMainActorAuthTests {
     ),
     (CanExecuteAsAnyParty, syncServiceCall(canExecuteAsAnyParty)(_)),
     (CanActAsAnyParty, syncServiceCall(canActAsAnyParty)(_)),
+    (ParticipantAdmin, syncServiceCall(canBeAnAdmin)(_)),
   )
 
   private val deniedRights: Seq[(?, TestConsoleEnvironment => Future[Any])] = Seq(
@@ -80,7 +81,6 @@ final class ListAccountsAuthIT extends ServiceCallWithMainActorAuthTests {
     (CanActAs, serviceCall(canActAsMainActor)(_)),
     (CanReadAs, serviceCall(canReadAsMainActor)(_)),
     (CanReadAsAnyParty, serviceCall(canReadAsAnyParty)(_)),
-    (ParticipantAdmin, serviceCall(canBeAnAdmin)(_)),
   )
 
   serviceCallName should {

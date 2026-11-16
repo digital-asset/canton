@@ -325,8 +325,9 @@ final class OngoingStreamAuthIT
             .failed
             .futureValue,
           _.warningMessage should fullyMatch regex raw"Authorization failed: the provided token was not verified by any configured authentication service: " +
-            raw"\(1\) \[AuthServiceJWT\] Authorization error: Could not verify JWT token: The provided Algorithm doesn't match the one defined in the JWT's Header\.; " +
-            raw"\(2\) \[IdentityProviderAwareAuthService\] Failed to authorize the token: Identity Provider \S+ is deactivated\.",
+            // one entry per AuthServiceJWT configured by the fixture
+            raw"(\(\d+\) \[AuthServiceJWT\] Authorization error: Could not verify JWT token: The provided Algorithm doesn't match the one defined in the JWT's Header\.; )+" +
+            raw"\(\d+\) \[IdentityProviderAwareAuthService\] Failed to authorize the token: Identity Provider \S+ is deactivated\.",
           _.shouldBeCantonError(
             Unauthenticated,
             _ shouldBe "The command is missing a (valid) JWT token",

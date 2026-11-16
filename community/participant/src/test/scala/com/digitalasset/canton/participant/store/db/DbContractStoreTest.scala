@@ -5,9 +5,10 @@ package com.digitalasset.canton.participant.store.db
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{
   BatchAggregatorConfig,
-  CachingConfigs,
+  CacheConfig,
   DefaultProcessingTimeouts,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -376,7 +377,7 @@ object DbContractStoreTest {
   )(implicit ec: ExecutionContext): DbContractStore =
     new DbContractStore(
       storage = storage,
-      cacheConfig = CachingConfigs.testing.contractStore,
+      cacheConfig = CacheConfig(maximumSize = PositiveNumeric.tryCreate(100)),
       dbQueryBatcherConfig = BatchAggregatorConfig.defaultsForTesting,
       insertBatchAggregatorConfig = BatchAggregatorConfig.defaultsForTesting,
       timeouts = DefaultProcessingTimeouts.testing,

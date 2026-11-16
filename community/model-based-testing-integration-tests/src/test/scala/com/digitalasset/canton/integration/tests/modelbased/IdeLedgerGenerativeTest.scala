@@ -29,48 +29,36 @@ class IdeLedgerGenerativeTest
     with PropertyCheckerResultAssertions {
 
   "The IDE ledger" should {
-    "not crash on valid scenarios" should {
-      List(
-        (
-          "pv35",
-          new ConcreteGenerators(
-            contractKeys = true,
-            readOnlyRollbacks = true,
-          ),
+    "not crash on valid scenarios" in {
+      val interpreter = ReferenceInterpreter(
+        InterpretationConfig.forProtocolVersion(testedProtocolVersion),
+        loggerFactory,
+      )
+
+      val generator =
+        new ConcreteGenerators(contractKeys = true).validScenarioGenerator(
+          numParties = 3,
+          numPackages = 1,
+          numParticipants = 3,
         )
-      ).foreach { case (pv, generators) =>
-        s"for $pv transactions" in {
-          val interpreter = ReferenceInterpreter(
-            InterpretationConfig.forProtocolVersion(testedProtocolVersion),
-            loggerFactory,
-          )
 
-          val generator =
-            generators.validScenarioGenerator(
-              numParties = 3,
-              numPackages = 1,
-              numParticipants = 3,
-            )
+      val result = PropertyChecker
+        .checkProperty(
+          generate = () => generator.generate(size = 40),
+          shrink = Shrinker.shrinkScenario,
+          property = (s: Concrete.Scenario) =>
+            interpreter.runAndProject(s).flatMap { projections =>
+              if (projections.nonEmpty) Right(())
+              else Left("Expected non-empty projections")
+            },
+          maxSamples = Int.MaxValue,
+          timeout = 5.minutes,
+          bufferSize = 1000,
+          generatorParallelism = Runtime.getRuntime.availableProcessors(),
+        )
 
-          val result = PropertyChecker
-            .checkProperty(
-              generate = () => generator.generate(size = 40),
-              shrink = Shrinker.shrinkScenario,
-              property = (s: Concrete.Scenario) =>
-                interpreter.runAndProject(s).flatMap { projections =>
-                  if (projections.nonEmpty) Right(())
-                  else Left("Expected non-empty projections")
-                },
-              maxSamples = Int.MaxValue,
-              timeout = 5.minutes,
-              bufferSize = 1000,
-              generatorParallelism = Runtime.getRuntime.availableProcessors(),
-            )
-
-          logger.info(result.summary)
-          result.assertPassed(Pretty.prettyScenario)
-        }
-      }
+      logger.info(result.summary)
+      result.assertPassed(Pretty.prettyScenario)
     }
   }
 }

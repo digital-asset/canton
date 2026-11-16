@@ -237,6 +237,30 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
         Validation.isReplayedBy(Normalization.normalizeTx(recorded), replayed) shouldBe Right(())
       }
     }
+
+    "be able to validate a transaction whose root exercises an interface choice" in {
+      val command =
+        ApiCommand.Exercise(idI1.toRef, cid1, "C1", ValueRecord(None, ImmArray.empty))
+      val (recorded, _) = runApi(command).value
+      def validate(packageResolution: Map[PackageName, PackageId]) = consume(
+        engine.validate(
+          submitters = Set(party),
+          tx = SubmittedTransaction(Normalization.normalizeTx(recorded)),
+          ledgerEffectiveTime = let,
+          participantId = participant,
+          preparationTime = let,
+          submissionSeed = submissionSeed,
+          contractIdVersion = contractIdVersion,
+          interpretationConfig = interpreationConfig,
+          packageResolution = packageResolution,
+        )
+      )
+      validate(packageNameMap) shouldBe Right(())
+      inside(validate(Map.empty)) {
+        case Left(Error.Interpretation(Error.Interpretation.DamlException(e), _)) =>
+          e shouldBe a[IE.UnresolvedPackageName]
+      }
+    }
   }
 }
 

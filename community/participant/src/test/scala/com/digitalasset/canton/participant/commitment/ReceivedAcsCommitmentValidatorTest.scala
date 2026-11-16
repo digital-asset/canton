@@ -7,7 +7,6 @@ import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
-  BatchingConfig,
   CachingConfigs,
   CryptoConfig,
   CryptoProvider,
@@ -24,6 +23,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.ReceivedAcsCommit
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentValidatorTest.Publisher
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.metrics.{CommitmentMetrics, TestCommitmentMetrics}
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.AcsCommitmentAlarm
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
@@ -95,7 +95,7 @@ class ReceivedAcsCommitmentValidatorTest
       CommonMockMetrics.cryptoMetrics,
       executorService,
       timeouts,
-      BatchingConfig(),
+      ParticipantBatchingConfig(),
       loggerFactory,
       NoReportingTracerProvider,
       new ExecutorServiceMetrics(NoOpMetricsFactory),

@@ -63,8 +63,8 @@ import scala.math.Ordered.orderingToOrdered
   *   the creation therefore is not rolled back either as the archival can only refer to non-rolled
   *   back creates.
   * @param keyResolution
-  *   Post PV35 contains key, maintainers and ordered contract ids for keys that are used to resolve
-  *   a key to one or more contract ids. These keys will be ones referenced in nodes for which
+  *   Contains key, maintainers and ordered contract ids for keys that are used to resolve a key to
+  *   one or more contract ids. These keys will be ones referenced in nodes for which
   *   [[com.digitalasset.daml.lf.transaction.Node.Action.byKey]] is true. A used contract that has a
   *   key but which is not queried is not included. The contract id ordering applies to all
   *   contracts used in the view or its subviews so may contain contract ids not in [[coreInputs]].
@@ -85,7 +85,7 @@ final case class ViewParticipantData private (
     createdInSubviewArchivedInCore: Set[LfContractId],
     keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
     actionDescription: ActionDescription,
-    rollbackContext: RollbackContext,
+    rollbackContext: RollbackScope,
     salt: Salt,
     externalCallResults: Seq[ViewParticipantData.ViewExternalCallResult],
 )(
@@ -184,14 +184,8 @@ final case class ViewParticipantData private (
         .maxSerializationVersionForProtocolVersion(protocolVersion)
     for {
       _ <- checkMaxContractSerializationVersion(protocolVersion, maxSerializationVersion)
-      _ <-
-        if (protocolVersion >= ProtocolVersion.v36)
-          checkMaxKeyResolutionSerializationVersion(protocolVersion, maxSerializationVersion)
-        else Either.unit
-      _ <-
-        if (protocolVersion >= ProtocolVersion.v36)
-          checkMaxChoiceValueSerializationVersion(protocolVersion, maxSerializationVersion)
-        else Either.unit
+      _ <- checkMaxKeyResolutionSerializationVersion(protocolVersion, maxSerializationVersion)
+      _ <- checkMaxChoiceValueSerializationVersion(protocolVersion, maxSerializationVersion)
     } yield ()
   }
 
@@ -380,7 +374,7 @@ final case class ViewParticipantData private (
       keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]] =
         this.keyResolution,
       actionDescription: ActionDescription = this.actionDescription,
-      rollbackContext: RollbackContext = this.rollbackContext,
+      rollbackContext: RollbackScope = this.rollbackContext,
       salt: Salt = this.salt,
       externalCallResults: Seq[ViewParticipantData.ViewExternalCallResult] =
         this.externalCallResults,
@@ -444,7 +438,7 @@ object ViewParticipantData
       createdInSubviewArchivedInCore: Set[LfContractId],
       keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       actionDescription: ActionDescription,
-      rollbackContext: RollbackContext,
+      rollbackContext: RollbackScope,
       salt: Salt,
       externalCallResults: Seq[ViewExternalCallResult],
       protocolVersion: ProtocolVersion,
@@ -471,7 +465,7 @@ object ViewParticipantData
       createdInSubviewArchivedInCore: Set[LfContractId],
       keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       actionDescription: ActionDescription,
-      rollbackContext: RollbackContext,
+      rollbackContext: RollbackScope,
       salt: Salt,
       externalCallResults: Seq[ViewExternalCallResult],
       protocolVersion: ProtocolVersion,
@@ -537,7 +531,7 @@ object ViewParticipantData
         hashOps,
         keyResolution.toMap,
         actionDescription,
-        NoPathRollbackContext(rolledBackP),
+        RollbackScope(rolledBackP),
         createdCore,
         protocolVersion,
         ProtoVersion(32),
@@ -556,7 +550,7 @@ object ViewParticipantData
       hashOps: HashOps,
       keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       actionDescription: ActionDescription,
-      rollbackContext: RollbackContext,
+      rollbackContext: RollbackScope,
       createdCore: Seq[CreatedContract],
       protocolVersion: ProtocolVersion,
       protoVersion: ProtoVersion,

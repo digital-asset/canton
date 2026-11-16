@@ -30,8 +30,7 @@ final class AutomaticReassignmentContractKeysIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition = EnvironmentDefinition.P1_S1M1_S1M1
     .addConfigTransforms(
-      ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
-      ConfigTransforms.disableAutomaticAssignment,
+      ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
     )
     .withSetup { implicit env =>
       import env.*
@@ -146,8 +145,7 @@ final class AutomaticReassignmentContractKeysIntegrationTest
       //  `None` (asserted above). BasicKey is then not an input contract of the transaction, and
       //  the router has no reason to reassign it.
       //  Even if it were an input, the router cannot reassign an in-flight contract: the
-      //  assignment to acme has to complete first, which is blocked by the
-      //  enable-automatic-assignment==false setting.
+      //  assignment to acme has to complete first.
       activeSynchronizerOf(basicKey.id.contractId, bob) shouldBe None
       participant1.ledger_api.state.acs
         .incomplete_unassigned_of_party(bob)
@@ -238,8 +236,7 @@ final class AutomaticReassignmentContractKeysIntegrationTest
     activeSynchronizerOf(basicKey.id.contractId, party) shouldBe Some(daId.logical.toProtoPrimitive)
     activeSynchronizerOf(keyOps.id.contractId, party) shouldBe Some(daId.logical.toProtoPrimitive)
 
-    // Unassign BasicKey from da to acme. With the enable-automatic-assignment==false setting
-    // the contract stays in flight during the rest of the test.
+    // Unassign BasicKey from da to acme.
     participant1.ledger_api.commands.submit_unassign(
       party,
       Seq(LfContractId.assertFromString(basicKey.id.contractId)),

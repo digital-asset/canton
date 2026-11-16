@@ -270,6 +270,14 @@ class ExternalTransactionProcessor(
     CommandExecutionResult,
   ] =
     for {
+      // We check this here so every execute variant applies the limit.
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        executeRequest.signatures.values
+          .forall(_.sizeIs <= config.maximumNumberOfSignaturesPerParty.value),
+        InteractiveSubmissionExecuteError.Reject(
+          s"One or more parties provided more than the maximum number of signatures allowed (${config.maximumNumberOfSignaturesPerParty.value})"
+        ),
+      )
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
         !config.enforceSingleRootNode || executeRequest.preparedTransaction.transaction
           .forall(_.roots.sizeIs == 1),

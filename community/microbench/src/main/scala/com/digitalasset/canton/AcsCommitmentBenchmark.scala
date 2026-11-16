@@ -14,7 +14,6 @@ import com.digitalasset.canton.BaseTest.*
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
 import com.digitalasset.canton.config.{
-  BatchingConfig,
   CommitmentSendDelay,
   DefaultProcessingTimeouts,
   NonNegativeDuration,
@@ -34,6 +33,7 @@ import com.digitalasset.canton.ledger.participant.state.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.metrics.{
   ConnectedSynchronizerMetrics,
@@ -61,7 +61,6 @@ import com.digitalasset.canton.protocol.messages.{
   LegacyCommitmentPeriod,
   SignedProtocolMessage,
 }
-import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{SendCallback, SequencerClientSend}
 import com.digitalasset.canton.sequencing.protocol.{
@@ -442,7 +441,6 @@ class AcsCommitmentBenchmark
         any[MessageId],
         any[Option[AggregationRule]],
         any[SendCallback],
-        any[TrafficCostValidator],
         any[Boolean],
       )(any[TraceContext], any[MetricsContext])
     ).thenReturn(EitherT.pure(())): Unit
@@ -484,7 +482,7 @@ class AcsCommitmentBenchmark
         }.toSet),
       new SimClock(loggerFactory = loggerFactory),
       exitOnFatalFailures = true,
-      BatchingConfig(),
+      ParticipantBatchingConfig(),
       asynchronousInitialization = false,
       // do not delay sending commitments for testing, because tests often expect to see commitments after an interval
       Some(CommitmentSendDelay(Some(NonNegativeProportion.zero), Some(NonNegativeProportion.zero))),

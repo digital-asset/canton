@@ -3,13 +3,15 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.bfttime
 
-import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.Commit
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 
 import scala.collection.immutable.SortedSet
 
@@ -40,10 +42,19 @@ object CanonicalCommitSet {
 
   val empty: CanonicalCommitSet = CanonicalCommitSet(Set.empty)
 
-  def fromProto(canonicalCommitSet: v30.CanonicalCommitSet): ParsingResult[CanonicalCommitSet] =
-    canonicalCommitSet.canonicalCommits
-      .traverse(
-        SignedMessage.fromProtoWithNodeId(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
+  def fromProto(
+      pvv: ProtocolVersionValidation,
+      limits: BftOrdererLimits,
+      canonicalCommitSet: v30.CanonicalCommitSet,
+  ): ParsingResult[CanonicalCommitSet] =
+    ProtoValidation
+      .validateLengthThen(
+        canonicalCommitSet.canonicalCommits,
+        "canonical_commits",
+        pvv,
+        ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxCanonicalCommits),
+      ) { (commit, _) =>
+        SignedMessage.fromProtoWithNodeId(pvv, v30.ConsensusMessage, SupportedVersions.ProtoData30)(
           claimedOriginator =>
             Commit.fromProtoConsensusMessage(
               // Since the commits in the canonical commit set are nested messages of PrePrepares,
@@ -52,7 +63,7 @@ object CanonicalCommitSet {
               claimedOriginatorAndActualSender = (claimedOriginator, None),
               _,
             )
-        )
-      )
+        )(commit)
+      }
       .map(x => CanonicalCommitSet(SortedSet.from(x)))
 }

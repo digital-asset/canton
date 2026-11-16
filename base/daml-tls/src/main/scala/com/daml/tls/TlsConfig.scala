@@ -143,8 +143,9 @@ final case class BaseServerTlsConfig(
   *   supported ciphers. Set to None (or null in config file) to use default settings
   *   [[com.daml.tls.TlsServerConfig.defaultCiphers]]
   * @param enableCertRevocationChecking
-  *   whether to enable certificate revocation checking per
-  *   https://tersesystems.com/blog/2014/03/22/fixing-certificate-revocation/
+  *   whether to check the revocation status (OCSP, falling back to CRLs) of client certificates
+  *   presented to this server. Has no effect if `clientAuth` is `None`, as no client certificates
+  *   are requested then.
   */
 // Information in this ScalaDoc comment has been taken from https://grpc.io/docs/guides/auth/.
 final case class TlsServerConfig(
@@ -166,13 +167,17 @@ final case class TlsServerConfig(
     TlsClientConfig(trustCollectionFile = Some(certChainFile), clientCert = clientCert)
   }
 
-  /** This is a side-effecting method. It modifies JVM TLS properties according to the TLS
-    * configuration.
+  /** Whether client certificates must be checked for revocation. Revocation checking only applies
+    * to client certificates, so it is skipped if the server does not request them.
     */
-  def setJvmTlsProperties(): Unit = {
-    if (enableCertRevocationChecking) OcspProperties.enableOcsp()
+  def checkClientCertRevocation: Boolean =
+    enableCertRevocationChecking && clientAuth != ServerAuthRequirementConfig.None
+
+  /** This is a side-effecting method. It modifies JVM TLS properties removing support for the
+    * obsolete SSLv2Hello.
+    */
+  def setJvmTlsProperties(): Unit =
     ProtocolDisabler.disableSSLv2Hello()
-  }
 }
 
 object TlsServerConfig {

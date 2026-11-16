@@ -107,6 +107,12 @@ inputs:
       0 disables the watchdog. Values >0 stop the rerun when a single test exceeds the limit.
     required: false
     default: '40'
+  failed_only_rerun:
+    description: >
+      Whether to rerun failed test classes once on refs where the rerun policy allows it.
+      Set to 'false' for jobs where a flake must not turn the run green.
+    required: false
+    default: 'true'
   timings_file:
     description: Historical timings JSON file
     default: ""
@@ -434,11 +440,14 @@ runs:
         EVENT_NAME: ${{ github.event_name }}
         RESOLVED_REF: ${{ steps.resolve_ref.outputs.resolved_ref }}
         REF_KIND: ${{ steps.resolve_ref.outputs.ref_kind }}
+        FAILED_ONLY_RERUN: ${{ inputs.failed_only_rerun }}
       run: |
         # Rerun failed test classes on PRs and the merge queue, but not on main/release-line/tag
         # pushes, so a flake reddens the branch honestly. resolve_ref keeps the ref event-aware.
         rerun=true
-        if [[ "$EVENT_NAME" == "push" ]]; then
+        if [[ "$FAILED_ONLY_RERUN" != "true" ]]; then
+          rerun=false
+        elif [[ "$EVENT_NAME" == "push" ]]; then
           case "$RESOLVED_REF" in
             main|release-line*)
               rerun=false

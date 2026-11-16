@@ -1009,10 +1009,6 @@ private[apiserver] final class ApiPartyManagementService private (
             .transform
             .asEither
             .leftMap(_.asErrorPathMessages.map { case (p, e) => s"$p: $e" }.mkString(", "))
-          pubKey <- SigningPublicKey
-            .fromProtoV30(publicKeyT)
-            .leftMap(_.message)
-          namespace = Namespace(pubKey.fingerprint)
           synchronizerProtocolVersion <- UniqueIdentifier
             .fromProtoPrimitive_(synchronizerIdP)
             .map(SynchronizerId(_))
@@ -1023,6 +1019,10 @@ private[apiserver] final class ApiPartyManagementService private (
                 .map(_.protocolVersion)
                 .toRight(s"Unknown or not connected synchronizer $synchronizerId")
             )
+          pubKey <- SigningPublicKey
+            .fromProtoV30(ProtocolVersionValidation(synchronizerProtocolVersion), publicKeyT)
+            .leftMap(_.message)
+          namespace = Namespace(pubKey.fingerprint)
           protocolVersion <- requestedProtocolVersionP
             .traverse(ProtocolVersion.fromProtoPrimitive(_))
             .leftMap(_.message)

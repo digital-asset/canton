@@ -174,6 +174,10 @@ object ReassignmentValidationError extends PrettyPrintingCompanion[ReassignmentV
       s"For `$reassignmentRef`: contracts require serialization version $contractVersion but target synchronizer `$targetSynchronizerId` only supports up to version $maxSynchronizerVersion"
   }
 
+  case object ReplayedReassignment extends ReassignmentValidationError {
+    override def message: String = "The request belongs to a replayed reassignment"
+  }
+
   final case class AbortedDueToShutdownOut(contractId: LfContractId)
       extends ReassignmentValidationError {
     override def message: String =

@@ -78,7 +78,7 @@ final case class AssignmentMediatorMessage(
 object AssignmentMediatorMessage
     extends VersioningCompanionContext[
       AssignmentMediatorMessage,
-      (HashOps, Target[ProtocolVersionValidation]),
+      HashOps,
     ]
     with PrettyPrintingCompanion[AssignmentMediatorMessage] {
 
@@ -88,20 +88,22 @@ object AssignmentMediatorMessage
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.AssignmentMediatorMessage)(
-      supportedProtoVersion(_)((context, proto) => fromProtoV30(context)(proto)),
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
 
-  def fromProtoV30(context: (HashOps, Target[ProtocolVersionValidation]))(
-      assignmentMediatorMessageP: v30.AssignmentMediatorMessage
+  def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      assignmentMediatorMessageP: v30.AssignmentMediatorMessage,
   ): ParsingResult[AssignmentMediatorMessage] = {
     val v30.AssignmentMediatorMessage(treePO, submittingParticipantSignaturePO) =
       assignmentMediatorMessageP
     for {
       tree <- ProtoConverter
         .required("AssignmentMediatorMessage.tree", treePO)
-        .flatMap(AssignmentViewTree.fromProtoV30(context))
+        .flatMap(AssignmentViewTree.fromProtoV30((hashOps, Target(pvv))))
       _ <- Either.cond(
         tree.commonData.isFullyUnblinded,
         (),
@@ -117,7 +119,7 @@ object AssignmentMediatorMessage
           "AssignmentMediatorMessage.submittingParticipantSignature",
           submittingParticipantSignaturePO,
         )
-        .flatMap(Signature.fromProtoV30)
+        .flatMap(Signature.fromProtoV30(pvv, _))
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield AssignmentMediatorMessage(tree, submittingParticipantSignature)(rpv)
   }

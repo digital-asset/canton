@@ -126,7 +126,7 @@ trait CommunityEnvironmentFixture extends BaseTest with HasExecutionContext { th
 
     val environment = new CantonEnvironment(
       config,
-      TestingConfigInternal(initializeGlobalOpenTelemetry = false, warnOnJwtScopeUsage = false),
+      TestingConfigInternal(initializeGlobalOpenTelemetry = false),
       new ParticipantNodeBootstrapFactory {
         override protected def createLedgerApiBootstrapUtils(
             arguments: this.Arguments,

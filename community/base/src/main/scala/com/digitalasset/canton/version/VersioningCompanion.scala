@@ -195,6 +195,7 @@ trait BaseVersioningCompanionF[
     * @param bytes
     *   trusted bytes with an embedded proto version
     */
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   def fromTrustedByteString(
       context: Context
   )(
@@ -219,6 +220,7 @@ trait BaseVersioningCompanionF[
     * @param bytes
     *   trusted bytes with an embedded proto version
     */
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   def fromTrustedByteArray(
       context: Context,
       bytes: Array[Byte],
@@ -296,6 +298,7 @@ trait BaseVersioningCompanionF[
       input: InputStream,
       context: Context,
   ): Option[ParsingResult[DeserializedValueClass]] = {
+    @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
     def fromTrustedProtoVersioned(
         proto: VersionedMessage[DeserializedValueClass]
     ): ParsingResult[DeserializedValueClass] =

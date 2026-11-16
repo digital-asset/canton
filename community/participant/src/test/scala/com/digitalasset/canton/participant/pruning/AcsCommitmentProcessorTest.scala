@@ -14,7 +14,6 @@ import com.digitalasset.canton.config.RequireTypes.{
   PositiveNumeric,
 }
 import com.digitalasset.canton.config.{
-  BatchingConfig,
   CommitmentSendDelay,
   DefaultProcessingTimeouts,
   NonNegativeDuration,
@@ -33,6 +32,7 @@ import com.digitalasset.canton.ledger.participant.state.{
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.event.{AcsChangeSupport, RecordTime}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
@@ -77,7 +77,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.version.HasTestCloseContext
+import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import com.digitalasset.canton.{protocol, *}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.IdString
@@ -391,7 +391,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       TestingConfigInternal(warnOnAcsCommitmentDegradation = warnOnAcsCommitmentDegradation),
       new SimClock(loggerFactory = loggerFactory),
       exitOnFatalFailures = true,
-      BatchingConfig(),
+      ParticipantBatchingConfig(),
       asynchronousInitialization = true,
       // do not delay sending commitments for testing, because tests often expect to see commitments after an interval
       Some(CommitmentSendDelay(Some(NonNegativeProportion.zero), Some(NonNegativeProportion.zero))),
@@ -1351,7 +1351,7 @@ class AcsCommitmentProcessorTest
       }
     }
 
-    "correctly issue local and process buffered remote commitments" in {
+    "correctly issue local and process buffered remote commitments" onlyRunLessThan ProtocolVersion.v38 in {
 
       val timeProofs = List(3L, 6, 10, 16).map(CantonTimestamp.ofEpochSecond)
       val contractSetup = Map(
@@ -1436,7 +1436,7 @@ class AcsCommitmentProcessorTest
      in `commitmentMsg`, otherwise the test will fail.
      */
 
-    "work when commitment tick falls between two participants connection to the synchronizer" in {
+    "work when commitment tick falls between two participants connection to the synchronizer" onlyRunLessThan ProtocolVersion.v38 in {
       /*
         The goal here is to check that ACS commitment processing works even when
         a commitment tick falls between two participants' connection timepoints to the synchronizer.
@@ -2453,7 +2453,7 @@ class AcsCommitmentProcessorTest
         )
       }
 
-      "enter catch up mode when processing falls behind" in {
+      "enter catch up mode when processing falls behind" onlyRunLessThan ProtocolVersion.v38 in {
         val timeProofs = List(3L, 8, 20, 35, 59).map(CantonTimestamp.ofEpochSecond)
         val contractSetup = Map(
           // contract ID to stakeholders, creation and archival time
@@ -2561,7 +2561,7 @@ class AcsCommitmentProcessorTest
         })
       }
 
-      "enter catch up mode when processing falls behind and enqueued acs changes exceed the threshold" in {
+      "enter catch up mode when processing falls behind and enqueued acs changes exceed the threshold" onlyRunLessThan ProtocolVersion.v38 in {
         val timeProofs = List(3L, 8, 20, 35, 59, 70, 90, 110, 130, 150, 200).map(
           CantonTimestamp.ofEpochSecond
         )
@@ -2668,7 +2668,7 @@ class AcsCommitmentProcessorTest
         })
       }
 
-      "catch up with maximum reconciliation interval and catch-up parameters logs error" in {
+      "catch up with maximum reconciliation interval and catch-up parameters logs error" onlyRunLessThan ProtocolVersion.v38 in {
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
             // maximum reconciliation interval in seconds allowed by the CantonTimestamp
@@ -2769,7 +2769,7 @@ class AcsCommitmentProcessorTest
         )
       }
 
-      "catch up in correct skip steps scenario1" in {
+      "catch up in correct skip steps scenario1" onlyRunLessThan ProtocolVersion.v38 in {
         val reconciliationInterval = 5L
         val testSequences =
           (1L to 14)
@@ -2851,7 +2851,7 @@ class AcsCommitmentProcessorTest
         })
       }
 
-      "catch up in correct skip steps scenario2" in {
+      "catch up in correct skip steps scenario2" onlyRunLessThan ProtocolVersion.v38 in {
         val reconciliationInterval = 5L
         val testSequences =
           (1L to 45)
@@ -2931,7 +2931,7 @@ class AcsCommitmentProcessorTest
         })
       }
 
-      "pruning works correctly for a participant ahead of a counter-participant that catches up" in {
+      "pruning works correctly for a participant ahead of a counter-participant that catches up" onlyRunLessThan ProtocolVersion.v38 in {
         val timeProofs = List(5L, 10, 15, 20, 25, 30).map(CantonTimestamp.ofEpochSecond)
         val contractSetup = Map(
           // contract ID to stakeholders, creation and archival time
@@ -3038,7 +3038,7 @@ class AcsCommitmentProcessorTest
         })
       }
 
-      "send skipped commitments on mismatch during catch-up" in {
+      "send skipped commitments on mismatch during catch-up" onlyRunLessThan ProtocolVersion.v38 in {
 
         val timeProofs = List(3L, 8, 20, 35, 59).map(CantonTimestamp.ofEpochSecond)
         val contractSetup = Map(
@@ -3176,7 +3176,7 @@ class AcsCommitmentProcessorTest
         })
       }
 
-      "dynamically change, disable & re-enable catch-up config during a catch-up" in {
+      "dynamically change, disable & re-enable catch-up config during a catch-up" onlyRunLessThan ProtocolVersion.v38 in {
         val reconciliationInterval = 5L
         val testSequences =
           List(
@@ -3297,7 +3297,7 @@ class AcsCommitmentProcessorTest
         })
       }
 
-      "disable catch-up config during catch-up mode" in {
+      "disable catch-up config during catch-up mode" onlyRunLessThan ProtocolVersion.v38 in {
         val reconciliationInterval = 5L
         val testSequences =
           (1L to 10)
@@ -3387,7 +3387,7 @@ class AcsCommitmentProcessorTest
         })
       }
 
-      "change catch-up config during catch-up mode" in {
+      "change catch-up config during catch-up mode" onlyRunLessThan ProtocolVersion.v38 in {
         val reconciliationInterval = 5L
         val testSequences =
           (1L to 11)
@@ -3488,7 +3488,7 @@ class AcsCommitmentProcessorTest
         })
       }
 
-      "should mark as unhealthy when not caught up" in {
+      "should mark as unhealthy when not caught up" onlyRunLessThan ProtocolVersion.v38 in {
         val reconciliationInterval = 5L
         val testSequences =
           (1L to 10)
@@ -3633,7 +3633,7 @@ class AcsCommitmentProcessorTest
         }
       }
 
-      "prune correctly on mismatch during catch-up" in {
+      "prune correctly on mismatch during catch-up" onlyRunLessThan ProtocolVersion.v38 in {
 
         val timeProofs = List(3L, 8, 20, 35, 59).map(CantonTimestamp.ofEpochSecond)
         val contractSetup = Map(
@@ -3792,7 +3792,7 @@ class AcsCommitmentProcessorTest
       // It must correctly persist the 3 skipped placeholders, store all received commitments,
       // and successfully dispatch its 4 boundary/reply network sends.
       //
-      "not report errors about skipped commitments due to catch-up mode" in {
+      "not report errors about skipped commitments due to catch-up mode" onlyRunLessThan ProtocolVersion.v38 in {
         val reconciliationInterval = 5L
         val timeProofs =
           (1L to 7)
@@ -3965,7 +3965,7 @@ class AcsCommitmentProcessorTest
         })
       }
 
-      "perform match for fine-grained commitments in case of mismatch at catch-up boundary" in {
+      "perform match for fine-grained commitments in case of mismatch at catch-up boundary" onlyRunLessThan ProtocolVersion.v38 in {
 
         val reconciliationInterval = 5L
         val timeProofs =
@@ -4586,7 +4586,7 @@ class AcsCommitmentProcessorTest
     }
   }
   "metrics" should {
-    "Report differently latencies for distinguished and non-distinguished counter participants" in {
+    "Report differently latencies for distinguished and non-distinguished counter participants" onlyRunLessThan ProtocolVersion.v38 in {
       val timeProofs = List(3L, 8, 20, 35, 59).map(CantonTimestamp.ofEpochSecond)
       val contractSetup = Map(
         // contract ID to stakeholders, creation and archival time
@@ -4677,7 +4677,7 @@ class AcsCommitmentProcessorTest
       }).failOnShutdown
     }
 
-    "Report latency metrics for the specified counter participants" in {
+    "Report latency metrics for the specified counter participants" onlyRunLessThan ProtocolVersion.v38 in {
       val timeProofs = List(3L, 8, 20, 35, 59).map(CantonTimestamp.ofEpochSecond)
       val contractSetup = Map(
         // contract ID to stakeholders, creation and archival time
@@ -4778,7 +4778,7 @@ class AcsCommitmentProcessorTest
       }).failOnShutdown
     }
 
-    "Only report latency if above thresholds" in {
+    "Only report latency if above thresholds" onlyRunLessThan ProtocolVersion.v38 in {
       val timeProofs = List(3L, 8, 20, 35, 59).map(CantonTimestamp.ofEpochSecond)
       val contractSetup = Map(
         // contract ID to stakeholders, creation and archival time

@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.block.data.memory
 
 import cats.data.EitherT
 import cats.syntax.functor.*
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -33,8 +33,7 @@ class InMemorySequencerBlockStore(
 ) extends SequencerBlockStore
     with NamedLogging {
 
-  implicit override protected val executionContext: ExecutionContext =
-    DirectExecutionContext(noTracingLogger)
+  implicit override protected val executionContext: ExecutionContext = directExecutionContext
   override protected val stateManagerStore = new InMemorySequencerStateManagerStore(loggerFactory)
 
   /** Stores for each block height the timestamp of the last event and the last topology client

@@ -33,6 +33,7 @@ import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.data.{LateLsuRequest, ManualLsuRequest}
 import com.digitalasset.canton.participant.admin.party.{
+  FreezingToOnboardingScheduler,
   OnboardingClearanceScheduler,
   PartyReplicationTopologyWorkflow,
   PartyReplicationTriggers,
@@ -1201,6 +1202,16 @@ private[sync] class SynchronizerConnectionsManager(
             timeouts,
           )
 
+          freezingToOnboardingScheduler = new FreezingToOnboardingScheduler(
+            participantId,
+            clearanceWorkflowContext,
+            persistent.pendingFreezingToOnboardingStore,
+            persistent.pendingOnboardingClearanceStore,
+            clock,
+            loggerFactory,
+            timeouts,
+          )
+
           lsuHandler =
             if (parameters.lsuConfig.automaticallyPerformLsu) {
               this
@@ -1223,6 +1234,7 @@ private[sync] class SynchronizerConnectionsManager(
                 parameters.cachingConfigs.transparencyCheckCache,
                 synchronizerConnectionConfig,
                 onboardingClearanceScheduler,
+                freezingToOnboardingScheduler,
                 participantId,
                 synchronizerLoggerFactory,
                 lsuHandler,
@@ -1275,8 +1287,10 @@ private[sync] class SynchronizerConnectionsManager(
                   missingKeysAlerter,
                   sequencerConnectionSuccessorListener,
                   onboardingClearanceScheduler,
+                  freezingToOnboardingScheduler,
                   synchronizerHandle.topologyClient,
                   ephemeral.recordOrderPublisher,
+                  ephemeral.ledgerApiIndexer,
                   pendingLsuOperationsStore = pendingLsuOperationsStore,
                   synchronizerConnectionConfigStore = synchronizerConnectionConfigStore,
                   persistent.pendingOnboardingClearanceStore,
@@ -1284,6 +1298,7 @@ private[sync] class SynchronizerConnectionsManager(
                   synchronizerConnectionConfig.predecessor,
                   ledgerApiIndexer.asEval.value.ledgerApiStore,
                   partyReplicationTriggersO,
+                  SynchronizerConnectionsManager.this,
                   metrics,
                 ),
               missingKeysAlerter,
@@ -1580,7 +1595,7 @@ private[sync] class SynchronizerConnectionsManager(
         pendingLsuOperationsStore,
         parameters.lsuConfig,
         loggerFactory.append("lsu", synchronizerSuccessor.psid.suffix),
-        parameters.acsCommitments.disableOldAcsCommitmentProcessor,
+        parameters.acsCommitments.doDisableOldAcsCommitmentProcessor,
       )(FullAutomaticLsuRequest(alias, currentPsid, synchronizerSuccessor, successorPsid))
 
       _ <- upgrader.upgrade()

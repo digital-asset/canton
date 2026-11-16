@@ -10,22 +10,15 @@ import com.digitalasset.canton.testing.modelbased.genlib.Spaces.Space
 import com.digitalasset.canton.testing.modelbased.genlib.Spaces.Space as S
 import com.digitalasset.canton.testing.modelbased.genlib.Spaces.Space.Instances.*
 
-class SkeletonEnumerator(
-    contractKeys: Boolean,
-    readOnlyRollbacks: Boolean,
-) {
+class SkeletonEnumerator(contractKeys: Boolean) {
 
   // Commands := Commands Parties [TopLevelAction]
   // TopLevelAction := Create | Exercise EKind Action*
   // Action := Create | Exercise EKind Action* | Fetch | QueryByKey | Rollback ActionUnderRollback+
   // EKind := Consuming | NonConsuming
+  // ActionUnderRollback := Exercise NonConsuming ActionUnderRollback* | Fetch | QueryByKey | Rollback ActionUnderRollback+
   //
-  // For PV=dev:
-  //   ActionUnderRollback := Exercise NonConsuming ActionUnderRollback* | Fetch | QueryByKey
-  // For other PVs:
-  //   ActionUnderRollback := Create | Exercise EActionUnderRollback* | Fetch | QueryByKey
-  //
-  // The ByKey variants are only available in PV=dev
+  // The ByKey variants are only generated when contractKeys is true
 
   val AS: Applicative[Space] = implicitly
 
@@ -90,7 +83,7 @@ class SkeletonEnumerator(
     }
 
   lazy val rollbacks: Space[Action] =
-    AS.map(nonEmptyListOf(if (readOnlyRollbacks) nonEffectfulActions else actions))(Rollback.apply)
+    AS.map(nonEmptyListOf(nonEffectfulActions))(Rollback.apply)
 
   lazy val actions: Space[Action] =
     S.pay(

@@ -5,9 +5,16 @@ package com.digitalasset.canton.platform.store.backend.common
 
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   RawArchivedEvent,
+  RawRemoveEvent,
   RawThinCreatedEvent,
+  TransactionProperties,
 }
 import com.digitalasset.canton.platform.store.backend.PersistentEventType
+import com.digitalasset.canton.platform.store.backend.PersistentParticipantEventUpdateCategory.{
+  AcsImportTxStyle,
+  ParticipantEventUpdateCategory,
+  PurgeTxStyle,
+}
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
   CompositeSql,
   SqlStringInterpolation,
@@ -31,19 +38,35 @@ class EventReaderQueries(stringInterning: StringInterning) {
   ): (Option[RawThinCreatedEvent], Option[RawArchivedEvent]) = {
     def queryByInternalContractId(
         tableName: String,
-        eventType: PersistentEventType,
+        eventTypes: Seq[PersistentEventType],
+        categoryO: Option[ParticipantEventUpdateCategory],
         ascending: Boolean,
     )(columns: CompositeSql) =
-      SQL"""
+      categoryO match {
+        case Some(category) =>
+          SQL"""
          SELECT $columns
          FROM #$tableName
          WHERE
            internal_contract_id = $internalContractId
            AND event_sequential_id <= $endEventSequentialId
-           AND event_type = ${eventType.asInt}
+           AND event_type IN (#${eventTypes.map(_.asInt).mkString(", ")})
+           AND (participant_event_category = ${category.asInt} OR participant_event_category IS NULL)
          ORDER BY event_sequential_id #${if (ascending) "ASC" else "DESC"}
          LIMIT 1
          """
+        case None =>
+          SQL"""
+         SELECT $columns
+         FROM #$tableName
+         WHERE
+           internal_contract_id = $internalContractId
+           AND event_sequential_id <= $endEventSequentialId
+           AND event_type IN (#${eventTypes.map(_.asInt).mkString(", ")})
+         ORDER BY event_sequential_id #${if (ascending) "ASC" else "DESC"}
+         LIMIT 1
+         """
+      }
 
     def lookupActivateCreated: Option[RawThinCreatedEvent] =
       RowDefs
@@ -56,7 +79,8 @@ class EventReaderQueries(stringInterning: StringInterning) {
         .querySingleOptRow(
           queryByInternalContractId(
             tableName = "lapi_events_activate_contract",
-            eventType = PersistentEventType.Create,
+            eventTypes = Seq(PersistentEventType.Create, PersistentEventType.Add),
+            categoryO = Some(AcsImportTxStyle),
             ascending = true,
           )
         )(connection)
@@ -71,10 +95,28 @@ class EventReaderQueries(stringInterning: StringInterning) {
         .querySingleOptRow(
           queryByInternalContractId(
             tableName = "lapi_events_deactivate_contract",
-            eventType = PersistentEventType.ConsumingExercise,
+            eventTypes = Seq(PersistentEventType.ConsumingExercise),
             ascending = false,
+            categoryO = None,
           )
         )(connection)
+
+    // A Remove event is served as an archive whose effective time is its record time
+    def lookupDeactivateRemoved: Option[RawArchivedEvent] =
+      RowDefs
+        .rawRemoveEventParser(
+          stringInterning = stringInterning,
+          allQueryingPartiesO = requestingParties,
+        )
+        .querySingleOptRow(
+          queryByInternalContractId(
+            tableName = "lapi_events_deactivate_contract",
+            eventTypes = Seq(PersistentEventType.Remove),
+            ascending = false,
+            categoryO = Some(PurgeTxStyle),
+          )
+        )(connection)
+        .map(removedAsArchived)
 
     def lookupWitnessedCreated: Option[RawThinCreatedEvent] =
       RowDefs
@@ -87,7 +129,8 @@ class EventReaderQueries(stringInterning: StringInterning) {
         .querySingleOptRow(
           queryByInternalContractId(
             tableName = "lapi_events_various_witnessed",
-            eventType = PersistentEventType.WitnessedCreate,
+            eventTypes = Seq(PersistentEventType.WitnessedCreate),
+            categoryO = None,
             ascending = true,
           )
         )(connection)
@@ -111,8 +154,12 @@ class EventReaderQueries(stringInterning: StringInterning) {
                LIMIT 1
                """)(connection)
 
+    def lookupDeactivate: Option[RawArchivedEvent] =
+      (lookupDeactivateArchived.toList ++ lookupDeactivateRemoved.toList)
+        .maxByOption(_.transactionProperties.commonEventProperties.eventSequentialId)
+
     lookupActivateCreated
-      .map(create => Some(create) -> lookupDeactivateArchived)
+      .map(create => Some(create) -> lookupDeactivate)
       .orElse(
         lookupWitnessedCreated.flatMap(create =>
           lookupTransientArchived(
@@ -122,4 +169,18 @@ class EventReaderQueries(stringInterning: StringInterning) {
       )
       .getOrElse(None -> None)
   }
+
+  private def removedAsArchived(remove: RawRemoveEvent): RawArchivedEvent =
+    RawArchivedEvent(
+      transactionProperties = TransactionProperties(
+        commonEventProperties = remove.participantEventProperties.commonEventProperties,
+        commonUpdateProperties = remove.participantEventProperties.commonUpdateProperties,
+        transactionHash = None,
+      ),
+      contractId = remove.contractId,
+      templateId = remove.templateId,
+      filteredStakeholderParties = remove.filteredStakeholderParties,
+      ledgerEffectiveTime = remove.participantEventProperties.commonUpdateProperties.recordTime,
+      deactivatedEventSeqId = remove.deactivatedEventSeqId,
+    )
 }

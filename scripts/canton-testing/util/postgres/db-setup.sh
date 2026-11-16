@@ -21,5 +21,5 @@ psql -v ON_ERROR_STOP=1 -h "${POSTGRES_HOST}" -p "$POSTGRES_PRIMARY_APPLICATION_
   create database "mediator_sec";
   create database "participant1";
   create database "ledger1";
-  create database "block_reference";
+  create database "block_bft";
 EOI

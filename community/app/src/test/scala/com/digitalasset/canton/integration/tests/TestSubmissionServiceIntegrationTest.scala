@@ -282,16 +282,16 @@ abstract sealed class TestSubmissionServiceIntegrationTestLF23
   }
 }
 
-trait TestSubmissionServiceReferenceSequencerPostgresTest {
+trait TestSubmissionServiceSequencerPostgresTest {
   self: SharedEnvironment =>
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }
 
-class ReferenceTestSubmissionServiceIntegrationTestPostgresStableLf
+class TestSubmissionServiceIntegrationTestPostgresStableLf
     extends TestSubmissionServiceIntegrationTestStableLf
-    with TestSubmissionServiceReferenceSequencerPostgresTest
+    with TestSubmissionServiceSequencerPostgresTest
 
-class ReferenceTestSubmissionServiceIntegrationTestPostgresLF23
+class TestSubmissionServiceIntegrationTestPostgresLF23
     extends TestSubmissionServiceIntegrationTestLF23
-    with TestSubmissionServiceReferenceSequencerPostgresTest
+    with TestSubmissionServiceSequencerPostgresTest

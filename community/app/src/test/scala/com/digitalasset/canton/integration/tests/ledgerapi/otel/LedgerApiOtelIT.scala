@@ -28,6 +28,7 @@ import com.daml.ledger.api.v2.update_service.*
 import com.daml.ledger.api.v2.value.{Record, RecordField, Value}
 import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.UniquePortGenerator
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.AuthServiceConfig.Wildcard
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.config.{CantonConfig, PemFile}

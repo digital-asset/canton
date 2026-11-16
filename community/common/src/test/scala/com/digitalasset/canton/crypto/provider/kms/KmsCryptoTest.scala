@@ -6,7 +6,6 @@ package com.digitalasset.canton.crypto.provider.kms
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.config.{
-  BatchingConfig,
   CachingConfigs,
   CryptoConfig,
   CryptoProvider,
@@ -16,6 +15,7 @@ import com.digitalasset.canton.config.{
   PrivateKeyStoreConfig,
   SessionEncryptionKeyCacheConfig,
   SigningSchemeConfig,
+  TestBatchingConfig,
 }
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.kms.Kms
@@ -93,7 +93,7 @@ trait KmsCryptoTest
         CommonMockMetrics.cryptoMetrics,
         executorService,
         timeouts,
-        BatchingConfig(),
+        TestBatchingConfig(),
         loggerFactory,
         NoReportingTracerProvider,
         new ExecutorServiceMetrics(NoOpMetricsFactory),

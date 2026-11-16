@@ -308,7 +308,7 @@ object SignedProtocolMessage
       signaturesSeqP <- ProtoValidation
         .validateLength(signaturesP, "signatures", pvv, ProtoValidation.MaxCollectionSize)
       signatures <- ProtoConverter.parseRequiredNonEmpty(
-        Signature.fromProtoV30,
+        Signature.fromProtoV30(pvv, _),
         "signatures",
         signaturesSeqP,
       )

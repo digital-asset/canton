@@ -7,6 +7,9 @@ on:
         required: true
         type: string
     secrets:
+      GHA_CANTON_DA:
+        required: false
+        description: GitHub token with write access to digital-asset/canton
       GHA_CANTON_DACH_NY:
         required: false
         description: GitHub token with write access to DACH-NY/canton
@@ -18,16 +21,23 @@ jobs:
     runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
+    env:
+      REPO_GITHUB_TOKEN: >-
+        ${{
+          case(
+            github.repository == 'DACH-NY/canton', secrets.GHA_CANTON_DACH_NY,
+            github.repository == 'digital-asset/canton', secrets.GHA_CANTON_DA,
+            ''
+          )
+        }}
     steps:
       # Tags pushed with github.token do not trigger other workflows, so the
       # v* tag would never start the Canton Release run that publishes it.
       - name: Validate repo GitHub token
         shell: bash
-        env:
-          REPO_GITHUB_TOKEN: ${{ secrets.GHA_CANTON_DACH_NY }}
         run: |
           if [[ -z "${REPO_GITHUB_TOKEN}" ]]; then
-            echo "::error::Missing GitHub token for ${GITHUB_REPOSITORY}. Set GHA_CANTON_DACH_NY before running this workflow."
+            echo "::error::Missing GitHub token for ${GITHUB_REPOSITORY}. Set GHA_CANTON_DACH_NY or GHA_CANTON_DA before running this workflow."
             exit 1
           fi
 
@@ -40,7 +50,7 @@ jobs:
       - name: Authorize git
         uses: ./.github/actions/git/authorize_git
         with:
-          github_token: ${{ secrets.GHA_CANTON_DACH_NY }}
+          github_token: ${{ env.REPO_GITHUB_TOKEN }}
 
       - name: Tag new releases
         shell: bash

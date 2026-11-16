@@ -305,11 +305,11 @@ object SequencedEvent
     }
 
   // It would be nice if we could appeal to a generic composition theorem here,
-  // but the `MemoizeEvidence` bound in `SignedContent` doesn't allow a generic `Traverse` instance.
+  // but the `MemoizeEvidence` bound in `AggregatedSignedContent` doesn't allow a generic `Traverse` instance.
   implicit val signedContentEnvelopeBox: EnvelopeBox[RawSignedContentEnvelopeBox] =
     new EnvelopeBox[RawSignedContentEnvelopeBox] {
       override private[sequencing] def traverse[G[_], Env1 <: Envelope[?], Env2 <: Envelope[?]](
-          signedEvent: SignedContent[DecompressedSequencedEvent[Env1]]
+          signedEvent: AggregatedSignedContent[DecompressedSequencedEvent[Env1]]
       )(f: Env1 => G[Env2])(implicit G: Applicative[G]): G[RawSignedContentEnvelopeBox[Env2]] =
         signedEvent.traverse {
           case deliver: Deliver[Batch[Env1]] => deliver.traverse(f)

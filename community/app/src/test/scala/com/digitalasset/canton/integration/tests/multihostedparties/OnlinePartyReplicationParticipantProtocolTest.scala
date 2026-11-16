@@ -7,8 +7,8 @@ import cats.Monad
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.ConsoleCommandTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.config.{BatchingConfig, ConsoleCommandTimeout}
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -35,6 +35,7 @@ import com.digitalasset.canton.participant.admin.party.{
 import com.digitalasset.canton.participant.config.{
   AlphaAcsReplicationSourceConfig,
   AlphaAcsReplicationTargetConfig,
+  ParticipantBatchingConfig,
 }
 import com.digitalasset.canton.participant.party.AcsReplicationTestInterceptorImpl
 import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPersistence
@@ -64,6 +65,9 @@ import scala.util.chaining.scalaUtilChainingOps
   *     participant TP.
   *   - Test that TP-side conflict detection properly handles concurrent contract archives and
   *     unassignments of contracts before they are replicated to the target participant.
+  *   - Test that replication completes when each TP request is larger than the SP's ACS queue. The
+  *     two batch sizes are configured on different participants, so neither operator can rule this
+  *     out.
   *
   * Setup:
   *   - 2 participants, a source and a target participant to perform party replication
@@ -204,8 +208,8 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         _.testing.state_inspection.getSequencerChannelClient(daId).value
       )
 
-      asyncExec("ping1")(spClient.ping(sequencer1.id))
-      asyncExec("ping2")(tpClient.ping(sequencer1.id))
+      asyncExec("ping1")(spClient.ping(sequencer1.id, ignorePoolCapacityExhaustion = false))
+      asyncExec("ping2")(tpClient.ping(sequencer1.id, ignorePoolCapacityExhaustion = false))
 
       val channelId = SequencerChannelId("channel1")
       val requestId =
@@ -246,7 +250,17 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           timeouts,
         ).tap(_.add(initialStatus).value.futureValueUS.value)
 
+      // The SP's ACS queue holds 20 contracts, fewer than each TP request of 21. So the SP serves
+      // each request in two parts: the 20 contracts of its full queue, then the single remaining
+      // contract.
+      val sourceConfig = AlphaAcsReplicationSourceConfig(
+        acsBatchSize = PositiveInt.tryCreate(10),
+        acsReaderMaxQueueSize = PositiveInt.tryCreate(20),
+      )
+      val targetConfig = AlphaAcsReplicationTargetConfig(acsBatchSize = PositiveInt.tryCreate(21))
+
       val agreedAt = env.environment.clock.now
+      val sourceReplicationProgressState = inMemoryAcsReplicationStateManager(sourceParticipant.id)
       val sourceProcessor = asyncExec("Initialize SP processor")(
         AcsReplicationSourceParticipantProcessor.initialize(
           daId,
@@ -257,10 +271,10 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           excludedStakeholders = Set.empty,
           agreedAt,
           sourceParticipant.underlying.value.participantServices.ledgerApiIndexServiceContainer.asEval.value.internalIndexService,
-          inMemoryAcsReplicationStateManager(sourceParticipant.id),
+          sourceReplicationProgressState,
           noOpProgressAndCompletionCallback,
           noOpProgressAndCompletionCallback2,
-          AlphaAcsReplicationSourceConfig(),
+          sourceConfig,
           sourceParticipant.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore,
           futureSupervisor,
           exitOnFatalFailures = false,
@@ -306,7 +320,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           noOpProgressAndCompletionCallback,
           noOpProgressAndCompletionCallback2,
           acsTransferContractHandler,
-          AlphaAcsReplicationTargetConfig(),
+          targetConfig,
           futureSupervisor,
           exitOnFatalFailures = false,
           timeouts,
@@ -317,10 +331,17 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
               canTargetParticipantProceed || _.processedContractCount.unwrap < handfulOfContractsCountToProcessBeforePausing
             ),
         )
+      // Like the AcsReplicator, register the processors so that their progress updates are accepted.
+      asyncExec("Register SP processor")(
+        sourceReplicationProgressState.update_(requestId, _.setProcessor(sourceProcessor))
+      )
+      asyncExec("Register TP processor")(
+        replicationProgressState.update_(requestId, _.setProcessor(targetProcessor))
+      )
       val targetParticipantIndexingWorkflow = new PartyReplicationIndexingWorkflow(
         targetParticipant.underlying.value.sync.participantNodePersistentState.map(_.contractStore),
         pauseSynchronizerIndexingDuringPartyReplication = true,
-        BatchingConfig(),
+        ParticipantBatchingConfig(),
         loggerFactory,
       )
 
@@ -403,9 +424,11 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       canTargetParticipantProceed = true
       targetProcessor.progressAcsReplication()
 
-      eventually(timeUntilSuccess = 2.minute) {
-        sourceProcessor.hasChannelCompleted shouldBe true
-        targetProcessor.hasChannelCompleted shouldBe true
+      clue("SP and TP complete although each TP request exceeds the SP's queue") {
+        eventually(timeUntilSuccess = 2.minute) {
+          sourceProcessor.hasChannelCompleted shouldBe true
+          targetProcessor.hasChannelCompleted shouldBe true
+        }
       }
 
       logger.info("Sequencer channel based party replication processing completed on SP and TP")

@@ -11,6 +11,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -23,12 +24,14 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
-  VersioningCompanion,
+  VersioningCompanionContext,
 }
 import com.google.protobuf.ByteString
 
@@ -171,7 +174,8 @@ final case class OrderingRequestBatch private (
     OrderingRequestBatch
 }
 
-object OrderingRequestBatch extends VersioningCompanion[OrderingRequestBatch] {
+object OrderingRequestBatch
+    extends VersioningCompanionContext[OrderingRequestBatch, BftOrdererLimits] {
 
   // TODO(#24736): make this possible to change
   val BatchValidityDurationEpochs = 500
@@ -189,20 +193,29 @@ object OrderingRequestBatch extends VersioningCompanion[OrderingRequestBatch] {
     )
 
   def fromProtoV30(
-      batch: v30.Batch
+      pvv: ProtocolVersionValidation,
+      limits: BftOrdererLimits,
+      batch: v30.Batch,
   ): ParsingResult[OrderingRequestBatch] =
     for {
       rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData30)
-      requests = batch.orderingRequests.map { protoOrderingRequest =>
-        Traced.fromPair[OrderingRequest](
-          (
-            OrderingRequest(
-              protoOrderingRequest.tag,
-              protoOrderingRequest.messageId,
-              protoOrderingRequest.payload,
-              protoOrderingRequest.orderingStartInstant.map(_.asJavaInstant),
-            ),
-            OrderingRequest.traceContextFromProtoString(protoOrderingRequest.traceContext),
+      requests <- ProtoValidation.validateLengthThen(
+        batch.orderingRequests,
+        "ordering_requests",
+        pvv,
+        ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxOrderingRequests),
+      ) { (protoOrderingRequest, _) =>
+        Right(
+          Traced.fromPair[OrderingRequest](
+            (
+              OrderingRequest(
+                protoOrderingRequest.tag,
+                protoOrderingRequest.messageId,
+                protoOrderingRequest.payload,
+                protoOrderingRequest.orderingStartInstant.map(_.asJavaInstant),
+              ),
+              OrderingRequest.traceContextFromProtoString(protoOrderingRequest.traceContext),
+            )
           )
         )
       }
@@ -215,7 +228,7 @@ object OrderingRequestBatch extends VersioningCompanion[OrderingRequestBatch] {
     VersioningTable(
       SupportedVersions.ProtoData30 ->
         VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.Batch)(
-          supportedProtoVersion(_)(fromProtoV30),
+          supportedProtoVersionPVV(_)(fromProtoV30),
           _.toProtoV30,
         )
     )

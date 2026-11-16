@@ -259,7 +259,7 @@ class CommandSubmissionServiceImplSpec
       actAs = Set.empty,
       readAs = Set.empty,
       submittedAt = Timestamp.Epoch,
-      deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration(Duration.ZERO),
+      deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration.Zero,
       commands = LfCommands(
         commands = ImmArray.empty,
         ledgerEffectiveTime = Timestamp.Epoch,
@@ -277,7 +277,7 @@ class CommandSubmissionServiceImplSpec
       readAs = Nil,
       userId = Ref.UserId.assertFromString("foobar"),
       commandId = Ref.CommandId.assertFromString("foobar"),
-      deduplicationPeriod = DeduplicationDuration(Duration.ofMinutes(1)),
+      deduplicationPeriod = DeduplicationDuration.create(Duration.ofMinutes(1)).value,
       submissionId = None,
       externallySignedSubmission = None,
       transactionHash = None,

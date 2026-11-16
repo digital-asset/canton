@@ -567,6 +567,8 @@ private[daml] class EncodeV2(minorLanguageVersion: LV.Minor) {
             case FCInvalidGivenCurrentSystemStateOther =>
               PLF.BuiltinLit.FailureCategory.INVALID_GIVEN_CURRENT_SYSTEM_STATE_OTHER
           })
+        case BLUint256(value) =>
+          builder.setUint256(Uint256.toByteString(value))
       }
       builder.build()
     }

@@ -39,6 +39,8 @@ import com.digitalasset.canton.tea.v1.{
   PruneResponse,
   RegisterSubmissionRequest,
   RegisterSubmissionResponse,
+  ReleaseSubmissionRequest,
+  ReleaseSubmissionResponse,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
@@ -88,18 +90,7 @@ class TrafficEnforcementService(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[RpcError, RegisterSubmissionResponse]] = {
     val result = for {
-      changeIdHash <- parsed(
-        LfHash
-          .fromString(request.changeIdHash)
-          .leftMap(ProtoDeserializationError.ValueConversionError("change_id_hash", _))
-      )
-      submissionId <- parsed(
-        Either.cond(
-          request.submissionId.nonEmpty,
-          request.submissionId,
-          ProtoDeserializationError.FieldNotSet("submission_id"),
-        )
-      )
+      key <- parsed(parseCorrelationKey(request.changeIdHash, request.submissionId))
       accountO <- parsed(request.account.traverse { charged =>
         // We check this first so an empty id gets a clearer error.
         Either
@@ -122,19 +113,50 @@ class TrafficEnforcementService(
           }
         case _ => EitherT.rightT[FutureUnlessShutdown, RpcError](())
       }
+      insertedAt = clock.now
       _ <- store
         .insertCorrelation(
-          SubmissionCorrelation(
-            CorrelationKey(changeIdHash, submissionId),
-            CorrelationAccount.fromOption(accountO),
-            clock.now,
-          )
+          SubmissionCorrelation(key, CorrelationAccount.fromOption(accountO), insertedAt)
         )
         .leftWiden[RpcError]
-    } yield RegisterSubmissionResponse()
+    } yield RegisterSubmissionResponse(Some(insertedAt.toProtoTimestamp))
 
     result.value
   }
+
+  /** Delete the correlation with this key and registration time, if it's still there. */
+  def releaseSubmission(request: ReleaseSubmissionRequest)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Either[RpcError, ReleaseSubmissionResponse]] = {
+    val result = for {
+      key <- parsed(parseCorrelationKey(request.changeIdHash, request.submissionId))
+      registeredAt <- parsed(
+        ProtoConverter.parseRequired(
+          CantonTimestamp.fromProtoTimestamp,
+          "registered_at",
+          request.registeredAt,
+        )
+      )
+      _ <- store.deleteCorrelation(key, registeredAt).leftWiden[RpcError]
+    } yield ReleaseSubmissionResponse()
+
+    result.value
+  }
+
+  private def parseCorrelationKey(
+      changeIdHash: String,
+      submissionId: String,
+  ): ParsingResult[CorrelationKey] =
+    for {
+      hash <- LfHash
+        .fromString(changeIdHash)
+        .leftMap(ProtoDeserializationError.ValueConversionError("change_id_hash", _))
+      submission <- Either.cond(
+        submissionId.nonEmpty,
+        submissionId,
+        ProtoDeserializationError.FieldNotSet("submission_id"),
+      )
+    } yield CorrelationKey(hash, submission)
 
   /** Update the account state for the given account ID */
   def updateAccount(request: UpdateAccountRequest)(implicit

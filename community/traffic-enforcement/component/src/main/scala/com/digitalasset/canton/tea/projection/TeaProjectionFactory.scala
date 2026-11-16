@@ -175,6 +175,11 @@ trait TeaProjectionFactory extends Spanning { this: NamedLogging =>
           case _: SQLTransientException | _: SQLRecoverableException |
               _: SQLNonTransientConnectionException =>
             logger.info(message, cause)(env.traceContext)
+          // Postgres reports a closed connection (e.g. while DbLockedConnection rebuilds it) as a
+          // plain PSQLException with SQL state class 08, which DbExceptionRetryPolicy also retries.
+          case e: org.postgresql.util.PSQLException
+              if Option(e.getSQLState).exists(_.startsWith("08")) =>
+            logger.info(message, cause)(env.traceContext)
           case _ => logger.warn(message, cause)(env.traceContext)
         }
       }

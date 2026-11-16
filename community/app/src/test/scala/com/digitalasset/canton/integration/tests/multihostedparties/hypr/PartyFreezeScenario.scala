@@ -39,6 +39,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 }
 import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
+import com.digitalasset.canton.topology.store.TimeQuery
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
@@ -71,7 +72,7 @@ import org.scalatest.matchers.should.Matchers.*
 import java.nio.file.Files
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.DurationInt
-import scala.concurrent.{Await, Promise}
+import scala.concurrent.{Await, Future, Promise}
 import scala.jdk.CollectionConverters.*
 
 /** Drives a party through HyPR (Hybrid Party Replication) on one synchronizer, and checks after
@@ -84,9 +85,10 @@ import scala.jdk.CollectionConverters.*
   * no hosts on the synchronizer, so no request with the party as a stakeholder can be committed and
   * its contracts do not change.
   *
-  * The remote ACS read and the import of its snapshot by a Freezing target do not exist yet.
-  * [[readAcs]] and [[importAcs]] stand in for them with the repair service, which needs database
-  * persistence.
+  * The remote ACS read runs only on the dev protocol version so far. [[readRemoteAcs]] does it;
+  * [[readAcs]] stands in for it with the repair service, which needs database persistence.
+  * [[importPartyAcs]] imports with the party ACS import, after which the target moves on its own;
+  * [[importAcs]] imports with the repair service, for cases that move the target themselves.
   *
   * Every write proposes the complete mapping, with each entry's hosting state, and is signed by the
   * given signers only. "Signed by the party" means signed with the party's namespace key: by the
@@ -145,7 +147,9 @@ final class PartyFreezeScenario private (
     participants.map(participant => participant.id -> participant.ledger_api.state.end()).toMap
 
   /** Continues the scenario on the successor of the synchronizer after a logical synchronizer
-    * upgrade, which carries over the party's mapping and contracts.
+    * upgrade, which carries over the party's mapping and contracts. The next step checks that the
+    * mapping has carried over, or waits for a change that a participant makes on its own after the
+    * upgrade, such as the move from Freezing to Onboarding after the party ACS import.
     */
   def continueOn(
       successor: PhysicalSynchronizerId,
@@ -163,7 +167,7 @@ final class PartyFreezeScenario private (
       loggerFactory,
       counterpartysContract,
     )
-    next.mapping shouldBe mapping
+    next.mapping = mapping
     next.withAcs = withAcs
     next.pendingSnapshots = pendingSnapshots
     next.eventOffsets = eventOffsets
@@ -450,15 +454,23 @@ final class PartyFreezeScenario private (
   }
 
   /** Sets the expected mapping after a write outside of this scenario, signed by `signers`, and
-    * waits until every connected participant has reached its effective time.
+    * waits until every connected participant has reached its effective time. Checks the ACS of a
+    * participant that starts hosting the party, as [[write]] does.
     */
   def expectWritten(
       entries: Map[ParticipantId, Entry],
       threshold: PositiveInt,
       signers: Seq[LocalParticipantReference],
   ): CantonTimestamp = {
+    val startsHosting = entries.collect {
+      case (participantId, entry)
+          if entry.state.canHost && !mapping.entries.get(participantId).exists(_.state.canHost) =>
+        participantId
+    }.toSet
     mapping = ExpectedMapping(entries, threshold)
-    awaitMapping(signers.map(Authorizer.Participant.apply))
+    val effectiveTime = awaitMapping(signers.map(Authorizer.Participant.apply))
+    participants.filter(participant => startsHosting.contains(participant.id)).foreach(checkAcs)
+    effectiveTime
   }
 
   /** Raises the permission of `participant`'s entry and sets the mapping's threshold in one
@@ -530,6 +542,42 @@ final class PartyFreezeScenario private (
   def readAcs(frozenAt: CantonTimestamp): AcsSnapshot =
     exportAcs(asOf = frozenAt.immediateSuccessor)
 
+  /** The remote ACS read: `target` looks up the time as of which its freeze applies, and reads the
+    * party's ACS from the source as of that time. Needs ACS replication and sequencer channels, and
+    * runs only on the dev protocol version so far.
+    *
+    * @param frozenAt
+    *   t_F, the effective time of the target's freeze.
+    */
+  def readRemoteAcs(target: LocalParticipantReference, frozenAt: CantonTimestamp): AcsSnapshot = {
+    val asOf = target.parties.get_party_freezing_time(party.partyId, synchronizerId.logical)
+    asOf shouldBe frozenAt.immediateSuccessor
+    // As in exportAcs: a request sequenced after asOf, so that the source has processed past asOf
+    source.health.ping(source.id)
+    val file = Files.createTempFile("party-freeze-remote-acs", ".gz")
+    file.toFile.deleteOnExit()
+    // The read proceeds in steps scheduled on the clock, so the simulated clock must advance
+    // while it runs, about as fast as real time: a faster clock times out the read's requests
+    val read = Future(
+      target.parties.get_remote_acs(
+        Seq(party.partyId),
+        synchronizerId.logical,
+        source.id,
+        asOf,
+        file.toString,
+      )
+    )(env.environment.executionContext)
+    BaseTest.eventually(timeUntilSuccess = 2.minutes, maxPollInterval = 100.millis) {
+      env.environment.simClock.value.advance(java.time.Duration.ofMillis(100))
+      read.isCompleted shouldBe true
+    }
+    Await.result(read, 0.seconds)
+    AcsSnapshot(
+      file.toString,
+      env.repair.acs.read_from_file(file.toString).map(_.getCreatedEvent.contractId).toSet,
+    )
+  }
+
   private def exportAcs(asOf: CantonTimestamp): AcsSnapshot = {
     // A request sequenced after asOf, so that the source's clean index passes asOf. Then the
     // highest offset with a record time at or before asOf covers the ACS as of asOf.
@@ -580,6 +628,48 @@ final class PartyFreezeScenario private (
     pendingSnapshots += target.id -> snapshot
   }
 
+  /** Imports the snapshot with the party ACS import while `target` is disconnected, then reconnects
+    * `target`. As `target` is Freezing, the import records its move to Onboarding, which `target`
+    * submits once connected.
+    *
+    * @param whileDisconnected
+    *   Runs after the import, while `target` is still disconnected.
+    */
+  def importPartyAcs(target: LocalParticipantReference, snapshot: AcsSnapshot)(
+      whileDisconnected: => Unit
+  ): Unit = {
+    target.synchronizers.disconnect_all()
+    disconnected += target.id
+    try {
+      target.parties.import_party_acs(synchronizerId.logical, Some(party.partyId), snapshot.path)
+      whileDisconnected
+    } finally {
+      target.synchronizers.reconnect_all()
+      disconnected -= target.id
+    }
+    withAcs += target.id
+    pendingSnapshots += target.id -> snapshot
+  }
+
+  /** Waits until `target`, restored from a backup of its database and reconnected, has caught up
+    * with the synchronizer and hosts the same contracts of the party as the source. The next step
+    * checks the Ledger API events of `target` from there, as its replay has emitted the events
+    * since the backup again.
+    */
+  def awaitCaughtUpAfterRestore(target: LocalParticipantReference): Unit = {
+    target.testing.await_synchronizer_time(
+      synchronizerId,
+      source.testing.fetch_synchronizer_time(synchronizerId),
+    )
+    withClue(s"${target.name} hosts the party's contracts after the restore: ") {
+      BaseTest.eventually() {
+        target.ledger_api.state.acs.of_party(party).map(_.contractId).toSet shouldBe
+          source.ledger_api.state.acs.of_party(party).map(_.contractId).toSet
+      }
+    }
+    eventOffsets += target.id -> target.ledger_api.state.end()
+  }
+
   /** `target` moves from Freezing to Onboarding, after importing the party's ACS.
     *
     * @return
@@ -619,11 +709,16 @@ final class PartyFreezeScenario private (
 
   /** Advances the simulated clock past the decision deadline of the requests sequenced up to and
     * including `timestamp`, with pings so that every connected participant sees the time pass.
+    * Requests sequenced before a change of the synchronizer parameters keep their earlier decision
+    * timeout, so this takes the largest one of the parameter history.
     */
   def advancePastDecisionDeadline(timestamp: CantonTimestamp): Unit = {
-    val decisionTimeout =
-      source.topology.synchronizer_parameters.latest(synchronizerId).decisionTimeout
-    advanceClockTo(timestamp.plus(decisionTimeout.asJava).immediateSuccessor)
+    val decisionTimeout = source.topology.synchronizer_parameters
+      .list(synchronizerId, timeQuery = TimeQuery.Range(from = None, until = None))
+      .map(_.item.decisionTimeout.duration)
+      .maxOption
+      .getOrElse(fail("No synchronizer parameters"))
+    advanceClockTo(timestamp.plus(decisionTimeout).immediateSuccessor)
   }
 
   /** Checks what every connected participant observes after a step:
@@ -1098,7 +1193,7 @@ final class PartyFreezeScenario private (
               // between would wait for the timeout.
               env.environment.simClock.value
                 .advance(confirmationResponseTimeout.plusSeconds(1).asJava)
-              BaseTest.eventually() {
+              val completion = BaseTest.eventually() {
                 // The mediators observe the time through time proofs, which need no confirmation.
                 // The sequencer may assign earlier timestamps for a while.
                 env.mediators.local
@@ -1113,6 +1208,17 @@ final class PartyFreezeScenario private (
                   )
                   .loneElement
               }
+              // A host whose response was dropped warns once it processes the verdict, possibly
+              // after the counterparty's completion. A ping is sequenced after the verdict, so
+              // once such a host has confirmed it, it has warned within this block.
+              connected
+                .filter(participant => withholdResponsesOf.contains(participant.id))
+                .foreach(participant =>
+                  counterpartyParticipant.health
+                    .ping(participant.id, synchronizerId = Some(synchronizerId.logical))
+                    .discard
+                )
+              completion
             },
             // The participants whose responses are dropped may warn about the timeout, but not
             // those whose responses reached the mediator before the deadline

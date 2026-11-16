@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration.tests
 import cats.syntax.option.*
 import com.digitalasset.canton.config
 import com.digitalasset.canton.console.{CommandFailure, ParticipantReference}
-import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, Offset}
+import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.examples.java.cycle as C
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
@@ -63,11 +63,6 @@ class CommandDeduplicationPruningIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
-        // TODO(#34818) Enable the new pipeline
-        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
-        // TODO(#35107) Upon disabling the old ACS commitment processor
-        //  this test fails: (enable the new pipeline) and make the fix
-        ConfigTransforms.enableOldAcsCommitmentProcessor,
       )
       .withSetup { implicit env =>
         import env.*
@@ -119,7 +114,8 @@ class CommandDeduplicationPruningIntegrationTest
 
       def submit(
           commandId: String,
-          dedupPeriod: DeduplicationPeriod = DeduplicationDuration(java.time.Duration.ofMinutes(1)),
+          dedupPeriod: DeduplicationPeriod =
+            DeduplicationDuration.create(java.time.Duration.ofMinutes(1)).value,
           submissionId: String = "",
       ): Long =
         participant1.ledger_api.javaapi.commands
@@ -155,14 +151,6 @@ class CommandDeduplicationPruningIntegrationTest
       simClock.advance(maxDedupDuration)
       val after3 = submit(commandId3)
 
-      // Flake prevention: Wait for ACS commitments to be processed first before attempting to query the safe prune offset.
-      eventually() {
-        val noOutstandingCommitmentsO = participant1.testing.state_inspection
-          .noOutstandingCommitmentsTs(daName, CantonTimestamp.MaxValue)
-        logger.debug(s"No outstanding commitment at $noOutstandingCommitmentsO")
-        noOutstandingCommitmentsO.value should be > before2
-      }
-
       // We must not prune anything published within the max deduplication duration,
       // so we can prune only up to the first transaction
       val safe1 = findSafeOffset("safe1", participant1, after1)
@@ -185,7 +173,7 @@ class CommandDeduplicationPruningIntegrationTest
       val submissionId = "resubmission"
       submitAsync(
         commandId4DuplicateRejected,
-        DeduplicationDuration(maxDedupDuration),
+        DeduplicationDuration.create(maxDedupDuration).value,
         submissionId,
       )
       val (completion4, _offset4) =
@@ -202,7 +190,7 @@ class CommandDeduplicationPruningIntegrationTest
 
       val after5 = submit(
         commandId5OutsideDedupBoundaryAccepted,
-        DeduplicationDuration(maxDedupDuration),
+        DeduplicationDuration.create(maxDedupDuration).value,
       )
       val outsideDedupBoundaryTs =
         valueOrFail(
@@ -228,12 +216,13 @@ class CommandDeduplicationPruningIntegrationTest
 
       val after6 = submit(
         commandId6DeduplicationPeriodAccepted,
-        DeduplicationDuration(maxDedupDuration.multipliedBy(2)),
+        DeduplicationDuration.create(maxDedupDuration.multipliedBy(2)).value,
       )
 
       logger.debug("submit command with too long dedup duration")
       val submissionIdTooLongDuration = "submission-id-too-long-duration"
-      val dedupPeriod7 = DeduplicationDuration(maxDedupDuration.multipliedBy(2).plusMillis(1))
+      val dedupPeriod7 =
+        DeduplicationDuration.create(maxDedupDuration.multipliedBy(2).plusMillis(1)).value
       submitAsync(
         commandId7DeduplicationPeriodTooLong,
         dedupPeriod7,

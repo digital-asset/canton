@@ -45,7 +45,8 @@ trait CryptoKeyFormatMigrationTest
 
             val newPublicKey = SigningPublicKey
               .fromProtoV30(
-                legacyPublicKey.toProtoV30.valueOrFail("serialization of legacy public key")
+                testedProtocolVersionValidation,
+                legacyPublicKey.toProtoV30.valueOrFail("serialization of legacy public key"),
               )
               .valueOrFail("deserialize public")
 

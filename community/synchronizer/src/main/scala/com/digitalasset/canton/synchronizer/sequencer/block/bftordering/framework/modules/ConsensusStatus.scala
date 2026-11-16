@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules
 
-import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -20,10 +20,12 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.MessageFrom
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   HasRepresentativeProtocolVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
   VersioningCompanionContextMemoization,
@@ -58,10 +60,16 @@ object ConsensusStatus {
       super[HasProtocolVersionedWrapper].toByteString
   }
 
+  /** Deserialization context for BFT orderer consensus status structures */
+  final case class ConsensusStatusDeserializationContext(
+      from: BftNodeId,
+      limits: BftOrdererLimits,
+  )
+
   object EpochStatus
       extends VersioningCompanionContextMemoization[
         EpochStatus,
-        BftNodeId,
+        ConsensusStatusDeserializationContext,
       ] {
     override def name: String = "EpochStatus"
 
@@ -78,11 +86,19 @@ object ConsensusStatus {
       )
 
     def fromProto(
-        sentBy: BftNodeId,
+        pvv: ProtocolVersionValidation,
+        context: ConsensusStatusDeserializationContext,
         protoEpochStatus: v30.EpochStatus,
-    )(originalByteString: ByteString): ParsingResult[EpochStatus] =
+    )(originalByteString: ByteString): ParsingResult[EpochStatus] = {
+      val ConsensusStatusDeserializationContext(sentBy, limits) = context
+
       for {
-        segments <- protoEpochStatus.segments.traverse(SegmentStatus.fromProto)
+        segments <- ProtoValidation.validateLengthThen(
+          protoEpochStatus.segments,
+          "segments",
+          pvv,
+          ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxSegments),
+        )((element, _) => SegmentStatus.fromProto(pvv, limits, element))
         nonEmptySegments <- NonEmpty
           .from(segments)
           .toRight(
@@ -94,11 +110,12 @@ object ConsensusStatus {
         EpochNumber(protoEpochStatus.epochNumber),
         nonEmptySegments,
       )(rpv, Some(originalByteString))
+    }
 
     override val versioningTable: VersioningTable = VersioningTable(
       SupportedVersions.ProtoData30 ->
         VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.EpochStatus)(
-          supportedProtoVersionMemoized(_)(fromProto),
+          supportedProtoVersionMemoizedPVV(_)(fromProto),
           _.toProto,
         )
     )
@@ -169,19 +186,44 @@ object ConsensusStatus {
         )
     }
 
-    private[modules] def fromProto(proto: v30.SegmentStatus): ParsingResult[SegmentStatus] =
+    private[modules] def fromProto(
+        pvv: ProtocolVersionValidation,
+        limits: BftOrdererLimits,
+        proto: v30.SegmentStatus,
+    ): ParsingResult[SegmentStatus] =
       proto.status match {
         case v30.SegmentStatus.Status.InViewChange(
               v30.SegmentInViewChange(viewChange, viewChangeMessagesPresent, areBlocksComplete)
             ) =>
-          Right(
-            SegmentStatus
-              .InViewChange(ViewNumber(viewChange), viewChangeMessagesPresent, areBlocksComplete)
+          for {
+            viewChangeMessagesPresentBounded <- ProtoValidation.validateLength(
+              viewChangeMessagesPresent,
+              "view_change_messages_present",
+              pvv,
+              ValidationParam(
+                ProtocolVersion.nextValidationBoundPV -> limits.maxViewChangeMessagesPresent
+              ),
+            )
+            areBlocksCompleteBounded <- ProtoValidation.validateLength(
+              areBlocksComplete,
+              "are_blocks_complete",
+              pvv,
+              ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxAreBlocksComplete),
+            )
+          } yield SegmentStatus.InViewChange(
+            ViewNumber(viewChange),
+            viewChangeMessagesPresentBounded,
+            areBlocksCompleteBounded,
           )
         case v30.SegmentStatus.Status
               .InProgress(v30.SegmentInProgress(viewNumber, blockStatuses)) =>
           for {
-            blocks <- blockStatuses.traverse(BlockStatus.fromProto)
+            blocks <- ProtoValidation.validateLengthThen(
+              blockStatuses,
+              "block_statuses",
+              pvv,
+              ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxBlockStatuses),
+            )((element, _) => BlockStatus.fromProto(pvv, limits, element))
           } yield SegmentStatus.InProgress(
             ViewNumber(viewNumber),
             blocks,
@@ -235,12 +277,29 @@ object ConsensusStatus {
       )
     }
 
-    private[modules] def fromProto(proto: v30.BlockStatus): ParsingResult[BlockStatus] =
+    private[modules] def fromProto(
+        pvv: ProtocolVersionValidation,
+        limits: BftOrdererLimits,
+        proto: v30.BlockStatus,
+    ): ParsingResult[BlockStatus] =
       proto.status match {
         case v30.BlockStatus.Status.InProgress(
               v30.BlockInProgress(prePrepared, preparesPresent, commitsPresent)
             ) =>
-          Right(BlockStatus.InProgress(prePrepared, preparesPresent, commitsPresent))
+          for {
+            preparesPresentBounded <- ProtoValidation.validateLength(
+              preparesPresent,
+              "prepares_present",
+              pvv,
+              ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxPreparesPresent),
+            )
+            commitsPresentBounded <- ProtoValidation.validateLength(
+              commitsPresent,
+              "commits_present",
+              pvv,
+              ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxCommitsPresent),
+            )
+          } yield BlockStatus.InProgress(prePrepared, preparesPresentBounded, commitsPresentBounded)
         case v30.BlockStatus.Status.Complete(_) => Right(BlockStatus.Complete)
         case v30.BlockStatus.Status.Empty =>
           Left(ProtoDeserializationError.OtherError("Empty Received"))

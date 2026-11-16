@@ -8,6 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
@@ -51,6 +52,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.ConsensusMessage.PbftVerifiedNetworkMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.Internal.WarnWaitingForNewEpochMembership
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.NewEpochMembership
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage.ConsensusDeserializationContext
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PbftNetworkMessage.headerFromProto
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PbftSignedNetworkMessage
@@ -72,7 +74,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Fa
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.{v30, v31}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
@@ -1051,19 +1053,30 @@ object IssConsensusModule {
   )
 
   def parseNetworkMessage(
+      pvv: ProtocolVersionValidation,
+      limits: BftOrdererLimits,
       protoSignedMessage: v30.SignedMessage,
       actualSender: BftNodeId,
   ): ParsingResult[SignedMessage[ConsensusSegment.ConsensusMessage.PbftNetworkMessage]] =
     SignedMessage
-      .fromProtoWithNodeId(v30.ConsensusMessage, SupportedVersions.ProtoData30)(claimedOriginator =>
-        proto =>
-          originalByteString =>
-            parseConsensusNetworkMessage(claimedOriginator, Some(actualSender), proto)(
-              originalByteString
-            )
+      .fromProtoWithNodeId(pvv, v30.ConsensusMessage, SupportedVersions.ProtoData30)(
+        claimedOriginator =>
+          proto =>
+            originalByteString =>
+              parseConsensusNetworkMessage(
+                pvv,
+                limits,
+                claimedOriginator,
+                Some(actualSender),
+                proto,
+              )(
+                originalByteString
+              )
       )(protoSignedMessage)
 
   def parseConsensusNetworkMessage(
+      pvv: ProtocolVersionValidation,
+      limits: BftOrdererLimits,
       claimedFrom: BftNodeId,
       actualSender: Option[BftNodeId],
       message: v30.ConsensusMessage,
@@ -1075,7 +1088,9 @@ object IssConsensusModule {
       result <- (message.message match {
         case v30.ConsensusMessage.Message.PrePrepare(_) =>
           ConsensusSegment.ConsensusMessage.PrePrepare.fromProtoConsensusMessage(
-            (claimedFrom, actualSender),
+            pvv,
+            ConsensusMessage
+              .ConsensusSegmentDeserializationContext(claimedFrom, actualSender, limits),
             message,
           )(originalByteString)
         case v30.ConsensusMessage.Message.Prepare(_) =>
@@ -1090,12 +1105,16 @@ object IssConsensusModule {
           )(originalByteString)
         case v30.ConsensusMessage.Message.ViewChange(_) =>
           ConsensusSegment.ConsensusMessage.ViewChange.fromProtoConsensusMessage(
-            (claimedFrom, actualSender),
+            pvv,
+            ConsensusMessage
+              .ConsensusSegmentDeserializationContext(claimedFrom, actualSender, limits),
             message,
           )(originalByteString)
         case v30.ConsensusMessage.Message.NewView(_) =>
           ConsensusSegment.ConsensusMessage.NewView.fromProtoConsensusMessage(
-            (claimedFrom, actualSender),
+            pvv,
+            ConsensusMessage
+              .ConsensusSegmentDeserializationContext(claimedFrom, actualSender, limits),
             message,
           )(originalByteString)
         case v30.ConsensusMessage.Message.Empty =>
@@ -1104,20 +1123,34 @@ object IssConsensusModule {
     } yield result
 
   def parseRetransmissionMessage(
+      pvv: ProtocolVersionValidation,
+      limits: BftOrdererLimits,
       sentBy: BftNodeId,
       message: v30.RetransmissionMessage,
   ): ParsingResult[Consensus.RetransmissionsMessage] =
     (message.message match {
       case v30.RetransmissionMessage.Message.RetransmissionRequest(value) =>
-        Consensus.RetransmissionsMessage.RetransmissionRequest.fromProto(sentBy, value)
+        Consensus.RetransmissionsMessage.RetransmissionRequest.fromProto(
+          pvv,
+          limits,
+          sentBy,
+          value,
+        )
       case v30.RetransmissionMessage.Message.RetransmissionResponse(value) =>
-        Consensus.RetransmissionsMessage.RetransmissionResponse.fromProto(sentBy, value)
+        Consensus.RetransmissionsMessage.RetransmissionResponse.fromProto(
+          pvv,
+          limits,
+          sentBy,
+          value,
+        )
       case v30.RetransmissionMessage.Message.Empty =>
         Left(ProtoDeserializationError.OtherError("Empty Received"))
     })
       .map(Consensus.RetransmissionsMessage.UnverifiedNetworkMessage.apply)
 
   def parseStateTransferMessage(
+      pvv: ProtocolVersionValidation,
+      limits: BftOrdererLimits,
       sentBy: BftNodeId,
       message: v30.StateTransferMessage,
   )(
@@ -1133,7 +1166,8 @@ object IssConsensusModule {
           originalByteString
         )
       case v30.StateTransferMessage.Message.BlockResponse(value) =>
-        Consensus.StateTransferMessage.BlockTransferResponse30.fromProto(sentBy, value)(
+        val context = ConsensusDeserializationContext(sentBy, limits)
+        Consensus.StateTransferMessage.BlockTransferResponse30.fromProto(pvv, context, value)(
           originalByteString
         )
       case v30.StateTransferMessage.Message.Empty =>
@@ -1141,7 +1175,9 @@ object IssConsensusModule {
     }
 
   def parseStateTransferMessage31(
-      from: BftNodeId,
+      pvv: ProtocolVersionValidation,
+      limits: BftOrdererLimits,
+      sentBy: BftNodeId,
       message: v31.StateTransferMessage,
   )(
       originalByteString: ByteString
@@ -1149,14 +1185,15 @@ object IssConsensusModule {
     message.message match {
       case v31.StateTransferMessage.Message.BlockRequest(value) =>
         Consensus.StateTransferMessage.BlockTransferRequest.fromProto(
-          from,
+          sentBy,
           value,
           SupportedVersions.ProtoData31,
         )(
           originalByteString
         )
       case v31.StateTransferMessage.Message.BlockResponse(value) =>
-        Consensus.StateTransferMessage.BlockTransferResponse31.fromProto(from, value)(
+        val context = ConsensusDeserializationContext(sentBy, limits)
+        Consensus.StateTransferMessage.BlockTransferResponse31.fromProto(pvv, context, value)(
           originalByteString
         )
       case v31.StateTransferMessage.Message.Empty =>

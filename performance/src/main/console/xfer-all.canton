@@ -24,10 +24,56 @@ Seq("performance-driver_", "performance_").foreach { jar =>
 // adding a @ will make the imports available
 @
 
-import com.digitalasset.canton.performance.scenarios.TransferTesting
+com.digitalasset.canton.util.Mutex.MaxSpins.set(60000)
+com.digitalasset.canton.util.Mutex.TrackContention.set(true)
 
-val master = TransferTesting.startupMaster()
+import com.digitalasset.canton.performance.scenarios.TransferTesting
+val runType = "triparty"
+val issuersPerNode = 3
+
+val master = TransferTesting.startupMaster(
+  runType = runType,
+  issuersPerNode = issuersPerNode,
+  reportFrequency = 2500,
+)
 
 val runners = TransferTesting.startupParticipants(
-  ignoreParticipants = Set("opsparticipant")
+  ignoreParticipants = Set("opsparticipant"),
+  runType = runType,
+  issuersPerNode = issuersPerNode,
 )
+
+def stats() =
+  println((master +: runners).flatMap(_.status()).map(_.toString).mkString("\n"))
+
+def phase() = {
+  val kk = "daml.participant.phase.duration.seconds"
+  val rr = participant1.metrics.list(kk).getOrElse(kk, List.empty)
+  val tmp = rr
+    .map { mv =>
+      val pp = participant1.metrics.get_exponential_histogram(kk, mv.attributes)
+      (
+        mv.attributes.getOrElse("phase", "unknown"),
+        pp.sum / Math.max(pp.count, 1),
+        pp.sum,
+        pp.count,
+      )
+    }
+    .sortBy(-_._2)
+    .map { case (phase, avg, sum, count) =>
+      s"$phase: avg=$avg, sum=$sum, count=$count"
+    }
+  println(tmp.mkString("\n"))
+}
+
+def sequencer_client(
+    instances: com.digitalasset.canton.console.LocalInstanceReference*
+)(waitMillis: Long = 2000L) =
+  instances.map { instance =>
+    val pre =
+      instance.metrics.get_long_point("daml.sequencer-client.handler.sequencer-events").value
+    com.digitalasset.canton.concurrent.Threading.sleep(waitMillis)
+    val post =
+      instance.metrics.get_long_point("daml.sequencer-client.handler.sequencer-events").value
+    (instance.name, (post - pre) / (waitMillis / 1000))
+  }

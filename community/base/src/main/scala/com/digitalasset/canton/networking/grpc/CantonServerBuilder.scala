@@ -3,13 +3,18 @@
 
 package com.digitalasset.canton.networking.grpc
 
+import com.daml.metrics.grpc.DamlGrpcServerMetrics
 import com.daml.tls.TlsServerConfig.logTlsProtocolsAndCipherSuites
-import com.daml.tls.{BaseServerTlsConfig, TlsConfig, TlsServerConfig}
+import com.daml.tls.{
+  BaseServerTlsConfig,
+  RevocationCheckingTrustManagerFactory,
+  TlsConfig,
+  TlsServerConfig,
+}
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.networking.grpc.ratelimiting.ActiveRequestCounterInterceptor
 import com.digitalasset.canton.tracing.TracingConfig
 import com.google.common.annotations.VisibleForTesting
@@ -149,7 +154,7 @@ object CantonServerBuilder {
       loggerFactory: NamedLoggerFactory,
       apiLoggingConfig: ApiLoggingConfig,
       tracing: TracingConfig,
-      grpcMetrics: GrpcServerMetricsX,
+      grpcMetrics: DamlGrpcServerMetrics,
       additionalInterceptors: Seq[ServerInterceptor] = Seq.empty,
       nettyServerBuilderCustomizer: NettyServerBuilder => Unit = _ => (),
   ): CantonServerBuilder = {
@@ -203,9 +208,13 @@ object CantonServerBuilder {
       logTlsProtocolAndCipherSuites: Boolean = false,
   ): SslContext = {
     val s1 = baseSslBuilder(config)
-    val s2 = config.trustCollectionFile.fold(s1)(trustCollection =>
-      s1.trustManager(trustCollection.pemStream)
-    )
+    val s2 =
+      if (config.checkClientCertRevocation)
+        s1.trustManager(RevocationCheckingTrustManagerFactory(config.trustCollectionFile))
+      else
+        config.trustCollectionFile.fold(s1)(trustCollection =>
+          s1.trustManager(trustCollection.pemStream)
+        )
     val s3 = s2.clientAuth(config.clientAuth.clientAuth)
     val sslContext = s3.build()
     if (logTlsProtocolAndCipherSuites)

@@ -10,23 +10,28 @@ import com.digitalasset.canton.ledger.participant.state.Update.CommandRejected.F
 import com.digitalasset.canton.ledger.participant.state.Update.{
   RepairTransactionAccepted,
   SequencedCommandRejected,
+  SequencedReassignmentAccepted,
   SequencedTransactionAccepted,
   TransactionAccepted,
   UnSequencedCommandRejected,
 }
 import com.digitalasset.canton.ledger.participant.state.{
   CompletionInfo,
+  Reassignment,
+  ReassignmentInfo,
   TestAcsChangeFactory,
   TransactionMeta,
 }
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
-import com.digitalasset.canton.protocol.TestUpdateId
+import com.digitalasset.canton.protocol.{ReassignmentId, TestUpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.transaction.CommittedTransaction
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
+import com.digitalasset.daml.lf.value.Value
 import io.grpc.Status
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -37,6 +42,7 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
   override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
 
   private val synchronizerId = SynchronizerId.tryFromString("x::synchronizer1")
+  private val targetSynchronizerId = SynchronizerId.tryFromString("x::synchronizer2")
   private val party = Ref.Party.assertFromString("party")
   private val userId = Ref.UserId.assertFromString("userid1")
   private val cantonTime1 = CantonTimestamp.now()
@@ -104,6 +110,7 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
         publicationTime = cantonTime1,
         submissionId = submissionId,
         accepted = true,
+        isTransaction = true,
         traceContext = TraceContext.empty,
       )
     )
@@ -133,21 +140,42 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
     ) shouldBe None
   }
 
-  it should "populate post PostPublishData correctly for SequencedCommandRejected" in {
-    val update = SequencedCommandRejected(
-      completionInfo = CompletionInfo(
-        actAs = List(party),
-        userId = userId,
-        commandId = commandId,
-        optDeduplicationPeriod = None,
-        submissionId = submissionId,
-        paidTrafficCost = NonNegativeLong.zero,
+  it should "populate post PostPublishData correctly for sequenced ReassignmentAccepted" in {
+    val update = SequencedReassignmentAccepted(
+      optCompletionInfo = Some(
+        CompletionInfo(
+          actAs = List(party),
+          userId = userId,
+          commandId = commandId,
+          optDeduplicationPeriod = None,
+          submissionId = submissionId,
+          paidTrafficCost = paidTrafficCost,
+        )
       ),
-      reasonTemplate = FinalReason(status),
-      synchronizerId = synchronizerId,
+      workflowId = None,
+      updateId = updateId,
+      reassignmentInfo = ReassignmentInfo(
+        sourceSynchronizer = ReassignmentTag.Source(synchronizerId),
+        targetSynchronizer = ReassignmentTag.Target(targetSynchronizerId),
+        submitter = Some(party),
+        reassignmentId = ReassignmentId.tryCreate("000123"),
+        isReassigningParticipant = true,
+      ),
+      reassignment = Reassignment.Batch(
+        Reassignment.Unassign(
+          contractId = Value.ContractId.V1(someHash),
+          templateId = Ref.Identifier.assertFromString("pkg:Mod:Template"),
+          packageName = Ref.PackageName.assertFromString("pkg"),
+          stakeholders = Set(party),
+          assignmentExclusivity = None,
+          reassignmentCounter = 1L,
+          nodeId = 0,
+          keyOpt = None,
+        )
+      ),
       recordTime = cantonTime2,
-      isTransaction = true,
-      transactionHash = None,
+      synchronizerId = synchronizerId,
+      acsChangeFactory = TestAcsChangeFactory(),
       traceContext = TraceContext.empty,
     )
 
@@ -167,16 +195,66 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
         offset = offset,
         publicationTime = cantonTime1,
         submissionId = submissionId,
-        accepted = false,
+        accepted = true,
+        isTransaction = false,
         traceContext = TraceContext.empty,
       )
     )
 
     PostPublishData.from(
-      update = update.copy(isTransaction = false),
+      update = update.copy(optCompletionInfo = None),
       offset = offset,
       publicationTime = cantonTime1,
     ) shouldBe None
+  }
+
+  it should "populate post PostPublishData correctly for SequencedCommandRejected" in {
+    val update = SequencedCommandRejected(
+      completionInfo = CompletionInfo(
+        actAs = List(party),
+        userId = userId,
+        commandId = commandId,
+        optDeduplicationPeriod = None,
+        submissionId = submissionId,
+        paidTrafficCost = NonNegativeLong.zero,
+      ),
+      reasonTemplate = FinalReason(status),
+      synchronizerId = synchronizerId,
+      recordTime = cantonTime2,
+      isTransaction = true,
+      transactionHash = None,
+      traceContext = TraceContext.empty,
+    )
+
+    val expected = Some(
+      PostPublishData(
+        submissionSynchronizerId = synchronizerId,
+        publishSource = PublishSource.Sequencer(
+          sequencerTimestamp = cantonTime2
+        ),
+        userId = userId,
+        commandId = commandId,
+        actAs = Set(party),
+        offset = offset,
+        publicationTime = cantonTime1,
+        submissionId = submissionId,
+        accepted = false,
+        isTransaction = true,
+        traceContext = TraceContext.empty,
+      )
+    )
+
+    PostPublishData.from(
+      update = update,
+      offset = offset,
+      publicationTime = cantonTime1,
+    ) shouldBe expected
+
+    PostPublishData.from(
+      update = update.copy(isTransaction = false),
+      offset = offset,
+      publicationTime = cantonTime1,
+    ) shouldBe expected.map(_.copy(isTransaction = false))
   }
 
   it should "populate post PostPublishData correctly for UnSequencedCommandRejected" in {
@@ -198,11 +276,7 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
       traceContext = TraceContext.empty,
     )
 
-    PostPublishData.from(
-      update = update,
-      offset = offset,
-      publicationTime = cantonTime1,
-    ) shouldBe Some(
+    val expected = Some(
       PostPublishData(
         submissionSynchronizerId = synchronizerId,
         publishSource = PublishSource.Local(messageUuid),
@@ -213,13 +287,21 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
         publicationTime = cantonTime1,
         submissionId = submissionId,
         accepted = false,
+        isTransaction = true,
         traceContext = TraceContext.empty,
       )
     )
+
+    PostPublishData.from(
+      update = update,
+      offset = offset,
+      publicationTime = cantonTime1,
+    ) shouldBe expected
+
     PostPublishData.from(
       update = update.copy(isTransaction = false),
       offset = offset,
       publicationTime = cantonTime1,
-    ) shouldBe None
+    ) shouldBe expected.map(_.copy(isTransaction = false))
   }
 }

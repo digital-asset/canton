@@ -88,6 +88,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
       acceptMatch("Text", { case Text(s) => BLText(s) }) |
       acceptMatch("Timestamp", { case Timestamp(l) => BLTimestamp(l) }) |
       acceptMatch("Date", { case Date(l) => BLDate(l) }) |
+      acceptMatch("Uint256", { case Uint256(v) => BLUint256(v) }) |
       (id ^? roundingModes) ^^ BLRoundingMode.apply |
       (id ^? failureCategories) ^^ BLFailureCategory.apply
 
@@ -387,6 +388,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
     "TEXT_TO_PARTY" -> BTextToParty,
     "TEXT_TO_INT64" -> BTextToInt64,
     "TEXT_TO_NUMERIC" -> BTextToNumeric,
+    "TEXT_TO_CONTRACT_ID" -> BTextToContractId,
     "TEXT_TO_CODE_POINTS" -> BTextToCodePoints,
     "ERROR" -> BError,
     "LESS_NUMERIC" -> BLessNumeric,
@@ -419,6 +421,35 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
     "TYPE_REP_TYCON_NAME" -> BTypeRepTyConName,
     "FAIL_WITH_STATUS" -> BFailWithStatus,
     "EXTERNAL_CALL" -> BExternalCall,
+    // Uint256 unsafe modular arithmetic
+    "ADD_UINT256" -> BAddUint256,
+    "SUB_UINT256" -> BSubUint256,
+    "MUL_UINT256" -> BMulUint256,
+    "DIV_UINT256" -> BDivUint256,
+    "MOD_UINT256" -> BModUint256,
+    "EXP_UINT256" -> BExpUint256,
+    // Uint256 bitwise operations
+    "AND_UINT256" -> BAndUint256,
+    "OR_UINT256" -> BOrUint256,
+    "XOR_UINT256" -> BXorUint256,
+    "NOT_UINT256" -> BNotUint256,
+    "SHL_UINT256" -> BShlUint256,
+    "SHR_UINT256" -> BShrUint256,
+    // Uint256 conversions
+    "UINT256_TO_TEXT" -> BUint256ToText,
+    "TEXT_TO_UINT256" -> BTextToUint256,
+    "INT64_TO_UINT256" -> BInt64ToUint256,
+    "UINT256_TO_INT64" -> BUint256ToInt64,
+    // Uint256 EVM-specific operations
+    "ADDMOD_UINT256" -> BAddModUint256,
+    "MULMOD_UINT256" -> BMulModUint256,
+    "SDIV_UINT256" -> BSDivUint256,
+    "SMOD_UINT256" -> BSModUint256,
+    "SLT_UINT256" -> BSltUint256,
+    "SGT_UINT256" -> BSgtUint256,
+    "SAR_UINT256" -> BSarUint256,
+    "BYTE_UINT256" -> BByteUint256,
+    "SIGNEXTEND_UINT256" -> BSignExtendUint256,
   )
 
   private lazy val eCallInterface: Parser[ECallInterface] =

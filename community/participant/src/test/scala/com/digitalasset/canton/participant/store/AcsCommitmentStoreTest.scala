@@ -41,6 +41,7 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
   UniqueIdentifier,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   CloseableTest,
@@ -61,7 +62,8 @@ trait CommitmentStoreBaseTest
     with FailOnShutdown
     with BaseTest
     with CloseableTest
-    with HasExecutionContext {
+    with HasExecutionContext
+    with ProtocolVersionChecksAsyncWordSpec {
 
   protected lazy val synchronizerId: PhysicalSynchronizerId = SynchronizerId(
     UniqueIdentifier.tryFromProtoPrimitive("synchronizer::synchronizer")
@@ -635,7 +637,7 @@ trait AcsCommitmentStoreTest
       }
     }
 
-    "correctly search stored remote commitment messages" in {
+    "correctly search stored remote commitment messages" onlyRunLessThan ProtocolVersion.v38 in {
       val store = mk()
 
       val dummyMsg2 = LegacyAcsCommitment.create(
@@ -718,7 +720,7 @@ trait AcsCommitmentStoreTest
       }
     }
 
-    "allow storing different remote commitment messages for the same period" in {
+    "allow storing different remote commitment messages for the same period" onlyRunLessThan ProtocolVersion.v38 in {
       val store = mk()
 
       val dummyMsg2 = LegacyAcsCommitment.create(
@@ -741,7 +743,7 @@ trait AcsCommitmentStoreTest
       }
     }
 
-    "be idempotent when storing the same remote commitment messages for the same period" in {
+    "be idempotent when storing the same remote commitment messages for the same period" onlyRunLessThan ProtocolVersion.v38 in {
       val store = mk()
 
       for {

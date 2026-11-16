@@ -12,6 +12,7 @@ import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.daml.metrics.api.MetricName
+import com.daml.metrics.grpc.DamlGrpcServerMetrics
 import com.daml.metrics.{CacheMetrics, ExecutorServiceMetrics, HealthMetrics}
 import com.digitalasset.canton.admin.health.v30.StatusServiceGrpc
 import com.digitalasset.canton.auth.{CantonAdminTokenDispenser, GrpcAuthInterceptorFactory}
@@ -63,7 +64,6 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.metrics.{CryptoMetrics, DbStorageMetrics, DeclarativeApiMetrics}
 import com.digitalasset.canton.networking.grpc.{
   CantonGrpcUtil,
@@ -180,7 +180,7 @@ trait BaseMetrics {
 
   def openTelemetryMetricsFactory: LabeledMetricsFactory
 
-  def grpcMetrics: GrpcServerMetricsX
+  def grpcMetrics: DamlGrpcServerMetrics
   final lazy val topologyCache: CacheMetrics =
     new CacheMetrics("topology", openTelemetryMetricsFactory)
   def healthMetrics: HealthMetrics
@@ -657,7 +657,7 @@ abstract class CantonNodeBootstrapImpl[
               adminApiConfig.jwtTimestampLeeway,
               adminApiConfig.adminTokenConfig,
               adminApiConfig.jwksCacheConfig,
-              arguments.testingConfig.warnOnJwtScopeUsage,
+              arguments.parameterConfig.enableScopeOnlyJwt,
             )
           ),
         )

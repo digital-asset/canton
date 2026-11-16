@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.model
 
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.config.{BatchAggregatorConfig, CachingConfigs}
+import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.resource.DbStorage
@@ -15,6 +15,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.db.DbAvailabilityStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.memory.InMemoryAvailabilityStore
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerCachingConfigs
 import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -27,7 +28,7 @@ trait ModelBasedTest extends AnyWordSpec with BftSequencerBaseTest { this: DbTes
   def createStore(): AvailabilityStore[PekkoEnv] =
     new DbAvailabilityStore(
       BatchAggregatorConfig(),
-      CachingConfigs(),
+      SequencerCachingConfigs(),
       SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
       storage,
       timeouts,

@@ -28,8 +28,6 @@ on:
         required: false
       AWS_REGION:
         required: false
-      GAC_JSON:
-        required: false
       GPG_CODE_SIGNING:
         required: false
       MAVEN_USERNAME:
@@ -117,7 +115,7 @@ jobs:
       - name: Publish release to OCI registry
         uses: ./.github/actions/publish/publish_release_on_oci_registry
         with:
-          gcloud_service_key: ${{ secrets.GAC_JSON }}
+          oci_registry: ${{ env.OCI_REGISTRY }}
           nightly_release: ${{ inputs.is_nightly_workflow }}
           release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}
 
@@ -126,7 +124,6 @@ jobs:
         uses: ./.github/actions/publish/publish_api_to_gar
         with:
           gar_maven_repo_url: https://europe-maven.pkg.dev/da-images/public-maven-unstable
-          gac_json: ${{ secrets.GAC_JSON }}
           release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}
 
       - name: Publish API artifacts to stable GAR
@@ -134,7 +131,6 @@ jobs:
         uses: ./.github/actions/publish/publish_api_to_gar
         with:
           gar_maven_repo_url: https://europe-maven.pkg.dev/da-images/public-maven
-          gac_json: ${{ secrets.GAC_JSON }}
           release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}
 
       - name: Publish API artifacts to Maven Central

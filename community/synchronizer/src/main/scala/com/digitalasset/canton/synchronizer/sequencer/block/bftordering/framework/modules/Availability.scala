@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.Signature
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequired}
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -32,6 +33,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingRequestBatch,
   SignedMessage,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability.RemoteDissemination.AvailabilityDeserializationContext
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.AvailabilityModuleDependencies
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{Env, Module}
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
@@ -141,7 +143,17 @@ object Availability {
         super[HasProtocolVersionedWrapper].toByteString
     }
 
-    object RemoteBatch extends VersioningCompanionContextMemoization[RemoteBatch, BftNodeId] {
+    /** Deserialization context for BFT orderer availability structures */
+    final case class AvailabilityDeserializationContext(
+        from: BftNodeId,
+        limits: BftOrdererLimits,
+    )
+
+    object RemoteBatch
+        extends VersioningCompanionContextMemoization[
+          RemoteBatch,
+          AvailabilityDeserializationContext,
+        ] {
 
       override def name: String = "RemoteBatch"
 
@@ -149,32 +161,47 @@ object Availability {
         VersioningTable(
           SupportedVersions.ProtoData30 -> {
             VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.AvailabilityMessage)(
-              supportedProtoVersionMemoized(_)(RemoteBatch.fromProtoAvailabilityMessage),
+              supportedProtoVersionMemoizedPVV(_)(fromProtoAvailabilityMessage),
               _.toProtoV30,
             )
           }
         )
 
-      def fromProtoAvailabilityMessage(from: BftNodeId, value: v30.AvailabilityMessage)(
+      private def fromProtoAvailabilityMessage(
+          pvv: ProtocolVersionValidation,
+          context: AvailabilityDeserializationContext,
+          value: v30.AvailabilityMessage,
+      )(
           bytes: ByteString
       ): ParsingResult[RemoteBatch] = for {
         protoStoreRequest <- value.message.storeRequest.toRight(
           ProtoDeserializationError.OtherError(s"Not a $name message")
         )
-        storeRequest <- fromProtoV30(from, protoStoreRequest)(bytes)
+        storeRequest <- fromProtoV30(pvv, context, protoStoreRequest)(bytes)
       } yield storeRequest
 
-      def fromProtoV30(from: BftNodeId, storeRequest: v30.StoreRequest)(
+      def fromProtoV30(
+          pvv: ProtocolVersionValidation,
+          context: AvailabilityDeserializationContext,
+          storeRequest: v30.StoreRequest,
+      )(
           bytes: ByteString
-      ): ParsingResult[RemoteBatch] =
+      ): ParsingResult[RemoteBatch] = {
+        val AvailabilityDeserializationContext(from, limits) = context
+
         for {
           id <- BatchId.fromProto(storeRequest.batchId)
-          batch <- parseRequired(OrderingRequestBatch.fromProtoV30, "batch", storeRequest.batch)
+          batch <- parseRequired(
+            OrderingRequestBatch.fromProtoV30(pvv, limits, _),
+            "batch",
+            storeRequest.batch,
+          )
           rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData30)
         } yield Availability.RemoteDissemination.RemoteBatch(id, batch, from)(
           rpv,
           deserializedFrom = Some(bytes),
         )
+      }
 
       def create(
           batchId: BatchId,
@@ -225,27 +252,32 @@ object Availability {
       override val versioningTable: VersioningTable = VersioningTable(
         SupportedVersions.ProtoData30 ->
           VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.AvailabilityMessage)(
-            supportedProtoVersionMemoized(_)(RemoteBatchAcknowledged.fromAvailabilityMessage),
+            supportedProtoVersionMemoizedPVV(_)(RemoteBatchAcknowledged.fromAvailabilityMessage),
             _.toProtoV30,
           )
       )
 
-      def fromAvailabilityMessage(from: BftNodeId, value: v30.AvailabilityMessage)(
+      def fromAvailabilityMessage(
+          pvv: ProtocolVersionValidation,
+          from: BftNodeId,
+          value: v30.AvailabilityMessage,
+      )(
           bytes: ByteString
       ): ParsingResult[RemoteBatchAcknowledged] = for {
         protoStoreResponse <- value.message.storeResponse.toRight(
           ProtoDeserializationError.OtherError(s"Not a $name message")
         )
-        storeResponse <- fromProtoV30(from, protoStoreResponse)(bytes)
+        storeResponse <- fromProtoV30(pvv, from, protoStoreResponse)(bytes)
       } yield storeResponse
 
       def fromProtoV30(
+          pvv: ProtocolVersionValidation,
           from: BftNodeId,
           value: v30.StoreResponse,
       )(bytes: ByteString): ParsingResult[RemoteBatchAcknowledged] =
         for {
           id <- BatchId.fromProto(value.batchId)
-          signature <- Signature.fromProtoV30(value.getSignature)
+          signature <- Signature.fromProtoV30(pvv, value.getSignature)
           rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData30)
         } yield Availability.RemoteDissemination.RemoteBatchAcknowledged(id, from, signature)(
           rpv,
@@ -444,7 +476,7 @@ object Availability {
     object RemoteBatchDataFetched
         extends VersioningCompanionContextMemoization[
           RemoteBatchDataFetched,
-          BftNodeId,
+          AvailabilityDeserializationContext,
         ] {
 
       override def name: String = "RemoteBatchDataFetched"
@@ -453,30 +485,33 @@ object Availability {
         VersioningTable(
           SupportedVersions.ProtoData30 ->
             VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.AvailabilityMessage)(
-              supportedProtoVersionMemoized(_)(RemoteBatchDataFetched.fromProtoAvailabilityMessage),
+              supportedProtoVersionMemoizedPVV(_)(fromProtoAvailabilityMessage),
               _.toProtoV30,
             )
         )
 
-      def fromProtoAvailabilityMessage(
-          from: BftNodeId,
+      private def fromProtoAvailabilityMessage(
+          pvv: ProtocolVersionValidation,
+          context: AvailabilityDeserializationContext,
           value: v30.AvailabilityMessage,
       )(bytes: ByteString): ParsingResult[RemoteBatchDataFetched] = for {
         protoRemoteBatchDataFetched <- value.message.batchResponse.toRight(
           ProtoDeserializationError.OtherError(s"Not a $name message")
         )
-        remoteBatchDataFetched <- fromProtoV30(from, protoRemoteBatchDataFetched)(bytes)
+        remoteBatchDataFetched <- fromProtoV30(pvv, context, protoRemoteBatchDataFetched)(bytes)
       } yield remoteBatchDataFetched
 
       def fromProtoV30(
-          from: BftNodeId,
+          pvv: ProtocolVersionValidation,
+          context: AvailabilityDeserializationContext,
           value: v30.BatchResponse,
-      )(bytes: ByteString): ParsingResult[RemoteBatchDataFetched] =
+      )(bytes: ByteString): ParsingResult[RemoteBatchDataFetched] = {
+        val AvailabilityDeserializationContext(from, limits) = context
+
         for {
           id <- BatchId.fromProto(value.batchId)
           batch <- value.batch match {
-            case Some(batch) =>
-              OrderingRequestBatch.fromProtoV30(batch)
+            case Some(batch) => OrderingRequestBatch.fromProtoV30(pvv, limits, batch)
             case None => Left(ProtoDeserializationError.FieldNotSet("batch"))
           }
           rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData30)
@@ -484,6 +519,7 @@ object Availability {
           rpv,
           deserializedFrom = Some(bytes),
         )
+      }
 
       def create(
           thisNode: BftNodeId,

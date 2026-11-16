@@ -10,7 +10,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.cache.StateCache.PendingUpdatesState
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, Mutex}
+import com.digitalasset.canton.util.ErrorUtil
 
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
@@ -23,8 +23,15 @@ import scala.concurrent.{ExecutionContext, Future}
   *
   * The cache's logical time (i.e. the `cacheIndex`) is used for establishing precedence of cache
   * updates stemming from read-throughs triggered from command interpretation on cache misses.
+  *
+  * Note: the synchronized statements here are correct. The cache is not performing any blocking
+  * operations or so. We don't want to use a mutex because we don't want to trigger the managed
+  * block that leaks threads. At the same time, we also don't want to use Future chaining because of
+  * the overhead they introduce.
   */
-@SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is mocked in tests
+@SuppressWarnings(
+  Array("org.wartremover.warts.FinalCaseClass", "com.digitalasset.canton.RequireBlocking")
+) // This class is mocked in tests
 private[platform] case class StateCache[K, V](
     initialCacheEventSeqIdIndex: Long,
     emptyLedgerState: V,
@@ -36,7 +43,6 @@ private[platform] case class StateCache[K, V](
   private[cache] val pendingUpdates = mutable.Map.empty[K, PendingUpdatesState]
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   @volatile private[cache] var cacheEventSeqIdIndex = initialCacheEventSeqIdIndex
-  private val lock = new Mutex()
 
   /** Fetch the corresponding value for an input key, if present.
     *
@@ -108,7 +114,7 @@ private[platform] case class StateCache[K, V](
   )(implicit traceContext: TraceContext): Unit =
     Timed.value(
       registerUpdateTimer,
-      (lock.exclusive {
+      (synchronized {
         // The mutable contract state cache update stream should generally increase the cacheIndex strictly monotonically.
         // However, the most recent updates can be replayed in case of failure of the mutable contract state cache update stream.
         // In this case, we must ignore the already seen updates (i.e. that have `validAt` before or at the cacheIndex).
@@ -149,7 +155,7 @@ private[platform] case class StateCache[K, V](
   ): Future[V] =
     Timed.value(
       registerUpdateTimer,
-      (lock.exclusive {
+      (synchronized {
         // dereferencing the mutable var to a val here is critical as it will be used asynchronously below
         val validAt = cacheEventSeqIdIndex
         val eventualValue = Future.delegate(fetchAsync(validAt))
@@ -184,7 +190,7 @@ private[platform] case class StateCache[K, V](
     *   The cache re-initialization event sequential ID
     */
   def reset(resetAtEventSeqId: Long): Unit =
-    (lock.exclusive {
+    (synchronized {
       cacheEventSeqIdIndex = resetAtEventSeqId
       pendingUpdates.clear()
       cache.invalidateAll()
@@ -199,7 +205,7 @@ private[platform] case class StateCache[K, V](
       .map { (value: V) =>
         Timed.value(
           registerUpdateTimer,
-          (lock.exclusive {
+          (synchronized {
             pendingUpdates.get(key) match {
               case Some(pendingForKey) =>
                 // Only update the cache if the current update is targeting the cacheIndex
@@ -222,7 +228,7 @@ private[platform] case class StateCache[K, V](
         )
       }
       .recover { case err =>
-        lock.exclusive(
+        synchronized(
           removeFromPending(key)
         )
 

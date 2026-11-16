@@ -279,8 +279,6 @@ sealed trait AcsCommitmentsEndToEndIntegrationTestStorage {
     implicit env =>
       import env.*
 
-      participant3.config.parameters.acsCommitments.enableNewAcsCommitmentProcessor shouldBe true
-
       participant3.synchronizers.register(
         sequencer1,
         daName,
@@ -294,8 +292,8 @@ sealed trait AcsCommitmentsEndToEndIntegrationTestStorage {
       participant3.start()
 
       def currentProc: Option[DigestProcessor] =
-        participant3.underlying.value.participantServices.acsCommitmentProcessorManagerO
-          .flatMap(_.asEval.value.synchronizers.get(daId))
+        participant3.underlying.value.participantServices.acsCommitmentProcessorManager.asEval.value.synchronizers
+          .get(daId)
           .flatMap(_.digestProcessorManager.currentProcessor)
 
       clue(s"$participant3 hasn't started reinitialization") {

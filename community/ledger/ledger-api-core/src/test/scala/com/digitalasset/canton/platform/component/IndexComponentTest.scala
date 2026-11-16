@@ -6,11 +6,19 @@ package com.digitalasset.canton.platform.component
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.metrics.DatabaseMetrics
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt, PositiveNumeric}
+import com.digitalasset.canton.config.{
+  BatchAggregatorConfig,
+  BatchingConfig,
+  CacheConfig,
+  DbParametersConfig,
+  NonNegativeFiniteDuration,
+  ProcessingTimeout,
+  QueryCostMonitoringConfig,
+}
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{Hash, HashPurpose}
-import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
+import com.digitalasset.canton.data.{CantonTimestamp, Counter, LedgerTimeBoundaries, Offset}
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.{CumulativeFilter, EventFormat, TemplateWildcardFilter}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.Onboarding
@@ -30,6 +38,7 @@ import com.digitalasset.canton.ledger.participant.state.index.IndexService
 import com.digitalasset.canton.ledger.participant.state.{
   CompletionInfo,
   IndexingWatermark,
+  ParticipantEvent,
   Reassignment,
   ReassignmentInfo,
   SynchronizerUpdate,
@@ -50,6 +59,7 @@ import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.indexer.parallel.NoOpReassignmentOffsetPersistence
 import com.digitalasset.canton.platform.indexer.{Indexer, IndexerConfig, IndexerParams, JdbcIndexer}
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DbConfig}
+import com.digitalasset.canton.platform.store.backend.PersistentParticipantEventUpdateCategory
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
@@ -86,7 +96,7 @@ import com.digitalasset.canton.util.PekkoUtil.{FutureQueue, IndexingFutureQueue}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{JarResourceUtils, MonadUtil}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, RepairCounter, platform}
-import com.digitalasset.daml.lf.archive.DarParser
+import com.digitalasset.daml.lf.archive.{DarParser, Decode}
 import com.digitalasset.daml.lf.data.Ref.{CommandId, UserId}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.{Engine, EngineConfig}
@@ -137,6 +147,7 @@ trait IndexComponentTest
     )
 
   private val testServicesRef: AtomicReference[TestServices] = new AtomicReference()
+  protected lazy val decodedDar = Decode.assertDecodeArchive(dar.main)
 
   private[this] lazy val dar = "P.dar"
     .pipe(JarResourceUtils.extractFileFromJar)
@@ -312,6 +323,9 @@ trait IndexComponentTest
     new Engine(EngineConfig(LanguageVersion.stableLfVersions), loggerFactory)
   private lazy val participantId =
     Ref.ParticipantId.assertFromString("index-component-test-participant-id")
+  private val logQueryCost = QueryCostMonitoringConfig(
+    every = NonNegativeFiniteDuration.ofSeconds(30)
+  )
 
   private def jdbcIndexerResourceOwner(
       config: IndexerConfig,
@@ -326,9 +340,9 @@ trait IndexComponentTest
             .tryCreate(
               config = dbConfig,
               connectionPoolForParticipant = false,
-              logQueryCost = None,
+              logQueryCost = Some(logQueryCost),
               clock = new SimClock(CantonTimestamp.Epoch, loggerFactory),
-              scheduler = None,
+              scheduler = Some(scheduler),
               metrics = CommonMockMetrics.dbStorage,
               timeouts = timeouts,
               loggerFactory = loggerFactory,
@@ -340,8 +354,12 @@ trait IndexComponentTest
             ContractStore.create(
               storage = dbStorage,
               processingTimeouts = timeouts,
-              cachingConfigs = CachingConfigs(),
-              batchingConfig = BatchingConfig(),
+              cacheConfig = CacheConfig(maximumSize = PositiveNumeric.tryCreate(10000)),
+              dbQueryBatcherConfig = BatchAggregatorConfig.Batching(
+                maximumInFlight = PositiveInt.tryCreate(5),
+                maximumBatchSize = PositiveInt.tryCreate(50),
+              ),
+              insertBatchAggregatorConfig = BatchingConfig.defaultAggregator,
               loggerFactory = loggerFactory,
             )
           )
@@ -378,6 +396,10 @@ trait IndexComponentTest
             ),
           ),
           disableMergeAndHashJoins = true,
+          dbQueueMetricsOpt = Some(CommonMockMetrics.dbStorage.ledgerApiServer),
+          logQueryCostOpt = Some(logQueryCost),
+          dbParametersConfigOpt = Some(DbParametersConfig()),
+          schedulerOpt = Some(scheduler),
           loggerFactory = loggerFactory,
         )
       indexer <- new JdbcIndexer.Factory(
@@ -400,6 +422,10 @@ trait IndexComponentTest
         sequentialPostProcessor = sequentialPostProcessor,
         contractStore = participantContractStore,
         disableMergeAndHashJoins = true,
+        dbQueueMetricsOpt = Some(CommonMockMetrics.dbStorage.indexer),
+        logQueryCostOpt = Some(logQueryCost),
+        dbParametersConfigOpt = Some(DbParametersConfig()),
+        schedulerOpt = Some(scheduler),
       ).initialized()
     } yield (indexer, participantContractStore, dbSupport, inMemoryState)
 
@@ -441,7 +467,7 @@ trait IndexComponentTest
         incompleteOffsets = (_, _, _) =>
           FutureUnlessShutdown.pure(params.incompleteOffsets.toVector),
         contractLoader = contractLoader,
-        getPackageMetadataSnapshot = _ => PackageMetadata(),
+        getPackageMetadataSnapshot = _ => PackageMetadata.from(decodedDar._1, decodedDar._2),
         lfValueTranslation = new LfValueTranslation(
           metrics = LedgerApiServerMetrics.ForTesting,
           engineO = Some(engine),
@@ -531,7 +557,7 @@ trait IndexComponentTest
   protected val synchronizer1: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer1")
   protected val synchronizer2: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer2")
   protected val synchronizer3: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer3")
-  protected val packageName: Ref.PackageName = Ref.PackageName.assertFromString("-package-name-")
+  protected val packageName: Ref.PackageName = decodedDar._2.metadata.name
   protected val dsoParty: ValueParty =
     ValueParty(Ref.Party.assertFromString("dsoParty")) // sees all
   private lazy val parties: Seq[ValueParty] =
@@ -712,12 +738,13 @@ trait IndexComponentTest
       payloadLength: Int,
       size: Int,
       ledgerEffectiveTime: Time.Timestamp,
+      template: Ref.Identifier = randomTemplate,
   ) =
     (1 to size)
       .map(_ =>
         genContract(
           argumentPayload = randomString(payloadLength),
-          template = randomTemplate,
+          template = template,
           signatories = Set(
             dsoParty,
             randomParty,
@@ -728,6 +755,48 @@ trait IndexComponentTest
         )
       )
       .toVector
+
+  protected def participantEventCreate(
+      recordTime: () => CantonTimestamp,
+      payloadLength: Int,
+      synchronizer: SynchronizerId = synchronizer1,
+      reassignmentCounter: Long = 0,
+      template: Ref.Identifier = randomTemplate, //  templates(0),
+      category: PersistentParticipantEventUpdateCategory =
+        PersistentParticipantEventUpdateCategory.AcsImportTxStyle,
+  )(size: Int): (Update.ParticipantEventUpdate, Vector[ContractInstance]) = {
+    val recordTimeAndLedgerEffectiveTime = recordTime()
+    val contracts =
+      createContracts(payloadLength, size, recordTimeAndLedgerEffectiveTime.underlying, template)
+        .map(c => (c, reassignmentCounter))
+    val update = participantEventImport(
+      synchronizerId = synchronizer,
+      recordTime = recordTimeAndLedgerEffectiveTime,
+      category = category,
+    )(contracts)
+    (update -> contracts.map(_._1))
+  }
+
+  protected def participantEventRemove(
+      recordTime: () => CantonTimestamp,
+      payloadLength: Int,
+      synchronizer: SynchronizerId = synchronizer1,
+      reassignmentCounter: Long = 0,
+      template: Ref.Identifier = randomTemplate, //  templates(0),
+      category: PersistentParticipantEventUpdateCategory =
+        PersistentParticipantEventUpdateCategory.AcsImportTxStyle,
+  )(size: Int): (Update.ParticipantEventUpdate, Vector[ContractInstance]) = {
+    val recordTimeAndLedgerEffectiveTime = recordTime()
+    val contracts =
+      createContracts(payloadLength, size, recordTimeAndLedgerEffectiveTime.underlying, template)
+        .map(c => (c, reassignmentCounter))
+    val update = participantEventPurge(
+      synchronizerId = synchronizer,
+      recordTime = recordTimeAndLedgerEffectiveTime,
+      category = category,
+    )(contracts)
+    (update -> contracts.map(_._1))
+  }
 
   protected def ingestTopologyEvents(
       parties: Set[String] = Set.empty,
@@ -850,6 +919,64 @@ trait IndexComponentTest
       result = Some(Value.ValueText(resultPayload)),
     )
   }
+  protected def participantEventPurge(
+      synchronizerId: SynchronizerId,
+      recordTime: CantonTimestamp,
+      category: PersistentParticipantEventUpdateCategory =
+        PersistentParticipantEventUpdateCategory.AcsImportTxStyle,
+  )(
+      contractsWithReassignmentCounter: Seq[(ContractInstance, Long)]
+  ): Update.ParticipantEventUpdate =
+    Update.RepairParticipantEventUpdate(
+      updateId = randomUpdateId,
+      workflowId = None,
+      synchronizerId = synchronizerId,
+      recordTime = recordTime,
+      events = contractsWithReassignmentCounter.map { case (contract, counter) =>
+        ParticipantEvent.Removed(
+          nodeId = 1, // dummy node id
+          // will be filled later
+          reassignmentCounter = counter,
+          contractId = contract.contractId,
+          templateId = contract.inst.templateId,
+          packageName = contract.inst.packageName,
+          stakeholders = contract.inst.stakeholders,
+          keyOpt = None,
+          signatories = Some(contract.inst.signatories),
+        )
+      },
+      category = category,
+      traceContext,
+      repairCounter = Counter(1L),
+    )
+  protected def participantEventImport(
+      synchronizerId: SynchronizerId,
+      recordTime: CantonTimestamp,
+      category: PersistentParticipantEventUpdateCategory =
+        PersistentParticipantEventUpdateCategory.AcsImportTxStyle,
+  )(
+      contractsWithReassignmentCounter: Seq[(ContractInstance, Long)]
+  ): Update.ParticipantEventUpdate =
+    Update.RepairParticipantEventUpdate(
+      updateId = randomUpdateId,
+      workflowId = None,
+      synchronizerId = synchronizerId,
+      recordTime = recordTime,
+      events = contractsWithReassignmentCounter.map { case (contract, counter) =>
+        ParticipantEvent.Added(
+          nodeId = 1, // dummy node id
+          contractInstance = PersistedContractInstance(
+            inst = contract.inst,
+            internalContractId = -1L,
+          ), // will be filled later
+          reassignmentCounter = counter,
+          representativePackageId = SameAsContractPackageId,
+        )
+      },
+      category = category,
+      traceContext,
+      repairCounter = Counter(1L),
+    )
 
   protected def transaction(
       synchronizerId: SynchronizerId,

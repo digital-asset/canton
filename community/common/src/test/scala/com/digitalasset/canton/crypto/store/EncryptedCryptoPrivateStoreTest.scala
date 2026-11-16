@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.crypto.store
 
-import com.digitalasset.canton.config.BatchingConfig
+import com.digitalasset.canton.config.TestBatchingConfig
 import com.digitalasset.canton.crypto.KeyPurpose.Encryption
 import com.digitalasset.canton.crypto.kms.{KmsKeyId, SymbolicKms}
 import com.digitalasset.canton.crypto.store.db.DbCryptoPrivateStore
@@ -53,7 +53,7 @@ trait EncryptedCryptoPrivateStoreTest extends AsyncWordSpec with CryptoPrivateSt
       storage,
       testedReleaseProtocolVersion,
       timeouts,
-      BatchingConfig(),
+      TestBatchingConfig(),
       loggerFactory,
     )
 
@@ -63,7 +63,7 @@ trait EncryptedCryptoPrivateStoreTest extends AsyncWordSpec with CryptoPrivateSt
     keyId,
     testedReleaseProtocolVersion,
     timeouts,
-    BatchingConfig(),
+    TestBatchingConfig(),
     loggerFactory,
   )
 

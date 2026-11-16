@@ -21,6 +21,7 @@ final class ProtoValidationTest extends AnyWordSpec with EitherValues with Match
   private val bad = "a\u0000b" // NUL, rejected by the content check
   // Proto string fields arrive wrapped; wrap test inputs the same way.
   private def u(s: String): ProtoUnvalidatedString = ProtoUnvalidatedString(s)
+  private def uBytes(b: ByteString): ProtoUnvalidatedByteString = ProtoUnvalidatedByteString(b)
   private def seq[E](es: E*): ProtoUnvalidatedSeq[E] = ProtoUnvalidatedSeq(es)
   private def seqStr(ss: String*): ProtoUnvalidatedSeq[ProtoUnvalidatedString] = seq(ss.map(u)*)
   // Each check has its own validating protocol version, so pin each fixture to that alias.
@@ -40,15 +41,12 @@ final class ProtoValidationTest extends AnyWordSpec with EitherValues with Match
   }
 
   "ProtoValidation.validate" should {
-    "validate only from the validating protocol version on" in {
+    "validate when pvv is set" in {
       // We use the string validator instance, whose validating protocol version is stringValidation.
       ProtoValidation
         .validate(u(bad), fieldName, pvvStrings)
         .left
         .value shouldBe a[StringConversionError]
-      ProtoValidation
-        .validate(u(bad), fieldName, pvv35)
-        .value shouldBe bad
     }
 
     "pass through a trusted NoValidation source unchecked" in {
@@ -101,7 +99,7 @@ final class ProtoValidationTest extends AnyWordSpec with EitherValues with Match
     }
   }
 
-  "ProtoValidation.validateLength" should {
+  "ProtoValidation.validateLength for collections" should {
     "return the raw elements when the collection is within the bound" in {
       ProtoValidation
         .validateLength(seqStr("a", "b"), fieldName, pvvBounds, maxLength(2))
@@ -210,6 +208,12 @@ final class ProtoValidationTest extends AnyWordSpec with EitherValues with Match
     val invalidBytes = ByteString.copyFromUtf8("1234") // 4 bytes
 
     "return the ByteString when the size is within the bound" in {
+      // Explicit ProtoUnvalidatedByteString
+      ProtoValidation
+        .validateLength(uBytes(validBytes), fieldName, pvvBounds, maxLength(3))
+        .value shouldBe validBytes
+
+      // Via implicit conversion from raw ByteString
       ProtoValidation
         .validateLength(validBytes, fieldName, pvvBounds, maxLength(3))
         .value shouldBe validBytes
@@ -217,25 +221,25 @@ final class ProtoValidationTest extends AnyWordSpec with EitherValues with Match
 
     "reject a ByteString larger than the bound" in {
       val err = ProtoValidation
-        .validateLength(invalidBytes, fieldName, pvvBounds, maxLength(3))
+        .validateLength(uBytes(invalidBytes), fieldName, pvvBounds, maxLength(3))
         .left
         .value
 
-      err shouldBe a[ProtoDeserializationError.InvariantViolation]
+      err shouldBe a[InvariantViolation]
       err.message should include("exceeds maximum limit of 3 bytes")
-      err.asInstanceOf[ProtoDeserializationError.InvariantViolation].field shouldBe Some(fieldName)
+      err.asInstanceOf[InvariantViolation].field shouldBe Some(fieldName)
     }
 
     "bound only from the validating protocol version on" in {
       ProtoValidation
-        .validateLength(invalidBytes, fieldName, pvv35, maxLength(3))
+        .validateLength(uBytes(invalidBytes), fieldName, pvv35, maxLength(3))
         .value shouldBe invalidBytes
     }
 
     "not bound a trusted NoValidation source" in {
       ProtoValidation
         .validateLength(
-          invalidBytes,
+          uBytes(invalidBytes),
           fieldName,
           ProtocolVersionValidation.NoValidation,
           maxLength(3),
@@ -246,7 +250,7 @@ final class ProtoValidationTest extends AnyWordSpec with EitherValues with Match
     "bound an AlwaysValidation read unconditionally" in {
       ProtoValidation
         .validateLength(
-          validBytes,
+          uBytes(validBytes),
           fieldName,
           ProtocolVersionValidation.AlwaysValidation,
           maxLength(3),
@@ -255,13 +259,57 @@ final class ProtoValidationTest extends AnyWordSpec with EitherValues with Match
 
       ProtoValidation
         .validateLength(
-          invalidBytes,
+          uBytes(invalidBytes),
           fieldName,
           ProtocolVersionValidation.AlwaysValidation,
           maxLength(3),
         )
         .left
-        .value shouldBe a[ProtoDeserializationError.InvariantViolation]
+        .value shouldBe a[InvariantViolation]
+    }
+
+    "handle optional ByteStrings" in {
+      // Valid Some
+      ProtoValidation
+        .validateLength(
+          Some(uBytes(validBytes)),
+          fieldName,
+          ProtocolVersionValidation.AlwaysValidation,
+          maxLength(3),
+        )
+        .value shouldBe Some(validBytes)
+
+      // Empty Option
+      ProtoValidation
+        .validateLength(
+          Option.empty[ProtoUnvalidatedByteString],
+          fieldName,
+          ProtocolVersionValidation.AlwaysValidation,
+          maxLength(3),
+        )
+        .value shouldBe None
+
+      // Oversized Some
+      val err = ProtoValidation
+        .validateLength(
+          Some(uBytes(invalidBytes)),
+          fieldName,
+          ProtocolVersionValidation.AlwaysValidation,
+          maxLength(3),
+        )
+        .left
+        .value
+
+      err shouldBe a[InvariantViolation]
+      err.message should include("exceeds maximum limit of 3 bytes")
+      err.asInstanceOf[InvariantViolation].field shouldBe Some(fieldName)
+    }
+    "bound the byte string, then parse it" in {
+      ProtoValidation
+        .validateLengthThen(uBytes(validBytes), fieldName, pvvBounds, maxLength(3))(bs =>
+          Right(bs.size())
+        )
+        .value shouldBe 3
     }
   }
 
@@ -388,11 +436,6 @@ final class ProtoValidationTest extends AnyWordSpec with EitherValues with Match
           .left
           .value
       ) shouldBe field
-    }
-
-    "run both checks only from the validating protocol version on" in {
-      ProtoValidation.validate(seqStr("ok", bad), fieldName, pvv35, maxLength(1)).value shouldBe
-        Seq("ok", bad)
     }
   }
 

@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.ledgerapi.services.reflection
 
 import com.daml.grpc.test.StreamConsumer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
-import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import io.grpc.reflection.v1.{
@@ -18,13 +17,6 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
 final class ReflectionIT extends CantonFixture {
-
-  // TODO (i#33090): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
-  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
-  override def beforeAll(): Unit =
-    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
-      super.beforeAll()
-    }
 
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

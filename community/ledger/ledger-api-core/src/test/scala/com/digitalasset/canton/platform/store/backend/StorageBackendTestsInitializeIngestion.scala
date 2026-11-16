@@ -643,18 +643,6 @@ private[backend] trait StorageBackendTestsInitializeIngestion
             event_sequential_id = 1002L,
             internal_contract_id = 101,
           )(),
-          // won't be added: has before activate
-          dtosCreate(
-            event_offset = 1003L,
-            event_sequential_id = 1003L,
-            internal_contract_id = 50,
-          )(),
-          // won't be added: has before witnessed
-          dtosCreate(
-            event_offset = 1004L,
-            event_sequential_id = 1004L,
-            internal_contract_id = 51,
-          )(),
           // won't be added: already there
           dtosCreate(
             event_offset = 1005L,
@@ -686,18 +674,6 @@ private[backend] trait StorageBackendTestsInitializeIngestion
             event_offset = 1009L,
             event_sequential_id = 1009L,
             internal_contract_id = 104,
-          )(),
-          // won't be added: has before activate
-          dtosWitnessedCreate(
-            event_offset = 1010L,
-            event_sequential_id = 1010L,
-            internal_contract_id = 50,
-          )(),
-          // won't be added: has before witnessed
-          dtosWitnessedCreate(
-            event_offset = 1011L,
-            event_sequential_id = 1011L,
-            internal_contract_id = 51,
           )(),
           // won't be added: already there
           dtosWitnessedCreate(

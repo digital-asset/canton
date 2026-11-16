@@ -4,9 +4,10 @@
 package com.digitalasset.canton.platform.store
 
 import com.daml.ledger.resources.ResourceOwner
+import com.digitalasset.canton.config.{DbParametersConfig, QueryCostMonitoringConfig}
 import com.digitalasset.canton.health.ReportsHealth
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.metrics.{DbQueueMetrics, LedgerApiServerMetrics}
 import com.digitalasset.canton.platform.config.ServerRole
 import com.digitalasset.canton.platform.store.backend.h2.H2StorageBackendFactory
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
@@ -19,6 +20,7 @@ import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.tracing.TraceContext
 
+import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 
@@ -64,6 +66,10 @@ object DbSupport {
       serverRole: ServerRole,
       metrics: LedgerApiServerMetrics,
       disableMergeAndHashJoins: Boolean,
+      dbQueueMetricsOpt: Option[DbQueueMetrics],
+      logQueryCostOpt: Option[QueryCostMonitoringConfig],
+      dbParametersConfigOpt: Option[DbParametersConfig],
+      schedulerOpt: Option[ScheduledExecutorService],
       loggerFactory: NamedLoggerFactory,
   )(implicit
       traceContext: TraceContext,
@@ -89,6 +95,10 @@ object DbSupport {
             else 1,
           connectionTimeout = dbConfig.connectionPool.connectionTimeout,
           metrics = metrics,
+          dbQueueMetricsOpt = dbQueueMetricsOpt,
+          logQueryCostOpt = logQueryCostOpt,
+          dbParametersConfigOpt = dbParametersConfigOpt,
+          schedulerOpt = schedulerOpt,
           loggerFactory = loggerFactory,
         )
     } yield DbSupport(

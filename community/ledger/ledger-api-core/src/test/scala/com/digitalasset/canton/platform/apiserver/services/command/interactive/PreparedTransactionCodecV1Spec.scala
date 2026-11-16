@@ -421,6 +421,49 @@ class PreparedTransactionCodecV1Spec
       timeouts.default.await_("Reject malformed prepared transaction")(result)
     }
 
+    "reject non-wellformed transactions" in {
+      def rollback(children: Int*): Node.Rollback =
+        Node.Rollback(ImmArray.from(children.map(NodeId(_))))
+      def transaction(roots: Int*)(nodes: (Int, Node.Rollback)*): VersionedTransaction =
+        VersionedTransaction(
+          LfSerializationVersion.V2,
+          nodes.map { case (id, node) => NodeId(id) -> node }.toMap,
+          ImmArray.from(roots.map(NodeId(_))),
+        )
+
+      Seq(
+        (
+          "cycle through rollback nodes",
+          transaction(0)(0 -> rollback(1), 1 -> rollback(2), 2 -> rollback(0)),
+          "Transaction is not well-formed: AliasedNode [0]",
+        ),
+        (
+          "dangling node id",
+          transaction(0)(0 -> rollback(7)),
+          "Transaction is not well-formed: DanglingNodeId [7]",
+        ),
+        (
+          "several kinds of error",
+          transaction(0)(0 -> rollback(7), 1 -> rollback()),
+          "Transaction is not well-formed: DanglingNodeId [7], OrphanedNode [1]",
+        ),
+        (
+          "many orphans",
+          transaction(0)((0 to 1000).map(i => i -> rollback())*),
+          "Transaction is not well-formed: OrphanedNode [1, 2, 3, 4, 5, ... (total 1000 items)]",
+        ),
+      ).foreach { case (description, tx, expectedMessage) =>
+        val result = encoder.serializeTransaction(tx, nodeSeeds = None).map { encoded =>
+          decoder.transactionTransformer.transform(encoded).asEither match {
+            case Left(errors) => errors.toString should include(expectedMessage)
+            case Right(decoded) => fail(s"Decoded malformed prepared transaction: $decoded")
+          }
+        }
+
+        timeouts.default.await_(s"Reject $description")(result)
+      }
+    }
+
     "change the prepared hash when external-call output changes" in {
       val physicalSynchronizerId =
         DefaultTestIdentities.physicalSynchronizerId.copy(protocolVersion = ProtocolVersion.dev)

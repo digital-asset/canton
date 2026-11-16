@@ -6,15 +6,21 @@ on:
         required: true
         description: needs information as json string
         type: string
-      runner:
-        description: GitHub Actions runner label
-        required: true
-        type: string
 
 jobs:
   send_notification:
     name: Send Slack Notification
-    runs-on: ${{ inputs.runner }}
+    # Picked here rather than from the caller's pick_runner output, so the alert still runs
+    # when pick_runner itself fails. github.repository is the caller's repository.
+    # Keep repo-to-runner labels in sync with .github/actions/utils/pick_runner/action.yml.
+    runs-on: >-
+      ${{
+        case(
+          github.repository == 'DACH-NY/canton', 'dach-ny-canton',
+          github.repository == 'digital-asset/canton', 'digital-asset-canton',
+          'ubuntu-latest'
+        )
+      }}
     # Posts to DA Slack via a blocked action and needs DA secrets. Skip on the OSS mirror.
     # TODO(#34681): re-enable on the public repo after the OSS org switch.
     if: github.repository == 'DACH-NY/canton'
@@ -48,7 +54,7 @@ jobs:
         # Only alert when there is a nameable non-test failure. If the failed
         # list is empty, stay silent instead of posting an "unknown" alert.
         if: steps.failed-jobs.outputs.result != ''
-        uses: ./.github/actions/slack/slack_red_main_with_volunteer
+        uses: ./.github/actions/slack/slack_notify_failure_with_volunteer
         with:
           webhook_url: ${{ secrets.SLACK_WEBHOOK_TEAM_CANTON_INTERNAL }}
           failed_job: ${{ steps.failed-jobs.outputs.result }}

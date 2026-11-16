@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.block.data
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -12,6 +12,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.synchronizer.block.data.db.DbSequencerBlockStore
 import com.digitalasset.canton.synchronizer.block.data.memory.InMemorySequencerBlockStore
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerBatchingConfig
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.store.{
   DbSequencerStore,
@@ -166,7 +167,7 @@ object SequencerBlockStore {
       sequencerStore: SequencerStore,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-      batchingConfig: BatchingConfig,
+      batchingConfig: SequencerBatchingConfig,
   )(implicit
       executionContext: ExecutionContext
   ): SequencerBlockStore =

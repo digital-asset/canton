@@ -3,10 +3,9 @@
 
 package com.digitalasset.canton.networking.grpc
 
-import com.daml.metrics.grpc.GrpcMetricsServerInterceptor
+import com.daml.metrics.grpc.{DamlGrpcServerMetrics, GrpcMetricsServerInterceptor}
 import com.digitalasset.canton.config.{ActiveRequestLimitsConfig, ApiLoggingConfig}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.networking.grpc.ratelimiting.ActiveRequestCounterInterceptor
 import com.digitalasset.canton.tracing.{TraceContextGrpc, TracingConfig}
 import io.grpc.ServerInterceptors.intercept
@@ -28,20 +27,19 @@ class CantonCommunityServerInterceptors(
     tracingConfig: TracingConfig,
     apiLoggingConfig: ApiLoggingConfig,
     loggerFactory: NamedLoggerFactory,
-    grpcMetrics: GrpcServerMetricsX,
+    grpcMetrics: DamlGrpcServerMetrics,
     additionalInterceptors: Seq[ServerInterceptor] = Seq.empty,
     requestLimits: Option[ActiveRequestLimitsConfig],
 ) extends CantonServerInterceptors {
 
   override val activeRequestCounter: Option[ActiveRequestCounterInterceptor] = requestLimits.map {
     limits =>
-      val (_, requestMetrics) = grpcMetrics
       new ActiveRequestCounterInterceptor(
         api,
         limits.active,
         limits.warnOnUndefinedLimits,
         limits.throttleLoggingRatePerSecond,
-        requestMetrics,
+        grpcMetrics,
         loggerFactory,
       )
   }
@@ -68,7 +66,7 @@ class CantonCommunityServerInterceptors(
   private def addMetricsInterceptor(
       service: ServerServiceDefinition
   ): ServerServiceDefinition =
-    intercept(service, new GrpcMetricsServerInterceptor(grpcMetrics._1))
+    intercept(service, new GrpcMetricsServerInterceptor(grpcMetrics))
 
   private def addLimitInterceptor(service: ServerServiceDefinition): ServerServiceDefinition =
     activeRequestCounter.fold(service) { limits =>

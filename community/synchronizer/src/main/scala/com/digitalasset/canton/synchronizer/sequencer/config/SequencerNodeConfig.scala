@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.sequencer.config
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.config.{DeclarativeSequencerConfig, PublicServerConfig}
-import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.SequencerHighAvailabilityConfig
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.synchronizer.sequencer.{SequencerConfig, SequencerHealthConfig}
 import monocle.macros.syntax.lens.*
@@ -87,34 +86,11 @@ final case class SequencerNodeConfig(
           .focus(_.adminApi.internalPort)
           .modify(ports.sequencerAdminApiPort.setDefaultPort)
       )
-      .focus(_.sequencer)
-      .modify {
-        case db: SequencerConfig.Database =>
-          val enabled =
-            ReplicationConfig.withDefault(storage, db.highAvailability.flatMap(_.enabled))
-          db
-            .focus(_.highAvailability)
-            .modify(
-              _.map(_.copy(enabled = enabled))
-                .orElse(
-                  enabled.map(enabled => SequencerHighAvailabilityConfig(enabled = Some(enabled)))
-                )
-            )
-        case other => other
-
-      }
       .focus(_.replication)
       // Even though the block sequencer does not support replicas, want to turn on replication
       // to take care of cases when more than one instance of the sequencer is started with the same
       // database setup and identity (typical in Kubernetes setups) and allow simultaneous startup of one instance
-      // while another is shutting down. The exception is the reference sequencer, which relies on multiple nodes
-      // using the same database for ordering blocks and handles that on a different level of the code.
-      .modify(replication =>
-        sequencer match {
-          // TODO(#29603): remove this logic once reference sequencer is gone. The reference sequencer does not
-          case SequencerConfig.External(_, _) => None
-          case _ => ReplicationConfig.withDefaultO(storage, replication)
-        }
-      )
+      // while another is shutting down.
+      .modify(replication => ReplicationConfig.withDefaultO(storage, replication))
 
 }

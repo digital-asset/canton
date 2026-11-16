@@ -13,7 +13,6 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{HashOps, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{
@@ -28,16 +27,11 @@ import com.digitalasset.canton.resource.{Storage, StorageSingleSetup}
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.sequencer.api.v30.SequencerAuthenticationServiceGrpc
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.block.BlockFormat.{AcknowledgeTag, SendTag}
-import com.digitalasset.canton.synchronizer.block.{
-  BlockFormat,
-  RawLedgerBlock,
-  SequencerDriverHealthStatus,
-}
 import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
-import com.digitalasset.canton.synchronizer.sequencer.block.BlockOrderer
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.{
   BftOrderingSequencerAdminService,
@@ -110,6 +104,12 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
   FiniteDurationDistribution,
   Probability,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.{
+  BlockOrderer,
+  BlockOrdererHealthStatus,
+  RawLedgerBlock,
+}
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.{AuthenticationServices, SequencerSnapshot}
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.standalone.v1.{
@@ -152,7 +152,7 @@ final class BftBlockOrderer(
     clock: Clock,
     // Owned and managed by the sequencer runtime, absent in some tests
     authenticationServicesO: Option[AuthenticationServices],
-    nodeParameters: CantonNodeParameters,
+    nodeParameters: SequencerNodeParameters,
     sequencerSubscriptionInitialHeight: Long,
     override val orderingTimeFixMode: OrderingTimeFixMode,
     sequencerSnapshotInfo: Option[SequencerSnapshot.ImplementationSpecificInfo],
@@ -759,7 +759,7 @@ final class BftBlockOrderer(
     )
   }
 
-  override def health(implicit traceContext: TraceContext): Future[SequencerDriverHealthStatus] = {
+  override def health(implicit traceContext: TraceContext): Future[BlockOrdererHealthStatus] = {
     val isStorageInactive = !localStorage.isActive
     val isOrdererUnhealthy = !isOrdererHealthy.get
 
@@ -770,7 +770,7 @@ final class BftBlockOrderer(
       else None
 
     Future.successful(
-      SequencerDriverHealthStatus(
+      BlockOrdererHealthStatus(
         isActive = description.isEmpty,
         description,
       )

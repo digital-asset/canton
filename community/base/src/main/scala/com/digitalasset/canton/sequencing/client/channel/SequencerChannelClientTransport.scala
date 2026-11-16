@@ -14,8 +14,14 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.SilentLogPolicy
-import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, GrpcClient, GrpcManagedChannel}
+import com.digitalasset.canton.networking.grpc.{
+  CantonGrpcUtil,
+  GrpcClient,
+  GrpcError,
+  GrpcManagedChannel,
+}
 import com.digitalasset.canton.sequencer.api.v30
+import com.digitalasset.canton.sequencing.channel.errors.SequencerChannelErrors
 import com.digitalasset.canton.sequencing.client.channel.endpoint.SequencerChannelClientEndpoint
 import com.digitalasset.canton.sequencing.client.transports.{
   GrpcClientTransportHelpers,
@@ -87,8 +93,13 @@ private[channel] final class SequencerChannelClientTransport(
       }
 
   /** Ping the sequencer channel service to check if the sequencer supports channels.
+    *
+    * @param ignorePoolCapacityExhaustion
+    *   If true, a sequencer whose channel pool is currently full still counts as supporting
+    *   channels (the ping succeeds). If false, a full pool fails the ping, e.g. to avoid a
+    *   reconnect attempt that would be rejected anyway.
     */
-  def ping()(implicit
+  def ping(ignorePoolCapacityExhaustion: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
     val sendAtMostOnce = retryPolicy(retryOnUnavailable = false)
@@ -101,6 +112,15 @@ private[channel] final class SequencerChannelClientTransport(
         SilentLogPolicy, // Silent is not fully silent, and logs grpc errors with cause as info
       retryPolicy = sendAtMostOnce,
     )
-    response.bimap(_.toString, _ => ())
+
+    def isPoolCapacityExhausted(err: GrpcError): Boolean =
+      err.decodedCantonError.exists(_.code.id == SequencerChannelErrors.PoolCapacityExhausted.id)
+
+    response
+      .map(_ => ())
+      .recover {
+        case err if ignorePoolCapacityExhaustion && isPoolCapacityExhausted(err) => ()
+      }
+      .leftMap(_.toString)
   }
 }

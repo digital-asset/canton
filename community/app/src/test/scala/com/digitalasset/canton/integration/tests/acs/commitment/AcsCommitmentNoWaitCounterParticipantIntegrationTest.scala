@@ -32,6 +32,7 @@ import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervals
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.Monocle.toAppliedFocusOps
 import org.slf4j.event.Level
 
@@ -83,9 +84,6 @@ trait AcsCommitmentNoWaitCounterParticipantIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
-        // TODO(#34818) Enable the new pipeline
-        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
-        // TODO(#35107) Disable the old processor, enable the new pipeline and fix the test
         ConfigTransforms.enableOldAcsCommitmentProcessor,
       )
       .updateTestingConfig(
@@ -161,30 +159,31 @@ trait AcsCommitmentNoWaitCounterParticipantIntegrationTest
     fetchedWaitList should contain theSameElementsAs waitList
   }
 
-  "Can get, set and reset no wait configuration" in { implicit env =>
-    import env.*
-    checkNoWaitConfigurationsAreApplied
+  "Can get, set and reset no wait configuration" onlyRunLessThan ProtocolVersion.v38 in {
+    implicit env =>
+      import env.*
+      checkNoWaitConfigurationsAreApplied
 
-    val (participant2, daId, participant2NoWaitConfig, _) =
-      getParticipant2WaitAndNoWaitConfiguration
+      val (participant2, daId, participant2NoWaitConfig, _) =
+        getParticipant2WaitAndNoWaitConfiguration
 
-    checkNoWaitConfigurationsAreApplied
+      checkNoWaitConfigurationsAreApplied
 
-    logger.info(s"Setting no wait for participant2 on participant1")
-    val synchronizerId1 = daId
-    // user-manual-entry-begin: SetNoWaitCommitment
-    participant1.commitments.set_no_wait_commitments_from(Seq(participant2), Seq(synchronizerId1))
-    // user-manual-entry-end: SetNoWaitCommitment
-    validateWait(noWaitList = participant2NoWaitConfig)
+      logger.info(s"Setting no wait for participant2 on participant1")
+      val synchronizerId1 = daId
+      // user-manual-entry-begin: SetNoWaitCommitment
+      participant1.commitments.set_no_wait_commitments_from(Seq(participant2), Seq(synchronizerId1))
+      // user-manual-entry-end: SetNoWaitCommitment
+      validateWait(noWaitList = participant2NoWaitConfig)
 
-    logger.info(s"resetting wait for participant2 on participant1")
-    // user-manual-entry-begin: ResetNoWaitCommitment
-    participant1.commitments.set_wait_commitments_from(Seq(participant2), Seq(synchronizerId1))
-    // user-manual-entry-end: ResetNoWaitCommitment
-    checkNoWaitConfigurationsAreApplied
+      logger.info(s"resetting wait for participant2 on participant1")
+      // user-manual-entry-begin: ResetNoWaitCommitment
+      participant1.commitments.set_wait_commitments_from(Seq(participant2), Seq(synchronizerId1))
+      // user-manual-entry-end: ResetNoWaitCommitment
+      checkNoWaitConfigurationsAreApplied
   }
 
-  "Can get, set and reset no wait configuration without affecting an existing config" in {
+  "Can get, set and reset no wait configuration without affecting an existing config" onlyRunLessThan ProtocolVersion.v38 in {
     implicit env =>
       import env.*
       checkNoWaitConfigurationsAreApplied
@@ -209,7 +208,7 @@ trait AcsCommitmentNoWaitCounterParticipantIntegrationTest
       participant1.commitments.set_wait_commitments_from(Seq(testId), Seq(testSynchronizer))
   }
 
-  "filtering working on get and reset" in { implicit env =>
+  "filtering working on get and reset" onlyRunLessThan ProtocolVersion.v38 in { implicit env =>
     import env.*
     checkNoWaitConfigurationsAreApplied
     val (participant2Id, synId, _, participant2WaitConfig) =
@@ -254,35 +253,36 @@ trait AcsCommitmentNoWaitCounterParticipantIntegrationTest
     checkNoWaitConfigurationsAreApplied
   }
 
-  "setting set wait without with missing parameters should not succeed" in { implicit env =>
-    import env.*
-    checkNoWaitConfigurationsAreApplied
+  "setting set wait without with missing parameters should not succeed" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+    implicit env =>
+      import env.*
+      checkNoWaitConfigurationsAreApplied
 
-    val (participant2Id, daId, participant2NoWaitConfig, participant2WaitConfig) =
-      getParticipant2WaitAndNoWaitConfiguration
-    val (testId, testSynchronizer, noWaitList) = nowaitParticipantSynchronizerLazyDummy
+      val (participant2Id, daId, participant2NoWaitConfig, participant2WaitConfig) =
+        getParticipant2WaitAndNoWaitConfiguration
+      val (testId, testSynchronizer, noWaitList) = nowaitParticipantSynchronizerLazyDummy
 
-    logger.info(s"setting no wait for non-existing participant on participant1")
-    participant1.commitments.set_no_wait_commitments_from(Seq(testId), Seq(testSynchronizer))
+      logger.info(s"setting no wait for non-existing participant on participant1")
+      participant1.commitments.set_no_wait_commitments_from(Seq(testId), Seq(testSynchronizer))
 
-    logger.info(
-      s"attempting to set wait on participant without a synchronizer (will fail and result should be same as previous)"
-    )
-    participant1.commitments.set_wait_commitments_from(Seq(participant2Id), Seq.empty)
-    validateWait(participant2WaitConfig, noWaitList = noWaitList)
+      logger.info(
+        s"attempting to set wait on participant without a synchronizer (will fail and result should be same as previous)"
+      )
+      participant1.commitments.set_wait_commitments_from(Seq(participant2Id), Seq.empty)
+      validateWait(participant2WaitConfig, noWaitList = noWaitList)
 
-    logger.info(
-      s"attempting to set wait on synchronizer without a participant (will fail and result should be same as previous)"
-    )
-    participant1.commitments.set_wait_commitments_from(Seq.empty, Seq(daId))
-    validateWait(participant2WaitConfig, noWaitList = noWaitList)
+      logger.info(
+        s"attempting to set wait on synchronizer without a participant (will fail and result should be same as previous)"
+      )
+      participant1.commitments.set_wait_commitments_from(Seq.empty, Seq(daId))
+      validateWait(participant2WaitConfig, noWaitList = noWaitList)
 
-    // clear before next test
-    participant1.commitments.set_wait_commitments_from(Seq(testId), Seq(testSynchronizer))
+      // clear before next test
+      participant1.commitments.set_wait_commitments_from(Seq(testId), Seq(testSynchronizer))
 
   }
 
-  "return errors on invalid input" in { implicit env =>
+  "return errors on invalid input" onlyRunWithOrLessThan ProtocolVersion.v37 in { implicit env =>
     import env.*
     val (participant, synchronizer, _, _) = getParticipant2WaitAndNoWaitConfiguration
     checkNoWaitConfigurationsAreApplied
@@ -316,26 +316,27 @@ trait AcsCommitmentNoWaitCounterParticipantIntegrationTest
     checkNoWaitConfigurationsAreApplied
   }
 
-  "allows idempotent addition of non-existing synchronizers and participants" in { implicit env =>
-    import env.*
-    checkNoWaitConfigurationsAreApplied
+  "allows idempotent addition of non-existing synchronizers and participants" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+    implicit env =>
+      import env.*
+      checkNoWaitConfigurationsAreApplied
 
-    val (_, _, _, participant2WaitConfig) = getParticipant2WaitAndNoWaitConfiguration
-    val (testId, testSynchronizer, noWaitList) = nowaitParticipantSynchronizerLazyDummy
+      val (_, _, _, participant2WaitConfig) = getParticipant2WaitAndNoWaitConfiguration
+      val (testId, testSynchronizer, noWaitList) = nowaitParticipantSynchronizerLazyDummy
 
-    logger.info(s"setting no wait for non-existing participant on non-existing synchronizer")
-    participant1.commitments.set_no_wait_commitments_from(Seq(testId), Seq(testSynchronizer))
-    validateWait(participant2WaitConfig, noWaitList)
+      logger.info(s"setting no wait for non-existing participant on non-existing synchronizer")
+      participant1.commitments.set_no_wait_commitments_from(Seq(testId), Seq(testSynchronizer))
+      validateWait(participant2WaitConfig, noWaitList)
 
-    logger.info(s"Idempotent check")
-    participant1.commitments.set_no_wait_commitments_from(Seq(testId), Seq(testSynchronizer))
-    validateWait(participant2WaitConfig, noWaitList)
+      logger.info(s"Idempotent check")
+      participant1.commitments.set_no_wait_commitments_from(Seq(testId), Seq(testSynchronizer))
+      validateWait(participant2WaitConfig, noWaitList)
 
-    // clear before next test
-    participant1.commitments.set_wait_commitments_from(Seq(testId), Seq(testSynchronizer))
+      // clear before next test
+      participant1.commitments.set_wait_commitments_from(Seq(testId), Seq(testSynchronizer))
   }
 
-  "No wait configuration allows pruning in case of ACS mismatch" onlyRunWhen (!isInMemory) in {
+  "No wait configuration allows pruning in case of ACS mismatch" onlyRunWhen (!isInMemory && testedProtocolVersion <= ProtocolVersion.v37) in {
     implicit env =>
       import env.*
       checkNoWaitConfigurationsAreApplied
@@ -397,7 +398,7 @@ trait AcsCommitmentNoWaitCounterParticipantIntegrationTest
       participant1.commitments.set_wait_commitments_from(Seq(participant2.id), Seq(daId))
   }
 
-  "No wait configuration allows pruning in case of participant falling behind" onlyRunWhen (!isInMemory) in {
+  "No wait configuration allows pruning in case of participant falling behind" onlyRunWhen (!isInMemory && testedProtocolVersion <= ProtocolVersion.v37) in {
     implicit env =>
       import env.*
       checkNoWaitConfigurationsAreApplied

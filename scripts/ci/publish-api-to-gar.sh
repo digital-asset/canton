@@ -8,7 +8,8 @@ set -eo pipefail
 #
 # Required environment variables:
 #   RELEASE_SUFFIX       - version string (e.g. "3.5.0-SNAPSHOT" or "3.5.0")
-#   GOOGLE_CREDENTIALS_FILE - path to GCP service account key file
+#   GAR_ACCESS_TOKEN     - access token for GAR (GHA workload identity), or
+#   GOOGLE_CREDENTIALS_FILE - path to GCP service account key file (CircleCI)
 #   GAR_MAVEN_REPO_URL   - GAR Maven repository URL
 #                          e.g. "https://europe-maven.pkg.dev/da-images/public-maven-unstable"
 #                          or   "https://europe-maven.pkg.dev/da-images/public-maven"
@@ -28,8 +29,8 @@ if [[ "$RELEASE_SUFFIX" == *"-SNAPSHOT" ]]; then
   exit 0
 fi
 
-if [[ -z "$GOOGLE_CREDENTIALS_FILE" ]]; then
-  err "ERROR, GOOGLE_CREDENTIALS_FILE is not set."
+if [[ -z "${GAR_ACCESS_TOKEN:-}" && -z "$GOOGLE_CREDENTIALS_FILE" ]]; then
+  err "ERROR, neither GAR_ACCESS_TOKEN nor GOOGLE_CREDENTIALS_FILE is set."
   exit 1
 fi
 
@@ -43,8 +44,12 @@ group_id="com.digitalasset.canton"
 group_path="com/digitalasset/canton"
 artifact_id="canton-api"
 
-# Authenticate with GCP and get an access token
-ACCESS_TOKEN="$(gcloud auth activate-service-account --key-file="$GOOGLE_CREDENTIALS_FILE" 2>/dev/null && gcloud auth print-access-token)"
+# Use the workload identity token when given, otherwise authenticate with the key file
+if [[ -n "${GAR_ACCESS_TOKEN:-}" ]]; then
+  ACCESS_TOKEN="$GAR_ACCESS_TOKEN"
+else
+  ACCESS_TOKEN="$(gcloud auth activate-service-account --key-file="$GOOGLE_CREDENTIALS_FILE" 2>/dev/null && gcloud auth print-access-token)"
+fi
 
 put_to_gar() {
   local source="$1"
@@ -57,19 +62,23 @@ put_to_gar() {
     exit 1
   fi
 
-  local http_code
-  http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+  local http_code response body
+  response="$(mktemp)"
+  # A curl failure (DNS, TLS, timeout) reports HTTP 000 instead of aborting the script
+  http_code=$(curl -sS -o "$response" -w "%{http_code}" \
     -X PUT \
     -H "Authorization: Bearer ${ACCESS_TOKEN}" \
     -T "${source}" \
-    "${remote_url}")
+    "${remote_url}") || true
+  body="$(cat "$response")"
+  rm -f "$response"
 
   if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
     info "Successfully published $(basename "${source}") (HTTP ${http_code})"
   elif [[ "$http_code" == "409" ]]; then
     warn "Artifact already exists (HTTP 409), skipping: $(basename "${source}")"
   else
-    err "Failed to publish $(basename "${source}") (HTTP ${http_code})"
+    err "Failed to publish $(basename "${source}") (HTTP ${http_code:-000}): ${body}"
     exit 1
   fi
 }

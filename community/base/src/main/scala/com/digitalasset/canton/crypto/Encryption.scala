@@ -39,14 +39,39 @@ import slick.jdbc.GetResult
 import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 
+/** Symmetric encryption operations with provided keys. */
+trait SymmetricEncryptionOps {
+
+  def defaultSymmetricKeyScheme: SymmetricKeyScheme
+
+  /** Encrypts the bytes of the serialized message using the given symmetric key. Where the message
+    * embedded protocol version determines the message serialization.
+    */
+  def encryptSymmetricWith[M <: HasToByteString](
+      message: M,
+      symmetricKey: SymmetricKey,
+  ): Either[EncryptionError, Encrypted[M]] =
+    encryptSymmetricWith(message.toByteString, symmetricKey).map { ciphertext =>
+      new Encrypted[M](ciphertext)
+    }
+
+  private[crypto] def encryptSymmetricWith(
+      data: ByteString,
+      symmetricKey: SymmetricKey,
+  ): Either[EncryptionError, ByteString]
+
+  /** Decrypts a message encrypted symmetrically. */
+  def decryptWith[M](encrypted: Encrypted[M], symmetricKey: SymmetricKey)(
+      deserialize: ByteString => Either[DeserializationError, M]
+  ): Either[DecryptionError, M]
+}
+
 /** Encryption operations that do not require access to a private key store but operates with
   * provided keys.
   */
-trait EncryptionOps extends DecryptionMetricsSupport {
+trait EncryptionOps extends SymmetricEncryptionOps with DecryptionMetricsSupport {
 
   def encryptionParallelism: PositiveInt
-
-  def defaultSymmetricKeyScheme: SymmetricKeyScheme
 
   /** Generates and returns a random symmetric key using the specified scheme. */
   def generateSymmetricKey(
@@ -77,29 +102,8 @@ trait EncryptionOps extends DecryptionMetricsSupport {
       encryptionAlgorithmSpec: EncryptionAlgorithmSpec = encryptionAlgorithmSpecs.default,
   )(implicit traceContext: TraceContext): Either[EncryptionError, AsymmetricEncrypted[M]]
 
-  /** Encrypts the bytes of the serialized message using the given symmetric key. Where the message
-    * embedded protocol version determines the message serialization.
-    */
-  def encryptSymmetricWith[M <: HasToByteString](
-      message: M,
-      symmetricKey: SymmetricKey,
-  ): Either[EncryptionError, Encrypted[M]] =
-    encryptSymmetricWith(message.toByteString, symmetricKey).map { ciphertext =>
-      new Encrypted[M](ciphertext)
-    }
-
-  private[crypto] def encryptSymmetricWith(
-      data: ByteString,
-      symmetricKey: SymmetricKey,
-  ): Either[EncryptionError, ByteString]
-
   /** Decrypts a message encrypted asymmetrically. */
   def decryptWith[M](encrypted: AsymmetricEncrypted[M], privateKey: EncryptionPrivateKey)(
-      deserialize: ByteString => Either[DeserializationError, M]
-  ): Either[DecryptionError, M]
-
-  /** Decrypts a message encrypted symmetrically. */
-  def decryptWith[M](encrypted: Encrypted[M], symmetricKey: SymmetricKey)(
       deserialize: ByteString => Either[DeserializationError, M]
   ): Either[DecryptionError, M]
 
@@ -246,11 +250,12 @@ object AsymmetricEncrypted extends HasVersionedMessageCompanion[AsymmetricEncryp
     )
   )
 
+  // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   def fromProtoV30[T](
       encryptedP: v30.AsymmetricEncrypted
   ): ParsingResult[AsymmetricEncrypted[T]] =
     for {
-      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
       fingerprint <- ProtoValidation.validateThen(
         encryptedP.fingerprint,
         "fingerprint",
@@ -904,12 +909,13 @@ object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPriva
     keyAfterMigration.validated
   }
 
+  // TODO(#34479): pass the pvv once it is threaded into the private key parsers.
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   @nowarn("cat=deprecation")
   def fromProtoV30(
       privateKeyP: v30.EncryptionPrivateKey
   ): ParsingResult[EncryptionPrivateKey] =
     for {
-      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
       id <- ProtoValidation.validateThen(
         privateKeyP.id,
         "id",

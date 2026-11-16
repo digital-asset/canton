@@ -6,7 +6,12 @@ package com.digitalasset.canton.integration.tests.security.kms
 import com.daml.metrics.api.testing.MetricValues.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.{KmsConfig, SessionSigningKeysConfig}
+import com.digitalasset.canton.config.{
+  KmsConfig,
+  SessionSigningKeysConfig,
+  SynchronizerTimeTrackerConfig,
+  TimeProofRequestConfig,
+}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.security.kms.mock.MockKmsDriverCryptoIntegrationTestBase
 import com.digitalasset.canton.integration.tests.security.kms.mock.MockKmsDriverCryptoIntegrationTestBase.mockKmsDriverConfig
@@ -40,8 +45,27 @@ trait SessionSigningKeysLifecycleIntegrationTest
     sessionSigningKeysConfig.keyValidityDuration.duration.div(2.0)
   )
 
+  // The participant signs a transaction for up to its ledger time plus the tolerance, and a time
+  // proof request for up to now plus the timeout. Each of the two plus the cut-off must stay below
+  // the key validity, or the signer falls back to the long-term key. The default time proof timeout
+  // of two minutes does not fit into the key validity of this test.
+  private val ledgerTimeRecordTimeTolerance = config.NonNegativeFiniteDuration.ofSeconds(4)
+  private val timeProofRequestTimeout = config.NonNegativeFiniteDuration.ofSeconds(5)
+  Seq(ledgerTimeRecordTimeTolerance, timeProofRequestTimeout).foreach { signedAhead =>
+    val signingInterval = signedAhead + sessionSigningKeysConfig.cutOffDuration
+    require(
+      signingInterval.duration < sessionSigningKeysConfig.keyValidityDuration.duration,
+      s"the signing interval $signingInterval does not fit into the session signing key validity",
+    )
+  }
+
+  override protected def synchronizerTimeTrackerConfig: SynchronizerTimeTrackerConfig =
+    SynchronizerTimeTrackerConfig(timeRequest =
+      TimeProofRequestConfig(requestTimeout = timeProofRequestTimeout)
+    )
+
   override protected def otherConfigTransforms: Seq[ConfigTransform] = Seq(
-    ConfigTransforms.setSigningKeysIfPV35OrHigher(sessionSigningKeysConfig),
+    ConfigTransforms.setSigningKeys(sessionSigningKeysConfig),
     // adjust the max sequencing time offset so requests remain compatible with the short validity
     // periods of session signing keys.
     ConfigTransforms.updateAllSequencerConfigs_(
@@ -68,7 +92,7 @@ trait SessionSigningKeysLifecycleIntegrationTest
       _.update(
         confirmationResponseTimeout = shortDuration,
         mediatorReactionTimeout = shortDuration,
-        ledgerTimeRecordTimeTolerance = sessionSigningKeysConfig.cutOffDuration,
+        ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
       ),
     )
 
@@ -80,7 +104,7 @@ trait SessionSigningKeysLifecycleIntegrationTest
 
         syncParameters.confirmationResponseTimeout shouldBe shortDuration
         syncParameters.mediatorReactionTimeout shouldBe shortDuration
-        syncParameters.ledgerTimeRecordTimeTolerance shouldBe sessionSigningKeysConfig.cutOffDuration
+        syncParameters.ledgerTimeRecordTimeTolerance shouldBe ledgerTimeRecordTimeTolerance
       }
     }
 

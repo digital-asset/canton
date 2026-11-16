@@ -9,13 +9,18 @@ inputs:
     description: Whether this is a nightly release
     required: false
     default: "false"
-  gcloud_service_key:
-    description: GCP service account key JSON used for registry auth
+  oci_registry:
+    description: OCI registry hostname
     required: true
 
 runs:
   using: composite
   steps:
+    - name: Log Docker into the OCI registry
+      uses: ./.github/actions/docker/docker_log_into_gcr
+      with:
+        oci_registry: ${{ inputs.oci_registry }}
+
     - name: Prepare OCI auth path
       shell: bash
       run: |
@@ -24,7 +29,6 @@ runs:
     - name: Publish to OCI registry
       uses: ./.github/actions/nix/nix_run
       env:
-        GAC_JSON: ${{ inputs.gcloud_service_key }}
         IS_NIGHTLY_RELEASE: ${{ inputs.nightly_release }}
         RELEASE_SUFFIX: ${{ inputs.release_suffix }}
       with:

@@ -6,18 +6,12 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.data.EitherT
 import cats.instances.future.catsStdInstancesForFuture
 import cats.syntax.functor.*
-import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.crypto.{
   SyncCryptoApiParticipantProvider,
   SynchronizerCryptoClient,
   SynchronizerSnapshotSyncCryptoApi,
 }
-import com.digitalasset.canton.data.{
-  CantonTimestamp,
-  ContractsReassignmentBatch,
-  ReassignmentSubmitterMetadata,
-  UnassignmentData,
-}
+import com.digitalasset.canton.data.{CantonTimestamp, ContractsReassignmentBatch, UnassignmentData}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -176,7 +170,7 @@ class ReassignmentCoordination(
     */
   private[reassignment] def assign(
       targetSynchronizerId: Target[PhysicalSynchronizerId],
-      submitterMetadata: ReassignmentSubmitterMetadata,
+      submissionInfo: ReassignmentSubmissionInfo,
       reassignmentId: ReassignmentId,
       targetTopology: Target[TopologySnapshot],
       accounting: SubmissionAccounting,
@@ -193,7 +187,7 @@ class ReassignmentCoordination(
       )
       submissionResult <- inSubmission
         .submitAssignments(
-          submitterMetadata,
+          submissionInfo,
           reassignmentId,
           targetTopology,
           accounting,
@@ -371,23 +365,8 @@ object ReassignmentCoordination {
 
 trait ReassignmentSubmissionHandle {
   def timeTracker: SynchronizerTimeTracker
-
-  def submitUnassignments(
-      submitterMetadata: ReassignmentSubmitterMetadata,
-      contractIds: Seq[LfContractId],
-      targetSynchronizer: Target[PhysicalSynchronizerId],
-      sourceTopology: Source[TopologySnapshot],
-      overrideSourceValidationPkgIds: Source[Map[LfContractId, LfPackageId]],
-      overrideTargetValidationPkgIds: Target[Map[LfContractId, LfPackageId]],
-      accounting: SubmissionAccounting,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, ReassignmentProcessorError, FutureUnlessShutdown[
-    UnassignmentProcessingSteps.SubmissionResult
-  ]]
-
   def submitAssignments(
-      submitterMetadata: ReassignmentSubmitterMetadata,
+      submissionInfo: ReassignmentSubmissionInfo,
       reassignmentId: ReassignmentId,
       targetTopology: Target[TopologySnapshot],
       accounting: SubmissionAccounting,

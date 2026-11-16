@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer.block.data.db
 import cats.data.EitherT
 import cats.syntax.functor.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -18,6 +18,7 @@ import com.digitalasset.canton.synchronizer.block.data.{
   SequencerBlockStore,
 }
 import com.digitalasset.canton.synchronizer.sequencer.SequencerInitialState
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerBatchingConfig
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.BlockNotFound
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
@@ -32,7 +33,7 @@ class DbSequencerBlockStore(
     protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
-    batchingConfig: BatchingConfig,
+    batchingConfig: SequencerBatchingConfig,
     sequencerStore: SequencerStore,
 )(implicit override protected val executionContext: ExecutionContext)
     extends SequencerBlockStore

@@ -396,7 +396,7 @@ class SegmentState(
         // remote node is either is a previous view, or in the same view but in an unfinished view change that we've completed.
         // so we give them the new-view message and all messages we have for blocks they haven't completed yet
         case _ =>
-          val newView = viewChangeState(currentViewNumber).newViewMessage.toList
+          val newView = viewChangeState.get(currentViewNumber).flatMap(_.newViewMessage).toList
           val result = addMessages(
             // TODO(#24442): rethink commit certs here, considering that some certs will be in the new-view message.
             // we could either: exclude sending commit certs that are already in the new-view,

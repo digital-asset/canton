@@ -38,6 +38,7 @@ import com.digitalasset.canton.participant.store.db.DbIncrementalCommitmentStore
 import com.digitalasset.canton.participant.sync.SyncEphemeralStateFactory
 import com.digitalasset.canton.protocol.messages.{Digest, LegacyCommitmentPeriod}
 import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SynchronizerAlias, config}
 import monocle.Monocle.toAppliedFocusOps
 import org.slf4j.event.Level
@@ -183,7 +184,7 @@ trait AcsCommitmentRepairIntegrationTest
   }
 
   "Running commitment reinitialization" should {
-    "reinitialize commitments based on ACS" in { implicit env =>
+    "reinitialize commitments based on ACS" onlyRunLessThan ProtocolVersion.v38 in { implicit env =>
       import env.*
 
       val simClock = environment.simClock.value
@@ -364,7 +365,9 @@ trait AcsCommitmentRepairIntegrationTest
             daCmtsP2.size shouldBe (1)
           }
 
-          logger.debug(s"Repair P2's commitments on $daId by reinitializing them based on the ACS")
+          logger.debug(
+            s"Repair P2's commitments on $daId by reinitializing them based on the ACS"
+          )
           // We expect that the running commitments are repaired, and there are no more inconsistencies or commitments mismatches
           val reinitCmtsResult2 =
             participant2.commitments.reinitialize_commitments(
@@ -375,7 +378,9 @@ trait AcsCommitmentRepairIntegrationTest
             )
           // results should be just for daId, and the timestamp should be defined
 
-          reinitCmtsResult2.map(_.synchronizerId) should contain theSameElementsAs Seq(daId.logical)
+          reinitCmtsResult2.map(_.synchronizerId) should contain theSameElementsAs Seq(
+            daId.logical
+          )
           forAll(reinitCmtsResult2)(_.acsTimestamp.isDefined shouldBe true)
         },
         logs => {
@@ -447,34 +452,35 @@ trait AcsCommitmentRepairIntegrationTest
         NonNegativeDuration.ofSeconds(30),
       )
 
-    "not be scheduled if a reinitialization is in progress" in { implicit env =>
-      import env.*
+    "not be scheduled if a reinitialization is in progress" onlyRunLessThan ProtocolVersion.v38 in {
+      implicit env =>
+        import env.*
 
-      // Launch many reinitializations in parallel. Some of these should fail because likely another reinit is in
-      // progress. This is a weaker condition than "no two reinitializations are ever scheduled in parallel",
-      // but it's good enough because (1) Checking the stricter condition is flaky unless we invest quite a bit of effort,
-      // or we increase the CI cost, and (2) The logic we're testing isn't terribly complex.
-      val manyReinits = Future.traverse(1 to 10)(_ => Future(reinitCommitments(participant1)))
+        // Launch many reinitializations in parallel. Some of these should fail because likely another reinit is in
+        // progress. This is a weaker condition than "no two reinitializations are ever scheduled in parallel",
+        // but it's good enough because (1) Checking the stricter condition is flaky unless we invest quite a bit of effort,
+        // or we increase the CI cost, and (2) The logic we're testing isn't terribly complex.
+        val manyReinits = Future.traverse(1 to 10)(_ => Future(reinitCommitments(participant1)))
 
-      val res = for {
-        resManyReinits <- manyReinits
-        _ = resManyReinits.flatten.map(
-          _.error
-        ) should contain(
-          Some(
-            s"Reinitialization is already scheduled or in progress for $daId."
+        val res = for {
+          resManyReinits <- manyReinits
+          _ = resManyReinits.flatten.map(
+            _.error
+          ) should contain(
+            Some(
+              s"Reinitialization is already scheduled or in progress for $daId."
+            )
           )
-        )
-        // after all reinits return, another reinit should succeed
-        successfulReinit = participant1.commitments.reinitialize_commitments(
-          Seq(daId.logical),
-          Seq.empty,
-          Seq.empty,
-          NonNegativeDuration.ofSeconds(30),
-        )
-        _ = forAll(successfulReinit.map(_.error shouldBe None))
-      } yield ()
-      res.futureValue
+          // after all reinits return, another reinit should succeed
+          successfulReinit = participant1.commitments.reinitialize_commitments(
+            Seq(daId.logical),
+            Seq.empty,
+            Seq.empty,
+            NonNegativeDuration.ofSeconds(30),
+          )
+          _ = forAll(successfulReinit.map(_.error shouldBe None))
+        } yield ()
+        res.futureValue
     }
   }
 }

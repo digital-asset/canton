@@ -33,6 +33,7 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.util.TestUtils.hasPersistence
 import com.digitalasset.canton.integration.util.{AcsInspection, EntitySyntax, PartiesAllocator}
+import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
@@ -40,7 +41,7 @@ import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.CircuitBreakerConfig
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
-import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{BftSequencer, External}
+import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.BftSequencer
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.topology.*
@@ -116,7 +117,6 @@ abstract class SynchronizerChangeIntegrationTest(
 
     config.focus(_.sequencer).modify {
       case bft: BftSequencer => bft.focus(_.block.circuitBreaker).replace(disabledCb)
-      case ext: External => ext.focus(_.block.circuitBreaker).replace(disabledCb)
       case other => other
     }
   }
@@ -383,7 +383,7 @@ abstract class SynchronizerChangeSimClockIntegrationTest
       participants: Seq[LocalParticipantReference],
       party: PartyId,
   ): (CantonTimestamp, CantonTimestamp) =
-    if (testedProtocolVersion <= ProtocolVersion.v36) {
+    if (testedProtocolVersion == ProtocolVersion.v36) {
       val exclusivityDeadline = CantonTimestamp
         .fromProtoTimestamp(
           getIncompleteUnassignedContracts(participants, party).assignmentExclusivity.value
@@ -848,7 +848,7 @@ trait SynchronizerChangeRealClockIntegrationTest
 
           val unassignedEvent = unassignedEvents.loneElement
 
-          if (testedProtocolVersion <= ProtocolVersion.v36)
+          if (testedProtocolVersion == ProtocolVersion.v36)
             // The time proof can vary depending on other concurrent events
             (CantonTimestamp
               .fromProtoTimestamp(unassignedEvent.assignmentExclusivity.value)
@@ -994,6 +994,11 @@ trait SynchronizerChangeRealClockIntegrationTest
                   "Rejected transaction is referring to locked contracts"
                 )
               },
+            ),
+            // Tracked reassignments: the second assignment on a participant is rejected before it is sent
+            (
+              LogEntryOptionality.OptionalMany,
+              _.errorMessage should include(ConsistencyErrors.SubmissionAlreadyInFlight.id),
             ),
           )
 

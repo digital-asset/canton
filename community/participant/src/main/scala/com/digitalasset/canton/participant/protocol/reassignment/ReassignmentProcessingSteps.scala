@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.EitherT
-import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution, RpcError}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
@@ -22,15 +21,21 @@ import com.digitalasset.canton.data.{
   ViewPosition,
 }
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.ReassignmentErrorGroup.SubmissionErrorGroup
-import com.digitalasset.canton.error.{CantonError, TransactionError}
+import com.digitalasset.canton.error.{
+  CantonBaseError,
+  CantonError,
+  ReassignmentErrorImpl,
+  TransactionError,
+}
+import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors
 import com.digitalasset.canton.ledger.participant.state.{
   ChangeId,
   CompletionInfo,
   SequencedEventUpdate,
   Update,
 }
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
@@ -48,13 +53,30 @@ import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   MalformedPayload,
   NoMediatorError,
   ProcessorError,
+  SequencerRequestError,
   ViewMessageError,
+}
+import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.{
+  SequencerBackpressure,
+  SequencerRequest,
 }
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.EncryptedViewMessageCreationError
-import com.digitalasset.canton.participant.protocol.{ProcessingSteps, ProtocolProcessor}
+import com.digitalasset.canton.participant.protocol.submission.SubmissionTrackingData.CauseWithTemplate
+import com.digitalasset.canton.participant.protocol.submission.{
+  ChangeIdHash,
+  InFlightSubmissionTracker,
+  ReassignmentSubmissionTrackingData,
+  SubmissionTrackingData,
+}
+import com.digitalasset.canton.participant.protocol.{
+  ProcessingSteps,
+  ProtocolProcessor,
+  TransactionProcessor,
+}
 import com.digitalasset.canton.participant.store.ReassignmentStore.ReassignmentStoreError
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend.TrafficRegistration
 import com.digitalasset.canton.platform.apiserver.services.command.{
   SubmissionAccounting,
   TrafficEnforcementBackend,
@@ -68,16 +90,25 @@ import com.digitalasset.canton.protocol.messages.Verdict.{
   MediatorReject,
   ParticipantReject,
 }
+import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
+import com.digitalasset.canton.store.{ConfirmationRequestSessionKeyStore, SessionKeyStore}
 import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ContractValidator, MonadUtil, ReassignmentTag}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{LfPackageName, LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.canton.{
+  LedgerSubmissionId,
+  LfPackageName,
+  LfPartyId,
+  RequestCounter,
+  SequencerCounter,
+  checked,
+}
 import com.digitalasset.nonempty.NonEmpty
+import com.google.rpc.status.Status as RpcStatus
 
 import scala.collection.concurrent
 import scala.concurrent.{ExecutionContext, Promise}
@@ -105,6 +136,8 @@ private[reassignment] trait ReassignmentProcessingSteps[
 
   protected implicit def ec: ExecutionContext
 
+  // TODO(#37720): Narrow SubmissionSendError to GenericStepsError[SubmissionSendFailure] once
+  //  the untracked submission is removed with protocol version 37
   override type SubmissionSendError = GenericStepsError[ProtocolProcessor.SubmissionProcessingError]
 
   override type PendingSubmissionId = RootHash
@@ -178,25 +211,30 @@ private[reassignment] trait ReassignmentProcessingSteps[
       validationResult: ReassignmentValidationResult,
   ): Option[LocalRejectError]
 
-  protected def performPendingSubmissionMapUpdate(
+  private def performPendingSubmissionMapUpdate(
       pendingSubmissionMap: concurrent.Map[RootHash, PendingReassignmentSubmission],
       reassignmentRef: ReassignmentRef,
       submitterLf: LfPartyId,
       rootHash: RootHash,
-      mkReassignmentId: CantonTimestamp => ReassignmentId,
-  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, PendingReassignmentSubmission] = {
-    val pendingSubmission = PendingReassignmentSubmission(mkReassignmentId)
+      pendingSubmission: PendingReassignmentSubmission,
+  ): Either[ReassignmentProcessorError, Unit] = {
     val existing = pendingSubmissionMap.putIfAbsent(rootHash, pendingSubmission)
-    EitherT.cond[FutureUnlessShutdown](
+    Either.cond(
       existing.isEmpty,
-      pendingSubmission,
+      (),
       DuplicateReassignmentTreeHash(
         reassignmentRef,
         submitterLf,
         rootHash,
-      ): ReassignmentProcessorError,
+      ),
     )
   }
+
+  /** The submission result when the submission fails definitely before it is sequenced */
+  protected def submissionFailure(cause: Option[RpcStatus]): SubmissionResult
+
+  /** The submission result when the submission may have been sent to the sequencer */
+  protected def submissionUnknown(maxSequencingTime: CantonTimestamp): SubmissionResult
 
   protected def decryptTree(
       snapshot: SynchronizerSnapshotSyncCryptoApi,
@@ -350,7 +388,6 @@ private[reassignment] trait ReassignmentProcessingSteps[
       traceContext: TraceContext
   ): (Option[SequencedEventUpdate], Option[PendingSubmissionId]) = {
     val rejection = Update.CommandRejected.FinalReason(error.rpcStatus())
-    val isSubmittingParticipant = submitterMetadata.submittingParticipant == participantId
 
     lazy val completionInfo = CompletionInfo(
       actAs = List(submitterMetadata.submitter),
@@ -360,7 +397,8 @@ private[reassignment] trait ReassignmentProcessingSteps[
       submissionId = submitterMetadata.submissionId,
       paidTrafficCost = trafficCost,
     )
-    val updateO = Option.when(isSubmittingParticipant)(
+    val isOwnSubmission = shouldEmitCompletion(submitterMetadata, freshOwnTimelyTx)
+    val updateO = Option.when(isOwnSubmission)(
       Update.SequencedCommandRejected(
         completionInfo = completionInfo,
         reasonTemplate = rejection,
@@ -371,7 +409,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
         traceContext = traceContext,
       )
     )
-    (updateO, rootHash.some)
+    (updateO, Option.when(isOwnSubmission)(rootHash))
   }
 
   override def createRejectionEvent(rejectionArgs: RejectionArgs)(implicit
@@ -379,10 +417,13 @@ private[reassignment] trait ReassignmentProcessingSteps[
   ): Either[ReassignmentProcessorError, Option[SequencedEventUpdate]] = {
 
     val RejectionArgs(pendingReassignment, errorDetails) = rejectionArgs
-    val isSubmittingParticipant =
-      pendingReassignment.submitterMetadata.submittingParticipant == participantId
 
-    val completionInfoO = Option.when(isSubmittingParticipant)(
+    val completionInfoO = Option.when(
+      shouldEmitCompletion(
+        pendingReassignment.submitterMetadata,
+        pendingReassignment.freshOwnTimelyTx,
+      )
+    )(
       CompletionInfo(
         actAs = List(pendingReassignment.submitterMetadata.submitter),
         userId = pendingReassignment.submitterMetadata.userId,
@@ -408,10 +449,160 @@ private[reassignment] trait ReassignmentProcessingSteps[
     Right(updateO)
   }
 
+  /** Whether this participant emits the command completion of the request. No completion is emitted
+    * for a replayed request.
+    */
+  protected def shouldEmitCompletion(
+      submitterMetadata: ReassignmentSubmitterMetadata,
+      freshOwnTimelyTx: Boolean,
+  ): Boolean =
+    submitterMetadata.submittingParticipant == participantId &&
+      ReassignmentValidation
+        .checkReplayedReassignment(
+          participantId,
+          submitterMetadata,
+          protocolVersion.unwrap,
+          isFreshOwnTimelyRequest = freshOwnTimelyTx,
+        )
+        .isEmpty
+
   override def getSubmitterInformation(views: Seq[DecryptedView]): Option[ViewSubmitterMetadata] =
     views.map(_.submitterMetadata).headOption
 
+  /** Reassignments are tracked in flight from
+    * [[com.digitalasset.canton.version.ProtocolVersion.v38]].
+    */
+  protected def trackedFromReplayProtection(
+      submission: ReassignmentsSubmission
+  ): Either[ReassignmentProcessorError, (Submission, PendingSubmissionData)] = {
+    // TODO(#37720): Remove the untracked submission once protocol version 37 is removed
+    val pendingSubmissionData = Some(submission.pendingSubmission)
+    if (protocolVersion.unwrap >= ProtocolVersion.v38)
+      Right(submission -> pendingSubmissionData)
+    else
+      submission.recordPendingSubmission.map(_ =>
+        UntrackedReassignmentsSubmission(
+          submission.batch,
+          submission.rootHash,
+          submission.approximateTimestampForSigning,
+          submission.maxSequencingTime,
+        ) -> pendingSubmissionData
+      )
+  }
+
   case class ReassignmentsSubmission(
+      batch: Batch[DefaultOpenEnvelope],
+      rootHash: RootHash,
+      reassignmentRef: ReassignmentRef,
+      submissionInfo: ReassignmentSubmissionInfo,
+      pendingSubmissionMap: concurrent.Map[RootHash, PendingReassignmentSubmission],
+      pendingSubmission: PendingReassignmentSubmission,
+      override val changeIdHash: ChangeIdHash,
+      override val approximateTimestampForSigning: CantonTimestamp,
+      override val maxSequencingTime: CantonTimestamp,
+  )(implicit traceContext: TraceContext)
+      extends TrackedSubmissionWithoutDeduplication {
+
+    override def submissionId: Option[LedgerSubmissionId] = submissionInfo.submissionId
+
+    override def submissionTimeoutTrackingData: SubmissionTrackingData =
+      trackingData(SubmissionTrackingData.TimeoutCause)
+
+    override def embedInFlightSubmissionTrackerError(
+        error: InFlightSubmissionTracker.InFlightSubmissionTrackerError
+    ): ReassignmentProcessorError = error match {
+      case InFlightSubmissionTracker.SubmissionAlreadyInFlight(
+            _newSubmission,
+            existingSubmission,
+          ) =>
+        ReassignmentSubmissionErrors.SubmissionAlreadyInFlight(
+          existingSubmission.submissionId,
+          existingSubmission.submissionSynchronizerId,
+        )
+      case InFlightSubmissionTracker.TimeoutTooLow(_submission, _lowerBound) =>
+        ReassignmentSubmissionErrors.TimeoutError.Reject()
+    }
+
+    override def prepareBatch(
+        approximateTimestampForSigning: CantonTimestamp,
+        maxSequencingTime: CantonTimestamp,
+        sessionKeyStore: SessionKeyStore,
+    ): EitherT[FutureUnlessShutdown, SubmissionTrackingData, PreparedBatch] =
+      EitherT
+        .fromEither[FutureUnlessShutdown](recordPendingSubmission)
+        .bimap(
+          // The root hash is unique because the salt seed is sampled for each submission
+          error => internalErrorTrackingData(new IllegalStateException(error.message)),
+          _ =>
+            new PreparedReassignmentBatch(
+              batch,
+              rootHash,
+              completionInfo(paidTrafficCost = NonNegativeLong.zero),
+            ): PreparedBatch,
+        )
+
+    override def shutdownDuringInFlightRegistration: ReassignmentProcessorError =
+      ReassignmentSubmissionErrors.SubmissionDuringShutdown()
+
+    override def onDefinitiveFailure(
+        trackingData: Option[SubmissionTrackingData]
+    ): SubmissionResult =
+      submissionFailure(trackingData.collect {
+        case ReassignmentSubmissionTrackingData(_, CauseWithTemplate(template), _) =>
+          template.status
+      })
+
+    override def definiteFailureTrackingData(
+        failure: UnlessShutdown[Throwable]
+    ): SubmissionTrackingData = failure match {
+      case UnlessShutdown.AbortedDueToShutdown =>
+        trackingData(
+          CauseWithTemplate(
+            TransactionProcessor.SubmissionErrors.SubmissionDuringShutdown.Rejection()
+          )
+        )
+      case UnlessShutdown.Outcome(exception) => internalErrorTrackingData(exception)
+    }
+
+    override def onPotentialFailure(maxSequencingTime: CantonTimestamp): SubmissionResult =
+      submissionUnknown(maxSequencingTime)
+
+    private[ReassignmentProcessingSteps] def recordPendingSubmission
+        : Either[ReassignmentProcessorError, Unit] =
+      performPendingSubmissionMapUpdate(
+        pendingSubmissionMap,
+        reassignmentRef,
+        submissionInfo.submitter,
+        rootHash,
+        pendingSubmission,
+      )
+
+    private def completionInfo(paidTrafficCost: NonNegativeLong): CompletionInfo =
+      CompletionInfo(
+        actAs = List(submissionInfo.submitter),
+        userId = submissionInfo.userId,
+        commandId = submissionInfo.commandId,
+        optDeduplicationPeriod = None,
+        submissionId = submissionInfo.submissionId,
+        paidTrafficCost = paidTrafficCost,
+      )
+
+    private def trackingData(
+        rejectionCause: SubmissionTrackingData.RejectionCause
+    ): SubmissionTrackingData =
+      ReassignmentSubmissionTrackingData.create(
+        completionInfo(paidTrafficCost = NonNegativeLong.zero),
+        rejectionCause,
+        psid.unwrap,
+      )
+
+    private def internalErrorTrackingData(throwable: Throwable): SubmissionTrackingData =
+      trackingData(
+        CauseWithTemplate(ReassignmentSubmissionErrors.SubmissionInternalError.Failure(throwable))
+      )
+  }
+
+  case class UntrackedReassignmentsSubmission(
       override val batch: Batch[DefaultOpenEnvelope],
       override val pendingSubmissionId: PendingSubmissionId,
       override val approximateTimestampForSigning: CantonTimestamp,
@@ -425,6 +616,34 @@ private[reassignment] trait ReassignmentProcessingSteps[
 
     override def toSubmissionError(err: SubmissionSendError): ReassignmentProcessorError =
       err
+  }
+
+  private class PreparedReassignmentBatch(
+      override val batch: Batch[DefaultOpenEnvelope],
+      override val rootHash: RootHash,
+      completionInfo: CompletionInfo,
+  ) extends PreparedBatch {
+    override def pendingSubmissionId: RootHash = rootHash
+
+    override def submissionErrorTrackingData(
+        error: ProtocolProcessor.SubmissionSendFailure
+    )(implicit traceContext: TraceContext): SubmissionTrackingData = {
+      val rejectionCause = error match {
+        case SequencerRequestError(refused @ SendAsyncClientError.RequestRefused(refusal)) =>
+          CauseWithTemplate(
+            if (refusal.isOverload) SequencerBackpressure.Rejection(refusal.toString)
+            else if (refusal.hasMaxSequencingTimeElapsed)
+              ReassignmentSubmissionErrors.TimeoutError.Error()
+            else SequencerRequest.Error(refused): CantonBaseError
+          )
+        case SequencerRequestError(otherSendError) =>
+          CauseWithTemplate(SequencerRequest.Error(otherSendError))
+        case ProtocolProcessor.TrafficEnforcementRejected(reason) =>
+          // Traffic enforcement already decided what the client should see, this only renders it.
+          CauseWithTemplate(RpcStatus.fromJavaProto(reason.asGrpcStatus))
+      }
+      ReassignmentSubmissionTrackingData.create(completionInfo, rejectionCause, psid.unwrap)
+    }
   }
 
   override def embedRequestError(
@@ -532,9 +751,14 @@ private[reassignment] trait ReassignmentProcessingSteps[
           val activenessRejection =
             localRejectFromActivenessCheck(requestId, validationResult)
 
+          // As for transactions, a `Malformed` rejection ensures that this rejection or something at
+          // least as strong reaches the mediator.
+          val replayRejection = validationResult.commonValidationResult.replayCheckResult
+            .map(err => LocalRejectError.MalformedRejects.MalformedRequest.Reject(err.message))
+
           val localRejections =
             (modelConformanceRejection ++ activenessRejection.toList ++
-              authenticationRejection.toList ++ submitterCheckRejection ++ reassignmentIdRejection ++ failedValidationRejection)
+              authenticationRejection.toList ++ submitterCheckRejection ++ reassignmentIdRejection ++ failedValidationRejection ++ replayRejection.toList)
               .map { err =>
                 err.logWithContext()
                 err.toLocalReject(protocolVersion)
@@ -658,24 +882,24 @@ object ReassignmentProcessingSteps {
 
   private[reassignment] def registerWithTrafficEnforcement(
       trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
-      submitterMetadata: ReassignmentSubmitterMetadata,
+      submissionInfo: ReassignmentSubmissionInfo,
       accounting: SubmissionAccounting,
       trafficCost: Long,
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+  ): EitherT[FutureUnlessShutdown, RpcError, Option[TrafficRegistration]] =
     TrafficEnforcementBackend.registerIfEnabled(
       trafficEnforcementBackendO,
       ChangeId(
-        submitterMetadata.userId,
-        submitterMetadata.commandId,
+        submissionInfo.userId,
+        submissionInfo.commandId,
         // Not the routed transaction's actAs: TEA matches the reassignment completion by
         // change id, and its actAs is only the submitter.
-        Set(submitterMetadata.submitter),
+        Set(submissionInfo.submitter),
       ),
-      submitterMetadata.submissionId,
+      submissionInfo.submissionId,
       accounting,
       trafficCost,
     )(ErrorLoggingContext.fromTracedLogger(logger), ec)
@@ -716,6 +940,11 @@ object ReassignmentProcessingSteps {
     def requestSequencerCounter: SequencerCounter
 
     def submitterMetadata: ReassignmentSubmitterMetadata
+
+    /** The resolved status from
+      * [[com.digitalasset.canton.participant.protocol.SubmissionTracker.register]]
+      */
+    def freshOwnTimelyTx: Boolean
 
     /** Traffic cost of the (un)assignment event
       */
@@ -767,6 +996,75 @@ object ReassignmentProcessingSteps {
           with ReassignmentProcessorError {
         override def message: String = cause
       }
+    }
+
+    @Explanation(
+      """This error occurs when the reassignment was not sequenced within the pre-defined max sequencing time
+        |and has therefore timed out. The max sequencing time is derived from the submission time and the
+        |sequencer client parameter default-max-sequencing-time-offset.
+        |"""
+    )
+    @Resolution(
+      """Resubmit if the delay is caused by high load.
+        |Alternatively, the participant node operator can increase the sequencer client parameter default-max-sequencing-time-offset.
+        |"""
+    )
+    object TimeoutError
+        extends ErrorCode(
+          id = "REASSIGNMENT_NOT_SEQUENCED_TIMEOUT",
+          ErrorCategory.ContentionOnSharedResources,
+        ) {
+      final case class Error()
+          extends ReassignmentErrorImpl(
+            cause =
+              "Reassignment was not sequenced within the pre-defined max sequencing time and has therefore timed out"
+          )
+
+      // TODO(#13240): Merge with Error() once reassignment submission errors keep their error code
+      final case class Reject()(implicit
+          val loggingContext: com.digitalasset.canton.logging.ErrorLoggingContext
+      ) extends CantonError.Impl(
+            cause =
+              "Reassignment was not sequenced within the pre-defined max sequencing time and has therefore timed out"
+          )
+          with ReassignmentProcessorError {
+        override def message: String = cause
+      }
+    }
+
+    @Explanation("An internal error occurred during reassignment submission.")
+    @Resolution("Please contact support and provide the failure reason.")
+    object SubmissionInternalError
+        extends ErrorCode(
+          id = "REASSIGNMENT_SUBMISSION_INTERNAL_ERROR",
+          ErrorCategory.SystemInternalAssumptionViolated,
+        ) {
+      final case class Failure(throwable: Throwable)(implicit
+          val loggingContext: com.digitalasset.canton.logging.ErrorLoggingContext
+      ) extends ReassignmentErrorImpl(
+            cause = "internal error during reassignment submission",
+            throwableO = Some(throwable),
+          )
+    }
+
+    final case class SubmissionAlreadyInFlight(
+        existingSubmissionId: Option[LedgerSubmissionId],
+        existingSubmissionSynchronizerId: SynchronizerId,
+    )(implicit val loggingContext: com.digitalasset.canton.logging.ErrorLoggingContext)
+        extends CantonError.Impl(cause = "The reassignment submission is already in-flight")(
+          ConsistencyErrors.SubmissionAlreadyInFlight.code
+        )
+        with ReassignmentProcessorError {
+      override def message: String = cause
+    }
+
+    final case class SubmissionDuringShutdown()(implicit
+        val loggingContext: com.digitalasset.canton.logging.ErrorLoggingContext
+    ) extends CantonError.Impl(cause = "Reassignment submitted during shutdown or while passive.")(
+          TransactionProcessor.SubmissionErrors.SubmissionDuringShutdown.code
+        )
+        with ReassignmentProcessorError {
+      override def message: String = cause
     }
   }
 

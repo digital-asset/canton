@@ -284,7 +284,7 @@ trait StatsUpdater {
 
     if (prop.nonEmpty || accUp.nonEmpty) {
       def updateStr(typ: String, current: Long, probes: Seq[TestProbeData]): Seq[String] =
-        probes.lastOption.map(x => s"$typ: $current -> ${x.count}").toList
+        probes.lastOption.map(x => s"$typ: $current -> ${x.count}@${x.timestamp}").toList
 
       val textStr =
         (updateStr("proposal", res.data.proposed, prop) ++ updateStr(
@@ -309,7 +309,6 @@ trait StatsUpdater {
   ): Seq[M.orchestration.TestProbeData] = {
     val maxObs = stats.observed
     val obsIdx = Math.min(current + master.reportFrequency, master.totalCycles).toInt
-
     if (current < obsIdx && obsIdx <= maxObs) {
       val ts =
         stats

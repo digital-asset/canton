@@ -60,11 +60,3 @@ jobs:
     secrets: inherit
     with:
       needs_json: ${{ toJSON(needs) }}
-      runner: >-
-        ${{
-          case(
-            github.repository == 'DACH-NY/canton', 'dach-ny-canton',
-            github.repository == 'digital-asset/canton', 'digital-asset-canton',
-            'ubuntu-latest'
-          )
-        }}

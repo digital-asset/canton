@@ -4,6 +4,7 @@
 package com.digitalasset.canton.validation
 
 import com.digitalasset.canton.version.ProtocolVersionValidation
+import com.google.protobuf.ByteString
 import io.scalaland.chimney.{PartialTransformer, partial}
 
 /** An unvalidated value read off a protobuf message. Reachable only via `ProtoValidation`
@@ -30,6 +31,12 @@ object ProtoUnvalidated {
         * implicit.
         */
       def toProtoUnvalidated: ProtoUnvalidatedString = ProtoUnvalidatedString(str)
+    }
+
+    implicit class ProtoUnvalidatedByteStringSyntax(
+        private val bytes: ByteString
+    ) extends AnyVal {
+      def toProtoUnvalidated: ProtoUnvalidatedByteString = ProtoUnvalidatedByteString(bytes)
     }
   }
 

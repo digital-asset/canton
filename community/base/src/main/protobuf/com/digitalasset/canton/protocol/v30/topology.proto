@@ -66,6 +66,8 @@ message Enums {
     // UNUSED in PV >= 34 - Was meant to tactically fix a bug in the external signing hash computation
     // in model conformance in PV 33
     PARTICIPANT_FEATURE_FLAG_PV33_EXTERNAL_SIGNING_LOCAL_CONTRACT_IN_SUBVIEW = 1;
+    // TODO(#37616): Remove when removing support for PV=36
+    // UNUSED in PV >= 37 - Multi-synchronizer is enabled without this flag
     // This flag indicates that the participant supports reassignments between synchronizers.
     PARTICIPANT_FEATURE_FLAG_ENABLE_MULTI_SYNCHRONIZER = 2;
   }

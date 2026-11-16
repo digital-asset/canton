@@ -124,8 +124,8 @@ trait ReliabilityPerformanceIntegrationTest extends BasePerformanceIntegrationTe
       localRoles = Set(
         Master(
           s"RestartMaster",
-          quorumParticipants = 3,
-          quorumIssuers = 2,
+          quorumUsers = 3,
+          quorumProviders = 2,
           runConfig = MasterDynamicConfig(
             totalCycles = totalCycles,
             reportFrequency = 10,

@@ -89,7 +89,7 @@ object ExternalAuthorization
           "signatures",
           pvv,
           ProtoValidation.MaxCollectionSize,
-        )((element, _) => Signature.fromProtoV30(element))
+        )((element, _) => Signature.fromProtoV30(pvv, element))
     } yield partyId -> partySignatures
   }
 

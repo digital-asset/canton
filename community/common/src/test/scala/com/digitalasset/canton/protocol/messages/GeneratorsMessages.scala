@@ -245,8 +245,8 @@ final class GeneratorsMessages(
     } yield confirmationResponses
   )
 
-  implicit val signedProtocolMessageContentArb: Arbitrary[SignedProtocolMessageContent] =
-    arbitraryForAllSubclasses(classOf[SignedProtocolMessageContent])(
+  implicit val signedProtocolMessageContentArb: Arbitrary[SignedProtocolMessageContent] = {
+    val arb = arbitraryForAllSubclasses(classOf[SignedProtocolMessageContent])(
       GeneratorForClass(Arbitrary.arbitrary[LegacyAcsCommitment], classOf[LegacyAcsCommitment]),
       GeneratorForClass(Arbitrary.arbitrary[ConfirmationResponses], classOf[ConfirmationResponses]),
       GeneratorForClass(
@@ -258,6 +258,13 @@ final class GeneratorsMessages(
         classOf[ConfirmationResultMessage],
       ),
     )
+    // Filter out LegacyAcsCommitments for protocol versions where they are no longer supported.
+    val filtered = arb.arbitrary.filter {
+      case _: LegacyAcsCommitment => protocolVersion < ProtocolVersion.v38
+      case _ => true
+    }
+    Arbitrary(filtered)
+  }
 
   implicit val typedSignedProtocolMessageContent
       : Arbitrary[TypedSignedProtocolMessageContent[SignedProtocolMessageContent]] = Arbitrary(for {

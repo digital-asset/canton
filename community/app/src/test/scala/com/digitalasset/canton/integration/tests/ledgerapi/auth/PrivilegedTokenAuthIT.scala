@@ -231,7 +231,8 @@ trait PrivilegedTokenAuthIT
 
 }
 
-class PrivilegedScopeTokenAuthIT extends PrivilegedTokenAuthIT {
+// TODO (i#33090): remove together with the scope-only token format
+class PrivilegedScopeTokenAuthIT extends PrivilegedTokenAuthIT with ScopeOnlyJwtSuite {
   registerPlugin(ExpectedScopeOverrideConfig(loggerFactory))
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
@@ -345,7 +346,6 @@ class PrivilegedAudienceTokenAuthIT extends PrivilegedTokenAuthIT {
     scope = None,
   )
 
-  private val defaultAudience: String = ExpectedAudience
   private val privilegedAudience: String = "Privileged-Audience"
   private val privilegedAdminAudience: String = "Privileged-Admin-Audience"
 
@@ -383,7 +383,7 @@ class PrivilegedAudienceTokenAuthIT extends PrivilegedTokenAuthIT {
     userId = randomPartyActUser,
     exp = Some(Instant.now().plusNanos(Duration.ofMinutes(5).toNanos)),
     format = StandardJWTTokenFormat.Audience,
-    audiences = List(defaultAudience),
+    audiences = List(ExpectedAudience),
     scope = None,
   )
 
@@ -398,7 +398,7 @@ class PrivilegedAudienceTokenAuthIT extends PrivilegedTokenAuthIT {
             AuthServiceConfig
               .UnsafeJwtHmac256(
                 secret = jwtSecret,
-                targetAudience = Some(defaultAudience),
+                targetAudience = Some(ExpectedAudience),
                 targetScope = None,
               ),
             AuthServiceConfig

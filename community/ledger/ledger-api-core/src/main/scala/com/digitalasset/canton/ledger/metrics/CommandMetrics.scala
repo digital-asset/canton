@@ -51,6 +51,14 @@ final class CommandHistograms(val prefix: MetricName)(implicit
                       |Package Selection, before the command is handed to the Daml Engine for interpretation.""",
     qualification = MetricQualification.Latency,
   )
+
+  val completion = Item(
+    prefix :+ "completion",
+    summary = "The time to complete a command from submission to result.",
+    description = "Measuring the full command lifecycle from submission to completion.",
+    qualification = MetricQualification.Latency,
+  )
+
 }
 
 // Private constructor to avoid being instantiated multiple times by accident
@@ -68,6 +76,7 @@ final class CommandMetrics private[metrics] (
   val submissions: Timer = factory.timer(inventory.submissions.info)
   val interactivePrepares: Timer = factory.timer(inventory.interactive_prepares.info)
   val tapsPackageSelection: Timer = factory.timer(inventory.taps_package_selection.info)
+  val completion: Timer = factory.timer(inventory.completion.info)
 
   val submissionsRunning: Counter = factory.counter(
     MetricInfo(

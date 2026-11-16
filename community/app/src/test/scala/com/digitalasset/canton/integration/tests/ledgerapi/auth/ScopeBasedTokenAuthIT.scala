@@ -24,7 +24,11 @@ import monocle.macros.syntax.lens.*
 import java.time.{Duration, Instant}
 import scala.concurrent.Future
 
-class ScopeBasedTokenAuthIT extends ServiceCallAuthTests with ErrorsAssertions {
+// TODO (i#33090): remove together with the scope-only token format
+class ScopeBasedTokenAuthIT
+    extends ServiceCallAuthTests
+    with ErrorsAssertions
+    with ScopeOnlyJwtSuite {
 
   registerPlugin(ExpectedScopeOverrideConfig(loggerFactory))
   registerPlugin(new UseH2(loggerFactory))

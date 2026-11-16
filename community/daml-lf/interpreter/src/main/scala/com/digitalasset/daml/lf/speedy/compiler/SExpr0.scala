@@ -84,7 +84,7 @@ private[speedy] object SExpr0 {
   final case class SELet(bounds: List[SExpr], body: SExpr) extends SExpr
 
   /** Location annotation. When encountered the location is stored in the 'lastLocation' variable of
-    * the machine. When commit is begun the location is stored in 'commitLocation'.
+    * the machine.
     */
   final case class SELocation(loc: Location, expr: SExpr) extends SExpr
 

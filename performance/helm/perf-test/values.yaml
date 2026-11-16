@@ -1,0 +1,75 @@
+participant:
+  # How many participant deployments/pods to deploy
+  podCount: 1
+  # Number of participants in each JVM instance
+  instancesPerPod: 3
+  # resource given to each pod - request matches limit to ensure QoS
+  resources:
+    cpu: 22
+    memory: 20Gi
+
+synchronizer:
+  # How may synchronizer pods to deploy
+  podCount: 1
+  # resource given to each pod - request matches limit to ensure QoS
+  resources:
+    cpu: 8
+    memory: 12Gi
+
+master:
+  # resource given to each pod - request matches limit to ensure QoS
+  resources:
+    cpu: 4
+    memory: 8Gi
+
+logLevel: "WARN"
+logLevelMaster: "WARN"
+
+# postgres config for the paired postgres to master, participants and synchronizer
+postgres:
+  image: postgres:16-alpine
+  user: "cnadmin"
+  password: "super_secret_password"
+  database: "opspar"
+  port: 5432
+  resources:
+    cpu: 8
+    memory: 18Gi
+
+postgresSmall:
+  resources:
+    cpu: 4
+    memory: 7Gi
+
+rate:
+  # "target-latency" or "fixed"
+  type: "target-latency"
+  fixedRate: 2500
+  targetLatencyMs: 750
+
+runConfig:
+  runType: "triparty"
+  numIssuersPerNode : 3
+  numAssetsPerIssuer : 100
+  numAccountsPerIssuer : 1
+
+# The docker image repo location and tag for the canton images used for
+# synchronizers, participants and the performance runner
+image:
+  repo: "europe-docker.pkg.dev/da-images/playground/docker"
+  tag: "3.8.0-snapshot-2026-11-09.9de0441a3d2-pre"
+
+contractCacheConfig: |
+  canton.participants.participant1.ledger-api.index-service.max-contract-state-cache-size=25000,
+  canton.participants.participant1.ledger-api.index-service.max-contract-key-state-cache-size=10000,
+  canton.participants.participant1.parameters.caching.contract-store.maximum-size=10000,
+  canton.participants.participant1.parameters.reassignments-config.target-timestamp-forward-tolerance=5m,
+  canton.participants.participant2.ledger-api.index-service.max-contract-state-cache-size=25000,
+  canton.participants.participant2.ledger-api.index-service.max-contract-key-state-cache-size=10000,
+  canton.participants.participant2.parameters.caching.contract-store.maximum-size=10000,
+  canton.participants.participant2.parameters.reassignments-config.target-timestamp-forward-tolerance=5m,
+  canton.participants.participant3.ledger-api.index-service.max-contract-state-cache-size=25000,
+  canton.participants.participant3.ledger-api.index-service.max-contract-key-state-cache-size=10000,
+  canton.participants.participant3.parameters.caching.contract-store.maximum-size=10000,    
+  canton.participants.participant3.parameters.reassignments-config.target-timestamp-forward-tolerance=5m
+  

@@ -158,9 +158,18 @@ class AudienceBasedTokenAuthIT extends ServiceCallAuthTests with ErrorsAssertion
       attackUnauthenticated(threat = "Present a custom JWT")
     ) in { implicit env =>
       import env.*
+      val scopeToken = expectedAudienceToken.copy(
+        format = StandardJWTTokenFormat.Scope,
+        audiences = List.empty,
+        scope = Some(defaultScope),
+      )
       loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
         expectUnauthenticated(
-          serviceCall(ServiceCallContext(Option(toHeader(standardToken(participantAdmin)))))
+          serviceCall(
+            ServiceCallContext(
+              Option(toHeader(scopeToken, enforceFormat = Some(StandardJWTTokenFormat.Scope)))
+            )
+          )
         )
       }
     }

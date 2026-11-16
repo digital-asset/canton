@@ -13,9 +13,9 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.util.Try
 
-class LfSerializationVersionToProtocolVersionsTest extends AnyWordSpec with Matchers {
+final class LfSerializationVersionToProtocolVersionsTest extends AnyWordSpec with Matchers {
 
-  val supportedSerializationVersions =
+  private val supportedSerializationVersions =
     List(
       LfSerializationVersion.V1,
       LfSerializationVersion.V2,

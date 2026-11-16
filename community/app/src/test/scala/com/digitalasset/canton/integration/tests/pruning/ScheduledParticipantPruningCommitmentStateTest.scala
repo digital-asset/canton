@@ -38,6 +38,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendDecision,
 }
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds}
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.Monocle.toAppliedFocusOps
 
 import java.time.Duration as JDuration
@@ -100,7 +101,7 @@ abstract class ScheduledParticipantPruningCommitmentStateTest
         )
       }
 
-  "Able to run scheduled participant pruning taking into account the commitment state" in {
+  "Able to run scheduled participant pruning taking into account the commitment state" onlyRunLessThan ProtocolVersion.v38 in {
     implicit env =>
       verifyScheduledPruning()
   }

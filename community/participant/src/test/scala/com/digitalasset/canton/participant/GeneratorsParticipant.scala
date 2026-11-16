@@ -20,6 +20,7 @@ import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
   ReplicationParams,
 }
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AgreementStatus.{
   Exists,
   NotProposed,
@@ -33,17 +34,21 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplica
   AgreementStatus,
   PersistentProgress,
 }
-import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.acsreplication.{
   AcsReplicationSourceParticipantMessage,
   AcsReplicationTargetParticipantMessage,
 }
-import com.digitalasset.canton.participant.protocol.submission.TransactionSubmissionTrackingData.{
+import com.digitalasset.canton.participant.protocol.party.{
+  FreezingToOnboardingOperation,
+  OnboardingClearanceOperation,
+}
+import com.digitalasset.canton.participant.protocol.submission.SubmissionTrackingData.{
   CauseWithTemplate,
   RejectionCause,
   TimeoutCause,
 }
 import com.digitalasset.canton.participant.protocol.submission.{
+  ReassignmentSubmissionTrackingData,
   SubmissionTrackingData,
   TransactionSubmissionTrackingData,
 }
@@ -135,12 +140,27 @@ final class GeneratorsParticipant(
       transactionHash = transactionHash,
     )
 
+  val reassignmentSubmissionTrackingDataGen: Gen[ReassignmentSubmissionTrackingData] =
+    for {
+      completionInfo <- Arbitrary.arbitrary[CompletionInfo]
+      rejectionCause <- Arbitrary.arbitrary[RejectionCause]
+      physicalSynchronizerId <- Arbitrary.arbitrary[PhysicalSynchronizerId]
+    } yield ReassignmentSubmissionTrackingData.create(
+      completionInfo,
+      rejectionCause,
+      physicalSynchronizerId,
+    )
+
   implicit val submissionTrackingDataArg: Arbitrary[SubmissionTrackingData] =
     arbitraryForAllSubclasses(classOf[SubmissionTrackingData])(
       GeneratorForClass(
         transactionSubmissionTrackingDataGen,
         classOf[TransactionSubmissionTrackingData],
-      )
+      ),
+      GeneratorForClass(
+        reassignmentSubmissionTrackingDataGen,
+        classOf[ReassignmentSubmissionTrackingData],
+      ),
     )
 
   implicit val reassignmentCounterArb: Arbitrary[ReassignmentCounter] =
@@ -256,6 +276,27 @@ final class GeneratorsParticipant(
         error <- Gen
           .oneOf[PartyReplicationError](Disconnected(message), PartyReplicationFailed(message))
       } yield error
+    )
+
+  implicit val acsReplicationParameters: Arbitrary[AcsReplicationParameters] =
+    Arbitrary(
+      for {
+        requestId <- Arbitrary.arbitrary[Hash]
+        partyId <- Arbitrary.arbitrary[PartyId]
+        synchronizerId <- Arbitrary.arbitrary[SynchronizerId]
+        sourceParticipantId <- Arbitrary.arbitrary[ParticipantId]
+        targetParticipantId <- Arbitrary.arbitrary[ParticipantId]
+        timestamp <- Arbitrary.arbitrary[CantonTimestamp]
+        acsReplicationDestination = AcsReplicationDestination.Persistence
+      } yield AcsReplicationParameters(
+        requestId,
+        partyId,
+        synchronizerId,
+        sourceParticipantId,
+        targetParticipantId,
+        timestamp,
+        acsReplicationDestination,
+      )
     )
 
   implicit val acsReplicationStatusArb: Arbitrary[AcsReplicationStatus] =
@@ -430,5 +471,14 @@ final class GeneratorsParticipant(
             OnboardingClearanceOperation.protocolVersionRepresentativeFor(version)
           )
         )
+    )
+
+  implicit val freezingToOnboardingOperationArb: Arbitrary[FreezingToOnboardingOperation] =
+    Arbitrary(
+      Gen.const(
+        FreezingToOnboardingOperation()(
+          FreezingToOnboardingOperation.protocolVersionRepresentativeFor(version)
+        )
+      )
     )
 }

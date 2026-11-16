@@ -20,7 +20,7 @@ import com.digitalasset.canton.lifecycle.{
   HasCloseContext,
   LifeCycle,
 }
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.resource.{DbExceptionRetryPolicy, Storage}
 import com.digitalasset.canton.scheduler.PruningScheduler
@@ -71,11 +71,9 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
-import com.digitalasset.canton.util.FutureUtil.doNotAwait
-import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.retry.Pause
-import com.digitalasset.canton.util.signalling.{EventSignaller, LocalEventSignaller}
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
+import com.digitalasset.canton.util.signalling.EventSignaller
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
@@ -85,85 +83,21 @@ import org.slf4j.event.Level
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.*
 
-object DatabaseSequencer {
-
-  /** Creates a single instance of a database sequencer. */
-  def single(
-      config: DatabaseSequencerConfig,
-      initialState: Option[SequencerInitialState],
-      timeouts: ProcessingTimeout,
-      storage: Storage,
-      sequencerStore: SequencerStore,
-      lsuSequencingBounds: Option[LsuSequencingBounds],
-      drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
-      clock: Clock,
-      topologyClientMember: Member,
-      cryptoApi: SynchronizerCryptoClient,
-      metrics: SequencerMetrics,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit
-      ec: ExecutionContext,
-      tracer: Tracer,
-      actorMaterializer: Materializer,
-  ): DatabaseSequencer = {
-
-    val logger = TracedLogger(DatabaseSequencer.getClass, loggerFactory)
-
-    ErrorUtil.requireArgument(
-      !config.highAvailabilityEnabled,
-      "Single database sequencer creation must not have HA enabled",
-    )(ErrorLoggingContext.fromTracedLogger(logger)(TraceContext.empty))
-
-    new DatabaseSequencer(
-      SequencerWriterStoreFactory.singleInstance,
-      sequencerStore,
-      config,
-      initialState,
-      TotalNodeCountValues.SingleSequencerTotalNodeCount,
-      new LocalEventSignaller[SequencerMemberId, Unit](
-        "member",
-        timeouts,
-        loggerFactory,
-      ),
-      None,
-      None,
-      timeouts,
-      storage,
-      None,
-      None,
-      clock,
-      topologyClientMember,
-      cryptoApi,
-      metrics,
-      loggerFactory,
-      blockSequencerMode = false,
-      lsuSequencingBounds = lsuSequencingBounds,
-      drSequencingTimeUpperBound = drSequencingTimeUpperBound,
-      rateLimitManagerO = None,
-      disableSubmissionChecksForTesting = false,
-    )
-  }
-}
-
 class DatabaseSequencer(
     writerStorageFactory: SequencerWriterStoreFactory,
     sequencerStore: SequencerStore,
     config: DatabaseSequencerConfig,
-    initialState: Option[SequencerInitialState],
     totalNodeCount: PositiveInt,
     eventSignaller: EventSignaller[SequencerMemberId, Unit],
     keepAliveInterval: Option[NonNegativeFiniteDuration],
-    onlineSequencerCheckConfig: Option[OnlineSequencerCheckConfig],
     override protected val timeouts: ProcessingTimeout,
     storage: Storage,
-    exclusiveStorage: Option[Storage],
     health: Option[SequencerHealthConfig],
     clock: Clock,
     topologyClientMember: Member,
     cryptoApi: SynchronizerCryptoClient,
     metrics: SequencerMetrics,
     loggerFactory: NamedLoggerFactory,
-    blockSequencerMode: Boolean,
     lsuSequencingBounds: Option[LsuSequencingBounds],
     drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
     rateLimitManagerO: Option[SequencerRateLimitManager],
@@ -184,11 +118,6 @@ class DatabaseSequencer(
   private val psid = cryptoApi.psid
   private val protocolVersion: ProtocolVersion = psid.protocolVersion
 
-  require(
-    blockSequencerMode || config.writer.eventWriteMaxConcurrency == 1,
-    "The database sequencer must be configured with writer.event-write-max-concurrency = 1",
-  )
-
   private val writer = SequencerWriter(
     config.writer,
     writerStorageFactory,
@@ -202,22 +131,15 @@ class DatabaseSequencer(
     eventSignaller,
     protocolVersion,
     loggerFactory,
-    blockSequencerMode,
     lsuSequencingBounds,
     drSequencingTimeUpperBound,
     metrics,
   )
 
-  private lazy val storageForAdminChanges: Storage = exclusiveStorage.getOrElse(
-    storage // no exclusive storage in non-ha setups
-  )
-
   override val pruningScheduler: Option[PruningScheduler] =
-    pruningSchedulerBuilder.map(_(storageForAdminChanges))
+    pruningSchedulerBuilder.map(_(storage))
 
-  override def adminStatus: SequencerAdminStatus = SequencerAdminStatus(
-    storageForAdminChanges.isActive
-  )
+  override def adminStatus: SequencerAdminStatus = SequencerAdminStatus(storage.isActive)
 
   @VisibleForTesting
   private[canton] val store = writer.generalStore
@@ -230,7 +152,7 @@ class DatabaseSequencer(
   withNewTraceContext("db_sequencer_start") { implicit traceContext =>
     timeouts.unbounded.await(s"Waiting for sequencer writer to fully start")(
       writer
-        .startOrLogError(initialState, resetWatermarkTo)
+        .startOrLogError(resetWatermarkTo)
         .onShutdown(logger.info("Sequencer writer not started due to shutdown"))
     )
 
@@ -240,48 +162,6 @@ class DatabaseSequencer(
         s"Waiting for pruning scheduler to start",
         logFailing = Level.INFO.some, // in case we're shutting down at start-up
       )(ps.start())
-    )
-  }
-
-  // periodically run the call to mark lagging sequencers as offline
-  private def periodicallyMarkLaggingSequencersOffline(
-      checkInterval: NonNegativeFiniteDuration,
-      offlineCutoffDuration: NonNegativeFiniteDuration,
-  ): Unit = {
-    def schedule(): Unit = {
-      val _ = clock.scheduleAfterCancelledOnShutdown(
-        _ => markOffline(),
-        s"${getClass.getName}: mark lagging sequencers offline",
-        checkInterval.unwrap,
-      )
-    }
-
-    def markOfflineF()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-      val cutoffTime = clock.now.minus(offlineCutoffDuration.unwrap)
-      logger.trace(s"Marking sequencers with watermarks earlier than [$cutoffTime] as offline")
-
-      sequencerStore.markLaggingSequencersOffline(cutoffTime)
-    }
-
-    def markOffline(): Unit = withNewTraceContext("mark_offline") { implicit traceContext =>
-      doNotAwait(
-        synchronizeWithClosing(functionFullName)(markOfflineF().thereafter { _ =>
-          // schedule next marking sequencers as offline regardless of outcome
-          schedule()
-        }).onShutdown {
-          logger.debug("Skipping scheduling next offline sequencer check due to shutdown")
-        },
-        "Marking lagging sequencers as offline failed",
-      )
-    }
-
-    schedule()
-  }
-
-  onlineSequencerCheckConfig.foreach { config =>
-    periodicallyMarkLaggingSequencersOffline(
-      config.onlineCheckInterval.toInternal,
-      config.offlineDuration.toInternal,
     )
   }
 
@@ -536,7 +416,6 @@ class DatabaseSequencer(
     LifeCycle.close(
       () => super.onClosed(),
       () => pruningScheduler foreach (LifeCycle.close(_)(logger)),
-      () => exclusiveStorage foreach (LifeCycle.close(_)(logger)),
       writer,
       reader,
       eventSignaller,

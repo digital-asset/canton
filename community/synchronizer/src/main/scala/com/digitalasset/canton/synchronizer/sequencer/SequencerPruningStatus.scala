@@ -253,14 +253,15 @@ object SequencerPruningStatus extends PrettyPrintingCompanion[SequencerPruningSt
     SequencerPruningStatus(CantonTimestamp.MinValue, CantonTimestamp.MinValue, members = Set.empty)
 
   def fromProtoV30(
-      statusP: v30.SequencerPruningStatus
+      pvv: ProtocolVersionValidation,
+      statusP: v30.SequencerPruningStatus,
   ): ParsingResult[SequencerPruningStatus] =
     // TODO(#35385): Reinstate a practical admin API members limit.
     for {
       validatedMembers <- ProtoValidation.validateLength(
         statusP.members,
         "members",
-        ProtocolVersionValidation.NoValidation,
+        pvv,
         ProtoValidation.MaxCollectionSize,
       )
       earliestEventTimestamp <- CantonTimestamp.fromProtoPrimitive(statusP.earliestEventTimestamp)
@@ -269,14 +270,15 @@ object SequencerPruningStatus extends PrettyPrintingCompanion[SequencerPruningSt
     } yield SequencerPruningStatus(earliestEventTimestamp, now, members)
 
   def fromProtoV31(
-      statusP: v31.SequencerPruningStatus
+      pvv: ProtocolVersionValidation,
+      statusP: v31.SequencerPruningStatus,
   ): ParsingResult[SequencerPruningStatus] =
     // TODO(#35385): Reinstate a practical admin API members limit.
     for {
       validatedMembers <- ProtoValidation.validateLength(
         statusP.members,
         "members",
-        ProtocolVersionValidation.NoValidation,
+        pvv,
         ProtoValidation.MaxCollectionSize,
       )
       earliestEventTimestamp <- CantonTimestamp.fromProtoPrimitive(statusP.earliestEventTimestamp)

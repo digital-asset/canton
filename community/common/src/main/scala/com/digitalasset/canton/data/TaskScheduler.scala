@@ -6,7 +6,8 @@ package com.digitalasset.canton.data
 import com.daml.metrics.api.MetricHandle.Counter
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, InsertedValue, NotInserted}
 import com.digitalasset.canton.data.TaskScheduler.*
@@ -486,7 +487,7 @@ class TaskScheduler[Task <: TimedTask](
           this.close()
           Future.failed(e)
         // Use a direct context here to avoid closing the scheduler in a different thread
-      }(DirectExecutionContext(noTracingLogger))
+      }(directExecutionContext)
     FutureUtil.doNotAwait(queued, s"A task failed with an exception.\n$taskName")
   }
 }
