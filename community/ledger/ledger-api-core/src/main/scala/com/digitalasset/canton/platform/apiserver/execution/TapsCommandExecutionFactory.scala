@@ -133,7 +133,7 @@ private[execution] class TapsCommandExecutionFactory(
           .forProtocolVersion(protocolVersion)
           // During interpretation in Phase 1, we want to fail on all contract key hash mismatches,
           // independent of the protocol version.
-          .copy(errorOnContractKeyMismatch = true)
+          .copy(errorOnContractKeyHashMismatch = true)
 
         _ = logDebug(
           show"Using package preference set: $packagePreferenceSet, protocol version: $protocolVersion"

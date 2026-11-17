@@ -148,6 +148,8 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present reserved range "[2]" on message "InitializeSequencerFromGenesisStateRequest" is missing values: [2] were removed.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present reserved range "[2]" on message "InitializeSequencerFromGenesisStateV2Request" is missing values: [2] were removed.""",
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present reserved range "[2]" on message "GetSynchronizerParametersResponse" is missing values: [2] were removed.""",
+      // Added `include_onboarding_members` to `TrafficControlStateRequest`; older nodes simply ignore the new field
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "4" with name "include_onboarding_members" on message "TrafficControlStateRequest" was deleted.""",
     ),
     (3, 5) -> Seq(
       // Changed for 3.5.1-rc4
@@ -225,6 +227,8 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "6" with name "labels" on message "ComponentStatus" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present RPC "OnboardingState" on service "SequencerAdministrationService" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present RPC "InitializeSequencerFromOnboardingState" on service "SequencerInitializationService" was deleted.""",
+      // Added `include_onboarding_members` to `TrafficControlStateRequest`; older nodes simply ignore the new field
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "4" with name "include_onboarding_members" on message "TrafficControlStateRequest" was deleted.""",
     ),
     (3, 6) -> Seq(
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
@@ -255,6 +259,12 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "6" with name "labels" on message "ComponentStatus" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present RPC "OnboardingState" on service "SequencerAdministrationService" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present RPC "InitializeSequencerFromOnboardingState" on service "SequencerInitializationService" was deleted.""",
+      // Added `include_onboarding_members` to `TrafficControlStateRequest`; older nodes simply ignore the new field
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "4" with name "include_onboarding_members" on message "TrafficControlStateRequest" was deleted.""",
+    ),
+    (3, 7) -> Seq(
+      // Added `include_onboarding_members` to `TrafficControlStateRequest`; older nodes simply ignore the new field
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "4" with name "include_onboarding_members" on message "TrafficControlStateRequest" was deleted."""
     ),
   )
 

@@ -30,7 +30,6 @@ import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
-import java.time.Duration
 import java.util.UUID
 
 trait FinalizedResponseStoreTest {
@@ -75,7 +74,7 @@ trait FinalizedResponseStoreTest {
       participantId,
       salt = s(6638),
       None,
-      DeduplicationPeriod.DeduplicationDuration(Duration.ZERO),
+      DeduplicationPeriod.DeduplicationDuration.Zero,
       CantonTimestamp.MaxValue,
       None,
       hashOps,

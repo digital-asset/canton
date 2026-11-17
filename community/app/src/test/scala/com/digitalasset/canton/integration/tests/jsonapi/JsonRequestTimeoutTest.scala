@@ -58,10 +58,11 @@ class JsonRequestTimeoutTest
 
   private def invalidMessage(rawValue: String): String =
     s"Invalid $headerName header value '$rawValue': " +
-      "expected a positive integer number of milliseconds."
+      "expected a number of milliseconds (e.g. '5000') or a duration with a unit " +
+      "(e.g. '5s', '1500ms')."
 
   private def belowLowerBoundMessage(rawValue: String): String =
-    s"$headerName '$rawValue' ms is below the minimum of " +
+    s"$headerName '$rawValue' is below the minimum of " +
       s"${JsonApiConfig.defaultRequestTimeoutLowerBound.toMillis} ms."
 
   private def openEndedUpdatesBody(party: String): String =

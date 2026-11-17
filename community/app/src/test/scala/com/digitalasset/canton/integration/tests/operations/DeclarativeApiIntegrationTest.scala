@@ -390,7 +390,7 @@ final class DeclarativeApiIntegrationTest
         .replace(
           Seq(
             s"http://localhost:${httpPort.unwrap}/CantonExamples.dar",
-            "./community/participant/target/scala-2.13/classes/canton-builtin-admin-workflow-acs-replication-alpha.dar",
+            "./community/participant/src/main/resources/dar/canton-builtin-admin-workflow-acs-replication-alpha.dar",
           ).map(location => DeclarativeDarConfig(location = location))
         )
         .focus(_.parties)

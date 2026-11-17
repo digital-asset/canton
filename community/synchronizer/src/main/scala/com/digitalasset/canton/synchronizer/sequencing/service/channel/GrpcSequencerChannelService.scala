@@ -8,9 +8,11 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencer.api.v30
+import com.digitalasset.canton.synchronizer.sequencer.config.AlphaSequencerChannelConfig
 import com.digitalasset.canton.synchronizer.sequencing.authentication.grpc.IdentityContextHelper
 import com.digitalasset.canton.synchronizer.sequencing.service.AuthenticationCheck
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.synchronizer.sequencing.service.channel.SequencerChannelInternalError.PoolCapacityExhausted
+import com.digitalasset.canton.time.{Clock, PositiveFiniteDuration}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.LoggerUtil
@@ -62,13 +64,25 @@ private[synchronizer] final class GrpcSequencerChannelService(
             timeouts,
             loggerFactory,
           )
-          .leftMap(Status.UNAVAILABLE.withDescription(_).asException())
+          .leftMap { channelErr =>
+            val runtimeError = SequencerChannelInternalError.toGrpcError(channelErr)
+            new StatusException(runtimeError.getStatus, runtimeError.getTrailers)
+          }
       } yield requestObserver
     }
   }
 
-  override def ping(request: v30.PingRequest): Future[v30.PingResponse] =
-    Future.successful(v30.PingResponse())
+  override def ping(request: v30.PingRequest): Future[v30.PingResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    // Used to determine which sequencers support channels, and whether a connection
+    // can be re-established after a disconnect. Fails if the pool has no free connection slot.
+    if (channelPool.numOfAvailableSlots > 0) {
+      Future.successful(v30.PingResponse())
+    } else {
+      logger.debug("Rejecting ping: the sequencer channel pool has no free connection slot.")
+      Future.failed(SequencerChannelInternalError.toGrpcError(PoolCapacityExhausted))
+    }
+  }
 
   def disconnectMember(member: Member)(implicit traceContext: TraceContext): Unit =
     channelPool.closeChannels(Some(member))
@@ -123,11 +137,20 @@ object GrpcSequencerChannelService {
       clock: Clock,
       protocolVersion: ProtocolVersion,
       timeouts: ProcessingTimeout,
+      config: AlphaSequencerChannelConfig,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): GrpcSequencerChannelService =
     new GrpcSequencerChannelService(
       authenticationCheck,
-      new GrpcSequencerChannelPool(clock, protocolVersion, timeouts, loggerFactory),
+      new GrpcSequencerChannelPool(
+        clock,
+        protocolVersion,
+        timeouts,
+        config.maxActiveSequencerChannels,
+        PositiveFiniteDuration.fromConfig(config.sequencerChannelTtl),
+        PositiveFiniteDuration.fromConfig(config.maxMetadataWaitingTime),
+        loggerFactory,
+      ),
       timeouts,
       loggerFactory,
     )

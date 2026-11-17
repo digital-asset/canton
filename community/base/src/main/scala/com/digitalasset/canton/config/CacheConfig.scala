@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.config
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.util.BytesUnit
@@ -230,7 +230,7 @@ class FallbackExecutor(context: ExecutionContext, loggerFactory: NamedLoggerFact
     } catch {
       case _: RejectedExecutionException =>
         logger.info(s"Falling back to direct execution for $command")
-        DirectExecutionContext(logger).execute(command)
+        directExecutionContext.execute(command)
         logger.info(s"Execution complete for: $command")
     }
 }

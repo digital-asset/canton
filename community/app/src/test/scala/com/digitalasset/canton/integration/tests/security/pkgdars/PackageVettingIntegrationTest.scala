@@ -15,6 +15,7 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Integrity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.base.error.ErrorCode
+import com.digitalasset.canton.admin.participant.v30.UnvetDarRequest.UnvetScope.UNVET_SCOPE_ALL_DAR_PACKAGES
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
   CommandFailure,
@@ -24,6 +25,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.{CryptoPureApi, SigningKeyUsage}
 import com.digitalasset.canton.damltests.java.conflicttest.Many
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId
 import com.digitalasset.canton.examples.java as M
 import com.digitalasset.canton.integration.*
@@ -59,7 +61,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, SynchronizerAlias, config}
-import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, DarReader}
+import com.digitalasset.daml.lf.archive.{DamlLf, Dar, DarParser, DarReader}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import org.scalatest.Assertion
 import org.slf4j.event.Level
@@ -326,7 +328,7 @@ sealed trait PackageVettingIntegrationTest
         daId,
         sequencer1,
         mediator1,
-        withMediatorVerdict(Verdict.Approve(testedProtocolVersion)),
+        withMediatorVerdict(Verdict.Approve.create(testedProtocolVersion)),
       ) {
         trackingLedgerEvents(Seq(participant2), Seq.empty) {
           maliciousP2.submitCommand(cmd).futureValueUS
@@ -993,7 +995,7 @@ sealed trait PackageVettingIntegrationTest
     }
   }
 
-  private def tryReadDar(darPath: String) =
+  protected def tryReadDar(darPath: String): Dar[DamlLf.Archive] =
     DarParser
       .readArchiveFromFile(new java.io.File(darPath))
       .getOrElse(fail(s"cannot read DAR: $darPath"))
@@ -1180,7 +1182,58 @@ trait AdminApiVettingOperations {
 
 final class PackageVettingIntegrationTestInMemory_AdminApi
     extends PackageVettingIntegrationTest
-    with AdminApiVettingOperations
+    with AdminApiVettingOperations {
+
+  "DAR vetting" when {
+    "a DAR is unvetted" must {
+      def vetDar(implicit env: TestConsoleEnvironment): (String, Dar[DamlLf.Archive]) = {
+        import env.*
+
+        val mainPackageId = participant3.dars.upload(CantonTestsPath, vetAllPackages = false)
+        val archive = tryReadDar(CantonTestsPath)
+
+        participant3.dars.vetting.enable(mainPackageId, synchronizerId = daId)
+        eventually() {
+          unvettedPackages(archive.all) shouldBe empty
+        }
+        mainPackageId -> archive
+      }
+
+      "unvet only the main package of the DAR by default" in { implicit env =>
+        import env.*
+
+        val (mainPackageId, archive) = vetDar
+
+        participant3.dars.vetting.disable(mainPackageId, synchronizerId = daId)
+
+        eventually() {
+          unvettedPackages(archive.all) should contain theSameElementsAs Seq(archive.main.getHash)
+        }
+      }
+
+      "unvet the main package and all its dependencies when unvetScope is UNVET_SCOPE_ALL_DAR_PACKAGES" in {
+        implicit env =>
+          import env.*
+
+          val (mainPackageId, darArchive) = vetDar
+
+          participant3.dars.vetting.disable(
+            mainPackageId,
+            synchronizerId = daId,
+            unvetScope = UNVET_SCOPE_ALL_DAR_PACKAGES,
+          )
+
+          val allDarPackageIds = darArchive.all.map(_.getHash)
+          eventually() {
+            unvettedPackages(darArchive.all) should contain theSameElementsAs allDarPackageIds
+          }
+
+          // restore the vetting state, as the DAR dependencies are shared with other DARs
+          vetDar.discard
+      }
+    }
+  }
+}
 
 final class PackageVettingIntegrationTestInMemory_LedgerApi
     extends PackageVettingIntegrationTest

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
+import cats.syntax.either.*
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.{InvariantViolation, OtherError}
@@ -24,6 +25,8 @@ import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.empty
 import pprint.Tree
+
+import scala.annotation.unused
 
 /** Verdicts sent from the mediator to the participants inside the [[ConfirmationResultMessage]] */
 sealed trait Verdict
@@ -53,7 +56,7 @@ object Verdict
     )
   )
 
-  final case class Approve()(
+  final case class Approve private ()(
       override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type]
   ) extends Verdict {
 
@@ -71,9 +74,14 @@ object Verdict
 
     override protected val pretty: Pretty[Approve] = prettyOfString(_ => "Approve")
 
-    def apply(protocolVersion: ProtocolVersion): Approve = Approve()(
+    def create(protocolVersion: ProtocolVersion): Approve = Approve()(
       Verdict.protocolVersionRepresentativeFor(protocolVersion)
     )
+
+    private[messages] def fromProtoV30(
+        @unused approveP: empty.Empty,
+        rpv: RepresentativeProtocolVersion[Verdict.type],
+    ): ParsingResult[Approve] = Right(Approve()(rpv))
   }
 
   final case class MediatorReject private (
@@ -82,7 +90,6 @@ object Verdict
   )(
       override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type]
   ) extends Verdict {
-    require(reason.code != com.google.rpc.Code.OK_VALUE, "Rejection must not use status code OK")
 
     private[messages] override def toProtoV30: v30.Verdict =
       v30.Verdict(v30.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectV30))
@@ -105,13 +112,29 @@ object Verdict
       param("isMalformed", _.isMalformed),
     )
 
-    // TODO(#15628) Make it safe (intercept the exception and return an either)
-    def tryCreate(
+    /** Creates a mediator rejection, unless `status` has the code OK. */
+    def create(
         status: com.google.rpc.status.Status,
         isMalformed: Boolean,
         protocolVersion: ProtocolVersion,
-    ): MediatorReject =
-      MediatorReject(status, isMalformed)(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+    ): Either[String, MediatorReject] =
+      createInternal(status, isMalformed)(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+        .leftMap(_.message)
+
+    /** Creates the mediator rejection for a mediator error, whose status never has the code OK. */
+    def fromMediatorError(error: MediatorError, protocolVersion: ProtocolVersion): MediatorReject =
+      MediatorReject(error.rpcStatusWithoutLoggingContext(), error.isMalformed)(
+        Verdict.protocolVersionRepresentativeFor(protocolVersion)
+      )
+
+    private def createInternal(status: com.google.rpc.status.Status, isMalformed: Boolean)(
+        rpv: RepresentativeProtocolVersion[Verdict.type]
+    ): ParsingResult[MediatorReject] =
+      Either.cond(
+        status.code != com.google.rpc.Code.OK_VALUE,
+        MediatorReject(status, isMalformed)(rpv),
+        InvariantViolation(None, "Rejection must not use status code OK"),
+      )
 
     private[messages] def fromProtoV30(
         mediatorRejectP: v30.MediatorReject
@@ -120,7 +143,8 @@ object Verdict
       for {
         status <- ProtoConverter.required("rejection_reason", statusO)
         rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-      } yield MediatorReject(status, isMalformed)(rpv)
+        reject <- createInternal(status, isMalformed)(rpv)
+      } yield reject
     }
   }
 
@@ -129,7 +153,7 @@ object Verdict
     *   [[com.digitalasset.canton.protocol.messages.ConfirmationResponse]] to the rejection reason
     *   from the [[com.digitalasset.canton.protocol.messages.ConfirmationResponse]]
     */
-  final case class ParticipantReject(
+  final case class ParticipantReject private (
       reasons: NonEmpty[List[(Set[LfPartyId], ParticipantId, NonPositiveLocalVerdict)]]
   )(
       override val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict.type]
@@ -195,7 +219,7 @@ object Verdict
       )
     }
 
-    def apply(
+    def create(
         reasons: NonEmpty[List[(Set[LfPartyId], ParticipantId, NonPositiveLocalVerdict)]],
         protocolVersion: ProtocolVersion,
     ): ParticipantReject =
@@ -237,7 +261,7 @@ object Verdict
 
     protocolVersionRepresentativeFor(ProtoVersion(30)).flatMap { rpv =>
       someVerdictP match {
-        case V.Approve(empty.Empty(_)) => Right(Approve()(rpv))
+        case V.Approve(approveP) => Approve.fromProtoV30(approveP, rpv)
         case V.MediatorReject(mediatorRejectP) =>
           MediatorReject.fromProtoV30(mediatorRejectP)
         case V.ParticipantReject(participantRejectP) =>

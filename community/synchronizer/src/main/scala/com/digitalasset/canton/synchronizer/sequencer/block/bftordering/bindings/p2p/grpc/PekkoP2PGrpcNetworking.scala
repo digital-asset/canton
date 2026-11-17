@@ -23,6 +23,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Ji
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.abort
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.util.retry.Jitter
 import org.apache.pekko.actor.typed.scaladsl.{ActorContext, Behaviors}
 import org.apache.pekko.actor.typed.{ActorRef, Behavior, PostStop}
@@ -210,6 +211,14 @@ object PekkoP2PGrpcNetworking {
 
       val outstandingMessages = new AtomicInteger()
 
+      // Spawn may start the actor before createNetworkRef returns, but it starts parked. The actor
+      //  calls getNetworkRef only while processing Initialize/Send or in PostStop after processing
+      //  one of those messages. Both messages can reach it only through the ref, which is not
+      //  returned or published until after putIfAbsent below; an early PostStop of a parked actor
+      //  does not call getNetworkRef. SingleUseCell's atomic storage makes the value visible to
+      //  the actor thread, including when startConnection or a send follows publication immediately.
+      val networkRef = new SingleUseCell[P2PNetworkRef[BftOrderingMessage]]
+
       logger.debug(s"Spawning P2P gRPC connection-managing actor '$actorName'")
       val result =
         new PekkoP2PNetworkRef(
@@ -219,6 +228,10 @@ object PekkoP2PGrpcNetworking {
               actorName,
               outstandingMessages,
               metrics,
+              getNetworkRef = () =>
+                networkRef.getOrElse(
+                  abort(logger, s"Missing network ref for connection-managing actor $actorName")
+                ),
             ),
             actorName,
           ),
@@ -228,6 +241,7 @@ object PekkoP2PGrpcNetworking {
           timeouts,
           loggerFactory,
         )
+      networkRef.putIfAbsent(result).discard
       logger.debug(s"Spawned P2P gRPC connection-managing actor '$actorName'")
       result
     }
@@ -251,6 +265,7 @@ object PekkoP2PGrpcNetworking {
         actorName: String,
         outstandingMessages: AtomicInteger,
         metrics: BftOrderingMetrics,
+        getNetworkRef: () => P2PNetworkRef[BftOrderingMessage],
     )(implicit traceContext: TraceContext): Behavior[PekkoP2PGrpcConnectionManagerActorMessage] = {
 
       // Reschedules an Initialize or Send if the connection is not available yet
@@ -307,7 +322,7 @@ object PekkoP2PGrpcNetworking {
 
         implicit val traceContext: TraceContext = message.traceContext
 
-        connectionManager.getPeerSenderOrStartConnection(p2pAddress) match {
+        connectionManager.getPeerSenderOrStartConnection(p2pAddress, getNetworkRef()) match {
 
           case Some(peerSender) =>
             logger.debug(
@@ -397,6 +412,7 @@ object PekkoP2PGrpcNetworking {
           p2pAddress.id,
           clearNetworkRefAssociations = true,
           closeNetworkRefs = false, // Because we're already closing the actor
+          expectedNetworkRefO = Some(getNetworkRef()),
         )
         Behaviors.stopped
       }
@@ -578,7 +594,8 @@ object PekkoP2PGrpcNetworking {
                 logger.info(
                   s"Connection-managing actor $actorName is stopping, closing"
                 )
-                createCloseBehavior()
+                // PostStop performs ownership-checked cleanup exactly once.
+                Behaviors.stopped
               } else {
                 logger.info(
                   s"Connection-managing actor $actorName is stopping before initialization, " +

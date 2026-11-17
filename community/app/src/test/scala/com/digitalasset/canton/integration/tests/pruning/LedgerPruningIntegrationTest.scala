@@ -817,7 +817,7 @@ abstract class LedgerPruningIntegrationTest
                 "AcsCommitmentProcessorManager"
               ))
               logEntry.message should (
-                include("Ledger subscription PingService failed with an error") or
+                include regex "Ledger subscription (PingService|AcsReplicationAdminWorkflow) failed with an error" or
                   include("failed to start running digest processor")
               )
               ()

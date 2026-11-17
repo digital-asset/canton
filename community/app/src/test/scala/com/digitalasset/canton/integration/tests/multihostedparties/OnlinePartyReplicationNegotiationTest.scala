@@ -39,10 +39,16 @@ import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationAdminWorkflow
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
-import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
+import com.digitalasset.canton.participant.config.{
+  AlphaAcsReplicationConfig,
+  AlphaOnlinePartyReplicationConfig,
+}
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.CircuitBreakerConfig
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{BftSequencer, External}
-import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  AlphaSequencerChannelConfig,
+  SequencerNodeConfig,
+}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -87,8 +93,8 @@ sealed trait OnlinePartyReplicationNegotiationTest
     // Enable channels on all sequencer except sequencer3 to test
     // that a usable sequencer is chosen.
     config
-      .focus(_.parameters.unsafeSequencerChannelSupport)
-      .replace(sequencer != "sequencer3")
+      .focus(_.parameters.alphaSequencerChannelSupport)
+      .replace(Option.when(sequencer != "sequencer3")(AlphaSequencerChannelConfig()))
 
   /** Flake prevention: Disables sequencer circuit breakers to prevent spurious test failures. In
     * resource-constrained CI environments, temporary CPU/memory throttling can trip the circuit
@@ -132,7 +138,9 @@ sealed trait OnlinePartyReplicationNegotiationTest
       .addConfigTransforms(
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.alphaOnlinePartyReplicationSupport)
-            .replace(Some(AlphaOnlinePartyReplicationConfig(unsafeSequencerChannelSupport = true)))
+            .replace(Some(AlphaOnlinePartyReplicationConfig()))
+            .focus(_.parameters.alphaAcsReplicationSupport)
+            .replace(Some(AlphaAcsReplicationConfig()))
         ),
         ConfigTransforms.updateAllSequencerConfigs(selectivelyEnableSequencerChannels),
         // Flake prevention: strip circuit breakers to prevent flaky sync rejections on slow CI runners.
@@ -465,7 +473,6 @@ sealed trait OnlinePartyReplicationNegotiationTest
       val participantWithParty = participant1
       val participantWithParty2 = participant2
       val participantWithoutParty = participant3
-      val synchronizerId = participantWithParty.synchronizers.list_connected().head.synchronizerId
 
       import scala.concurrent.duration.*
 
@@ -494,7 +501,6 @@ sealed trait OnlinePartyReplicationNegotiationTest
           targetParticipant.adminParty.toProtoPrimitive,
           sequencerUids.asJava,
           timestamp.toInstant,
-          M.acsreplication.ParticipantPermission.CONFIRMATION,
           "online-party-replication",
         )
         targetParticipant.ledger_api.commands
@@ -645,17 +651,6 @@ sealed trait OnlinePartyReplicationNegotiationTest
             }
         }
 
-      def findLatestPtpTopologyTimestamp(participant: LocalParticipantReference): CantonTimestamp =
-        CantonTimestamp
-          .fromInstant(
-            participant.topology.party_to_participant_mappings
-              .list(synchronizerId, filterParty = aliceName)
-              .head
-              .context
-              .validFrom
-          )
-          .value
-
       testParsingError(
         "bad-party-id-format",
         "Invalid partyId .*Invalid unique identifier .* with missing namespace",
@@ -693,7 +688,8 @@ sealed trait OnlinePartyReplicationNegotiationTest
         "PartyToParticipant mapping for party .* doesn't exist for either source or target participant",
         sourceParticipant = participantWithoutParty,
         targetParticipant = participantWithParty,
-        timestamp = findLatestPtpTopologyTimestamp(participantWithParty),
+        // timestamp after which the party is known to the synchronizer:
+        timestamp = CantonTimestamp.MaxValue,
       )
 
       testAgreementError(

@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Hash
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
@@ -17,15 +18,22 @@ import com.digitalasset.canton.participant.admin.data.{
   FlagSet,
   PartyOnboardingFlagStatus,
 }
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow.AuthorizeClearanceError
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow.{
+  AuthorizeClearanceError,
+  FreezingToOnboardingStatus,
+  partyToParticipantTopologyHeadO,
+}
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer
 import com.digitalasset.canton.protocol.DynamicSynchronizerParametersHistory
 import com.digitalasset.canton.time.SynchronizerTimeTracker
-import com.digitalasset.canton.topology.TopologyManagerError.NoAppropriateSigningKeyInStore
+import com.digitalasset.canton.topology.TopologyManagerError.{
+  NoAppropriateSigningKeyInStore,
+  SerialMismatch,
+}
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
-import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TimeQuery, TopologyStore}
+import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TopologyStore}
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
@@ -43,6 +51,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.nowarn
@@ -56,6 +65,34 @@ object PartyReplicationTopologyWorkflow {
   object AuthorizeClearanceError {
     final case class PartyNotHosted(message: String) extends AuthorizeClearanceError
     final case class ProposeError(message: String) extends AuthorizeClearanceError
+  }
+
+  /** How far this participant's move from Freezing to Onboarding for a party has got. */
+  sealed trait FreezingToOnboardingStatus extends Product with Serializable
+  object FreezingToOnboardingStatus {
+
+    /** The participant is Freezing and has proposed the move at `serial`. */
+    final case class Proposed(serial: PositiveInt) extends FreezingToOnboardingStatus
+
+    /** The participant is no longer Freezing. */
+    sealed trait Ended extends FreezingToOnboardingStatus
+
+    /** The participant has moved on to Onboarding or Active. */
+    case object Moved extends Ended
+
+    /** The participant's entry has been removed (`state` is empty), or it is Nominated again after
+      * a removal.
+      */
+    final case class Aborted(state: Option[HostingState]) extends Ended
+
+    /** How the move has ended, given the participant's current hosting state, if it has an entry.
+      * Empty while the participant is Freezing.
+      */
+    def endedBy(state: Option[HostingState]): Option[Ended] = state match {
+      case Some(HostingState.Freezing) => None
+      case Some(HostingState.Onboarding | HostingState.Active) => Some(Moved)
+      case Some(HostingState.Nominated) | None => Some(Aborted(state))
+    }
   }
 
   /** Represents the connected components available once the synchronizer is fully active */
@@ -90,6 +127,29 @@ object PartyReplicationTopologyWorkflow {
       */
     def synchronizerContext: Option[SynchronizerTopologyContext]
   }
+
+  /** The party's current mapping, or its current proposal if `proposal` is set. Filters by the uid
+    * only: with a namespace filter, the store also returns the mappings of other parties of that
+    * namespace.
+    */
+  private[party] def partyToParticipantTopologyHeadO(
+      partyId: PartyId,
+      topologyStore: TopologyStore[SynchronizerStore],
+      proposal: Boolean = false,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[Option[StoredTopologyTransaction[Replace, PartyToParticipant]]] =
+    topologyStore
+      .findPositiveTransactions(
+        asOf = CantonTimestamp.MaxValue,
+        asOfInclusive = false,
+        isProposal = proposal,
+        types = Seq(TopologyMapping.Code.PartyToParticipant),
+        filterUid = Some(NonEmpty(Seq, partyId.uid)),
+        filterNamespace = None,
+      )
+      .map(_.collectOfMapping[PartyToParticipant].result.headOption)
 }
 
 /** The OnPR topology workflow manages the interaction with topology processing with respect to
@@ -591,10 +651,19 @@ class PartyReplicationTopologyWorkflow(
                   }
                   .leftMap { err =>
                     val exception = err.asGrpcError
-                    logger.warn(
-                      s"${requestIdLogPart}Error proposing party to participant topology change on $participantId for $partyId",
-                      exception,
-                    )
+                    err match {
+                      // Another change of the mapping, e.g. by a parallel replication, took the serial
+                      // first. A later attempt proposes the clearance at the new serial.
+                      case _: SerialMismatch.Failure =>
+                        logger.info(
+                          s"${requestIdLogPart}Another change of the mapping of $partyId took serial $serial first: ${exception.getMessage}"
+                        )
+                      case _ =>
+                        logger.warn(
+                          s"${requestIdLogPart}Error proposing party to participant topology change on $participantId for $partyId",
+                          exception,
+                        )
+                    }
                     AuthorizeClearanceError.ProposeError(
                       exception.getMessage
                     ): AuthorizeClearanceError
@@ -619,30 +688,91 @@ class PartyReplicationTopologyWorkflow(
     } yield partyOnboardingStatus
   }
 
-  private def partyToParticipantTopologyHeadO(
+  /** Moves this participant's entry for the party from Freezing to Onboarding, signed by this
+    * participant alone. Does not propose the move again at a serial it has already proposed it at.
+    *
+    * @param proposedAt
+    *   The serial at which this participant has last proposed the move, if it has.
+    * @return
+    *   [[PartyReplicationTopologyWorkflow.FreezingToOnboardingStatus.Proposed]] with the serial of
+    *   the proposal while the participant is Freezing, and how the move has ended otherwise.
+    */
+  private[party] def moveFreezingToOnboarding(
       partyId: PartyId,
-      topologyStore: TopologyStore[SynchronizerStore],
-      proposal: Boolean = false,
+      proposedAt: Option[PositiveInt],
+      topologyContext: PartyReplicationTopologyWorkflow.SynchronizerTopologyContext,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[StoredTopologyTransaction[Replace, PartyToParticipant]]] =
-    // TODO(#25766): add topology client endpoint
-    topologyStore
-      .inspect(
-        proposals = proposal,
-        timeQuery = TimeQuery.HeadState,
-        asOfExclusiveO = None,
-        op = Some(TopologyChangeOp.Replace),
-        types = Seq(TopologyMapping.Code.PartyToParticipant),
-        idFilter = Some(partyId.uid.identifier.str),
-        namespaceFilter = Some(partyId.uid.namespace.filterString),
+  ): EitherT[FutureUnlessShutdown, String, FreezingToOnboardingStatus] =
+    for {
+      headO <- EitherT.right[String](
+        partyToParticipantTopologyHeadO(partyId, topologyContext.topologyStore)
       )
-      .map(
-        _.collectOfMapping[PartyToParticipant]
-          .collectOfType[TopologyChangeOp.Replace]
-          .result
-          .headOption
+      headWithState = headO.flatMap(head =>
+        head.mapping.participants.find(_.participantId == participantId).map(head -> _.state)
       )
+      status <- headWithState match {
+        case Some((head, HostingState.Freezing)) =>
+          for {
+            serial <- EitherT.fromEither[FutureUnlessShutdown](
+              head.serial.increment.leftMap(_.message)
+            )
+            _ <-
+              if (proposedAt.contains(serial)) EitherTUtil.unitUS[String]
+              else proposeFreezingToOnboarding(head.mapping, serial, topologyContext)
+          } yield FreezingToOnboardingStatus.Proposed(serial): FreezingToOnboardingStatus
+        case Some((_, HostingState.Onboarding | HostingState.Active)) =>
+          EitherT.rightT[FutureUnlessShutdown, String](
+            FreezingToOnboardingStatus.Moved: FreezingToOnboardingStatus
+          )
+        case Some((_, state @ HostingState.Nominated)) =>
+          EitherT.rightT[FutureUnlessShutdown, String](
+            FreezingToOnboardingStatus.Aborted(Some(state)): FreezingToOnboardingStatus
+          )
+        case None =>
+          EitherT.rightT[FutureUnlessShutdown, String](
+            FreezingToOnboardingStatus.Aborted(None): FreezingToOnboardingStatus
+          )
+      }
+    } yield status
+
+  private def proposeFreezingToOnboarding(
+      mapping: PartyToParticipant,
+      serial: PositiveInt,
+      topologyContext: PartyReplicationTopologyWorkflow.SynchronizerTopologyContext,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val topologyManager = topologyContext.topologyManager
+    for {
+      onboarding <- EitherT.fromEither[FutureUnlessShutdown](
+        PartyToParticipant.create(
+          mapping.partyId,
+          mapping.threshold,
+          mapping.participants.map {
+            case HostingParticipant(`participantId`, permission, HostingState.Freezing) =>
+              HostingParticipant(participantId, permission, HostingState.Onboarding)
+            case otherParticipant => otherParticipant
+          },
+          mapping.partySigningKeysWithThreshold,
+        )
+      )
+      _ = logger.info(
+        s"Proposing to move party ${mapping.partyId} from Freezing to Onboarding at serial $serial"
+      )
+      _ <- topologyManager
+        .proposeAndAuthorize(
+          op = TopologyChangeOp.Replace,
+          mapping = onboarding,
+          serial = Some(serial),
+          signingKeys = Seq.empty,
+          namespacesToSignFor = Seq(participantId.namespace),
+          protocolVersion = topologyManager.managerVersion.serialization,
+          expectFullAuthorization = true,
+          forceChanges = ForceFlags.none,
+          waitToBecomeEffective = None,
+        )
+        .bimap(_.asGrpcError.getMessage, _ => ())
+    } yield ()
+  }
 
   private[party] def partyToParticipantTopologyHead(
       partyId: PartyId,

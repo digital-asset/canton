@@ -6,7 +6,8 @@ package com.digitalasset.canton.participant.protocol
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName}
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
@@ -20,18 +21,20 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   GenericTopologyEvent,
 }
 import com.digitalasset.canton.ledger.participant.state.{FloatingUpdate, SynchronizerUpdate, Update}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
-import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.logging.{SuppressionRule, TracedLogger}
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
+import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.{ParticipantHistograms, ParticipantMetrics}
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
+import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.store.memory.InMemoryPendingOperationStore
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.*
@@ -41,6 +44,7 @@ import com.digitalasset.canton.topology.processing.{
   TopologyTransactionTestFactory,
 }
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
+import com.digitalasset.canton.topology.store.db.DbTopologyStoreHelper
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.store.{
   TopologyStore,
@@ -52,39 +56,45 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
+  HasActorSystem,
   HasExecutionContext,
   LfPartyId,
   ProtocolVersionChecksAsyncWordSpec,
   SequencerCounter,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.mockito.ArgumentCaptor
 import org.scalatest.wordspec.AsyncWordSpec
 import org.slf4j.event.Level
 
+import java.util.concurrent.atomic.AtomicInteger
+import scala.concurrent.Promise
 import scala.jdk.CollectionConverters.*
 
-final class ParticipantTopologyTerminateProcessingTest
+sealed abstract class ParticipantTopologyTerminateProcessingTest
     extends AsyncWordSpec
     with BaseTest
     with FailOnShutdown
     with HasExecutionContext
+    with HasActorSystem
     with ProtocolVersionChecksAsyncWordSpec {
 
-  protected def mkStore: TopologyStore[TopologyStoreId.SynchronizerStore] =
-    new InMemoryTopologyStore(
-      TopologyStoreId.SynchronizerStore(psid2),
-      predecessor = None,
-      testedProtocolVersion,
-      loggerFactory,
-      timeouts,
-    )
+  protected def mkStore: TopologyStore[TopologyStoreId.SynchronizerStore]
 
-  private lazy val psid1 = DefaultTestIdentities.physicalSynchronizerId
-  private lazy val psid2 = psid1.incrementSerial.value
+  protected lazy val psid1 = DefaultTestIdentities.physicalSynchronizerId
+
+  // use a new psid for each test case to isolate DB tests
+  private val serialCounter = new AtomicInteger(psid1.serial.tryIncrement.value)
+  protected def newPsid = PhysicalSynchronizerId(
+    psid1.logical,
+    NonNegativeInt.tryCreate(serialCounter.incrementAndGet()),
+    psid1.protocolVersion,
+  )
   private def synchronizerPredecessor(upgradeTime: CantonTimestamp) =
     SynchronizerPredecessor(psid1, upgradeTime, isLateUpgrade = false)
 
@@ -92,6 +102,9 @@ final class ParticipantTopologyTerminateProcessingTest
       store: TopologyStore[TopologyStoreId.SynchronizerStore] = mkStore,
       initialRecordTime: CantonTimestamp = CantonTimestamp.MinValue,
       synchronizerPredecessor: Option[SynchronizerPredecessor] = None,
+      onboardingClearanceScheduler: OnboardingClearanceScheduler =
+        mock[OnboardingClearanceScheduler],
+      ledgerApiIndexer: LedgerApiIndexer = mock[LedgerApiIndexer],
   ): (
       ParticipantTopologyTerminateProcessing,
       TopologyStore[TopologyStoreId.SynchronizerStore],
@@ -128,6 +141,7 @@ final class ParticipantTopologyTerminateProcessingTest
 
     val proc = new ParticipantTopologyTerminateProcessing(
       recordOrderPublisher,
+      ledgerApiIndexer,
       store,
       initialRecordTime = initialRecordTime,
       DefaultTestIdentities.participant1,
@@ -136,7 +150,7 @@ final class ParticipantTopologyTerminateProcessingTest
       pendingLsuOperationsStore = mock[PendingLsuOperation.Store],
       synchronizerConnectionConfigStore = mock[SynchronizerConnectionConfigStore],
       pendingOnboardingClearanceStore = pendingOnboardingClearanceStoreMock,
-      onboardingClearanceScheduler = mock[OnboardingClearanceScheduler],
+      onboardingClearanceScheduler = onboardingClearanceScheduler,
       partyReplicationTriggersO = None,
       metrics,
       loggerFactory,
@@ -150,8 +164,45 @@ final class ParticipantTopologyTerminateProcessingTest
     parallelExecutionContext,
   )
 
+  private def mkFlagCloseable(): FlagCloseable = new FlagCloseable {
+    override protected def timeouts: ProcessingTimeout =
+      ParticipantTopologyTerminateProcessingTest.this.timeouts
+    override protected[this] def logger: TracedLogger =
+      ParticipantTopologyTerminateProcessingTest.this.logger
+  }
+
+  val dummyFlagCloseable: FlagCloseable = mkFlagCloseable()
+
   import DefaultTestIdentities.*
   import factory.*
+
+  private val trustCertEffective = CantonTimestamp.Epoch.plusSeconds(1000)
+  private val noTraceContext: CantonTimestamp => FutureUnlessShutdown[Option[TraceContext]] =
+    _ => FutureUnlessShutdown.pure(None)
+
+  // populates the store with `numParties` party onboardings followed by the trust certificate, so that
+  // the streamed onboarding recovery has `numParties + 1` topology updates to enqueue
+  private def populate(
+      store: TopologyStore[TopologyStoreId.SynchronizerStore],
+      numParties: Int,
+  ): FutureUnlessShutdown[Unit] =
+    for {
+      _ <- MonadUtil.sequentialTraverse_((1 to numParties).toList) { i =>
+        val eff = CantonTimestamp.Epoch.plusSeconds(i.toLong)
+        add(
+          store,
+          eff.minusSeconds(1),
+          eff,
+          List(partyParticipant1(PartyId.tryCreate(s"p$i", namespace))),
+        )
+      }
+      _ <- add(
+        store,
+        trustCertEffective.minusSeconds(1),
+        trustCertEffective,
+        List(trustCertificate),
+      )
+    } yield ()
 
   private lazy val party1participant1 = mkAdd(
     PartyToParticipant.tryCreate(
@@ -686,6 +737,7 @@ final class ParticipantTopologyTerminateProcessingTest
           topologyEventPublishedOnInitialRecordTime = true,
           traceContextLookup,
           PositiveInt.two,
+          dummyFlagCloseable,
         )
         _ = {
           verify(rop, times(3)).scheduleFloatingEventPublication(
@@ -709,6 +761,7 @@ final class ParticipantTopologyTerminateProcessingTest
           topologyEventPublishedOnInitialRecordTime = false,
           traceContextLookup,
           PositiveInt.two,
+          dummyFlagCloseable,
         )
       } yield {
         verify(rop, times(6)).scheduleFloatingEventPublication(
@@ -724,6 +777,367 @@ final class ParticipantTopologyTerminateProcessingTest
         ).toSet shouldBe Set(
           (Set(parties(2).toLf), cts5, traceContextMap(cts3))
         )
+      }
+    }
+
+    "resume streamed onboarding recovery after a crash without losing or repeating events" in {
+      val effectiveTimes = (1 to 5).map(i => CantonTimestamp.Epoch.plusSeconds(i.toLong))
+      val parties = (1 to 5).map(i => PartyId.tryCreate(s"p$i", namespace))
+      val trustCertEffective = CantonTimestamp.Epoch.plusSeconds(10)
+      val postOnboardingParty = PartyId.tryCreate("post-stc", namespace)
+
+      val store = mkStore
+      val noTraceContext: CantonTimestamp => FutureUnlessShutdown[Option[TraceContext]] =
+        _ => FutureUnlessShutdown.pure(None)
+
+      // runs recovery for initial topology processing (like after a restart) with the given persisted initial record time and
+      // returns the updates enqueued into the ledger api indexer by that run
+      def recoverFrom(
+          initialRecordTime: CantonTimestamp,
+          topologyEventPublishedOnInitialRecordTime: Boolean = false,
+      ): FutureUnlessShutdown[
+        (Seq[(CantonTimestamp, Set[LfPartyId])], Seq[(CantonTimestamp, Set[LfPartyId])])
+      ] = {
+        val enqueued = new java.util.concurrent.ConcurrentLinkedQueue[Update]()
+        val indexer = mock[LedgerApiIndexer]
+        when(indexer.enqueue).thenReturn { (update: Update) =>
+          enqueued.add(update)
+          FutureUnlessShutdown.unit
+        }
+        val (proc, _, _, rop, _) = mk(store, initialRecordTime, ledgerApiIndexer = indexer)
+        // capture the event by the protocol processing crash recovery
+        val timestampCaptor: ArgumentCaptor[CantonTimestamp] =
+          ArgumentCaptor.forClass(classOf[CantonTimestamp])
+        val eventCaptor: ArgumentCaptor[CantonTimestamp => Option[FloatingUpdate]] =
+          ArgumentCaptor.forClass(classOf[CantonTimestamp => Option[FloatingUpdate]])
+        when(
+          rop.scheduleFloatingEventPublication(
+            timestampCaptor.capture(),
+            eventCaptor.capture(),
+          )(anyTraceContext)
+        )
+          .thenReturn(Outcome(Right(())))
+
+        proc
+          .scheduleMissingTopologyEventsAtInitialization(
+            topologyEventPublishedOnInitialRecordTime = topologyEventPublishedOnInitialRecordTime,
+            noTraceContext,
+            PositiveInt.two,
+            dummyFlagCloseable,
+          )
+          .map { _ =>
+            // extract the scheduled event
+            val scheduled = eventCaptor.getValue.apply(timestampCaptor.getValue).toList
+            (summarize(enqueued.asScala.toList), summarize(scheduled))
+          }
+      }
+
+      def summarize(updates: Seq[Update]): Seq[(CantonTimestamp, Set[LfPartyId])] =
+        updates.collect { case u: TopologyTransactionEffective =>
+          u.recordTime -> u.events.collect { case ptp: PartyToParticipantAuthorization =>
+            ptp.party
+          }
+        }
+
+      for {
+        _ <- MonadUtil.sequentialTraverse_(effectiveTimes.zip(parties)) { case (eff, party) =>
+          add(store, eff.minusSeconds(1), eff, List(partyParticipant1(party)))
+        }
+        _ <- add(
+          store,
+          trustCertEffective.minusSeconds(1),
+          trustCertEffective,
+          List(trustCertificate),
+        )
+        // add another party with an effective time after the trust certificate
+        _ <- add(
+          store,
+          trustCertEffective.minusMillis(500),
+          trustCertEffective.plusMillis(500),
+          List(partyParticipant1(postOnboardingParty)),
+        )
+        // first run: nothing persisted yet
+        (full, fullScheduled) <- recoverFrom(CantonTimestamp.MinValue)
+        // crash after the first two updates were persisted: the restart starts from the persisted record time
+        (resumed, resumedScheduled) <- recoverFrom(effectiveTimes(1))
+        // recover from a timestamp that falls between two effective times
+        (resumedInBetween, resumedScheduledInBetween) <- recoverFrom(
+          effectiveTimes(1).immediateSuccessor
+        )
+        // crash after everything was persisted, but before the recovery completed
+        (afterSTC, afterScheduled) <- recoverFrom(trustCertEffective)
+        (afterSTC, afterScheduled) <- recoverFrom(trustCertEffective)
+
+      } yield {
+        val allPartiesInInitialTopologyState = effectiveTimes.zip(
+          parties.map(p => Set(p.toLf))
+        ) :+ (trustCertEffective -> Set(trustCertificate.mapping.participantId.adminParty.toLf))
+        val scheduledParty =
+          Seq(trustCertEffective.plusMillis(500) -> Set(postOnboardingParty.toLf))
+
+        full shouldBe allPartiesInInitialTopologyState
+        fullScheduled shouldBe scheduledParty
+
+        resumed shouldBe allPartiesInInitialTopologyState.drop(2)
+        resumedScheduled shouldBe scheduledParty
+
+        resumedInBetween shouldBe resumed
+        resumedScheduledInBetween shouldBe resumedScheduled
+
+        // persisted prefix and resumed suffix together are exactly the full stream
+        (full.take(2) ++ resumed) shouldBe full
+
+        afterSTC shouldBe empty
+        afterScheduled shouldBe scheduledParty
+      }
+    }
+
+    // Recovery with an initial record time after the trust certificate's effective time: the indexer
+    // already holds the whole onboarding state, so the streamed onboarding recovery is skipped. The
+    // protocol processing recovery still has to schedule the events of transactions that are already in
+    // the store (from the onboarding snapshot or from processing) but only become effective after the
+    // initial record time.
+    //
+    //  sequenced:  2   9   11  12  14  16  18
+    //  effective:  4   10  13  15  17  19  21
+    //              pre STC A   B   C   D   E
+    // pre and STC are always skipped
+    case class RecoveryAfterOnboarding(
+        enqueued: Seq[Update],
+        scheduledEffectiveTimes: Seq[CantonTimestamp],
+        scheduledParties: Seq[Set[LfPartyId]],
+        immediateParties: Seq[Set[LfPartyId]],
+    )
+
+    def party(name: String) = PartyId.tryCreate(name, namespace)
+    def recoverAfterOnboarding(
+        initialRecordTime: CantonTimestamp,
+        topologyEventPublishedOnInitialRecordTime: Boolean,
+    ): FutureUnlessShutdown[RecoveryAfterOnboarding] = {
+      def at(sec: Long) = CantonTimestamp.Epoch.plusSeconds(sec)
+      def partiesOf(updates: Seq[Update]): Seq[Set[LfPartyId]] =
+        updates.collect { case u: TopologyTransactionEffective =>
+          u.events.collect { case ptp: PartyToParticipantAuthorization => ptp.party }
+        }
+
+      val store = mkStore
+      val enqueued = new java.util.concurrent.ConcurrentLinkedQueue[Update]()
+      val indexer = mock[LedgerApiIndexer]
+      when(indexer.enqueue).thenReturn { (update: Update) =>
+        enqueued.add(update)
+        FutureUnlessShutdown.unit
+      }
+      val (proc, _, _, rop, _) = mk(store, initialRecordTime, ledgerApiIndexer = indexer)
+
+      val timestampCaptor: ArgumentCaptor[CantonTimestamp] =
+        ArgumentCaptor.forClass(classOf[CantonTimestamp])
+      val eventCaptor: ArgumentCaptor[CantonTimestamp => Option[FloatingUpdate]] =
+        ArgumentCaptor.forClass(classOf[CantonTimestamp => Option[FloatingUpdate]])
+      // the record time is already at the initial record time: scheduling at it is rejected
+      when(
+        rop.scheduleFloatingEventPublication(timestampCaptor.capture(), eventCaptor.capture())(
+          anyTraceContext
+        )
+      ).thenAnswer { (timestamp: CantonTimestamp, _: CantonTimestamp => Option[Update]) =>
+        Outcome(if (timestamp == initialRecordTime) Left(initialRecordTime) else Right(()))
+      }
+      val immediateCaptor: ArgumentCaptor[CantonTimestamp => Option[FloatingUpdate]] =
+        ArgumentCaptor.forClass(classOf[CantonTimestamp => Option[FloatingUpdate]])
+      when(
+        rop.scheduleFloatingEventPublicationImmediately(immediateCaptor.capture())(anyTraceContext)
+      )
+        .thenReturn(Outcome(initialRecordTime))
+
+      for {
+        _ <- add(store, at(1), at(3), List(partyParticipant1(party("pre"))))
+        _ <- add(store, at(9), at(10), List(trustCertificate))
+        _ <- add(store, at(11), at(13), List(partyParticipant1(party("a"))))
+        _ <- add(store, at(12), at(15), List(partyParticipant1(party("b"))))
+        _ <- add(store, at(14), at(17), List(partyParticipant1(party("c"))))
+        _ <- add(store, at(16), at(19), List(partyParticipant1(party("d"))))
+        _ <- add(store, at(18), at(21), List(partyParticipant1(party("e"))))
+        _ <- proc.scheduleMissingTopologyEventsAtInitialization(
+          topologyEventPublishedOnInitialRecordTime = topologyEventPublishedOnInitialRecordTime,
+          _ => FutureUnlessShutdown.pure(Some(traceContext)),
+          PositiveInt.two,
+          dummyFlagCloseable,
+        )
+      } yield {
+        val scheduledEffectiveTimes = timestampCaptor.getAllValues.asScala.toList
+        val scheduledUpdates =
+          scheduledEffectiveTimes.zip(eventCaptor.getAllValues.asScala).flatMap {
+            case (t, factory) => factory(t)
+          }
+        RecoveryAfterOnboarding(
+          enqueued = enqueued.asScala.toList,
+          scheduledEffectiveTimes = scheduledEffectiveTimes,
+          scheduledParties = partiesOf(scheduledUpdates).map(_.map(identity)),
+          immediateParties = partiesOf(
+            immediateCaptor.getAllValues.asScala.toList.flatMap(_(initialRecordTime))
+          ),
+        )
+      }
+    }
+
+    "recovery after the trust certificate from a record time between effective times" in {
+      val c = party("c").toLf
+      val d = party("d").toLf
+      // 16 is between the effective times 15 (b) and 17 (c)
+      recoverAfterOnboarding(
+        CantonTimestamp.Epoch.plusSeconds(16),
+        topologyEventPublishedOnInitialRecordTime = false,
+      ).map { result =>
+        // nothing is streamed: the onboarding recovery is skipped
+        result.enqueued shouldBe empty
+        // c and d are sequenced before and effective after the initial record time, e is reprocessed
+        result.scheduledEffectiveTimes should contain theSameElementsAs Seq(
+          CantonTimestamp.Epoch.plusSeconds(17),
+          CantonTimestamp.Epoch.plusSeconds(19),
+        )
+        result.scheduledParties should contain theSameElementsAs Seq(Set(c), Set(d))
+        result.immediateParties shouldBe empty
+      }
+    }
+
+    "recovery after the trust certificate from an effective time, topology event already published" in {
+      val c = party("c").toLf
+      val d = party("d").toLf
+      recoverAfterOnboarding(
+        CantonTimestamp.Epoch.plusSeconds(17), // effective time of c
+        topologyEventPublishedOnInitialRecordTime = true,
+      ).map { result =>
+        result.enqueued shouldBe empty
+        result.scheduledEffectiveTimes should contain theSameElementsAs Seq(
+          CantonTimestamp.Epoch.plusSeconds(17),
+          CantonTimestamp.Epoch.plusSeconds(19),
+        )
+        result.scheduledParties should contain theSameElementsAs Seq(Set(c), Set(d))
+        // c is omitted: its event was already published at the initial record time
+        result.immediateParties shouldBe empty
+        // c is omitted: its event was already published at the initial record time
+        result.immediateParties shouldBe empty
+      }
+    }
+
+    "recovery after the trust certificate from an effective time, topology event not yet published" in {
+      val c = party("c").toLf
+      val d = party("d").toLf
+      recoverAfterOnboarding(
+        CantonTimestamp.Epoch.plusSeconds(17), // effective time of c
+        topologyEventPublishedOnInitialRecordTime = false,
+      ).map { result =>
+        result.enqueued shouldBe empty
+        result.scheduledEffectiveTimes should contain theSameElementsAs Seq(
+          CantonTimestamp.Epoch.plusSeconds(17),
+          CantonTimestamp.Epoch.plusSeconds(19),
+        )
+        result.scheduledParties should contain theSameElementsAs Seq(Set(c), Set(d))
+        // c is published immediately at the initial record time
+        result.immediateParties shouldBe Seq(Set(c))
+      }
+    }
+
+    "onboarding recovery: stop streaming and report a shutdown when the flagCloseable closes mid-stream" in {
+      val numParties = 40
+      val store = mkStore
+      val flagCloseable = mkFlagCloseable()
+
+      val enqueuedCount = new AtomicInteger(0)
+      val firstEnqueueStarted = Promise[Unit]()
+      val releaseEnqueue = Promise[Unit]()
+      val indexer = mock[LedgerApiIndexer]
+      when(indexer.enqueue).thenReturn { (_: Update) =>
+        // block the very first enqueue, so that the stream is guaranteed to be in the middle of processing
+        if (enqueuedCount.getAndIncrement() == 0) {
+          firstEnqueueStarted.success(())
+          FutureUnlessShutdown.outcomeF(releaseEnqueue.future)
+        } else FutureUnlessShutdown.unit
+      }
+      val (proc, _, _, rop, _) = mk(store, ledgerApiIndexer = indexer)
+
+      for {
+        _ <- populate(store, numParties)
+        result = proc
+          .scheduleMissingTopologyEventsAtInitialization(
+            topologyEventPublishedOnInitialRecordTime = false,
+            noTraceContext,
+            PositiveInt.two,
+            flagCloseable,
+          )
+          .unwrap
+        _ <- FutureUnlessShutdown.outcomeF(firstEnqueueStarted.future)
+        // closing runs the registered kill switch; it must not wait for the blocked enqueue
+        _ = flagCloseable.close()
+        _ = releaseEnqueue.success(())
+        outcome <- FutureUnlessShutdown.outcomeF(result)
+      } yield {
+        outcome shouldBe AbortedDueToShutdown
+        // the kill switch stops reading from the store, so only what was already buffered in the stream is enqueued
+        enqueuedCount.get() should (be >= 1 and be < numParties + 1)
+        // the protocol processing recovery must not run after the onboarding recovery was aborted
+        verify(rop, times(0)).scheduleFloatingEventPublication(
+          any[CantonTimestamp],
+          any[CantonTimestamp => Option[FloatingUpdate]],
+        )(any[TraceContext])
+        succeed
+      }
+    }
+
+    "onboarding recovery: report a shutdown if the flagCloseable is already closed before the recovery starts" in {
+      val store = mkStore
+      val flagCloseable = mkFlagCloseable()
+      val indexer = mock[LedgerApiIndexer]
+      when(indexer.enqueue).thenReturn((_: Update) => FutureUnlessShutdown.unit)
+      val (proc, _, _, rop, _) = mk(store, ledgerApiIndexer = indexer)
+
+      for {
+        _ <- populate(store, 5)
+        _ = flagCloseable.close()
+        outcome <- FutureUnlessShutdown.outcomeF(
+          proc
+            .scheduleMissingTopologyEventsAtInitialization(
+              topologyEventPublishedOnInitialRecordTime = false,
+              noTraceContext,
+              PositiveInt.two,
+              flagCloseable,
+            )
+            .unwrap
+        )
+      } yield {
+        outcome shouldBe AbortedDueToShutdown
+        verify(rop, times(0)).scheduleFloatingEventPublication(
+          any[CantonTimestamp],
+          any[CantonTimestamp => Option[FloatingUpdate]],
+        )(any[TraceContext])
+        succeed
+      }
+    }
+
+    "onboarding recovery: complete normally if the flagCloseable only closes after the recovery finished" in {
+      val numParties = 5
+      val store = mkStore
+      val flagCloseable = mkFlagCloseable()
+      val enqueuedCount = new AtomicInteger(0)
+      val indexer = mock[LedgerApiIndexer]
+      when(indexer.enqueue).thenReturn { (_: Update) =>
+        enqueuedCount.incrementAndGet()
+        FutureUnlessShutdown.unit
+      }
+      val (proc, _, _, _, _) = mk(store, ledgerApiIndexer = indexer)
+
+      for {
+        _ <- populate(store, numParties)
+        _ <- proc.scheduleMissingTopologyEventsAtInitialization(
+          topologyEventPublishedOnInitialRecordTime = false,
+          noTraceContext,
+          PositiveInt.two,
+          flagCloseable,
+        )
+      } yield {
+        // the close registration of the finished recovery must be gone, so that closing is harmless
+        flagCloseable.close()
+        // every party and the trust certificate resulted in an update
+        enqueuedCount.get() shouldBe numParties + 1
       }
     }
 
@@ -746,6 +1160,27 @@ final class ParticipantTopologyTerminateProcessingTest
           any[NonEmptyString],
         )(any[TraceContext])
 
+        succeed
+      }
+    }
+
+    "request the onboarding flag clearance at the effective time of the onboarding" in {
+      val scheduler = mock[OnboardingClearanceScheduler]
+      val (proc, store, _, _, pendingOnboardingStore) = mk(onboardingClearanceScheduler = scheduler)
+      val (cts0, _) = timestampWithCounter(0)
+      val (cts1, sc1) = timestampWithCounter(1)
+      // A pending clearance with another effective time than the onboarding's
+      val pendingClearance = OnboardingClearanceOperation(Some(EffectiveTime(cts0)))(
+        OnboardingClearanceOperation.protocolVersionRepresentativeFor(testedProtocolVersion)
+      ).toPendingOperation(store.storeId.psid.logical, party1)
+
+      for {
+        _ <- valueOrFail(pendingOnboardingStore.insert(pendingClearance))("insert")
+        _ <- add(store, cts1, List(party1participant1_ob))
+        _ <- proc.terminate(sc1, SequencedTime(cts1), EffectiveTime(cts1))
+      } yield {
+        verify(scheduler, times(1))
+          .requestClearanceInBackground(eqTo(party1), eqTo(EffectiveTime(cts1)))(any[TraceContext])
         succeed
       }
     }
@@ -880,8 +1315,8 @@ final class ParticipantTopologyTerminateProcessingTest
       val (cts1, sc1) = timestampWithCounter(1)
 
       val mockStore = mock[TopologyStore[SynchronizerStore]]
-      val mappingCodeCaptor: ArgumentCaptor[Option[Seq[TopologyMapping.Code]]] =
-        ArgumentCaptor.forClass(classOf[Option[Seq[TopologyMapping.Code]]])
+      val mappingCodeCaptor: ArgumentCaptor[Option[NonEmpty[Seq[TopologyMapping.Code]]]] =
+        ArgumentCaptor.forClass(classOf[Option[NonEmpty[Seq[TopologyMapping.Code]]]])
       when(
         mockStore.findEffectiveStateChanges(
           any[CantonTimestamp],
@@ -898,7 +1333,8 @@ final class ParticipantTopologyTerminateProcessingTest
       } yield {
         mappingCodeCaptor
           .getValue()
-          .value should contain theSameElementsAs ParticipantTopologyTerminateProcessing
+          .value
+          .forgetNE should contain theSameElementsAs ParticipantTopologyTerminateProcessing
           .relevantMappingsForEffectiveStateChanges(testedProtocolVersion)
       }
     }
@@ -937,6 +1373,35 @@ final class ParticipantTopologyTerminateProcessingTest
         }
       }
     }
-
   }
 }
+
+final class ParticipantTopologyTerminateProcessingTestInMemory
+    extends ParticipantTopologyTerminateProcessingTest {
+  override protected def mkStore: TopologyStore[TopologyStoreId.SynchronizerStore] =
+    new InMemoryTopologyStore(
+      TopologyStoreId.SynchronizerStore(newPsid),
+      predecessor = None,
+      testedProtocolVersion,
+      loggerFactory,
+      timeouts,
+    )
+}
+
+sealed abstract class DbParticipantTopologyTerminateProcessingTest
+    extends ParticipantTopologyTerminateProcessingTest
+    with DbTest
+    with DbTopologyStoreHelper {
+  override protected def mkStore: TopologyStore[SynchronizerStore] = {
+    val psid = newPsid
+    mkStore(psid, psid.toString)
+  }
+}
+
+final class ParticipantTopologyTerminateProcessingTestPostgres
+    extends DbParticipantTopologyTerminateProcessingTest
+    with PostgresTest
+
+final class ParticipantTopologyTerminateProcessingTestH2
+    extends DbParticipantTopologyTerminateProcessingTest
+    with H2Test

@@ -20,12 +20,12 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.SuppressionRule
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor.*
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor.*
 import com.digitalasset.canton.participant.admin.party.{
-  PartyReplicationTestInterceptor,
+  AcsReplicationTestInterceptor,
   PartyReplicator,
 }
-import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
+import com.digitalasset.canton.participant.party.AcsReplicationTestInterceptorImpl
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ExternalParty, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -70,8 +70,8 @@ class OnlinePartyReplicationFileBasedResilienceIntegrationTest
   private val interceptorLogicRef = new AtomicReference[Long => ProceedOrWait](_ => Proceed)
 
   // Dynamically delegates to the current logic in the reference
-  private val dynamicInterceptor: PartyReplicationTestInterceptor =
-    PartyReplicationTestInterceptorImpl.targetParticipantEvaluates { progress =>
+  private val dynamicInterceptor: AcsReplicationTestInterceptor =
+    AcsReplicationTestInterceptorImpl.targetParticipantEvaluates { progress =>
       interceptorLogicRef.get()(progress.processedContractCount.unwrap)
     }
 

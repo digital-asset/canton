@@ -145,6 +145,14 @@ trait CryptoPublicStore extends AutoCloseable { this: NamedLogging =>
 
   private[crypto] def deleteKey(keyId: Fingerprint)(implicit
       traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    deleteStoredKey(keyId).map { _ =>
+      signingKeyMap.remove(keyId).discard
+      encryptionKeyMap.remove(keyId).discard
+    }
+
+  protected def deleteStoredKey(keyId: Fingerprint)(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
   private[crypto] def replaceSigningPublicKeys(newKeys: Seq[SigningPublicKey])(implicit

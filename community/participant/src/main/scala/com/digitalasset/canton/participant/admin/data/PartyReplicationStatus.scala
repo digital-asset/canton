@@ -7,7 +7,7 @@ import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyReplicationStatus as LapiPartyReplicationStatus
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.admin.participant.v30
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
@@ -27,6 +27,7 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplica
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
+import io.scalaland.chimney.dsl.*
 
 import scala.annotation.unused
 
@@ -115,6 +116,30 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
       )
   }
 
+  def fromAcsReplicationStatus(
+      acsReplicationStatus: InternalAcsReplicationStatus
+  ): PartyReplicationStatus = {
+    import com.digitalasset.canton.participant.admin.data.AcsReplicationStatus as ApiAcsReplicationStatus
+    PartyReplicationStatus(
+      ReplicationParameters.fromAcsReplicationStatus(acsReplicationStatus),
+      authorizationO = acsReplicationStatus.partyToParticipantTopologyTransaction
+        .map(
+          InternalStatus.PartyReplicationAuthorization.fromAcsPartyToParticipantTopologyTransaction
+        )
+        .map(PartyReplicationAuthorization.fromInternal),
+      replicationO = acsReplicationStatus.replicationO.map(
+        AcsReplicationProgress.fromInternal
+      ),
+      acsReplicationO = Some(ApiAcsReplicationStatus.fromInternal(acsReplicationStatus)),
+      indexingO = None,
+      hasCompleted = acsReplicationStatus.hasCompleted,
+      replicationMode = ReplicationMode.SequencerChannel,
+      errorO = acsReplicationStatus.errorO
+        .map(InternalStatus.PartyReplicationError.fromAcsReplicationError)
+        .map(PartyReplicationError.fromInternal),
+    )
+  }
+
   def fromProtoV30(proto: v30.PartyReplicationStatus): ParsingResult[PartyReplicationStatus] =
     for {
       paramsP <- ProtoConverter.required("parameters", proto.parameters)
@@ -143,7 +168,6 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
       synchronizerId: SynchronizerId,
       sourceParticipantId: ParticipantId,
       targetParticipantId: ParticipantId,
-      serial: PositiveInt,
   ) extends PrettyPrintingFromCompanion {
 
     def toProtoV30: v30.PartyReplicationStatus.ReplicationParameters =
@@ -153,7 +177,6 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
         synchronizerId.uid.toProtoPrimitive,
         sourceParticipantId.uid.toProtoPrimitive,
         targetParticipantId.uid.toProtoPrimitive,
-        serial.unwrap,
       )
 
     override def prettyCompanion: PrettyPrintingCompanion[ReplicationParameters] =
@@ -168,7 +191,7 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
             synchronizerId,
             sourceParticipantId,
             targetParticipantId,
-            serial,
+            _,
             _,
           ) =>
         ReplicationParameters(
@@ -177,9 +200,18 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
           synchronizerId,
           sourceParticipantId,
           targetParticipantId,
-          serial,
         )
     }
+
+    def fromAcsReplicationStatus(
+        acsReplicationStatus: InternalAcsReplicationStatus
+    ): ReplicationParameters = acsReplicationStatus.params
+      .into[ReplicationParameters]
+      .withFieldConst(
+        _.requestId,
+        acsReplicationStatus.params.requestId.toHexString,
+      )
+      .transform
 
     def fromProtoV30(
         proto: v30.PartyReplicationStatus.ReplicationParameters
@@ -201,17 +233,12 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
           "target_participant_uid",
         )
         .map(ParticipantId(_))
-      topologySerial <- ProtoConverter.parsePositiveInt(
-        "topology_serial",
-        proto.topologySerial,
-      )
     } yield ReplicationParameters(
       proto.requestId,
       partyId,
       synchronizerId,
       sourceParticipantId,
       targetParticipantId,
-      topologySerial,
     )
 
     override protected val pretty: Pretty[ReplicationParameters] = {
@@ -222,7 +249,6 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
         param("synchronizer", _.synchronizerId),
         param("source participant", _.sourceParticipantId),
         param("target participant", _.targetParticipantId),
-        param("serial", _.serial),
       )
     }
   }

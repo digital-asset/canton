@@ -4,7 +4,7 @@
 package com.digitalasset.canton.pekkostreams
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import org.apache.pekko.actor.ActorSystem
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -30,11 +30,11 @@ trait FutureTimeouts { self: AsyncWordSpec & BaseTest =>
       runnable,
     )(system.dispatcher)
 
-    f.onComplete((_: Try[Any]) => cancellable.cancel())(DirectExecutionContext(noTracingLogger))
+    f.onComplete((_: Try[Any]) => cancellable.cancel())(directExecutionContext)
 
     recoverToSucceededIf[TimeoutException](
       Future.firstCompletedOf[Any](List[Future[Any]](f, promise.future))(
-        DirectExecutionContext(noTracingLogger)
+        directExecutionContext
       )
     )
   }

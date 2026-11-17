@@ -160,7 +160,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
 
   protected val name: String
 
-  private[canton] lazy val userId: String = token
+  private[canton] lazy val userId: String = ledgerApiToken
     .flatMap(encodedToken => JwtDecoder.decode(Jwt(encodedToken)).toOption)
     .flatMap(decodedToken => AuthServiceJWTCodec.readFromString(decodedToken.payload).toOption)
     .map {

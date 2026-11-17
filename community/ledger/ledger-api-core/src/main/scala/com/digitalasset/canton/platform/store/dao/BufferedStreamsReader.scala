@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
@@ -49,8 +49,6 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
-
-  private val directEc = DirectExecutionContext(noTracingLogger)
 
   private val bufferReaderMetrics = metrics.services.index.BufferedReader(streamName)
 
@@ -167,7 +165,7 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
           Timed.future(
             bufferReaderMetrics.conversion,
             Future.delegate {
-              toApiResponse(payload).map(offset -> _)(directEc)
+              toApiResponse(payload).map(offset -> _)(directExecutionContext)
             },
           )
         }

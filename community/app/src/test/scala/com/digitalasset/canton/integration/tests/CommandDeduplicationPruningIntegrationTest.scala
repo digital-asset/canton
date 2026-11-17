@@ -119,7 +119,8 @@ class CommandDeduplicationPruningIntegrationTest
 
       def submit(
           commandId: String,
-          dedupPeriod: DeduplicationPeriod = DeduplicationDuration(java.time.Duration.ofMinutes(1)),
+          dedupPeriod: DeduplicationPeriod =
+            DeduplicationDuration.create(java.time.Duration.ofMinutes(1)).value,
           submissionId: String = "",
       ): Long =
         participant1.ledger_api.javaapi.commands
@@ -185,7 +186,7 @@ class CommandDeduplicationPruningIntegrationTest
       val submissionId = "resubmission"
       submitAsync(
         commandId4DuplicateRejected,
-        DeduplicationDuration(maxDedupDuration),
+        DeduplicationDuration.create(maxDedupDuration).value,
         submissionId,
       )
       val (completion4, _offset4) =
@@ -202,7 +203,7 @@ class CommandDeduplicationPruningIntegrationTest
 
       val after5 = submit(
         commandId5OutsideDedupBoundaryAccepted,
-        DeduplicationDuration(maxDedupDuration),
+        DeduplicationDuration.create(maxDedupDuration).value,
       )
       val outsideDedupBoundaryTs =
         valueOrFail(
@@ -228,12 +229,13 @@ class CommandDeduplicationPruningIntegrationTest
 
       val after6 = submit(
         commandId6DeduplicationPeriodAccepted,
-        DeduplicationDuration(maxDedupDuration.multipliedBy(2)),
+        DeduplicationDuration.create(maxDedupDuration.multipliedBy(2)).value,
       )
 
       logger.debug("submit command with too long dedup duration")
       val submissionIdTooLongDuration = "submission-id-too-long-duration"
-      val dedupPeriod7 = DeduplicationDuration(maxDedupDuration.multipliedBy(2).plusMillis(1))
+      val dedupPeriod7 =
+        DeduplicationDuration.create(maxDedupDuration.multipliedBy(2).plusMillis(1)).value
       submitAsync(
         commandId7DeduplicationPeriodTooLong,
         dedupPeriod7,

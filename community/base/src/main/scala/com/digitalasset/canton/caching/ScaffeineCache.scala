@@ -8,7 +8,7 @@ import cats.{FlatMap, Functor}
 import com.daml.metrics.CacheMetrics
 import com.daml.metrics.api.MetricHandle.Gauge
 import com.digitalasset.canton.checked
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -50,7 +50,6 @@ object ScaffeineCache {
     metrics.foreach(CaffeineCache.installMetrics(_, asyncCache.underlying.synchronous()))
     new TunnelledAsyncCacheImpl[K, V](
       asyncCache,
-      tracedLogger,
       contextWithLoggerName,
     )
   }
@@ -77,7 +76,6 @@ object ScaffeineCache {
     metrics.foreach(CaffeineCache.installMetrics(_, asyncLoadingCache.underlying.synchronous()))
     new TunnelledAsyncLoadingCache[F, K, V](
       asyncLoadingCache,
-      tracedLogger,
       tunnel,
       contextWithLoggerName,
     )
@@ -133,13 +131,10 @@ object ScaffeineCache {
 
   class TunnelledAsyncCacheImpl[K, V] private[ScaffeineCache] (
       underlying: AsyncCache[K, V],
-      tracedLogger: TracedLogger,
       context: String,
   ) extends TunnelledAsyncCache[K, V] {
-    implicit private[this] val ec: ExecutionContext =
-      DirectExecutionContext(NamedLogging.loggerWithoutTracing(tracedLogger))
     val tunnel: EffectTunnel[FutureUnlessShutdown, Future] =
-      EffectTunnel.effectTunnelFutureUnlessShutdown
+      EffectTunnel.effectTunnelFutureUnlessShutdown(directExecutionContext)
     def getFuture(
         key: K,
         mappingFunction: K => FutureUnlessShutdown[V],
@@ -165,7 +160,7 @@ object ScaffeineCache {
       tunnel.exit(
         FutureUtil.unwrapCompletionException(
           FutureConverters.asScala(v)
-        )
+        )(directExecutionContext)
       )
 
     private def toCompletableFutureValue(v: FutureUnlessShutdown[V]): CompletableFuture[V] =
@@ -330,12 +325,9 @@ object ScaffeineCache {
 
   class TunnelledAsyncLoadingCache[F[_], K, V] private[ScaffeineCache] (
       underlying: AsyncLoadingCache[K, V],
-      tracedLogger: TracedLogger,
       tunnel: EffectTunnel[F, Future],
       context: String,
   ) {
-    implicit private[this] val ec: ExecutionContext =
-      DirectExecutionContext(NamedLogging.loggerWithoutTracing(tracedLogger))
 
     /** @see
       *   com.github.blemale.scaffeine.AsyncLoadingCache.get
@@ -343,7 +335,7 @@ object ScaffeineCache {
     def get(key: K): F[V] = tunnel.exit(
       // The Caffeine cache's get method wraps exceptions from the loader in a `CompletionException`.
       // We should strip it here.
-      FutureUtil.unwrapCompletionException(underlying.get(key))
+      FutureUtil.unwrapCompletionException(underlying.get(key))(directExecutionContext)
     )
 
     /** @see
@@ -352,7 +344,9 @@ object ScaffeineCache {
     def getIfPresent(key: K): Option[F[V]] = (
       // The Caffeine cache's get method wraps exceptions from the loader in a `CompletionException`.
       // We should strip it here.
-      underlying.getIfPresent(key).map(f => tunnel.exit(FutureUtil.unwrapCompletionException(f)))
+      underlying
+        .getIfPresent(key)
+        .map(f => tunnel.exit(FutureUtil.unwrapCompletionException(f)(directExecutionContext)))
     )
 
     /** @see
@@ -362,7 +356,7 @@ object ScaffeineCache {
       tunnel.exit(
         // The Caffeine cache's getAll method wraps exceptions from the loader in a `CompletionException`.
         // We should strip it here.
-        FutureUtil.unwrapCompletionException(underlying.getAll(keys))
+        FutureUtil.unwrapCompletionException(underlying.getAll(keys))(directExecutionContext)
       )
 
     /** @see
@@ -399,7 +393,7 @@ object ScaffeineCache {
                   tunnel.exit(
                     FutureUtil.unwrapCompletionException(
                       FutureConverters.asScala(oldValueTunnelled)
-                    )
+                    )(directExecutionContext)
                   )
                 oldValueF.flatMap(oldValue => remapper(k, Some(oldValue)))
             }
@@ -408,7 +402,11 @@ object ScaffeineCache {
           }
         }
       val remappedValueF = underlying.underlying.asMap().compute(key, tunnelledRemapper)
-      tunnel.exit(FutureUtil.unwrapCompletionException(FutureConverters.asScala(remappedValueF)))
+      tunnel.exit(
+        FutureUtil.unwrapCompletionException(FutureConverters.asScala(remappedValueF))(
+          directExecutionContext
+        )
+      )
     }
 
     override def toString = s"TunnelledAsyncLoadingCache($underlying)"

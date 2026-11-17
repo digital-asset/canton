@@ -12,7 +12,11 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
-import com.digitalasset.canton.participant.config.{ExtensionServiceConfig, ParticipantNodeConfig}
+import com.digitalasset.canton.participant.config.{
+  AlphaAcsReplicationConfig,
+  ExtensionServiceConfig,
+  ParticipantNodeConfig,
+}
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
@@ -106,6 +110,8 @@ object ConfigValidations extends NamedLogging {
       validateLegacyContractsV11Enabled,
       serverConfigOnlyOneGrpcControlFlowMode,
       clientChannelParamsOnlyOneGrpcControlFlowMode,
+      sequencerChannelsRequireNonStandardConfig,
+      enforceAcsReplicationSupportConstraints,
     ) ++ (if (ensurePortsSet) List(portsArtSet) else Nil)
 
   /** Group node configs by db access to find matching db storage configs. Overcomplicated types
@@ -1187,4 +1193,57 @@ object ConfigValidations extends NamedLogging {
 
       errors.result()
     }
+
+  def sequencerChannelsRequireNonStandardConfig(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = if (config.parameters.nonStandardConfig)
+    Validated.Valid(())
+  else
+    toValidated {
+      val errors = Seq.newBuilder[String]
+
+      config.sequencers.foreach { case (name, config) =>
+        if (config.parameters.alphaSequencerChannelSupport.nonEmpty) {
+          errors.addOne(
+            s"Sequencer node $name can only enable sequencer channels in non-standard config"
+          )
+        }
+      }
+
+      config.participants.foreach { case (name, config) =>
+        if (config.parameters.alphaAcsReplicationSupport.nonEmpty) {
+          errors.addOne(
+            s"Participant node $name can only enable ACS replication in non-standard config"
+          )
+        }
+      }
+      errors.result()
+    }
+
+  def enforceAcsReplicationSupportConstraints(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = toValidated {
+    val errors = Seq.newBuilder[String]
+
+    config.participants.foreach { case (name, config) =>
+      if (
+        config.parameters.alphaOnlinePartyReplicationSupport.nonEmpty && config.parameters.alphaAcsReplicationSupport.isEmpty
+      ) {
+        errors.addOne(
+          s"Participant node $name can only enable online party replication along with ACS replication"
+        )
+      }
+
+      config.parameters.alphaAcsReplicationSupport match {
+        case None =>
+        case Some(AlphaAcsReplicationConfig(source, _, _)) =>
+          if (source.acsBatchSize > source.acsReaderMaxQueueSize) {
+            errors.addOne(
+              s"Participant node $name ACS replication source ACS reader max queue size must be at least the ACS batch size"
+            )
+          }
+      }
+    }
+    errors.result()
+  }
 }

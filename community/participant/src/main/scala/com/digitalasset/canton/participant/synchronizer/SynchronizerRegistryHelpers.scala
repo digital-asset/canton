@@ -245,7 +245,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
             participantNodeParameters.exitOnFatalFailures,
             synchronizerLoggerFactory,
           ),
-          participantNodeParameters.alphaOnlinePartyReplicationSupport
+          participantNodeParameters.alphaAcsReplicationSupport
             .map(_ =>
               new SequencerChannelClientFactory(
                 psid,

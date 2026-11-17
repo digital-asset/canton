@@ -27,12 +27,21 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.collection.immutable.ArraySeq
 
-class UpgradeTest
+class UpgradeTest_KeyHashMismatchIgnored extends UpgradeTest(errorOnContractKeyHashMismatch = false)
+class UpgradeTest_KeyHashMismatchError extends UpgradeTest(errorOnContractKeyHashMismatch = true)
+
+class UpgradeTest(errorOnContractKeyHashMismatch: Boolean)
     extends AnyFreeSpec
     with Matchers
     with TableDrivenPropertyChecks
     with Inside
     with SuppressingLogging {
+
+  private val interpretationConfig =
+    InterpretationConfig(
+      allowedLanguageVersions = LanguageVersion.allLfVersions,
+      errorOnContractKeyHashMismatch = errorOnContractKeyHashMismatch,
+    )
 
   implicit val pkgId: Ref.PackageId = Ref.PackageId.assertFromString("-no-pkg-")
 
@@ -474,12 +483,15 @@ class UpgradeTest
 
     val seed = crypto.Hash.hashPrivateKey("seed")
     val machine = Speedy.Machine.fromUpdateSExpr(
-      pkgs,
-      seed,
-      sexprToEval,
-      Set(alice, bob),
-      MachineLogger(),
-      interpretationConfig = InterpretationConfig.Default,
+      compiledPackages = pkgs,
+      transactionSeed = seed,
+      updateSE = sexprToEval,
+      committers = Set(alice, bob),
+      logger = MachineLogger(),
+      interpretationConfig = interpretation.InterpretationConfig(
+        allowedLanguageVersions = LanguageVersion.allLfVersions,
+        errorOnContractKeyHashMismatch = errorOnContractKeyHashMismatch,
+      ),
     )
 
     val contract = TransactionBuilder
@@ -517,13 +529,13 @@ class UpgradeTest
     val sexprToEval: SExpr = pkgs.compiler.unsafeCompile(e)
     val seed = crypto.Hash.hashPrivateKey("seed")
     Speedy.Machine.fromUpdateSExpr(
-      pkgs,
-      seed,
-      sexprToEval,
-      Set(alice, bob),
-      MachineLogger(),
+      compiledPackages = pkgs,
+      transactionSeed = seed,
+      updateSE = sexprToEval,
+      committers = Set(alice, bob),
+      logger = MachineLogger(),
       packageResolution = packageResolution,
-      interpretationConfig = InterpretationConfig.Default,
+      interpretationConfig = interpretationConfig,
     )
   }
 
@@ -541,7 +553,11 @@ class UpgradeTest
     )
 
   val commonKeyValue = ValueParty(alice)
-  val commonKeyHash = crypto.Hash.hashPrivateKey(alice)
+  val commonKeyHash = crypto.SValueHash.assertHashContractKey(
+    pkgName,
+    Ref.QualifiedName.assertFromString("M:T"),
+    SValue.SParty(alice),
+  )
 
   val v1_key =
     GlobalKeyWithMaintainers(
@@ -574,7 +590,7 @@ class UpgradeTest
       val v_missingFieldKey = GlobalKeyWithMaintainers(
         i"'-pkg2-':M:T",
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )
@@ -634,7 +650,7 @@ class UpgradeTest
       val v_missingFieldKey = GlobalKeyWithMaintainers(
         i"'-pkg1-':M:T",
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )
@@ -693,7 +709,7 @@ class UpgradeTest
       def key(templateId: Ref.TypeConId) = GlobalKeyWithMaintainers(
         templateId,
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )
@@ -908,7 +924,7 @@ class UpgradeTest
       val v1_extraTextKey = GlobalKeyWithMaintainers(
         i"'-pkg1-':M:T",
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )
@@ -970,7 +986,7 @@ class UpgradeTest
       val v1_extraSomeKey = GlobalKeyWithMaintainers(
         i"'-pkg3-':M:T",
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )
@@ -1044,7 +1060,7 @@ class UpgradeTest
       val v1_extraNoneKey = GlobalKeyWithMaintainers(
         i"'-pkg3-':M:T",
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )
@@ -1098,7 +1114,7 @@ class UpgradeTest
       val v1_extraNoneKey = GlobalKeyWithMaintainers(
         i"'-pkg3-':M:T",
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )

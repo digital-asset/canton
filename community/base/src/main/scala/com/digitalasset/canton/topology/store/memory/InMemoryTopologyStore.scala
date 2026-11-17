@@ -17,7 +17,10 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.*
-import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
+import com.digitalasset.canton.topology.store.StoredTopologyTransaction.{
+  GenericStoredTopologyTransaction,
+  PositiveStoredTopologyTransaction,
+}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.{
   GenericStoredTopologyTransactions,
   NegativeStoredTopologyTransactions,
@@ -804,7 +807,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
 
   override def findEffectiveStateChanges(
       fromEffectiveInclusive: CantonTimestamp,
-      filterTypes: Option[Seq[TopologyMapping.Code]],
+      filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]],
       onlyAtEffective: Boolean,
   )(implicit
       traceContext: TraceContext
@@ -915,4 +918,28 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     }
 
   }
+
+  override def findEffectiveStateChangesAtTopologyInit(
+      fromExclusive: EffectiveTime,
+      toInclusive: EffectiveTime,
+      filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]],
+  )(implicit traceContext: TraceContext): Source[PositiveStoredTopologyTransaction, NotUsed] = {
+    val result = lock.exclusive {
+      topologyTransactionStore.view
+        .filter(tx =>
+          tx.from > fromExclusive && tx.from <= toInclusive &&
+            tx.until.forall(
+              _ > toInclusive
+            ) && tx.rejected.isEmpty && !tx.transaction.isProposal && tx.operation == TopologyChangeOp.Replace &&
+            filterTypes.forall(_.contains(tx.mapping.code))
+        )
+        .flatMap(e =>
+          StoredTopologyTransaction(e.sequenced, e.from, e.until, e.transaction, e.rejected)
+            .selectOp[TopologyChangeOp.Replace]
+        )
+        .toSeq
+    }
+    Source(result)
+  }
+
 }

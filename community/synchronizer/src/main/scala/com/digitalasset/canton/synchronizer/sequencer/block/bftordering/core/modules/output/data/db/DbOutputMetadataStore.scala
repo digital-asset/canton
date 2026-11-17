@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import cats.data.EitherT
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -236,7 +236,7 @@ class DbOutputMetadataStore(
           }
           .map(_._1)
         blocksUntilFirstGap
-      }(DirectExecutionContext(noTracingLogger))
+      }(directExecutionContext)
     val future = () => storage.query(query, functionFullName)
     PekkoFutureUnlessShutdown(name, future, orderingStage = Some(functionFullName))
   }

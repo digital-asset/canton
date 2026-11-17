@@ -58,7 +58,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
     EnvironmentDefinition.P2S1M1_Manual
       .addConfigTransforms(
         ConfigTransforms
-          .enableAlphaOnlinePartyReplicationSupport(enableUnsafeSequencerChannelSupport = true)*
+          .enableAlphaOnlinePartyReplicationSupport()*
       )
       .withNetworkBootstrap { implicit env =>
         import env.*
@@ -91,8 +91,8 @@ sealed trait SequencerChannelProtocolIntegrationTest
       )
 
       clue("Both sequencer channel clients can ping the sequencer") {
-        asyncExec("ping1")(client1.ping(sequencer1.id))
-        asyncExec("ping2")(client2.ping(sequencer1.id))
+        asyncExec("ping1")(client1.ping(sequencer1.id, ignorePoolCapacityExhaustion = false))
+        asyncExec("ping2")(client2.ping(sequencer1.id, ignorePoolCapacityExhaustion = false))
       }
 
       val channelId = SequencerChannelId("empty channel")

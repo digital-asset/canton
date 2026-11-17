@@ -90,9 +90,11 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
   ): PostPublishData = mkPublicationInternal(longOffset, completionInfo, true, publicationTime)
 
   private lazy val dedupTime1Day: DeduplicationPeriod.DeduplicationDuration =
-    DeduplicationPeriod.DeduplicationDuration(java.time.Duration.ofDays(1))
+    DeduplicationPeriod.DeduplicationDuration.create(java.time.Duration.ofDays(1)).value
   private lazy val dedupTimeAlmost1Day: DeduplicationPeriod.DeduplicationDuration =
-    DeduplicationPeriod.DeduplicationDuration(java.time.Duration.ofDays(1).minusNanos(1000))
+    DeduplicationPeriod.DeduplicationDuration
+      .create(java.time.Duration.ofDays(1).minusNanos(1000))
+      .value
 
   "CommandDeduplicator" should {
     "accept fresh change IDs" in {
@@ -101,7 +103,7 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
         offset1 <- fix.dedup
           .checkDuplication(
             changeId1Hash,
-            DeduplicationPeriod.DeduplicationDuration(java.time.Duration.ofDays(1)),
+            DeduplicationPeriod.DeduplicationDuration.create(java.time.Duration.ofDays(1)).value,
           )
           .valueOrFail("dedup 1")
         offset3 <- fix.dedup
@@ -116,19 +118,23 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
     "complain about time underflow" in {
       val fix = mk()
       val timeUnderflowDuration =
-        DeduplicationPeriod.DeduplicationDuration(java.time.Duration.ofDays(365 * 10000))
+        DeduplicationPeriod.DeduplicationDuration
+          .create(java.time.Duration.ofDays(365 * 10000))
+          .value
       for {
         error <- fix.dedup
           .checkDuplication(changeId1Hash, timeUnderflowDuration)
           .leftOrFail("time underflow")
 
       } yield {
-        error shouldBe DeduplicationPeriodTooEarly(
-          timeUnderflowDuration,
-          DeduplicationPeriod.DeduplicationDuration(
-            java.time.Duration.between(CantonTimestamp.MinValue.toInstant, clock.now.toInstant)
-          ),
-        )
+        val expectedError =
+          DeduplicationPeriod.DeduplicationDuration
+            .create(
+              java.time.Duration.between(CantonTimestamp.MinValue.toInstant, clock.now.toInstant)
+            )
+            .map(duration => DeduplicationPeriodTooEarly(timeUnderflowDuration, duration))
+
+        Right(error) shouldBe expectedError
       }
     }.failOnShutdown
 
@@ -269,7 +275,7 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
         errorTime <- fix.dedup
           .checkDuplication(
             changeId1Hash,
-            DeduplicationPeriod.DeduplicationDuration(java.time.Duration.ofHours(25)),
+            DeduplicationPeriod.DeduplicationDuration.create(java.time.Duration.ofHours(25)).value,
           )
           .leftOrFail("dedup conflict by time")
         okOffsetAfter <- fix.dedup

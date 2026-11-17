@@ -14,7 +14,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.admin.data.AcsReplicationStatus.AcsReplicationError.Disconnected
-import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
+import com.digitalasset.canton.participant.party.AcsReplicationTestInterceptorImpl
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.LostSequencerSubscription
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.PartyId
@@ -51,7 +51,7 @@ sealed trait OnlinePartyReplicationRecoverFromDisruptionsTest
   // Use the test interceptor to block OnPR after replication has started, but before the sequencer
   // hosting the channel is restarted.
   private def createSourceParticipantTestInterceptor() =
-    PartyReplicationTestInterceptorImpl.sourceParticipantProceedsIf(stateSP =>
+    AcsReplicationTestInterceptorImpl.sourceParticipantProceedsIf(stateSP =>
       // Once OnPR has been paused, wait until the disruption has been lifted unblocking OnPR.
       if (hasSourceParticipantBeenPaused) hasDisruptionBeenFixed
       else {
@@ -70,7 +70,6 @@ sealed trait OnlinePartyReplicationRecoverFromDisruptionsTest
       .addConfigTransforms(
         ConfigTransforms.enableAlphaOnlinePartyReplicationSupport(
           Map("participant1" -> (() => createSourceParticipantTestInterceptor())),
-          enableUnsafeSequencerChannelSupport = true,
           pauseIndexer = false,
         )*
       )

@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.admin.party.acsreplication
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Hash
@@ -20,7 +20,7 @@ import com.digitalasset.canton.lifecycle.{
   LifeCycle,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStage.*
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.{
@@ -38,7 +38,7 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplica
   AcsReplicationArguments,
   AcsReplicationRequestId,
 }
-import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
+import com.digitalasset.canton.participant.config.AlphaAcsReplicationConfig
 import com.digitalasset.canton.participant.protocol.party.AcsReplicationContractHandlerFactory
 import com.digitalasset.canton.participant.protocol.party.acsreplication.{
   AcsReplicationProcessor,
@@ -57,16 +57,21 @@ import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.{TimeQuery, TopologyStore}
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
+import com.digitalasset.canton.util.TryUtil.ForFailedOps
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.stream.Materializer
 
+import java.io.OutputStream as JOutputStream
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
+import scala.annotation.tailrec
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Try
 import scala.util.chaining.scalaUtilChainingOps
 
 /** Acts on behalf of the participant's ACS replication requests handling asynchronous requests and
@@ -78,8 +83,7 @@ final class AcsReplicator(
     syncService: CantonSyncService,
     internalIndexService: InternalIndexService,
     clock: Clock,
-    // TODO(#36539) replace with an AcsReplicator-specific config class (ACS replication could be allowed but not OnPR)
-    config: AlphaOnlinePartyReplicationConfig,
+    config: AlphaAcsReplicationConfig,
     storage: Storage,
     acsReplicationContractHandlerFactory: AcsReplicationContractHandlerFactory,
     futureSupervisor: FutureSupervisor,
@@ -125,11 +129,11 @@ final class AcsReplicator(
 
   private val damlAdminWorkflowO = new SingleUseCell[AcsReplicationAdminWorkflow]
 
-  private[party] val testInterceptorO: Option[PartyReplicationTestInterceptor] =
+  private[party] val testInterceptorO: Option[AcsReplicationTestInterceptor] =
     config.testInterceptor.map(_())
 
-  /** Validates ACS replication arguments and propose party ACS replication via the provided admin
-    * workflow service.
+  /** Validates ACS replication arguments and either starts a new ACS replication or restarts an
+    * existing one.
     */
   private[admin] def replicateAcsAsync(
       args: AcsReplicationArguments
@@ -144,7 +148,6 @@ final class AcsReplicator(
           synchronizerId,
           sourceParticipantId,
           timestamp,
-          participantPermission,
           replicationDestination,
         ) = args
 
@@ -154,12 +157,18 @@ final class AcsReplicator(
           for {
             _ <- ensurePartyHostedBySourceAndTargetParticipant(
               partyId,
+              timestamp,
               sourceParticipantId,
               participantId,
               syncPersistentState.topologyStore,
             )
             _ <- EitherT.fromEither[FutureUnlessShutdown](
-              ensureCanReplicateAcs(targetParticipantId = participantId, partyId)
+              ensureCanReplicateAcs(
+                targetParticipantId = participantId,
+                partyId,
+                synchronizerId,
+                Some(replicationDestination),
+              )
             )
           } yield ()
 
@@ -173,7 +182,7 @@ final class AcsReplicator(
           )
           _ <- EitherT.fromEither[FutureUnlessShutdown](
             damlAdminWorkflowO.get.toRight(
-              "The ACS replication requires the `unsafe_sequencer_channel_support` configuration flag to be true"
+              "The ACS replication requires `alpha-acs-replication-support` to be configured"
             )
           )
           connectedSynchronizer <-
@@ -183,28 +192,238 @@ final class AcsReplicator(
                 .toRight(s"Unknown synchronizer $synchronizerId")
             )
           syncPersistentState = connectedSynchronizer.synchronizerHandle.syncPersistentState
-          _ <- ensureCanReplicate(syncPersistentState).leftSemiflatTap { err =>
-            addStatus(
-              args,
-              syncPersistentState.psid.protocolVersion,
-              AgreementStatus.NotProposed,
-              Some(err),
-            ).value
+          restartNeededStatusO = acsReplicationStateManager
+            .get(requestId)
+            .filter(_.restartRequiresReplicationFromBeginning)
+          status <- (restartNeededStatusO, replicationDestination) match {
+            case (Some(existingStatus), destination: AcsReplicationDestination.OutputStream) =>
+              for {
+                _ <- ensurePartyHostedBySourceAndTargetParticipant(
+                  partyId,
+                  timestamp,
+                  sourceParticipantId,
+                  participantId,
+                  syncPersistentState.topologyStore,
+                )
+                restartedStatus <- restartAcsReplication(existingStatus, args, destination)
+              } yield {
+                logger.info(s"Existing ACS replication $requestId restarted")
+                restartedStatus
+              }
+            case _ =>
+              for {
+                _ <- ensureCanReplicate(syncPersistentState).leftSemiflatTap { err =>
+                  addStatus(
+                    args,
+                    syncPersistentState.psid.protocolVersion,
+                    AgreementStatus.NotProposed,
+                    Some(err),
+                  ).value
+                }
+                newStatus <- addStatus(
+                  args,
+                  syncPersistentState.psid.protocolVersion,
+                  AgreementStatus.NotProposed,
+                  None,
+                )
+              } yield {
+                logger.info(s"New ACS replication $requestId created and is about to start")
+                newStatus
+              }
           }
-          newStatus <- addStatus(
-            args,
-            syncPersistentState.psid.protocolVersion,
-            AgreementStatus.NotProposed,
-            None,
-          )
         } yield {
-          logger.info(s"New ACS replication $requestId created and is about to start")
           activateProgressMonitoring(requestId)
-          newStatus
+          status
         }
       },
       s"replicate ACS of party ${args.partyId} on ${args.synchronizerId}",
     )
+
+  /** Restarts an existing ACS replication by resetting the progress and setting a new output stream
+    * destination.
+    *
+    * Any processor of the existing ACS replication is aborted and discarded first, so that it
+    * neither writes to the previous destination nor updates the restarted ACS replication. The
+    * previous output stream is aborted beforehand, so that an in-flight processor task blocked on a
+    * slow client fails rather than preventing the processor from closing. The processor abort ends
+    * the sequencer channel with an error, which makes the source participant reconnect even if it
+    * has already sent the end of the ACS. Should a processor task nonetheless outlive the processor
+    * close, the [[AcsReplicationStateManager]] rejects its progress updates as superseded.
+    */
+  private def restartAcsReplication(
+      existingStatus: AcsReplicationStatus,
+      args: AcsReplicationArguments,
+      destination: AcsReplicationDestination.OutputStream,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, AcsReplicationStatus] = {
+    val requestId = args.requestId
+    val existingParams = existingStatus.params
+    for {
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        existingParams.partyId == args.partyId &&
+          existingParams.synchronizerId == args.synchronizerId &&
+          existingParams.sourceParticipantId == args.sourceParticipantId &&
+          existingParams.targetParticipantId == participantId &&
+          existingParams.timestamp == args.timestamp,
+        s"ACS replication $requestId cannot be restarted with different parameters $args: $existingStatus",
+      )
+      _ <- existingStatus.replicationO
+        .flatMap(_.processorO)
+        .fold(EitherTUtil.unitUS[String]) { processor =>
+          // Fail any write blocked on a slow client first, as otherwise the in-flight processor
+          // task cannot complete and closing the processor would time out.
+          abortDestination(existingParams.acsReplicationDestination)
+          abortProcessor(requestId, processor, s"ACS replication $requestId is being restarted")
+        }
+      resetStatus <- acsReplicationStateManager.resetProgress(requestId, destination)
+    } yield resetStatus
+  }
+
+  private def abortDestination(destination: AcsReplicationDestination)(implicit
+      traceContext: TraceContext
+  ): Unit = destination match {
+    case outputStream: AcsReplicationDestination.OutputStream =>
+      logger.info("Aborting output stream of ACS replication")
+      outputStream.abort()
+    case AcsReplicationDestination.Persistence => ()
+  }
+
+  private def abortProcessor(
+      requestId: AcsReplicationRequestId,
+      processor: AcsReplicationProcessor,
+      reason: String,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val operation = s"await channel endpoint removal of ACS replication $requestId"
+    val delay = 100.millis
+    for {
+      _ <- processor.abort(reason)
+      _ <- EitherT(
+        retry
+          .Pause(
+            logger,
+            this,
+            maxRetries = timeouts.network.retries(delay),
+            delay = delay,
+            operationName = operation,
+          )
+          .unlessShutdown(
+            FutureUnlessShutdown.pure(
+              Either.cond(
+                !processor.hasChannelEndpoint,
+                (),
+                s"Failed to $operation",
+              )
+            ),
+            retry.NoExceptionRetryPolicy,
+          )
+      )
+    } yield {
+      // Closing waits for in-flight processor tasks so that they cannot modify the restarted status.
+      processor.close()
+      logger.info(s"Aborted processor of ACS replication $requestId")
+    }
+  }
+
+  /** Wait until get_remote_acs-based ACS replication completes successfully, fails, or has been
+    * restarted.
+    *
+    * If the gRPC request is cancelled, the ACS replication is stopped via [[stopRemoteRead]], so
+    * that it no longer progresses. A subsequent request for the same ACS replication can restart
+    * it.
+    *
+    * @param out
+    *   the output stream of the caller, closed upon returning
+    */
+  private[admin] def awaitRemoteAcsReadCompletion(
+      requestId: AcsReplicationRequestId,
+      out: JOutputStream,
+      grpcContext: io.grpc.Context,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val hasCompleted = true
+
+    @tailrec
+    def awaitDoneOrFailed(): Either[String, Unit] =
+      getAcsReplicationStatus(requestId) match {
+        case None => Left(s"Cannot locate remote read $requestId")
+        case Some(status) if isRemoteReadSuperseded(status, out) =>
+          val msg = s"Remote read $requestId has been restarted by another request"
+          logger.info(msg)
+          Left(msg)
+        case Some(AcsReplicationStatus(_, _, _, _, _, Some(AcsReplicationFailed(error)))) =>
+          Left(error)
+        case Some(AcsReplicationStatus(_, _, _, _, `hasCompleted`, _)) =>
+          Right(())
+        case Some(status) if grpcContext.isCancelled =>
+          val msg = "gRPC request is cancelled, not waiting for remote read result anymore"
+          logger.info(msg)
+          stopRemoteRead(requestId, out, status.params.acsReplicationDestination)
+          Left(msg)
+        case Some(_) if isClosing =>
+          val msg = "AcsReplicator is closing, not waiting for remote read result anymore"
+          logger.info(msg)
+          Left(msg)
+        case Some(status) =>
+          logger.debug(s"Remote read has not yet completed: $status")
+          Threading.sleep(progressSchedulingInterval.duration.toMillis)
+          awaitDoneOrFailed()
+      }
+
+    val resultE = awaitDoneOrFailed()
+
+    // Close the caller's stream after success or failure. Closing fails if the stream has been
+    // aborted by a restart, in which case there is nothing left to close.
+    Try(out.close()).forFailed(e => logger.info(s"Failed to close remote read stream: $e"))
+
+    EitherT.fromEither[FutureUnlessShutdown](resultE)
+  }
+
+  /** Whether the get_remote_acs-based ACS replication no longer writes to the caller's stream `out`
+    * because it has been restarted by another request.
+    */
+  private def isRemoteReadSuperseded(status: AcsReplicationStatus, out: JOutputStream): Boolean =
+    status.params.acsReplicationDestination match {
+      case AcsReplicationDestination.OutputStream(destination) => destination ne out
+      case AcsReplicationDestination.Persistence => false
+    }
+
+  /** Stops the get_remote_acs-based ACS replication whose caller has cancelled the gRPC request, so
+    * that the ACS replication stops progressing and writing to the abandoned stream.
+    *
+    * The ACS replication is torn down as upon a restart: the output stream and the processor are
+    * aborted, but the sequencer channel agreement is kept, so that it can be reused if needed.
+    * Marking the ACS replication as failed stops the progress scheduling.
+    */
+  private def stopRemoteRead(
+      requestId: AcsReplicationRequestId,
+      out: JOutputStream,
+      destination: AcsReplicationDestination,
+  )(implicit traceContext: TraceContext): Unit = {
+    val reason = s"ACS replication $requestId is cancelled by the get_remote_acs caller"
+    // Fail any write blocked on the abandoned stream right away, as otherwise an in-flight processor
+    // task cannot complete and aborting the processor in the execution queue would time out.
+    abortDestination(destination)
+    executeAsync(requestId, "cancel remote read") {
+      acsReplicationStateManager.get(requestId) match {
+        case Some(status) if !isRemoteReadSuperseded(status, out) && status.isProgressExpected =>
+          logger.info(s"Stopping ACS replication $requestId: $reason")
+          for {
+            _ <- status.replicationO
+              .flatMap(_.processorO)
+              .fold(EitherTUtil.unitUS[String])(abortProcessor(requestId, _, reason))
+            // Mark as failed only after the processor has been aborted, so that the error is not
+            // overwritten by the processor disconnect.
+            _ <- acsReplicationStateManager.update_(
+              requestId,
+              _.modifyErrorO(_ => Some(AcsReplicationFailed(reason))),
+            )
+          } yield ()
+        case _ =>
+          logger.info(s"Not stopping ACS replication $requestId as it is no longer active")
+          EitherTUtil.unitUS
+      }
+    }
+  }
 
   /** Activates progress scheduling once a new ACS replication request is received unless already
     * active.
@@ -346,6 +565,9 @@ final class AcsReplicator(
             connectedSynchronizer,
             channelClient,
           ) =>
+        // Binds the processor callbacks to this processor so that callbacks of a processor
+        // superseded by ACS replication restart are ignored.
+        val processorCell = new SingleUseCell[AcsReplicationProcessor]
         for {
           partiesAlreadyHostedByTargetParticipant <- EitherT.right[String](
             partiesHostedByParticipant(
@@ -368,26 +590,22 @@ final class AcsReplicator(
                   agreedAt,
                   internalIndexService,
                   acsReplicationStateManager,
-                  recordSequencerChannelError(requestId, traceContext),
-                  markDisconnected(requestId)(_, _),
+                  recordSequencerChannelError(requestId, processorCell, traceContext),
+                  markDisconnected(requestId, processorCell)(_, _),
+                  config.source,
                   syncService.participantNodePersistentState.value.ledgerApiStore,
                   futureSupervisor,
                   exitOnFatalFailures,
                   timeouts,
                   loggerFactory,
-                  testInterceptorO.getOrElse(PartyReplicationTestInterceptor.AlwaysProceed),
+                  testInterceptorO.getOrElse(AcsReplicationTestInterceptor.AlwaysProceed),
                 )
                 .map((_: AcsReplicationProcessor, params.targetParticipantId, noSessionKey))
             } else if (participantId == params.targetParticipantId) {
               for {
-                acsReplicationDestination <- EitherT.cond[FutureUnlessShutdown](
-                  params.acsReplicationDestination == AcsReplicationDestination.Persistence,
-                  params.acsReplicationDestination,
-                  s"Only AcsReplicationDestination.Persistence is supported but received ${params.acsReplicationDestination}",
-                )
                 acsReplicationContractHandler <- EitherT.fromEither[FutureUnlessShutdown](
                   acsReplicationContractHandlerFactory.create(
-                    acsReplicationDestination,
+                    params.acsReplicationDestination,
                     requestId,
                     params.partyId,
                     params.timestamp,
@@ -409,15 +627,15 @@ final class AcsReplicator(
                     params.sourceParticipantId,
                     agreedAt,
                     acsReplicationStateManager,
-                    recordSequencerChannelError(requestId, traceContext),
-                    markDisconnected(requestId),
+                    recordSequencerChannelError(requestId, processorCell, traceContext),
+                    markDisconnected(requestId, processorCell),
                     acsReplicationContractHandler,
                     config.target,
                     futureSupervisor,
                     exitOnFatalFailures,
                     timeouts,
                     contextualLoggerFactory,
-                    testInterceptorO.getOrElse(PartyReplicationTestInterceptor.AlwaysProceed),
+                    testInterceptorO.getOrElse(AcsReplicationTestInterceptor.AlwaysProceed),
                   ): AcsReplicationProcessor,
                   params.sourceParticipantId,
                   ownsSessionKey,
@@ -432,6 +650,7 @@ final class AcsReplicator(
               )
             }
           (processor, counterParticipantId, isSessionKeyOwner) = processorInfo
+          _ = processorCell.putIfAbsent(processor).discard
           // Set replication state before channel connect so that processor always finds "progress" state.
           _ <- acsReplicationStateManager.update_(requestId, _.setProcessor(processor))
           _ <- channelClient
@@ -493,8 +712,10 @@ final class AcsReplicator(
               // try a channel-ping because the former does not return an error immediately,
               // but subsequently produces another disconnect. Doing a ping lowers the
               // chances of unnecessary and noisy status-change toggling.
+              // Ping will fail if the channel pool is exhausted. This check is best-effort:
+              // a slot still can free up or be taken between the ping and the connect.
               channelClient
-                .ping(sequencerId)
+                .ping(sequencerId, ignorePoolCapacityExhaustion = false)
                 .flatMap(_ =>
                   channelClient
                     .connectToSequencerChannel(
@@ -566,7 +787,10 @@ final class AcsReplicator(
           )
           // To be sure the authorization has become effective, wait until the topology change is visible via the ledger api
           _ <- topologyTransactionInfo match {
-            case Some(TopologyTransactionInfo(EffectiveTime(replicationTimestamp), _, _)) =>
+            case Some(TopologyTransactionInfo(EffectiveTime(_), Some(HostingState.Freezing))) =>
+              // Don't expect to see freezing via the LAPI
+              EitherT.rightT[FutureUnlessShutdown, String](())
+            case Some(TopologyTransactionInfo(EffectiveTime(replicationTimestamp), _)) =>
               val operation = s"observe ${params.partyId} topology transaction via ledger api"
               val retryCounter = new AtomicInteger(0)
               retryUntilLocalStoreUpdatedInExpectedState(operation)(
@@ -608,17 +832,16 @@ final class AcsReplicator(
               s"Onboarding topology for party replication $requestId and party ${params.partyId} not yet authorized."
             )
             EitherTUtil.unitUS[String]
-          } { case TopologyTransactionInfo(validFrom, onboardingFlag, serial) =>
+          } { case TopologyTransactionInfo(validFrom, hostingStateO) =>
             logger.info(
-              s"ACS replication $requestId topology of party ${params.partyId} authorized with effective time $validFrom and onboarding flag $onboardingFlag"
+              s"ACS replication $requestId topology of party ${params.partyId} authorized with effective time $validFrom and hosting state $hostingStateO"
             )
             acsReplicationStateManager.update_(
               requestId,
               _.setTopologyTransaction(
                 PartyToParticipantTopologyTransaction(
                   validFrom,
-                  onboardingFlag,
-                  serial,
+                  hostingStateO.contains(HostingState.Onboarding),
                 )
               ),
             )
@@ -644,10 +867,13 @@ final class AcsReplicator(
               _,
               _,
               false, // not completed
-              None,
+              errorO,
             ),
             _,
-          ) =>
+          ) if errorO.forall {
+            case _: Disconnected => true
+            case _ => false
+          } =>
         for {
           isAgreementArchived <- EitherT.right[String](
             (agreementO, damlAdminWorkflowO.get) match {
@@ -682,6 +908,11 @@ final class AcsReplicator(
                 isAgreementArchived || agreementO.isEmpty, // not sure isEmpty should be here
                 _.setCompleted(),
               )
+              // A disconnect after the agreement has been archived does not require reconnecting.
+              ++ statusUpdate(
+                isAgreementArchived && errorO.nonEmpty,
+                _.modifyErrorO(_ => None),
+              )
           }
 
           status <-
@@ -713,7 +944,7 @@ final class AcsReplicator(
     for {
       adminWorkflow <- EitherT.fromEither[FutureUnlessShutdown](
         damlAdminWorkflowO.get.toRight(
-          "ACS replication requires the `unsafe_sequencer_channel_support` configuration flag to be true"
+          "ACS replication requires `alpha-acs-replication-support` to be configured"
         )
       )
       connectedSynchronizer <-
@@ -741,7 +972,6 @@ final class AcsReplicator(
         replicationParams.sourceParticipantId,
         sequencerCandidates,
         replicationParams.timestamp,
-        replicationParams.participantPermission,
       )
       _ <- acsReplicationStateManager.update_(
         replicationParams.requestId,
@@ -773,7 +1003,7 @@ final class AcsReplicator(
         MonadUtil
           .parTraverseWithLimit(parallelism)(sequencerIds)(sequencerId =>
             channelClient
-              .ping(sequencerId)
+              .ping(sequencerId, ignorePoolCapacityExhaustion = true)
               .fold(
                 err => {
                   logger.info(s"Skipping sequencer $sequencerId: $err")
@@ -790,18 +1020,48 @@ final class AcsReplicator(
       )
     } yield nonEmpty
 
-  private def recordSequencerChannelError(requestId: AcsReplicationRequestId, tc: TraceContext)(
+  /** Whether the processor in the cell, if set, is still the processor of the ACS replication, i.e.
+    * it has not been superseded by the ACS replication restart.
+    */
+  private def isCurrentProcessor(
+      requestId: AcsReplicationRequestId,
+      processorCell: SingleUseCell[AcsReplicationProcessor],
+  ): Boolean =
+    processorCell.get.forall(processor =>
+      acsReplicationStateManager
+        .get(requestId)
+        .flatMap(_.replicationO)
+        .flatMap(_.processorO)
+        .exists(_ eq processor)
+    )
+
+  private def recordSequencerChannelError(
+      requestId: AcsReplicationRequestId,
+      processorCell: SingleUseCell[AcsReplicationProcessor],
+      tc: TraceContext,
+  )(
       error: String
   ): Unit = {
     implicit val traceContext: TraceContext = tc
-    logger.error(s"ACS replication $requestId failed: $error")
     executeAsync(requestId, "error ACS replication") {
-      EitherT.leftT[FutureUnlessShutdown, Unit](error)
+      if (isCurrentProcessor(requestId, processorCell)) {
+        logger.error(s"ACS replication $requestId failed: $error")
+        acsReplicationStateManager.update_(
+          requestId,
+          _.modifyErrorO(_ => Some(AcsReplicationFailed(error))),
+        )
+      } else {
+        logger.info(
+          s"Ignoring error of superseded processor of restarted ACS replication $requestId: $error"
+        )
+        EitherTUtil.unitUS
+      }
     }
   }
 
   private def markDisconnected(
-      requestId: AcsReplicationRequestId
+      requestId: AcsReplicationRequestId,
+      processorCell: SingleUseCell[AcsReplicationProcessor],
   )(message: String, tc: TraceContext): Unit = {
     implicit val traceContext: TraceContext = tc
     executeAsync(requestId, "disconnect ACS replication") {
@@ -812,6 +1072,11 @@ final class AcsReplicator(
             .toRight(s"Unknown ACS replication $requestId")
         )
         _ <- status match {
+          case _ if !isCurrentProcessor(requestId, processorCell) =>
+            logger.info(
+              s"Ignoring disconnect of superseded ACS replication processor after replication restart $requestId: $message"
+            )
+            EitherTUtil.unitUS[String]
           case AcsReplicationStatus(_, _, _, _, _, None) =>
             acsReplicationStateManager.update_(
               requestId,
@@ -1003,15 +1268,14 @@ final class AcsReplicator(
     }
   }
 
-  /** Checks that the party is
-    *   - hosted by the source and target participant
-    *   - serial matches head authorized topology
+  /** Checks that the party is hosted by the source and target participant at the asOf timestamp.
     *
     * Called at target participant when starting the ACS replication and at source participant when
     * processing the ACS replication Daml proposal.
     */
   private def ensurePartyHostedBySourceAndTargetParticipant(
       partyId: PartyId,
+      asOf: CantonTimestamp,
       sourceParticipantId: ParticipantId,
       targetParticipantId: ParticipantId,
       topologyStore: TopologyStore[SynchronizerStore],
@@ -1022,8 +1286,9 @@ final class AcsReplicator(
         (),
         s"Source and target participants $targetParticipantId cannot match",
       )
-      partyToParticipantTopologyHeadTx <- topologyWorkflow.partyToParticipantTopologyHead(
+      partyToParticipantTopologyHeadTx <- topologyWorkflow.partyToParticipantTopologyAsOf(
         partyId,
+        asOf,
         topologyStore,
       )
       participantsOfParty = partyToParticipantTopologyHeadTx.mapping.participants.map(
@@ -1044,6 +1309,8 @@ final class AcsReplicator(
   private def ensureCanReplicateAcs(
       targetParticipantId: ParticipantId,
       partyId: PartyId,
+      synchronizerId: SynchronizerId,
+      replicationDestination: Option[AcsReplicationDestination],
   ): Either[String, Unit] = for {
     // This verifies the following guarantees:
     // - Source participants can retry after an error
@@ -1070,7 +1337,16 @@ final class AcsReplicator(
         )
       }
     _ <- acsReplicationStateManager
-      .collectFirst { case (id, status) if !status.hasCompleted => id -> status }
+      .collectFirst {
+        case (id, status)
+            // Only one ACS replication can be in progress for a given synchronizer and Persistence
+            // destination but multiple concurrent replications with Stream destination are allowed
+            if !status.hasCompleted && status.params.synchronizerId == synchronizerId && replicationDestination
+              .contains(
+                AcsReplicationDestination.Persistence
+              ) && status.params.acsReplicationDestination == AcsReplicationDestination.Persistence =>
+          id -> status
+      }
       .fold(Right(()): Either[String, Unit]) { case (id, status) =>
         Left(
           s"Only a single party ACS replication can be in progress: $status, but found ACS replication $id" +
@@ -1194,8 +1470,6 @@ final class AcsReplicator(
         sourceParticipantId = args.sourceParticipantId,
         targetParticipantId = participantId,
         timestamp = args.timestamp,
-        // TODO(#36539) remove permission once using AcsReplicationStatus
-        participantPermission = args.participantPermission,
         acsReplicationDestination = args.replicationDestination,
       ),
       protocolVersion,
@@ -1219,8 +1493,6 @@ final class AcsReplicator(
         sourceParticipantId = participantId,
         targetParticipantId = proposalParams.targetParticipantId,
         timestamp = proposalParams.timestamp,
-        // TODO(#36539) remove permission once using AcsReplicationStatus
-        participantPermission = proposalParams.participantPermission,
       ),
       protocolVersion,
       agreementStatus,
@@ -1308,12 +1580,16 @@ final class AcsReplicator(
         synchronizerId,
         targetParticipantId,
         sequencerIdsProposed,
-        _,
-        _,
+        timestamp,
       ) = proposal
       for {
         _ <- EitherT.fromEither[FutureUnlessShutdown](
-          ensureCanReplicateAcs(targetParticipantId, partyId)
+          ensureCanReplicateAcs(
+            targetParticipantId,
+            partyId,
+            connectedSynchronizer.psid.logical,
+            None,
+          )
         )
         topologySnapshot =
           connectedSynchronizer.synchronizerHandle.topologyClient.headSnapshot
@@ -1354,6 +1630,7 @@ final class AcsReplicator(
         syncPersistentState = connectedSynchronizer.synchronizerHandle.syncPersistentState
         _ <- ensurePartyHostedBySourceAndTargetParticipant(
           partyId,
+          timestamp,
           participantId,
           targetParticipantId,
           syncPersistentState.topologyStore,
@@ -1573,7 +1850,6 @@ object AcsReplicator {
       synchronizerId: SynchronizerId,
       sourceParticipantId: ParticipantId,
       timestamp: CantonTimestamp,
-      participantPermission: ParticipantPermission,
       replicationDestination: AcsReplicationDestination,
   )
 

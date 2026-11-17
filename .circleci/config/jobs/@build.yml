@@ -26,7 +26,7 @@ protobuf_continuity:
     - checkout_and_restore_caches
     - execute_sbt_command:
         cmd: "protobufContinuityCheck"
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 static_tests:
   executor: canton-medium-docker
@@ -71,7 +71,7 @@ static_tests:
           echo "if this fails, you need to update our build image. have a look at .ci/README.md"
           diff shell.nix /tmp/shell.nix || exit 1
           diff -r nix /tmp/nix || exit 1
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 check_todos:
   executor: canton-medium-docker
@@ -86,7 +86,7 @@ check_todos:
           if [ "${CIRCLE_PROJECT_USERNAME}" = "DACH-NY" ]; then
             .ci/nix-exec amm .circleci/todo-script/src/checkTodos.sc
           fi
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 scalafix:
   executor: canton-large-docker
@@ -96,7 +96,7 @@ scalafix:
     - execute_sbt_command:
         cmd: "scalafixCheck"
     - save_sbt_cache
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 update_canton_build_docker_image:
   docker:
@@ -164,7 +164,7 @@ daml_upgrade_pr:
         from_version: $CANTON_DAML_VERSION
         to_version: $NEWEST_DAML_VERSION
         pr_url: $PR_URL
-    - slack_red_main_with_volunteer
+    - slack_notify_failure_with_volunteer
 
 upload_new_test_artifact_dars:
     executor: canton-small-docker

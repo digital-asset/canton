@@ -21,6 +21,9 @@ import com.digitalasset.canton.http.JsonApiConfig
 import com.digitalasset.canton.integration.ConfigTransforms
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.participant.config.{
+  AlphaAcsReplicationConfig,
+  AlphaAcsReplicationSourceConfig,
+  AlphaOnlinePartyReplicationConfig,
   CantonEngineConfig,
   ExtensionServiceConfig,
   LedgerApiServerConfig,
@@ -39,6 +42,7 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.SequencerHighAvailabilityConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.{
+  AlphaSequencerChannelConfig,
   RemoteSequencerConfig,
   SequencerNodeConfig,
   SequencerNodeParameterConfig,
@@ -1602,6 +1606,81 @@ class ConfigValidationsTest extends BaseTestWordSpec {
       )
       assertErrors(config)(
         clientFlowControlError("CantonBFT sequencer 's1', P2P endpoint: 127.0.0.1:5001")
+      )
+    }
+  }
+
+  "sequencer channels in standard config" should {
+    "sequencer nodes reject sequencer channels config" in {
+      val config = CantonConfig(
+        sequencers = Map(
+          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
+            parameters = SequencerNodeParameterConfig(alphaSequencerChannelSupport =
+              Some(AlphaSequencerChannelConfig())
+            )
+          )
+        )
+      )
+
+      assertErrors(config)(
+        s"Sequencer node s1 can only enable sequencer channels in non-standard config"
+      )
+    }
+
+    "participant nodes reject ACS replication config" in {
+      val config = CantonConfig(
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            parameters = ParticipantNodeParameterConfig(alphaAcsReplicationSupport =
+              Some(AlphaAcsReplicationConfig())
+            )
+          )
+        )
+      )
+
+      assertErrors(config)(
+        s"Participant node p1 can only enable ACS replication in non-standard config"
+      )
+    }
+
+    "online party replication rejected without ACS replication config" in {
+      val config = CantonConfig(
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            parameters = ParticipantNodeParameterConfig(
+              alphaOnlinePartyReplicationSupport = Some(AlphaOnlinePartyReplicationConfig()),
+              alphaAcsReplicationSupport = None,
+            )
+          )
+        )
+      )
+
+      assertErrors(config)(
+        s"Participant node p1 can only enable online party replication along with ACS replication"
+      )
+    }
+
+    "ACS replication source rejects max queue size below source batch size" in {
+      val config = CantonConfig(
+        parameters = CantonParameters(nonStandardConfig = true),
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            parameters = ParticipantNodeParameterConfig(
+              alphaAcsReplicationSupport = Some(
+                AlphaAcsReplicationConfig(
+                  source = AlphaAcsReplicationSourceConfig(
+                    acsBatchSize = PositiveInt.tryCreate(20),
+                    acsReaderMaxQueueSize = PositiveInt.tryCreate(10),
+                  )
+                )
+              )
+            )
+          )
+        ),
+      )
+
+      assertErrors(config)(
+        "Participant node p1 ACS replication source ACS reader max queue size must be at least the ACS batch size"
       )
     }
   }

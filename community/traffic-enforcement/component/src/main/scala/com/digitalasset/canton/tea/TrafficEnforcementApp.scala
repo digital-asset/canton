@@ -11,7 +11,7 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.InProcessGrpcName
 import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
-import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig
+import com.digitalasset.canton.platform.config.{TopUpConfig, TrafficEnforcementServerConfig}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.tea.ingestion.{
   TeaCreditIngestionService,
@@ -99,13 +99,12 @@ class TrafficEnforcementApp(
     ).grpcSource,
   )
 
-  // Projection for credits, only started when paymasters are configured: without them no top-up can
-  // be trusted, and the top-up package might not even be uploaded on this participant.
-  private val creditIngestion: Option[CloseableProjection] =
-    if (config.projection.topUpPaymasters.isEmpty) {
-      noTracingLogger.info("No top-up paymasters configured, top-up ingestion is disabled")
+  // Projection for credits by daml top-ups
+  private val creditIngestion: Option[CloseableProjection] = config.topUp match {
+    case TopUpConfig.Disabled =>
+      noTracingLogger.info("Top-up ingestion is disabled")
       None
-    } else
+    case damlCredit: TopUpConfig.DamlCredit =>
       Some(
         createProjection(
           ProjectionId("credit-ingestion", "grpc-stream"),
@@ -113,11 +112,12 @@ class TrafficEnforcementApp(
           new TeaCreditIngestionService(
             ledgerResources.client.updateService,
             ledgerResources.client.stateService,
-            config.projection,
+            damlCredit,
             loggerFactory,
           ).grpcSource,
         )
       )
+  }
 
   // Start the in process gRPC server
   server.start().discard
