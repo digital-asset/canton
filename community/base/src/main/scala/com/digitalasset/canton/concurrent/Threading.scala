@@ -15,7 +15,7 @@ import com.typesafe.scalalogging.Logger
 import java.util.concurrent.*
 import java.util.concurrent.ForkJoinPool.ForkJoinWorkerThreadFactory
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{ExecutionContextExecutor, blocking}
+import scala.concurrent.blocking
 import scala.util.chaining.*
 
 /** Factories and utilities for dealing with threading.
@@ -245,10 +245,6 @@ object Threading {
       TimeUnit.MILLISECONDS,
     )
   }
-
-  def directExecutionContext(logger: Logger): ExecutionContextExecutor = DirectExecutionContext(
-    logger
-  )
 
   // None only when detection code was never run
   private val detectedNumberOfThreads = new AtomicReference[Option[PositiveInt]](None)

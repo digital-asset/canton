@@ -13,8 +13,8 @@ import com.digitalasset.canton.tracing.TracingConfig
 object MockedNodeParameters {
   def cantonNodeParameters(
       _processingTimeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing,
-      _cachingConfigs: CachingConfigs = CachingConfigs.testing,
-      _batchingConfig: BatchingConfig = BatchingConfig(),
+      _cachingConfigs: CachingConfigs = TestCachingConfigs(),
+      _batchingConfig: BatchingConfig = TestBatchingConfig(),
       _loggingConfig: LoggingConfig = LoggingConfig(),
       _enableAdditionalConsistencyChecks: Boolean = true,
       _nonStandardConfig: Boolean = false,
@@ -26,6 +26,8 @@ object MockedNodeParameters {
     override def enableKeyDownload: Boolean = false
 
     override def enableTestingFeatures: Boolean = true
+
+    override def enableScopeOnlyJwt: Boolean = false
 
     override def enableAdditionalConsistencyChecks: Boolean = _enableAdditionalConsistencyChecks
 

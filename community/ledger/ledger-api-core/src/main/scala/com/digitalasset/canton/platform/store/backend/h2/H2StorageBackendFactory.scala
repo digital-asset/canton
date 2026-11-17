@@ -49,7 +49,7 @@ final case class H2StorageBackendFactory(loggerFactory: NamedLoggerFactory)
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
   ): PartyStorageBackend =
-    new PartyStorageBackendTemplate(participantId, ledgerEndCache, stringInterning)
+    new PartyStorageBackendTemplate(H2QueryStrategy, participantId, ledgerEndCache, stringInterning)
 
   override def createPartyRecordStorageBackend: PartyRecordStorageBackend =
     PartyRecordStorageBackendImpl

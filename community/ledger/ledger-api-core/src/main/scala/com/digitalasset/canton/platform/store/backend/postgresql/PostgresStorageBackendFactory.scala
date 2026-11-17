@@ -31,7 +31,7 @@ final case class PostgresStorageBackendFactory(
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
   ): PartyStorageBackend =
-    new PartyStorageBackendTemplate(participantId, ledgerEndCache, stringInterning)
+    new PartyStorageBackendTemplate(queryStrategy, participantId, ledgerEndCache, stringInterning)
 
   override def createCompletionStorageBackend(
       stringInterning: StringInterning,

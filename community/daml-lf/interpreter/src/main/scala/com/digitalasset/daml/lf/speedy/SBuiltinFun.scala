@@ -136,14 +136,15 @@ private[speedy] sealed abstract class CmdBuiltin(arity: Int)
     *   the builtin execution's resulting control value
     */
   protected def executeCmd(
-      args: ArraySeq[SValue]
+      args: ArraySeq[SValue],
+      machine: CmdMachine,
   ): Question.Cmd
 
   override private[speedy] final def execute[Q](
       args: ArraySeq[SValue],
       machine: Machine[Q],
   ): Control[Q] =
-    machine.asCmdMachine(productPrefix)(_ => Control.Question(executeCmd(args)))
+    machine.asCmdMachine(productPrefix)(machine => Control.Question(executeCmd(args, machine)))
 }
 
 private[lf] object SBuiltinFun {
@@ -650,6 +651,22 @@ private[lf] object SBuiltinFun {
 
       val codePoints = Utf8.unpack(string)
       SList(FrontStack.from(codePoints.map(SInt64.apply)))
+    }
+  }
+
+  final case object SBTextToContractId extends SBuiltinPure(1) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SOptional = {
+      val arg0 = getSText(args, 0)
+
+      machine.updateGasBudget(_.BTextToContractId.cost(arg0))
+
+      V.ContractId.fromString(arg0) match {
+        case Right(coid) if coid.isAbsolute => SOptional(Some(SContractId(coid)))
+        case _ => SV.None
+      }
     }
   }
 
@@ -2473,6 +2490,23 @@ private[lf] object SBuiltinFun {
                 mbToken,
               )
               (result, newMbtoken) = entry
+              // This check is superseded by `checkContractUpgradable`. We keep it here only when
+              // `errorOnContractKeyHashMismatch` is off (PV36) to be 100% sure we do not break
+              // backward compatibility.
+              _ = if (!machine.interpretationConfig.errorOnContractKeyHashMismatch)
+                result.foreach { case (contract, _, _) =>
+                  if (contract.contractKeyWithMaintainers.forall(_.globalKey != gkey))
+                    crash(
+                      s"""Contract key mismatch: the ledger returned a contract whose key does not match the requested key.
+                         | Requested key: $gkey
+                         | Returned contract id: ${contract.contractId}
+                         | Returned contract template: ${contract.templateId}
+                         | Returned contract key: ${contract.contractKeyWithMaintainers
+                          .map(_.globalKey)
+                          .getOrElse("<no key>")}
+                         |""".stripMargin
+                    )
+                }
               result <- loop(resume(result.view.map(_._1.contractId), newMbtoken))
             } yield result
           case Right(Right((mapping, next))) =>
@@ -2817,68 +2851,75 @@ private[lf] object SBuiltinFun {
 
   case class SBCCreate(tmplId: TypeConId) extends CmdBuiltin(1) {
     override protected def executeCmd(
-        args: ArraySeq[SValue]
+        args: ArraySeq[SValue],
+        machine: CmdMachine,
     ): Question.Cmd = {
       val record = getSRecord(args, 0)
-      Question.Cmd.Create(tmplId, record)
+      Question.Cmd.Create(tmplId, record, machine.getLastLocation)
     }
   }
 
   case class SBCFetchTemplate(tmplId: TypeConId) extends CmdBuiltin(1) {
     override protected def executeCmd(
-        args: ArraySeq[SValue]
+        args: ArraySeq[SValue],
+        machine: CmdMachine,
     ): Question.Cmd = {
       val coid = getSContractId(args, 0)
-      Question.Cmd.FetchTemplate(tmplId, coid)
+      Question.Cmd.FetchTemplate(tmplId, coid, machine.getLastLocation)
     }
   }
 
   case class SBCFetchByKey(tmplId: TypeConId) extends CmdBuiltin(1) {
     override protected def executeCmd(
-        args: ArraySeq[SValue]
+        args: ArraySeq[SValue],
+        machine: CmdMachine,
     ): Question.Cmd = {
       val key = args(0)
-      Question.Cmd.FetchByKey(tmplId, key)
+      Question.Cmd.FetchByKey(tmplId, key, machine.getLastLocation)
     }
   }
 
   case class SBCExerciseTemplate(ifaceId: TypeConId, choiceName: ChoiceName) extends CmdBuiltin(2) {
     override protected def executeCmd(
-        args: ArraySeq[SValue]
+        args: ArraySeq[SValue],
+        machine: CmdMachine,
     ): Question.Cmd = {
       val coid = getSContractId(args, 0)
       val arg = args(1)
-      Question.Cmd.ExerciseTemplate(ifaceId, coid, choiceName, arg)
+      Question.Cmd.ExerciseTemplate(ifaceId, coid, choiceName, arg, machine.getLastLocation)
     }
   }
 
   case class SBCFetchInterface(ifaceId: TypeConId) extends CmdBuiltin(1) {
     override protected def executeCmd(
-        args: ArraySeq[SValue]
+        args: ArraySeq[SValue],
+        machine: CmdMachine,
     ): Question.Cmd = {
       val coid = getSContractId(args, 0)
-      Question.Cmd.FetchInterface(ifaceId, coid)
+      Question.Cmd.FetchInterface(ifaceId, coid, machine.getLastLocation)
     }
   }
 
   case class SBCExerciseInterface(ifaceId: TypeConId, choiceName: ChoiceName)
       extends CmdBuiltin(2) {
     override protected def executeCmd(
-        args: ArraySeq[SValue]
+        args: ArraySeq[SValue],
+        machine: CmdMachine,
     ): Question.Cmd = {
       val coid = getSContractId(args, 0)
       val arg = args(1)
-      Question.Cmd.ExerciseInterface(ifaceId, coid, choiceName, arg)
+      Question.Cmd.ExerciseInterface(ifaceId, coid, choiceName, arg, machine.getLastLocation)
     }
   }
 
   case class SBCQueryContractKey(tmplId: TypeConId) extends CmdBuiltin(2) {
     override protected def executeCmd(
-        args: ArraySeq[SValue]
+        args: ArraySeq[SValue],
+        machine: CmdMachine,
     ): Question.Cmd = {
       val n = (getSInt64(args, 0) min MaxContractKeyFetches.toLong).toInt
       val key = args(1)
-      Question.Cmd.QueryContractKey(tmplId, key, n)
+      Question.Cmd.QueryContractKey(tmplId, key, n, machine.getLastLocation)
     }
   }
 
@@ -2887,17 +2928,19 @@ private[lf] object SBuiltinFun {
       choiceName: ChoiceName,
   ) extends CmdBuiltin(2) {
     override protected def executeCmd(
-        args: ArraySeq[SValue]
+        args: ArraySeq[SValue],
+        machine: CmdMachine,
     ): Question.Cmd = {
       val key = args(0)
       val arg = args(1)
-      Question.Cmd.ExerciseByKey(tmplId, key, choiceName, arg)
+      Question.Cmd.ExerciseByKey(tmplId, key, choiceName, arg, machine.getLastLocation)
     }
   }
 
   case object SBCNeedExternalCall extends CmdBuiltin(4) {
     override protected def executeCmd(
-        args: ArraySeq[SValue]
+        args: ArraySeq[SValue],
+        machine: CmdMachine,
     ): Question.Cmd = {
       val extensionId = getSText(args, 0)
       val functionId = getSText(args, 1)
@@ -2909,13 +2952,15 @@ private[lf] object SBuiltinFun {
 
   case object SBCGetTime extends CmdBuiltin(0) {
     override protected def executeCmd(
-        args: ArraySeq[SValue]
+        args: ArraySeq[SValue],
+        machine: CmdMachine,
     ): Question.Cmd = Question.Cmd.GetTime
   }
 
   case object SBCCheckLedgerTimeLT extends CmdBuiltin(1) {
     override protected def executeCmd(
-        args: ArraySeq[SValue]
+        args: ArraySeq[SValue],
+        machine: CmdMachine,
     ): Question.Cmd = {
       val time = getSTimestamp(args, 0)
       Question.Cmd.CheckLedgerTimeLT(time)
@@ -3226,6 +3271,7 @@ private[lf] object SBuiltinFun {
         dstContract.packageName,
         srcContractMetadata,
         dstContract.metadata,
+        machine,
       )
       _ <- mbTypedNormalFormAuthenticator match {
         case Some(authenticator) =>
@@ -3307,6 +3353,7 @@ private[lf] object SBuiltinFun {
       dstPkgName: Ref.PackageName,
       original: ContractMetadata,
       recomputed: ContractMetadata,
+      machine: UpdateMachine,
   ): ContU[Unit] = {
 
     def check[T](getter: ContractMetadata => T, desc: String): Option[String] =
@@ -3314,15 +3361,22 @@ private[lf] object SBuiltinFun {
         s"$desc mismatch: $original vs $recomputed"
       )
 
+    val keyHashMismatchError: Option[String] =
+      if (original.keyOpt.map(_.globalKey.hash) == recomputed.keyOpt.map(_.globalKey.hash)) {
+        None
+      } else if (machine.interpretationConfig.errorOnContractKeyHashMismatch) {
+        check(_.keyOpt.map(_.globalKey.hash), "key hash")
+      } else {
+        machine.recordContractKeyMismatch(coid, original.keyOpt, recomputed.keyOpt)
+        None
+      }
+
     List(
       check(_.signatories, "signatories"),
       check(_.nonSignatoryStakeholders, "nonSignatoryStakeholders"),
       check(_.keyOpt.map(_.maintainers), "key maintainers"),
       check(_.keyOpt.map(_.globalKey.key), "key value"),
-      // TODO(#37616): PV36 backward-compatibility logic was omitted here assuming PV36 is deprecated.
-      // If support is retained, port the fixes implemented on 3.7 in #37442, #37448, #37450, and #37482.
-      // Once #37616 is resolved, simply remove this comment.
-      check(_.keyOpt.map(_.globalKey.hash), "key hash"),
+      keyHashMismatchError,
       Option.when(srcPkgName != dstPkgName)(
         s"package name mismatch: $srcPkgName vs $dstPkgName"
       ),

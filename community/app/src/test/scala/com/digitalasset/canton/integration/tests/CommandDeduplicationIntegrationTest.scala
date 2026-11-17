@@ -128,7 +128,7 @@ trait CommandDeduplicationIntegrationTest
         ).create.commands.loneElement
       val completionEnd = participant1.ledger_api.state.end()
       val commandId = "deduplicate-accept-command-service"
-      val dedupPeriod1 = DeduplicationDuration(java.time.Duration.ofHours(1))
+      val dedupPeriod1 = DeduplicationDuration.create(java.time.Duration.ofHours(1)).value
       val submissionId1 = "first-submission"
 
       def submit(submissionId: String, dedupPeriod: DeduplicationPeriod): Transaction =
@@ -195,7 +195,7 @@ trait CommandDeduplicationIntegrationTest
         sequencer1
       )
       val submissionId5 = "fifth-submission"
-      submit(submissionId5, DeduplicationDuration(java.time.Duration.ofSeconds(599)))
+      submit(submissionId5, DeduplicationDuration.create(java.time.Duration.ofSeconds(599)).value)
       val (completion5, _) =
         findCompletionFor(participant1, alice, offset4, commandId, submissionId5)
       checkAccepted(completion5, submissionId5, offset4.some -> None)
@@ -212,7 +212,7 @@ trait CommandDeduplicationIntegrationTest
         ).create.commands.loneElement
       val completionEnd = participant1.ledger_api.state.end()
       val commandId = "deduplicate-accept-command-submission-service"
-      val dedupPeriod1 = DeduplicationDuration(java.time.Duration.ofHours(1))
+      val dedupPeriod1 = DeduplicationDuration.create(java.time.Duration.ofHours(1)).value
       val submissionId1 = "first-submission"
 
       def submitAsync(submissionId: String, dedupPeriod: DeduplicationPeriod): Unit =
@@ -265,7 +265,10 @@ trait CommandDeduplicationIntegrationTest
       // the time change for the next command submissions
       participant1.testing.fetch_synchronizer_time(daId)
       val submissionId5 = "fifth-submission"
-      submitAsync(submissionId5, DeduplicationDuration(java.time.Duration.ofSeconds(599)))
+      submitAsync(
+        submissionId5,
+        DeduplicationDuration.create(java.time.Duration.ofSeconds(599)).value,
+      )
       val (completion5, _) =
         findCompletionFor(participant1, alice, offset4, commandId, submissionId5)
       checkAccepted(completion5, submissionId5, offset4.some -> None)
@@ -302,7 +305,11 @@ trait CommandDeduplicationIntegrationTest
       val offset0 = participant1.ledger_api.state.end()
 
       logger.debug("Submit to synchronizer da")
-      submitAsync(submissionId1, DeduplicationDuration(java.time.Duration.ofMillis(1)), daId)
+      submitAsync(
+        submissionId1,
+        DeduplicationDuration.create(java.time.Duration.ofMillis(1)).value,
+        daId,
+      )
       val (completion1, offset1) =
         findCompletionFor(participant1, alice, completionEnd, commandId, submissionId1)
       checkAccepted(completion1, submissionId1)
@@ -310,7 +317,11 @@ trait CommandDeduplicationIntegrationTest
       logger.debug("Resubmit on synchronizer acme with deduplication duration")
       val submissionId2 = "second-submission-duration"
 
-      submitAsync(submissionId2, DeduplicationDuration(java.time.Duration.ofHours(1)), acmeId)
+      submitAsync(
+        submissionId2,
+        DeduplicationDuration.create(java.time.Duration.ofHours(1)).value,
+        acmeId,
+      )
       val (completion2, offset2) =
         findCompletionFor(participant1, alice, offset1, commandId, submissionId2)
       checkIsAlreadyExists(completion2, submissionId2, offset1)
@@ -419,7 +430,8 @@ trait CommandDeduplicationIntegrationTest
           synchronizerId = Some(daId),
           commandId = commandId,
           submissionId = submissionId,
-          deduplicationPeriod = DeduplicationDuration(java.time.Duration.ofNanos(1000)).some,
+          deduplicationPeriod =
+            DeduplicationDuration.create(java.time.Duration.ofNanos(1000)).value.some,
         )
 
       val DelayPromises(requestReceived, requestRelease, responseReceived, responseRelease) =
@@ -494,7 +506,8 @@ trait CommandDeduplicationIntegrationTest
           synchronizerId = Some(daId),
           commandId = commandId,
           submissionId = submissionId,
-          deduplicationPeriod = DeduplicationDuration(java.time.Duration.ofNanos(1000)).some,
+          deduplicationPeriod =
+            DeduplicationDuration.create(java.time.Duration.ofNanos(1000)).value.some,
         )
 
       val DelayPromises(requestReceived, requestRelease, responseReceived, responseRelease) =
@@ -567,7 +580,7 @@ trait CommandDeduplicationIntegrationTest
         synchronizerId = Some(daId),
         commandId = commandId,
         submissionId = submissionId,
-        deduplicationPeriod = DeduplicationDuration(maxDedupDuration).some,
+        deduplicationPeriod = DeduplicationDuration.create(maxDedupDuration).value.some,
       )
 
     val sequencer = getProgrammableSequencer(sequencer1.name) // For DA synchronizer

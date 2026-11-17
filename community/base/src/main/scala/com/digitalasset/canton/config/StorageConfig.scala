@@ -102,92 +102,42 @@ final case class DbParametersConfig(
 }
 
 /** Various settings to control batching behaviour related to db queries
-  *
-  * @param maxItemsInBatch
-  *   maximum number of items in a batch (default value)
-  * @param maxTopologyWriteBatchSize
-  *   maximum number of items in a write batch
-  * @param maxTopologyUpdateBatchSize
-  *   maximum number of items in an update batch
-  * @param ledgerApiPruningBatchSize
-  *   Number of events to prune from the ledger api server index-database at a time during automatic
-  *   background pruning. Canton-internal store pruning happens at the smaller batch size of
-  *   "maxPruningBatchSize" to minimize memory usage whereas ledger-api-server index-db pruning
-  *   needs sufficiently large batches to amortize the database overhead of "skipping over" active
-  *   contracts.
-  * @param maxAcsImportBatchSize
-  *   maximum number of active contracts in a batch to be imported
-  * @param parallelism
-  *   number of parallel queries to the db. defaults to 8
-  * @param aggregator
-  *   batching configuration for DB queries
-  * @param inFlightAggregationsQueryInterval
-  *   (optionally) split aggregator queries into intervals of this duration to avoid sequential
-  *   scans. When too many query intervals are generated, query interval splitting does not occur.
-  * @param mediatorFetchFinalizedResponsesAggregator
-  *   batching configuration for the mediator for fetching finalized responses
-  * @param mediatorStoreFinalizedResponsesAggregator
-  *   batching configuration for the mediator for storing finalized responses
-  * @param maxPruningBatchSize
-  *   maximum number of events to prune from a participant at a time, used to break up canton
-  *   participant-internal batches
-  * @param maxPruningTimeInterval
-  *   split pruning queries into intervals of this duration to avoid sequential scans
-  * @param pruningParallelism
-  *   number of parallel pruning queries to the db. defaults to 2
-  * @param topologyCacheAggregator
-  *   number of parallel requests for the topology cache read side
-  * @param maxStakeholderGroupsBatchSize
-  *   maximum number of stakeholder groups in a batch when reading commitments from a snapshot
   */
-final case class BatchingConfig(
-    maxItemsInBatch: PositiveNumeric[Int] = BatchingConfig.defaultMaxItemsBatch,
-    maxTopologyWriteBatchSize: PositiveNumeric[Int] =
-      BatchingConfig.defaultMaxTopologyWriteBatchSize,
-    maxTopologyUpdateBatchSize: PositiveNumeric[Int] =
-      BatchingConfig.defaultMaxTopologyUpdateBatchSize,
-    ledgerApiPruningBatchSize: PositiveNumeric[Int] =
-      BatchingConfig.defaultLedgerApiPruningBatchSize,
-    maxAcsImportBatchSize: PositiveNumeric[Int] = BatchingConfig.defaultMaxAcsImportBatchSize,
-    parallelism: PositiveNumeric[Int] = BatchingConfig.defaultBatchingParallelism,
-    aggregator: BatchAggregatorConfig = BatchingConfig.defaultAggregator,
-    inFlightAggregationsQueryInterval: Option[PositiveFiniteDuration] =
-      BatchingConfig.defaultInFlightAggregationsQueryInterval,
-    contractStoreAggregator: BatchAggregatorConfig = BatchingConfig.defaultContractStoreAggregator,
-    mediatorFetchFinalizedResponsesAggregator: BatchAggregatorConfig =
-      BatchingConfig.defaultAggregator,
-    mediatorStoreFinalizedResponsesAggregator: BatchAggregatorConfig =
-      BatchingConfig.defaultAggregator,
-    maxPruningBatchSize: PositiveNumeric[Int] = BatchingConfig.defaultMaxPruningBatchSize,
-    maxPruningTimeInterval: PositiveFiniteDuration = BatchingConfig.defaultMaxPruningTimeInterval,
-    pruningParallelism: PositiveNumeric[Int] = BatchingConfig.defaultPruningParallelism,
-    topologyCacheAggregator: BatchAggregatorConfig = BatchingConfig.defaultAggregator,
-    maxStakeholderGroupsBatchSize: PositiveNumeric[Int] =
-      BatchingConfig.defaultMaxStakeholderGroupsBatchSize,
-)
+trait BatchingConfig {
+
+  /** Maximum number of items in a batch (default value). */
+  def maxItemsInBatch: PositiveNumeric[Int]
+
+  /** Maximum number of items in a write batch. */
+  def maxTopologyWriteBatchSize: PositiveNumeric[Int]
+
+  /** Maximum number of items in an update batch. */
+  def maxTopologyUpdateBatchSize: PositiveNumeric[Int]
+
+  /** Number of parallel queries to the db. Defaults to 8. */
+  def parallelism: PositiveNumeric[Int]
+
+  /** Batching configuration for DB queries. */
+  def aggregator: BatchAggregatorConfig
+
+  /** Number of parallel pruning queries to the db. Defaults to 2. */
+  def pruningParallelism: PositiveNumeric[Int]
+
+  /** Number of parallel requests for the topology cache read side. */
+  def topologyCacheAggregator: BatchAggregatorConfig
+}
 
 object BatchingConfig {
 
-  private val defaultMaxItemsBatch: PositiveInt = PositiveNumeric.tryCreate(100)
-  private val defaultMaxTopologyWriteBatchSize: PositiveInt = PositiveNumeric.tryCreate(1000)
-  private val defaultMaxTopologyUpdateBatchSize: PositiveInt = PositiveNumeric.tryCreate(1000)
-  private val defaultBatchingParallelism: PositiveInt = PositiveNumeric.tryCreate(8)
-  private val defaultLedgerApiPruningBatchSize: PositiveInt = PositiveNumeric.tryCreate(50000)
-  private val defaultMaxAcsImportBatchSize: PositiveNumeric[Int] = PositiveNumeric.tryCreate(1000)
-  private val defaultAggregator: BatchAggregatorConfig.Batching =
+  private[canton] val defaultMaxItemsBatch: PositiveInt = PositiveNumeric.tryCreate(100)
+  private[canton] val defaultMaxTopologyWriteBatchSize: PositiveInt =
+    PositiveNumeric.tryCreate(1000)
+  private[canton] val defaultMaxTopologyUpdateBatchSize: PositiveInt =
+    PositiveNumeric.tryCreate(1000)
+  private[canton] val defaultBatchingParallelism: PositiveInt = PositiveNumeric.tryCreate(8)
+  private[canton] val defaultAggregator: BatchAggregatorConfig.Batching =
     BatchAggregatorConfig.Batching()
-  private val defaultInFlightAggregationsQueryInterval: Option[PositiveFiniteDuration] = None
-  private val defaultContractStoreAggregator: BatchAggregatorConfig.Batching =
-    BatchAggregatorConfig.Batching(
-      maximumInFlight = PositiveNumeric.tryCreate(5),
-      maximumBatchSize = PositiveNumeric.tryCreate(50),
-    )
-  private val defaultMaxPruningBatchSize: PositiveInt = PositiveNumeric.tryCreate(1000)
-  // default of 30min corresponds to 1440 pruning queries after 30 days downtime, which is a reasonable tradeoff
-  private val defaultMaxPruningTimeInterval: PositiveFiniteDuration =
-    PositiveFiniteDuration.ofMinutes(30)
-  private val defaultPruningParallelism: PositiveInt = PositiveNumeric.tryCreate(2)
-  private val defaultMaxStakeholderGroupsBatchSize: PositiveInt = PositiveNumeric.tryCreate(1000)
+  private[canton] val defaultPruningParallelism: PositiveInt = PositiveNumeric.tryCreate(2)
 }
 
 final case class ConnectionAllocation(

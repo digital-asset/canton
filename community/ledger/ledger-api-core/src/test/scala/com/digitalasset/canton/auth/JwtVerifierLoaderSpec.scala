@@ -8,6 +8,7 @@ import com.daml.jwt.*
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authenticity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AsyncFlatSpec
@@ -30,6 +31,7 @@ trait JwtVerifierLoaderSpec
     10.minutes,
     10.seconds,
     10.seconds,
+    minRefreshInterval = 30.seconds,
     loggerFactory = loggerFactory,
   )
 
@@ -113,7 +115,14 @@ trait JwtVerifierLoaderSpecKeys {
   private val server = SimpleHttpServer.start(jwks)
   protected val url: String = SimpleHttpServer.responseUrl(server)
 
-  protected val verifier: JwksVerifier = JwksVerifier(url, 1000, 10.minutes, 10.seconds, 10.seconds)
+  protected val verifier: JwksVerifier = JwksVerifier(
+    url,
+    cacheExpiration = 10.minutes,
+    connectionTimeout = 10.seconds,
+    readTimeout = 10.seconds,
+    minRefreshInterval = 30.seconds,
+    loggerFactory = NamedLoggerFactory.root,
+  )
 }
 
 class JwtVerifierLoaderSpecRSA extends JwtVerifierLoaderSpec with JwtVerifierLoaderSpecKeys {

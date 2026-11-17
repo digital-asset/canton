@@ -199,7 +199,6 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
                 _serialization,
               ),
               consumedInCore = false,
-              rolledBack = false,
             )
             val _data = data.copy(createdCore = Seq(_createdContract))
             TransactionView.tryCreate(v.hashOps)(

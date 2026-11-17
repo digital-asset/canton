@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.logging.LoggingContext
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.ledger.api.ParticipantId
@@ -69,7 +69,7 @@ private[platform] final case class InitializeParallelIngestion(
       initializeInMemoryState: (Option[LedgerEnd], AchsState) => Future[Unit],
       shutdownRequested: ShutdownInProgress,
   ): Future[Future[(Option[LedgerEnd], AchsWorkDistance)]] = {
-    implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
+    implicit val ec: ExecutionContext = directExecutionContext
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace(TraceContext.createNew("initialize-parallel-ingestion"))(
         LoggingContext.empty

@@ -7,10 +7,12 @@ import cats.data.{EitherT, Nested}
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.crypto.SynchronizerSnapshotSyncCryptoApi
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.UnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
-import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.{
+  PreparedSubmission,
+  SendRequestTimestamps,
+}
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend.Request
 import com.digitalasset.canton.sequencing.protocol.{
   AggregationRule,
@@ -42,20 +44,12 @@ class TestSequencerClientSend(
 
   override def psid: PhysicalSynchronizerId = DefaultTestIdentities.physicalSynchronizerId
 
-  override def sendAsync(
+  private def recordRequest(
       batch: Batch[DefaultOpenEnvelope],
-      currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
       timestamps: SendRequestTimestamps,
       messageId: MessageId,
       aggregationRule: Option[AggregationRule],
-      callback: SendCallback,
-      trafficCostValidator: TrafficCostValidator,
-      amplify: Boolean,
-      useConfirmationResponseAmplificationParameters: Boolean,
-  )(implicit
-      traceContext: TraceContext,
-      metricsContext: MetricsContext,
-  ): SendAsyncResult = {
+  )(implicit traceContext: TraceContext): PreparedSubmission = {
     val request = Request(
       batch,
       timestamps.maxSequencingTime,
@@ -64,14 +58,51 @@ class TestSequencerClientSend(
       None,
     )
 
-    requestsQueue.add(request)
+    new PreparedSubmission {
+      override def trafficCost: Option[Long] = None
 
-    sendResultFactoryO.foreach { sendResultFactory =>
-      callback(sendResultFactory(request))
+      override def sendAsync(
+          callback: SendCallback,
+          amplify: Boolean,
+          useConfirmationResponseAmplificationParameters: Boolean,
+      ): SendAsyncResult = {
+        requestsQueue.add(request)
+        sendResultFactoryO.foreach { sendResultFactory =>
+          callback(sendResultFactory(request))
+        }
+
+        Nested(EitherT.pure(EitherTUtil.unitUS[SendAsyncClientError]))
+      }
     }
-
-    Nested(EitherT.pure(EitherTUtil.unitUS[SendAsyncClientError]))
   }
+
+  override def prepareSend(
+      batch: Batch[DefaultOpenEnvelope],
+      currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
+      timestamps: SendRequestTimestamps,
+      messageId: MessageId,
+      aggregationRule: Option[AggregationRule],
+  )(implicit
+      traceContext: TraceContext,
+      metricsContext: MetricsContext,
+  ): EitherT[FutureUnlessShutdown, SendAsyncClientError, PreparedSubmission] =
+    EitherT.pure(recordRequest(batch, timestamps, messageId, aggregationRule))
+
+  override def sendAsync(
+      batch: Batch[DefaultOpenEnvelope],
+      currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
+      timestamps: SendRequestTimestamps,
+      messageId: MessageId,
+      aggregationRule: Option[AggregationRule],
+      callback: SendCallback,
+      amplify: Boolean,
+      useConfirmationResponseAmplificationParameters: Boolean,
+  )(implicit
+      traceContext: TraceContext,
+      metricsContext: MetricsContext,
+  ): SendAsyncResult =
+    recordRequest(batch, timestamps, messageId, aggregationRule)
+      .sendAsync(callback, amplify, useConfirmationResponseAmplificationParameters)
 
   override def generateMaxSequencingTime(
       referenceTimestamp: CantonTimestamp

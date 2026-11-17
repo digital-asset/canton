@@ -45,6 +45,14 @@ if (runningInCI) {
   val onReleaseLine = baseBranch.exists(_.contains(releaseLineStr)) || branch.contains(releaseLineStr)
   val debugInfo = s"[debug info: branch '$branch', base branch '$baseBranch']"
 
+  // On a tag we disable the todo-checker. The release-line check below does not catch tags:
+  // a tag build has no PR and no branch, only the tag name (e.g. v3.7.2)
+  val tag = sys.env.getOrElse("CIRCLE_TAG", "").strip()
+  if (tag.nonEmpty) {
+    println(s"todo-checker has been disabled, because this CI run is for tag $tag $debugInfo")
+    sys.exit(0)
+  }
+
  // On a release line we disable the todo-checker
   if (onReleaseLine) {
     if (baseBranch.isDefined) {

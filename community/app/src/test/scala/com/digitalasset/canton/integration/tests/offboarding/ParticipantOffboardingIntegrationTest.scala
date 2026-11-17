@@ -12,6 +12,7 @@ import com.digitalasset.canton.admin.api.client.data.{
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{CommandFailure, InstanceReference}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.util.SequencerPenaltyUtils.sequencerPenalty
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
@@ -122,7 +123,8 @@ final class ParticipantOffboardingIntegrationTest
     "successfully off-board a participant" in { implicit env =>
       import env.*
 
-      // revoking the participant synchronizer permission results in the connection to the sequencer being closed.
+      // revoking the participant synchronizer permission results in the sequencer denying the participant's
+      // subscriptions. The participant keeps retrying, in case it is allowed back on the synchronizer.
       // this produces a bunch of warnings
       loggerFactory.assertLogsUnorderedOptional(
         {
@@ -138,10 +140,19 @@ final class ParticipantOffboardingIntegrationTest
           }
           // user-manual-entry-end: OffboardParticipant
 
+          // participant2 stores the revocation, but the sequencer cuts it off before any later event, so its
+          // topology client never reaches the effective time of the revocation and still lists the permission.
+          // So we skip participant2 in the check below.
           eventually() {
-            forAll(synchronizerOwners ++ participants.all) { member =>
+            forAll(synchronizerOwners ++ Seq(participant1, participant3)) { member =>
               member.topology.participant_synchronizer_permissions
                 .list(synchronizerId, filterUid = participant2.filterString) shouldBe empty
+            }
+          }
+
+          clue("participant2 is denied by the sequencer") {
+            eventually() {
+              sequencerPenalty(participant2, synchronizerId, sequencer1.id) should be > 0.0
             }
           }
 
@@ -161,6 +172,9 @@ final class ParticipantOffboardingIntegrationTest
               timeout = 3.seconds,
             )
           }
+
+          // participant2 keeps retrying until its operator disconnects it
+          participant2.synchronizers.disconnect_all()
         },
         logAssertions(participant2, daName, synchronizerId.logical)*
       )
@@ -171,8 +185,11 @@ final class ParticipantOffboardingIntegrationTest
 trait ParticipantOffboardingIntegrationTestAssertions { self: CommunityIntegrationTest =>
 
   protected val subscriptionPermissionDenied =
-    "Permanently closing sequencer subscription due to permission denied"
+    "Closing sequencer subscription due to permission denied"
 
+  /** The off-boarded participant keeps retrying, in case it is allowed back on the synchronizer,
+    * until its operator disconnects it.
+    */
   def logAssertions(
       offboardedParticipant: ParticipantId,
       synchronizer: SynchronizerAlias,
@@ -192,20 +209,25 @@ trait ParticipantOffboardingIntegrationTestAssertions { self: CommunityIntegrati
         s"Unable to find ParticipantSynchronizerPermission for participant $offboardedParticipant on synchronizer $lsid"
       ),
     ),
+    // Repeated at every attempt while the participant keeps retrying
     (
-      LogEntryOptionality.Required,
+      LogEntryOptionality.OptionalMany,
       _.warningMessage should include(s"$offboardedParticipant access is disabled"),
     ),
+    // The participant is denied at least once, and again at every attempt while it keeps retrying
+    // (hence `Required` + `OptionalMany`)
     (
       LogEntryOptionality.Required,
       _.warningMessage should include(subscriptionPermissionDenied),
     ),
-    // The client closes with either permission denied or, if a token refresh races
-    //  with offboarding, an unrecoverable error, because the sole sequencer connection fails
-    //  and the threshold is unreachable.
-    //  These are mutually exclusive outcomes of the same completion callback.
     (
-      LogEntryOptionality.Required,
+      LogEntryOptionality.OptionalMany,
+      _.warningMessage should include(subscriptionPermissionDenied),
+    ),
+    // If a token refresh races with offboarding, the client may still close with an unrecoverable error,
+    //  because the sole sequencer connection fails and the threshold is unreachable.
+    (
+      LogEntryOptionality.Optional,
       entry =>
         if (entry.message.startsWith(SyncServiceSynchronizerDisabledUs.id))
           entry.shouldBeCantonError(
@@ -227,7 +249,7 @@ trait ParticipantOffboardingIntegrationTestAssertions { self: CommunityIntegrati
     ),
     // A token refresh racing with offboarding can be denied because the participant's access is disabled.
     (
-      LogEntryOptionality.Optional,
+      LogEntryOptionality.OptionalMany,
       _.warningMessage should include("PERMISSION_DENIED/Authentication token refresh error"),
     ),
     (
@@ -256,7 +278,8 @@ final class ParticipantSelfOffboardingIntegrationTest
       participants.all.synchronizers.connect_local(sequencer1, daName)
       participant1.health.ping(participant2)
 
-      // revoking the participant synchronizer permission results in the connection to the sequencer being closed.
+      // removing its synchronizer trust certificate results in the sequencer denying the participant's subscriptions.
+      // The participant keeps retrying until its operator disconnects it.
       // this produces a bunch of warnings
       loggerFactory.assertLogsUnorderedOptional(
         {
@@ -267,10 +290,18 @@ final class ParticipantSelfOffboardingIntegrationTest
             change = Remove,
           )
 
+          clue("participant2 is denied by the sequencer") {
+            eventually() {
+              sequencerPenalty(participant2, daId.logical, sequencer1.id) should be > 0.0
+            }
+          }
+
           a[CommandFailure] should be thrownBy participant1.health.ping(
             participant2,
             timeout = 3.seconds,
           )
+
+          participant2.synchronizers.disconnect_all()
         },
         logAssertions(participant2, daName, daId.logical)*
       )

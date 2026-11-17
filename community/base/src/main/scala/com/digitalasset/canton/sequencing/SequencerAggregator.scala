@@ -8,7 +8,7 @@ import com.daml.nameof.NameOf
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashPurpose, Signature}
+import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.health.ComponentHealthState
@@ -29,7 +29,13 @@ import com.digitalasset.canton.sequencing.SequencerAggregator.{
 import com.digitalasset.canton.sequencing.SequencerAggregatorXImpl.EventAndOrdinal
 import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
 import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPoolImpl.SubscriptionStartProvider
-import com.digitalasset.canton.sequencing.protocol.{Batch, Envelope, SignedContent}
+import com.digitalasset.canton.sequencing.protocol.{
+  AggregatedSignedContent,
+  Batch,
+  Envelope,
+  SignedContent,
+}
+import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -54,7 +60,7 @@ trait SequencerAggregator extends FlagCloseable with NamedLogging with Subscript
     *   A Future that completes with a `Right` if the message has been accepted and passed on to the
     *   application handler, or with a `Left` if an error has occurred.
     */
-  def combineAndMergeEvent(sequencerId: SequencerId, message: SequencedSerializedEvent)(implicit
+  def combineAndMergeEvent(sequencerId: SequencerId, message: ConnectionSerializedEvent)(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): FutureUnlessShutdown[Either[SequencerAggregatorError, Unit]]
@@ -79,7 +85,7 @@ trait SequencerAggregator extends FlagCloseable with NamedLogging with Subscript
 
   @VisibleForTesting
   def combine(
-      messages: NonEmpty[Seq[SequencedSerializedEvent]]
+      messages: NonEmpty[Seq[ConnectionSerializedEvent]]
   ): Either[SequencerAggregatorError, SequencedSerializedEvent]
 }
 
@@ -102,7 +108,7 @@ class SequencerAggregatorImpl(
   private def sequencerTrustThreshold: PositiveInt = configRef.get().sequencerTrustThreshold
 
   private case class SequencerMessageData(
-      eventBySequencer: Map[SequencerId, SequencedSerializedEvent],
+      eventBySequencer: Map[SequencerId, ConnectionSerializedEvent],
       promise: PromiseUnlessShutdown[Either[SequencerAggregatorError, SequencerId]],
   )
 
@@ -135,7 +141,7 @@ class SequencerAggregatorImpl(
 
   override def clearEventQueue(): Unit = receivedEvents.clear()
 
-  private def hash(message: SequencedSerializedEvent) =
+  private def hash(message: ConnectionSerializedEvent) =
     SignedContent.hashContent(
       cryptoPureApi,
       message.signedEvent.content,
@@ -143,9 +149,9 @@ class SequencerAggregatorImpl(
     )
 
   override def combine(
-      messages: NonEmpty[Seq[SequencedSerializedEvent]]
+      messages: NonEmpty[Seq[ConnectionSerializedEvent]]
   ): Either[SequencerAggregatorError, SequencedSerializedEvent] = {
-    val message: SequencedSerializedEvent = messages.head1
+    val message: ConnectionSerializedEvent = messages.head1
     val expectedMessageHash = hash(message)
     val hashes: NonEmpty[Set[Hash]] = messages.map(hash).toSet
     for {
@@ -155,14 +161,14 @@ class SequencerAggregatorImpl(
         SequencerAggregatorError.NotTheSameContentHash(hashes),
       )
     } yield {
-      val combinedSignatures: NonEmpty[Seq[Signature]] = messages.flatMap(_.signedEvent.signatures)
-
       val potentiallyNonEmptyTraceContext = messages
         .find(_.traceContext != TraceContext.empty)
         .map(_.traceContext)
         .getOrElse(message.traceContext)
 
-      SequencedEventWithTraceContext(message.signedEvent.copy(signatures = combinedSignatures))(
+      SequencedEventWithTraceContext(
+        SequencerAggregator.mergeSignatures(messages.map(_.signedEvent))
+      )(
         potentiallyNonEmptyTraceContext
       )
     }
@@ -194,12 +200,12 @@ class SequencerAggregatorImpl(
   }
 
   private def addEventToQueue(
-      messages: NonEmpty[List[SequencedSerializedEvent]]
+      messages: NonEmpty[List[ConnectionSerializedEvent]]
   ): Either[SequencerAggregatorError, Unit] =
     combine(messages).map(addEventToQueue)
 
   @SuppressWarnings(Array("com.digitalasset.canton.SynchronizedFuture"))
-  override def combineAndMergeEvent(sequencerId: SequencerId, message: SequencedSerializedEvent)(
+  override def combineAndMergeEvent(sequencerId: SequencerId, message: ConnectionSerializedEvent)(
       implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -252,7 +258,7 @@ class SequencerAggregatorImpl(
 
   private def updatedSequencerMessageData(
       sequencerId: SequencerId,
-      message: SequencedSerializedEvent,
+      message: ConnectionSerializedEvent,
   ): SequencerMessageData = {
     implicit val traceContext: TraceContext = message.traceContext
     val promise = PromiseUnlessShutdown.supervised[Either[SequencerAggregatorError, SequencerId]](
@@ -282,6 +288,20 @@ class SequencerAggregatorImpl(
 }
 
 object SequencerAggregator {
+
+  /** Merges the signatures of the given signed contents. The content and the protocol version are
+    * taken from the first one, so the caller must ensure that all of them sign the same content.
+    */
+  private[sequencing] def mergeSignatures[A <: HasCryptographicEvidence](
+      signed: NonEmpty[Seq[SignedContent[A]]]
+  ): AggregatedSignedContent[A] = {
+    val first = signed.head1
+    AggregatedSignedContent(
+      first.content,
+      signed.map(_.signature),
+      first.representativeProtocolVersion.representative,
+    )
+  }
 
   /** @param maxNbOfContributions
     *   Maximum number of contributions that the aggregator can receive for a given event. Used to
@@ -324,7 +344,7 @@ object SequencerAggregator {
       * @param event
       *   The rejected event
       */
-    final case class BogusEvent(sequencerId: SequencerId, event: SequencedSerializedEvent)
+    final case class BogusEvent(sequencerId: SequencerId, event: ConnectionSerializedEvent)
         extends SequencerAggregatorError {
       override protected def pretty: Pretty[BogusEvent] =
         prettyOfClass(param("sequencerId", _.sequencerId), param("event", _.event))

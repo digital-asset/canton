@@ -26,7 +26,13 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
 import com.digitalasset.canton.synchronizer.sequencing.integrations.state.DbSequencerStateManagerStore.AggregatedSignaturesOfSender
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
 import com.digitalasset.canton.topology.transaction.GeneratorsTransaction
-import com.digitalasset.canton.topology.{GeneratorsTopology, MediatorId, Member, SequencerId}
+import com.digitalasset.canton.topology.{
+  GeneratorsTopology,
+  MediatorId,
+  Member,
+  SequencerId,
+  SynchronizerId,
+}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.rpc.status.Status
 import magnolify.scalacheck.auto.*
@@ -150,10 +156,15 @@ final class GeneratorsSequencer(
       syncParamsAndSnapshotO <- Gen.option(
         Arbitrary.arbitrary[(StaticSynchronizerParameters, SequencerSnapshot)]
       )
+      synchronizerIdO <-
+        if (protocolVersion >= ProtocolVersion.v37)
+          Gen.option(Arbitrary.arbitrary[SynchronizerId])
+        else Gen.const(None)
     } yield OnboardingStateForSequencerV2(
       topologySnapshotO,
       syncParamsAndSnapshotO.map(_._1),
       syncParamsAndSnapshotO.map(_._2),
+      synchronizerIdO,
       protocolVersion,
     )
   )

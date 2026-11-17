@@ -19,7 +19,25 @@ import com.digitalasset.daml.lf.data.Ref.NameTypeConRef
 final case class TemplatePartiesFilter(
     relation: Map[NameTypeConRef, Option[Set[Party]]],
     templateWildcardParties: Option[Set[Party]],
-) {
+) extends ((NameTypeConRef, Set[String]) => Boolean) {
+  def apply(templateId: NameTypeConRef, parties: Set[String]) = {
+    val matchesByWildcard: Boolean =
+      templateWildcardParties match {
+        case Some(include) => parties.exists(p => include.map(_.toString)(p))
+        case None => parties.nonEmpty // the witnesses should not be empty
+      }
+
+    def matchesByTemplateId(templateId: NameTypeConRef): Boolean =
+      relation.get(templateId) match {
+        case Some(Some(include)) =>
+          parties.exists(include.map(_.toString)) // specific parties for the template
+        case Some(None) => parties.nonEmpty // party wildcard
+        case None => false // templateId is not in the filter
+      }
+
+    matchesByWildcard || matchesByTemplateId(templateId)
+  }
+
   val allFilterParties: Option[Set[Party]] = {
     val partiesO = Seq(templateWildcardParties) ++ relation.values
     if (partiesO.exists(_.isEmpty)) {

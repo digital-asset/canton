@@ -120,12 +120,20 @@ class TeaDbTrafficStore(
       })
   }
 
+  override def deleteCorrelation(key: CorrelationKey, insertedAt: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Unit] =
+    singleAttemptUpdate(
+      withStatementTimeout(deleteCorrelationDBIO(key, insertedAt)),
+      "delete_correlation",
+    ).map(_ => ())
+
   // Match the timestamp so we don't delete a newer row with the same key.
-  private[db] def deleteCorrelationDBIO(correlation: SubmissionCorrelation) = {
-    val changeIdHash = correlation.key.changeIdHash.toHexString
+  private[db] def deleteCorrelationDBIO(key: CorrelationKey, insertedAt: CantonTimestamp) = {
+    val changeIdHash = key.changeIdHash.toHexString
     sqlu"""delete from par_traffic_enforcement_correlations
-            where change_id_hash = $changeIdHash and submission_id = ${correlation.key.submissionId}
-              and timestamp = ${correlation.insertedAt}"""
+            where change_id_hash = $changeIdHash and submission_id = ${key.submissionId}
+              and timestamp = $insertedAt"""
   }
 
   /** Returns `None` without writing if the completion is at or below the stored last applied
@@ -167,7 +175,9 @@ class TeaDbTrafficStore(
                 insertUnchargedDBIO(completion).map(_ => ())
               case CompletionDecision.NoEvent => DBIO.unit
             }
-            _ <- DBIO.sequenceOption(correlation.map(deleteCorrelationDBIO))
+            _ <- DBIO.sequenceOption(
+              correlation.map(c => deleteCorrelationDBIO(c.key, c.insertedAt))
+            )
             _ <- upsertStateDBIO(stateKey, event.offset.toString)
           } yield Some(decision)
     } yield result

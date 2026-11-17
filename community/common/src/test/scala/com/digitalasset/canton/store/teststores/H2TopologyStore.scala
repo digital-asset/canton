@@ -3,15 +3,15 @@
 
 package com.digitalasset.canton.store.teststores
 
-import com.digitalasset.canton.TestEssentials
-import com.digitalasset.canton.config.BatchingConfig
+import com.digitalasset.canton.config.TestBatchingConfig
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.store.IndexedTopologyStoreId
 import com.digitalasset.canton.topology.store.TopologyStoreId
 import com.digitalasset.canton.topology.store.db.DbTopologyStore
+import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, TestEssentials}
 import org.scalatest.Suite
 
-trait H2TopologyStore extends H2StoresTest {
+trait H2TopologyStore extends H2StoresTest with HasExecutionContext with HasActorSystem {
   self: Suite & TestEssentials =>
 
   def createTopologyStore[StoreId <: TopologyStoreId](
@@ -26,7 +26,7 @@ trait H2TopologyStore extends H2StoresTest {
       predecessor = None,
       protocolVersion = testedProtocolVersion,
       timeouts = timeouts,
-      batchingConfig = BatchingConfig(),
+      batchingConfig = TestBatchingConfig(),
       loggerFactory = loggerFactory,
     )(h2InMemoryEc)
 

@@ -6,12 +6,12 @@ import DA.Action
 import DA.Text (isPrefixOf)
 import Triparty.Bootstrap
 
-data Mode = PrepareIssuer | PrepareTrader | Throughput | Done deriving (Eq, Show)
+data Mode = PrepareProvider | PrepareUser | Throughput | Done deriving (Eq, Show)
 data ParticipantFlag = Initialising | Ready | Finished deriving (Eq, Show)
 data PartyGrowth = NoPartyGrowth |
                    LocalGrowth with ratio : Int, maxNum : Int, poolSize: Int, maxPending: Int |
                    RemoteGrowth with ratio : Int, maxNum: Int, poolSize: Int, prefix: Text deriving (Eq, Show)
-data Role = Issuer | Trader deriving (Eq, Show)
+data Role = Provider | User deriving (Eq, Show)
 data RunType =
   DvpRun
     with
@@ -30,6 +30,7 @@ data RunType =
       numAgents : Int
       numAssetsPerIssuer : Int
       numAccountsPerIssuer: Int
+      capNumCounterparties : Int
     deriving (Eq, Show)
 
 validPartyGrowth : PartyGrowth -> Bool
@@ -42,7 +43,7 @@ validRunType : RunType -> Bool
 validRunType a = case a of
   DvpRun numAssets acsGrowth payloadSize partyGrowth -> numAssets > 0 && acsGrowth > -1 && payloadSize >= 0 && validPartyGrowth partyGrowth
   TransferRun numAssetsPerActor transferBatchSize payloadSize -> numAssetsPerActor > 0 && transferBatchSize > 0 && payloadSize >= 0
-  TriParty numAgents numAssetsPerIssuer numAccountsPerIssuer -> numAgents > 0 && numAssetsPerIssuer > 0 && numAccountsPerIssuer > 0
+  TriParty numAgents numAssetsPerIssuer numAccountsPerIssuer capNumCounterparties -> numAgents > 0 && numAssetsPerIssuer > 0 && numAccountsPerIssuer > 0 && capNumCounterparties > 0
 
 runTypeCode : RunType -> Int
 runTypeCode a =  case a of
@@ -53,19 +54,18 @@ runTypeCode a =  case a of
 template TestRun
   with
     mode : Mode
-    issuers : [Party]
-    traders : [Party]
+    providers : [Party]
+    users : [Party]
     master : Party
     totalCycles : Int
     reportFrequency: Int
     runType: RunType
   where
 
-    ensure (mode /= Throughput || ((length traders) > 1 && (length issuers) > 0)) && validRunType runType
+    ensure (mode /= Throughput || ((length users) > 1 && (length providers) > 0)) && validRunType runType
 
     signatory master
-    observer traders, issuers
-
+    observer users, providers
 
     choice ToggleMode : ContractId TestRun
        with
@@ -96,6 +96,34 @@ template TestRun
               return newRunCid
             ) self requests
 
+    nonconsuming choice BulkAddTriPartyProvider : (ContractId TestRun, ContractId PreBootstrap)
+      with
+          requests : [ContractId ParticipationRequest]
+          bootstrapCid : ContractId PreBootstrap
+       controller master
+       do
+          let startVal = (self, bootstrapCid)
+          foldlA (\(currentRunCid, currentBootstrapCid) reqCid -> do
+              (newRunCid, newBootstrapCid,_participantCid) <- exercise reqCid AcceptTriPartyProvider with
+                masterCid = currentRunCid
+                bootstrapCid = currentBootstrapCid
+              return (newRunCid, newBootstrapCid)
+            ) startVal requests
+
+    nonconsuming choice BulkAddTriPartyUsers : (ContractId TestRun, ContractId Bootstrap)
+      with
+          requests : [ContractId ParticipationRequest]
+          bootstrapCid : ContractId Bootstrap
+       controller master
+       do
+          let startVal = (self, bootstrapCid)
+          foldlA (\(currentRunCid, currentBootstrapCid) reqCid -> do
+              (newRunCid, newBootstrapCid,_participantCid) <- exercise reqCid AcceptTriPartyUser with
+                masterCid = currentRunCid
+                bootstrapCid = currentBootstrapCid
+              return (newRunCid, newBootstrapCid)
+            ) startVal requests
+
     choice AddParticipant : (ContractId TestRun, ContractId TestParticipant)
        with
           party : Party
@@ -108,7 +136,7 @@ template TestRun
                 party :: (filter (/= party) lst)
               else
                 lst
-          ts <- create this with issuers = (addParty party issuers Issuer), traders = (addParty party traders Trader)
+          ts <- create this with providers = (addParty party providers Provider), users = (addParty party users User)
           rs <- create TestParticipant with master = master, party = party, role, flag = Initialising, proposed = 0, accepted = 0
           return(ts, rs)
 
@@ -119,7 +147,7 @@ template TestRun
         do
           let
             removeParty = \party lst -> filter (/= party) lst
-          create this with issuers = (removeParty party issuers), traders = (removeParty party traders)
+          create this with providers = (removeParty party providers), users = (removeParty party users)
 
 data ProbeType = Proposal | Acceptance deriving (Eq, Show)
 data TestProbeData = TestProbeData with typ: ProbeType, timestamp: Time, count: Int deriving (Eq, Show)
@@ -133,7 +161,6 @@ template TestProbe
     count : Int
   where
     signatory master, party
-
 
     choice Acknowledge : ()
       controller master
@@ -191,14 +218,14 @@ template ParticipationRequest
           exercise masterCid AddParticipant with party, role
 
 
-    choice AcceptTriPartyIssuer : (ContractId TestRun, ContractId TestParticipant)
+    choice AcceptTriPartyProvider : (ContractId TestRun, ContractId PreBootstrap, ContractId TestParticipant)
         with
           masterCid : ContractId TestRun
           bootstrapCid : ContractId PreBootstrap
         controller master
         do
           let partyName = show party
-          if "'cash" `isPrefixOf` partyName then do
+          newBootstrapCid <- if "'cash" `isPrefixOf` partyName then do
             exercise bootstrapCid AddCashIssuer with cashIssuerParty = party
           else if "'issuer" `isPrefixOf` partyName then do
             exercise bootstrapCid AddIssuer with issuer = party
@@ -210,16 +237,19 @@ template ParticipationRequest
             exercise bootstrapCid AddTaker with taker = party
           else do
             abort ("Unknown party type " <> partyName)
-          exercise masterCid AddParticipant with party, role
+          (masterCid, testParticipantCid) <-exercise masterCid AddParticipant with party, role
+          return (masterCid, newBootstrapCid, testParticipantCid)
 
-    choice AcceptTriPartyUser : (ContractId TestRun, ContractId TestParticipant)
+    choice AcceptTriPartyUser : (ContractId TestRun, ContractId Bootstrap, ContractId TestParticipant)
         with
           masterCid : ContractId TestRun
           bootstrapCid : ContractId Bootstrap
         controller master
         do
-          exercise bootstrapCid AddCustodian with custodian = party
-          exercise masterCid AddParticipant with party, role
+          bootCid <- exercise bootstrapCid AddUser with user = party
+          (masterCid, tpCid) <- exercise masterCid AddParticipant with party, role
+          return (masterCid, bootCid, tpCid)
+
 
 
 

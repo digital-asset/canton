@@ -91,7 +91,7 @@ we have the capability to run a specific test many times on CircleCI.
 ![image](5_ci-usage_run_test_many_times.png)
 
 1. In CircleCI on your branch, click the `Trigger Pipeline` button.
-2. In the `Parameters` section, put the fully qualified classname in the `Value` textbox for the parameter `test_to_run_many_times`.
+2. In the `Parameters` section, put the fully qualified classname in the `Value` textbox for the parameter `test_to_run_many_times`, set parameter 'protocol_version' to 'dev' or any other appropriate value.
 3. Click the `Run Pipeline`.
 4. Once approved, the tests will be run 5 times on each one of 10 build runners (50 times in total).
 

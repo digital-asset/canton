@@ -70,7 +70,8 @@ class InFlightSubmissionTracker(
       publications: Seq[PostPublishData]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
-      _ <- deduplicator.processPublications(publications)
+      // there is no deduplication for reassignments
+      _ <- deduplicator.processPublications(publications.filter(_.isTransaction))
       trackedReferences = publications.map(publication =>
         publication.publishSource match {
           case PublishSource.Local(messageUuid) =>
@@ -190,8 +191,9 @@ class InFlightSubmissionSynchronizerTracker(
     extends NamedLogging {
 
   /** Registers the given submission as being in flight and unsequenced unless there already is an
-    * in-flight submission for the same change ID or the timeout has already elapsed. It is expected
-    * that client always calls this function with a unique messageUuid
+    * in-flight submission for the same change ID or the timeout has already elapsed, and
+    * deduplicates the command. It is expected that client always calls this function with a unique
+    * messageUuid
     *
     * @return
     *   The actual deduplication offset that is being used for deduplication for this submission
@@ -203,6 +205,24 @@ class InFlightSubmissionSynchronizerTracker(
     DeduplicationFailed,
     DeduplicationPeriod.DeduplicationOffset,
   ]] = {
+    implicit val traceContext: TraceContext = submission.submissionTraceContext
+    for {
+      _ <- registerWithoutDeduplication(submission)
+      // After the registration of the in-flight submission, we want to deduplicate the command.
+      // A command deduplication failure must be reported via a completion event
+      // because we do not know whether we have already produced a timely rejection concurrently.
+      deduplicationResult <- EitherT
+        .right(deduplicator.checkDuplication(submission.changeIdHash, deduplicationPeriod).value)
+    } yield deduplicationResult
+  }
+
+  /** Registers the given submission as being in flight and unsequenced unless there already is an
+    * in-flight submission for the same change ID or the timeout has already elapsed. It is expected
+    * that client always calls this function with a unique messageUuid
+    */
+  def registerWithoutDeduplication(
+      submission: InFlightSubmission[UnsequencedSubmission]
+  ): EitherT[FutureUnlessShutdown, InFlightSubmissionTrackerError, Unit] = {
     implicit val traceContext: TraceContext = submission.submissionTraceContext
     for {
       tickCellO <- EitherT(
@@ -247,12 +267,7 @@ class InFlightSubmissionSynchronizerTracker(
         val maxSequencingTimeTick = timeTracker.requestTick(submission.sequencingInfo.timeout)
         tickCell.setRequest(maxSequencingTimeTick)
       }
-      // After the registration of the in-flight submission, we want to deduplicate the command.
-      // A command deduplication failure must be reported via a completion event
-      // because we do not know whether we have already produced a timely rejection concurrently.
-      deduplicationResult <- EitherT
-        .right(deduplicator.checkDuplication(submission.changeIdHash, deduplicationPeriod).value)
-    } yield deduplicationResult
+    } yield ()
   }
 
   /** @see com.digitalasset.canton.participant.store.InFlightSubmissionStore.updateRegistration */

@@ -39,7 +39,6 @@ import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MaliciousParticipantNode
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.engine.Result
 import org.scalatest.Assertion
@@ -100,52 +99,51 @@ class ExternalCallTamperingIntegrationTest
         participants.all.foreach(_.synchronizers.connect_local(sequencer1, alias = daName))
         pureCryptoRef.set(sequencer1.crypto.pureCrypto)
 
-        if (testedProtocolVersion >= ProtocolVersion.v36) {
-          participants.all.dars.upload(BaseTest.ExternalCallTestPath)
+        participants.all.dars.upload(BaseTest.ExternalCallTestPath)
 
-          PartiesAllocator(Set(participant1, participant2))(
-            newParties = Seq("owner" -> participant1),
-            targetTopology = Map(
-              "owner" -> Map(
-                daId -> (PositiveInt.one, Set(
-                  participant1.id -> ParticipantPermission.Submission,
-                  participant2.id -> ParticipantPermission.Confirmation,
-                ))
-              )
-            ),
-          )
-          owner = "owner".toPartyId(participant1)
-
-          tester = JavaDecodeUtil
-            .decodeAllCreated(M.externalcalltest.ExternalCallTester.COMPANION)(
-              participant1.ledger_api.javaapi.commands.submit(
-                Seq(owner),
-                Seq(
-                  new M.externalcalltest.ExternalCallTester(
-                    owner.toProtoPrimitive
-                  ).create.commands.loneElement
-                ),
-              )
+        PartiesAllocator(Set(participant1, participant2))(
+          newParties = Seq("owner" -> participant1),
+          targetTopology = Map(
+            "owner" -> Map(
+              daId -> (PositiveInt.one, Set(
+                participant1.id -> ParticipantPermission.Submission,
+                participant2.id -> ParticipantPermission.Confirmation,
+              ))
             )
-            .loneElement
+          ),
+        )
+        owner = "owner".toPartyId(participant1)
 
-          maliciousP1 = MaliciousParticipantNode(
-            participant1,
-            daId,
-            testedProtocolVersion,
-            testedTransactionLimits,
-            timeouts,
-            loggerFactory,
-            testSubmissionServiceOverrideO = Some(
-              TestSubmissionService(
-                participant1,
-                checkAuthorization = false,
-                enableLfDev = true,
-                externalCallHandler = recordingHandler,
-              )
-            ),
+        tester = JavaDecodeUtil
+          .decodeAllCreated(M.externalcalltest.ExternalCallTester.COMPANION)(
+            participant1.ledger_api.javaapi.commands.submit(
+              Seq(owner),
+              Seq(
+                new M.externalcalltest.ExternalCallTester(
+                  owner.toProtoPrimitive
+                ).create.commands.loneElement
+              ),
+            )
           )
-        }
+          .loneElement
+
+        maliciousP1 = MaliciousParticipantNode(
+          participant1,
+          daId,
+          testedProtocolVersion,
+          testedTransactionLimits,
+          timeouts,
+          loggerFactory,
+          testSubmissionServiceOverrideO = Some(
+            TestSubmissionService(
+              participant1,
+              checkAuthorization = false,
+              enableLfDev = true,
+              externalCallHandler = recordingHandler,
+            )
+          ),
+        )
+
       }
 
   private def callExtensionCommand: Command =

@@ -10,15 +10,23 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.HealthComponent
 import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.SequencedSerializedEvent
 import com.digitalasset.canton.sequencing.client.TestSubscriptionError.{
   RetryableError,
   RetryableExn,
   UnretryableError,
 }
-import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, SignedContent}
+import com.digitalasset.canton.sequencing.protocol.{
+  AggregatedSignedContent,
+  Batch,
+  Deliver,
+  SignedContent,
+}
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
-import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
+import com.digitalasset.canton.sequencing.{ConnectionSerializedEvent, SequencedSerializedEvent}
+import com.digitalasset.canton.store.SequencedEventStore.{
+  ConnectionSequencedEvent,
+  SequencedEventWithTraceContext,
+}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
@@ -68,7 +76,7 @@ class TestSequencerSubscriptionFactoryPekko(
           case Complete =>
             withKillSwitch.killSwitch.shutdown()
             Seq.empty
-          case event: Event => Seq(Right(event.asOrdinarySerializedEvent))
+          case event: Event => Seq(Right(event.asConnectionEvent))
           case Failure(ex) => throw ex
         }
       }
@@ -102,15 +110,39 @@ object TestSequencerSubscriptionFactoryPekko {
   ) extends Element {
     def asOrdinarySerializedEvent: SequencedSerializedEvent =
       mkOrdinarySerializedEvent(timestamp, signatures)
+
+    /** The event as delivered by a single sequencer connection, which signs it once. */
+    def asConnectionEvent: ConnectionSerializedEvent = {
+      val signature = signatures.forgetNE match {
+        case Seq(single) => single
+        case _ =>
+          throw new IllegalArgumentException(
+            s"A connection event has exactly one signature, got $signatures"
+          )
+      }
+      ConnectionSequencedEvent(
+        SignedContent(mkDeliver(timestamp), signature, None, BaseTest.testedProtocolVersion)
+      )(TraceContext.empty)
+    }
   }
 
   def mkOrdinarySerializedEvent(
       timestamp: CantonTimestamp,
       signatures: NonEmpty[Seq[Signature]] = Signature.noSignatures,
   ): SequencedSerializedEvent = {
+    val signedContent =
+      AggregatedSignedContent(
+        mkDeliver(timestamp),
+        signatures,
+        BaseTest.testedProtocolVersion,
+      )
+    SequencedEventWithTraceContext(signedContent)(TraceContext.empty)
+  }
+
+  private def mkDeliver(timestamp: CantonTimestamp): Deliver[Batch[Nothing]] = {
     val pts =
       if (timestamp == CantonTimestamp.Epoch) None else Some(timestamp.addMicros(-1L))
-    val sequencedEvent = Deliver.create(
+    Deliver.create(
       pts,
       timestamp,
       DefaultTestIdentities.physicalSynchronizerId,
@@ -119,14 +151,6 @@ object TestSequencerSubscriptionFactoryPekko {
       Option.empty[TrafficReceipt],
       BaseTest.testedProtocolVersion,
     )
-    val signedContent =
-      SignedContent.create(
-        sequencedEvent,
-        signatures,
-        None,
-        SignedContent.protocolVersionRepresentativeFor(BaseTest.testedProtocolVersion),
-      )
-    SequencedEventWithTraceContext(signedContent)(TraceContext.empty)
   }
 
   def genEvents(startTimestamp: Option[CantonTimestamp], count: Long): Seq[Event] =

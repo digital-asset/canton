@@ -78,6 +78,8 @@ message Value {
 
     TextMap text_map = 16;
 
+    bytes uint256 = 17;
+
     // user-defined datas
 
     Record record = 13;

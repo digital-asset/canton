@@ -7,13 +7,13 @@ import com.daml.ledger.resources.ResourceOwner
 import com.daml.logging.entries.LoggingEntries
 import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
-import com.digitalasset.canton.config.{ProcessingTimeout, StorageConfig}
+import com.digitalasset.canton.config.{ProcessingTimeout, QueryCostMonitoringConfig, StorageConfig}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
-import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.metrics.{DbStorageMetrics, LedgerApiServerMetrics}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore.LastSynchronizerOffset
 import com.digitalasset.canton.platform.config.ServerRole
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
@@ -34,6 +34,7 @@ import com.digitalasset.canton.{LedgerParticipantId, config}
 import com.google.common.annotations.VisibleForTesting
 
 import java.sql.Connection
+import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.{ExecutionContext, Future}
 
 class LedgerApiStore(
@@ -44,6 +45,9 @@ class LedgerApiStore(
     val metrics: LedgerApiServerMetrics,
     val loggerFactory: NamedLoggerFactory,
     val timeouts: ProcessingTimeout,
+    val storageMetricsOpt: Option[DbStorageMetrics],
+    val logQueryCostOpt: Option[QueryCostMonitoringConfig],
+    val schedulerOpt: Option[ScheduledExecutorService],
 ) extends ResourceCloseable {
   private val integrityStorageBackend =
     ledgerApiDbSupport.storageBackendFactory.createIntegrityStorageBackend
@@ -282,6 +286,9 @@ object LedgerApiStore {
   def initialize(
       storageConfig: StorageConfig,
       storage: Option[Storage],
+      storageMetricsOpt: Option[DbStorageMetrics],
+      logQueryCostOpt: Option[QueryCostMonitoringConfig],
+      schedulerOpt: Option[ScheduledExecutorService],
       ledgerParticipantId: LedgerParticipantId,
       ledgerApiDatabaseConnectionTimeout: config.NonNegativeFiniteDuration,
       ledgerApiPostgresDataSourceConfig: PostgresDataSourceConfig,
@@ -339,6 +346,10 @@ object LedgerApiStore {
             metrics = metrics,
             dbConfig = dbConfig,
             disableMergeAndHashJoins = disableMergeAndHashJoins,
+            dbQueueMetricsOpt = storageMetricsOpt.map(_.ledgerApiServer),
+            logQueryCostOpt = logQueryCostOpt,
+            dbParametersConfigOpt = Some(storageConfig.parameters),
+            schedulerOpt = schedulerOpt,
             loggerFactory = loggerFactory,
           )
       }
@@ -351,6 +362,9 @@ object LedgerApiStore {
           metrics = metrics,
           loggerFactory = loggerFactory,
           timeouts = timeouts,
+          storageMetricsOpt = storageMetricsOpt,
+          logQueryCostOpt = logQueryCostOpt,
+          schedulerOpt = schedulerOpt,
         )
       )
 

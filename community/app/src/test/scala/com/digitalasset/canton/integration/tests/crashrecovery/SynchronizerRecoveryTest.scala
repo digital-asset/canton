@@ -4,16 +4,19 @@
 package com.digitalasset.canton.integration.tests.crashrecovery
 
 import com.digitalasset.canton.HasTempDirectory
+import com.digitalasset.canton.admin.api.client.data.ComponentHealthState
 import com.digitalasset.canton.admin.api.client.data.ParticipantStatus.SubmissionReady
 import com.digitalasset.canton.console.CommandFailure
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.TestConsoleEnvironment
+import com.digitalasset.canton.integration.util.SequencerPenaltyUtils.sequencerPenalty
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceSynchronizerDisabledUs,
   SyncServiceSynchronizerDisconnect,
 }
 import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError.ConnectionErrors.FailedToConnectToSequencers
-import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError
+import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerSubscriptionError}
 import org.scalatest.Assertion
 
 import scala.concurrent.duration.*
@@ -227,15 +230,34 @@ final class SynchronizerRecoveryTest extends BaseSynchronizerRestartTest with Ha
             // timestamp. this will kick the sequencer to create more events for this member and this will eventually
             // cause the event stream to reach the timestamp that the participant has subscribed from (which is ahead of
             // where the synchronizer was restored at). Upon receiving a different event for its subscription it will
-            // notice the synchronizer has "forked" and will disconnect.
-            clue("Check all participants are disconnected")(
-              checkAllDisconnected(
-                remoteSequencer1,
-                60.seconds,
-                () => Try(participants.local.foreach(_.testing.fetch_synchronizer_times())),
-              )
-            )
-            ()
+            // notice the synchronizer has "forked", penalize the sequencer and keep retrying.
+            // As the trust threshold of 1 cannot be reached without the sole sequencer, which caused a failure, the
+            // sequencer client reports a failed health.
+            clue("Check all participants penalize the sequencer and report a failed health") {
+              eventually(60.seconds) {
+                // Each participant requests a time separately, as the request fails for participants that cannot subscribe
+                participants.local.foreach(p => Try(p.testing.fetch_synchronizer_times()).discard)
+                forAll(participants.local) { participant =>
+                  sequencerPenalty(
+                    participant,
+                    remoteSequencer1.synchronizer_id,
+                    remoteSequencer1.id,
+                  ) should be > 0.0
+
+                  val sequencerClientStates = participant.health.status.trySuccess.components
+                    .filter(_.name == SequencerClient.healthName)
+                    .map(_.state)
+                  inside(sequencerClientStates) { case Seq(failed: ComponentHealthState.Failed) =>
+                    failed.state.description.value should include(
+                      "The trust threshold of 1 cannot currently be reached: 0 remaining sequencer(s), 1 faulty"
+                    )
+                  }
+                }
+              }
+            }
+
+            // The participants keep retrying, which cannot succeed: disconnect them
+            participants.local.foreach(_.synchronizers.disconnect_all())
           },
           logEntries => {
             // Make sure there is no unrelated/unexpected error
@@ -261,6 +283,13 @@ final class SynchronizerRecoveryTest extends BaseSynchronizerRestartTest with Ha
               } else if (logEntry.message.contains(SequencerSubscriptionError.ForkHappened.id)) {
                 // Additionally to the handler event below, the system will emit an appropriate error code with instructions
                 succeed
+              } else if (
+                logEntry.message.contains(SequencerSubscriptionError.TrustAssumptionViolated.id) ||
+                logEntry.message.contains(SequencerSubscriptionError.UnreachableTrustThreshold.id)
+              ) {
+                // The sole sequencer caused a failure: it reaches the trust threshold of 1, and leaves no sequencer
+                // to reach it
+                succeed
               } else if (logEntry.message.contains(SyncServiceSynchronizerDisconnect.id)) {
                 succeed
               } else if (logEntry.message.contains("EventValidationError")) {
@@ -268,6 +297,10 @@ final class SynchronizerRecoveryTest extends BaseSynchronizerRestartTest with Ha
               } else if (logEntry.message.contains("ForkHappened")) {
                 // If a client reconnects after the server has generated further events,
                 // the acknowledgement will succeed, but the client will detect a fork.
+                succeed
+              } else if (logEntry.message.contains("operation 'request current time'")) {
+                // While the participants keep retrying, their connection is repeatedly failed, so time proof requests
+                // can find no connection available and are retried
                 succeed
               } else if (logEntry.throwable.exists(_.getMessage.contains("ForkHappened"))) {
                 succeed

@@ -92,28 +92,6 @@ final class SequencerOfflineException(instanceIndex: Int)
       s"This sequencer (instance:$instanceIndex) has been marked as offline"
     )
 
-/** We intentionally use an unsafe storage method for writing payloads to take advantage of a full
-  * connection pool for performance. However this means if a HA Sequencer Writer has lost its
-  * instance lock it may still attempt to write payloads while another Sequencer Writer is active
-  * with the same instance index. As we use this instance index to generate an (almost) conflict
-  * free payload id, in this circumstance there is a slim chance that we may attempt to write
-  * conflicting payloads with the same id. If we were using a simple idempotent write approach this
-  * could result in the active sequencer writing an event with a payload from the offline writer
-  * process (and not the payload it is expecting). This would be a terrible and difficult to
-  * diagnose corruption issue.
-  *
-  * If this exception is raised we currently just halt the writer and run crash recovery. This is
-  * slightly suboptimal as in the above scenario we may crash the active writer (if they were second
-  * to write a conflicting payload id). However this will be safe. We could optimise this by
-  * checking the active lock status and only halting if this is found to be false.
-  */
-final class ConflictingPayloadIdException(
-    payloadId: PayloadId,
-    conflictingInstanceDiscriminator: UUID,
-) extends SequencerWriterException(
-      s"We attempted to write a payload with an id that already exists [$payloadId] written by instance $conflictingInstanceDiscriminator"
-    )
-
 /** A payload that we should have just stored now seems to be missing. */
 final class PayloadMissingException(payloadId: PayloadId)
     extends SequencerWriterException(s"Payload missing after storing [$payloadId]")
@@ -196,7 +174,6 @@ object SequencerWriterSource {
       loggerFactory: NamedLoggerFactory,
       protocolVersion: ProtocolVersion,
       metrics: SequencerMetrics,
-      blockSequencerMode: Boolean,
       lsuSequencingBounds: Option[LsuSequencingBounds],
       drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
   )(implicit
@@ -211,10 +188,8 @@ object SequencerWriterSource {
       new PartitionedTimestampGenerator(clock, store.instanceIndex, totalNodeCount)
     val payloadIdGenerator =
       new PartitionedTimestampGenerator(clock, store.instanceIndex, totalNodeCount)
-    // when running an HA sequencer we typically rely on the lock based [[resource.DbStorageMulti]] to ensure that
-    // there are no other writers sharing the same instance index concurrently writing. however for performance reasons
-    // we in places forgo this and use a non-lock protected based "unsafe" methods. We then separately use a unique
-    // instance discriminator to check that our writes are conflict free (currently used solely for payloads).
+    // A unique discriminator for this writer stream instance, used when saving payloads (currently solely for
+    // payloads) so that payload writes can be attributed to the instance that made them.
     val instanceDiscriminator = UUID.randomUUID()
 
     // log this instance discriminator so in the exceptionally unlikely event that we actually hit conflicts we have
@@ -242,7 +217,6 @@ object SequencerWriterSource {
           store,
           instanceDiscriminator,
           loggerFactory,
-          blockSequencerMode,
         )
       )
       // Get rid of the WithKillSwitch wrapper here so we can inject keep alive messages below
@@ -270,7 +244,6 @@ object SequencerWriterSource {
           lsuSequencingBounds,
           drSequencingTimeUpperBound,
           loggerFactory,
-          blockSequencerMode,
         )
       )
       .async // async boundary after sequencing and writing events for better pipelining
@@ -293,21 +266,17 @@ object SequencerWriterSource {
       .via(UpdateWatermarkFlow(store, logger, loggerFactory))
       .via(RecordWatermarkDelayMetricFlow(clock, metrics))
       .via(
-        // Buffer events in case of block sequencer single instance mode
-        if (blockSequencerMode) {
-          Flow[Traced[BatchWritten]].map { tracedBatchWritten =>
-            tracedBatchWritten.withTraceContext { _ => batchWritten =>
-              batchWritten.events.foreach { events =>
-                store.bufferEvents(events.map(_.map(_.id)))
-                events.foreach { event =>
-                  event.event.payloadO.foreach(store.bufferPayload(_)(event.traceContext))
-                }
+        // Buffer events, since there is a single writer instance
+        Flow[Traced[BatchWritten]].map { tracedBatchWritten =>
+          tracedBatchWritten.withTraceContext { _ => batchWritten =>
+            batchWritten.events.foreach { events =>
+              store.bufferEvents(events.map(_.map(_.id)))
+              events.foreach { event =>
+                event.event.payloadO.foreach(store.bufferPayload(_)(event.traceContext))
               }
             }
-            tracedBatchWritten
           }
-        } else {
-          Flow[Traced[BatchWritten]]
+          tracedBatchWritten
         }
       )
       .via(NotifyEventSignallerFlow(eventSignaller))
@@ -516,7 +485,6 @@ object SequenceWritesFlow {
       lsuSequencingBounds: Option[LsuSequencingBounds],
       drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
       loggerFactory: NamedLoggerFactory,
-      blockSequencerMode: Boolean,
   )(implicit
       executionContext: ExecutionContext,
       errorLoggingContext: ErrorLoggingContext,
@@ -559,22 +527,13 @@ object SequenceWritesFlow {
         // if we opt not to write the event as we're past the max-sequencing-time, just replace with a keep alive as we're still alive
         case Write.Event(event) =>
           val sequencingTimestamp =
-            if (blockSequencerMode)
-              event.blockSequencerTimestampO match {
-                case Some(blockSequencerTimestamp) => blockSequencerTimestamp
-                case None =>
-                  ErrorUtil.invalidState(
-                    "Did not find a blockSequencerTimestamp for an event in blocksequencer mode."
-                  )
-              }
-            else
-              event.blockSequencerTimestampO match {
-                case Some(_) =>
-                  ErrorUtil.invalidState(
-                    "Encountered a blockSequencerTimestamp for an event in non-blocksequencer mode."
-                  )
-                case None => eventTimestampGenerator.generateNext
-              }
+            event.blockSequencerTimestampO match {
+              case Some(blockSequencerTimestamp) => blockSequencerTimestamp
+              case None =>
+                ErrorUtil.invalidState(
+                  "Did not find a blockSequencerTimestamp for an event."
+                )
+            }
 
           sequenceEvent(sequencingTimestamp, event)
             .map(SequencedWrite.Event.apply)
@@ -688,11 +647,8 @@ object SequenceWritesFlow {
       BatchN
         .forMaxBatchSize[WithKillSwitch[Write]](
           maxBatchSize = writerConfig.eventWriteBatchMaxSize,
-          maxBatchCount =
-            // only block sequencers can write events parallel, because the sequencing had already happened at this point
-            if (blockSequencerMode) writerConfig.eventWriteMaxConcurrency
-            // in line with mapAsync(1) in non blocksequencer mode
-            else 1,
+          // events can be written in parallel, because the sequencing had already happened at this point
+          maxBatchCount = writerConfig.eventWriteMaxConcurrency,
         )
         .mapConcat { withKsWriteSeq =>
           NonEmpty.from(withKsWriteSeq.toSeq).map { nonEmptyBatch =>
@@ -704,14 +660,11 @@ object SequenceWritesFlow {
           }
         }
 
-    val storingEvents = if (blockSequencerMode) {
-      // we can write multiple events at the same time, because the sequencing had already happened at this point.
+    // we can write multiple events at the same time, because the sequencing had already happened at this point.
+    val storingEvents =
       batching.mapAsyncAndDrainUS(writerConfig.eventWriteMaxConcurrency)(batch =>
         sequenceWritesAndStoreEvents(batch)
       )
-    } else {
-      batching.mapAsyncAndDrainUS(1)(batch => sequenceWritesAndStoreEvents(batch))
-    }
     storingEvents
       .collect { case tew @ Traced(Some(ew)) => tew.map(_ => ew) }
       .named("sequenceAndWriteEvents")
@@ -729,7 +682,6 @@ object WritePayloadsFlow {
       store: SequencerWriterStore,
       instanceDiscriminator: UUID,
       loggerFactory: NamedLoggerFactory,
-      blockSequencerMode: Boolean,
   )(implicit
       namedLoggingContext: NamedLoggingContext,
       executionContext: ExecutionContext,
@@ -759,10 +711,8 @@ object WritePayloadsFlow {
               .from(payloads)
               .map(_.map(_.value))
               .traverse_(store.savePayloads(_, instanceDiscriminator))
-              .leftMap {
-                case SavePayloadsError.ConflictingPayloadId(id, conflictingInstance) =>
-                  new ConflictingPayloadIdException(id, conflictingInstance)
-                case SavePayloadsError.PayloadMissing(id) => new PayloadMissingException(id)
+              .leftMap { case SavePayloadsError.PayloadMissing(id) =>
+                new PayloadMissingException(id)
               }
               .map((_: Unit) => events)
           }
@@ -782,21 +732,12 @@ object WritePayloadsFlow {
       maxBatchCount = writerConfig.payloadWriteMaxConcurrency,
       // for the sequencer, we'd rather optimize for writing fewer but fuller batches
     )
+    // the block sequencer MUST NOT reorder the events during processing, because the
+    // events are already in sequenced order and this order MUST be maintained.
     val writingPayloads =
-      if (blockSequencerMode) {
-        // the block sequencer MUST NOT reorder the events during processing, because the
-        // events are already in sequenced order and this order MUST be maintained.
-        batching.mapAsyncAndDrainUS(writerConfig.payloadWriteMaxConcurrency)(batch =>
-          writePayloads(batch.toSeq)
-        )
-      } else {
-        // the database sequencer is still allowed to reorder the events during processing,
-        // because the sequencing happens in a follow-up step.
-        batching
-          .mapAsyncUnorderedAndDrainUS(writerConfig.payloadWriteMaxConcurrency)(batch =>
-            writePayloads(batch.toSeq)
-          )
-      }
+      batching.mapAsyncAndDrainUS(writerConfig.payloadWriteMaxConcurrency)(batch =>
+        writePayloads(batch.toSeq)
+      )
     writingPayloads
       .mapConcat(identity)
       .named("writePayloads")

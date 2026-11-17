@@ -68,12 +68,11 @@ object CreatedContract extends PrettyPrintingCompanion[CreatedContract] {
   def tryCreate(
       contract: NewContractInstance,
       consumedInCore: Boolean,
-      rolledBack: Boolean,
   ): CreatedContract =
     create(
       contract = contract,
       consumedInCore = consumedInCore,
-      rolledBack = rolledBack,
+      rolledBack = false,
     ).valueOr(err => throw new IllegalArgumentException(err))
 
   def fromProtoV30(

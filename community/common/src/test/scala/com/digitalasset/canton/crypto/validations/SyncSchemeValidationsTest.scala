@@ -7,11 +7,11 @@ import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
-  BatchingConfig,
   CachingConfigs,
   CryptoConfig,
   CryptoProvider,
   SessionEncryptionKeyCacheConfig,
+  TestBatchingConfig,
 }
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
@@ -52,7 +52,7 @@ class SyncSchemeValidationsTest extends AnyWordSpec with BaseTest with HasExecut
       CommonMockMetrics.cryptoMetrics,
       executorService,
       timeouts,
-      BatchingConfig(),
+      TestBatchingConfig(),
       loggerFactory,
       NoReportingTracerProvider,
       new ExecutorServiceMetrics(NoOpMetricsFactory),

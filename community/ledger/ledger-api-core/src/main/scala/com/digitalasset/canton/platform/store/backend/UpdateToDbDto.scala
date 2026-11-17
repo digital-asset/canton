@@ -11,7 +11,12 @@ import com.digitalasset.canton.data.DeduplicationPeriod.{DeduplicationDuration, 
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId
-import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Reassignment, Update}
+import com.digitalasset.canton.ledger.participant.state.{
+  CompletionInfo,
+  ParticipantEvent,
+  Reassignment,
+  Update,
+}
 import com.digitalasset.canton.metrics.{IndexerMetrics, LedgerApiServerMetrics}
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils.NodeInfo
@@ -76,6 +81,14 @@ object UpdateToDbDto {
           offset = offset,
           serializedTraceContext = serializedTraceContext,
           reassignmentAccepted = u,
+        )
+
+      case u: ParticipantEventUpdate =>
+        participantEventUpdateToDbDto(
+          metrics = metrics,
+          offset = offset,
+          serializedTraceContext = serializedTraceContext,
+          participantEventUpdate = u,
         )
 
       case u: SequencerIndexMoved =>
@@ -331,6 +344,15 @@ object UpdateToDbDto {
     Ref.NameTypeConRef(
       PackageRef.Name(reassignment.packageName),
       reassignment.templateId.qualifiedName,
+    )
+
+  def templateIdWithPackageName(
+      packageName: Ref.PackageName,
+      templateId: Ref.Identifier,
+  ): NameTypeConRef =
+    Ref.NameTypeConRef(
+      Ref.PackageRef.Name(packageName),
+      templateId.qualifiedName,
     )
 
   private def createNodeToDbDto(
@@ -634,6 +656,87 @@ object UpdateToDbDto {
       stakeholders = assign.createNode.stakeholders,
       template_id = templateIdWithPackageName(assign),
     )
+
+  def participantEventUpdateToDbDto(
+      metrics: LedgerApiServerMetrics,
+      offset: Offset,
+      serializedTraceContext: Array[Byte],
+      participantEventUpdate: ParticipantEventUpdate,
+  )(implicit mc: MetricsContext): Iterator[DbDto] = {
+    incrementCounterForEvent(
+      metrics.indexer,
+      IndexerMetrics.Labels.eventType.participantEventContractUpdate,
+      IndexerMetrics.Labels.status.accepted,
+    )
+    val transactionMeta = DbDto.TransactionMeta(
+      update_id = participantEventUpdate.updateId.toProtoPrimitive.toByteArray,
+      event_offset = offset.unwrap,
+      publication_time = 0, // this is filled later
+      record_time = participantEventUpdate.recordTime.toMicros,
+      synchronizer_id = participantEventUpdate.synchronizerId,
+      event_sequential_id_first = 0, // this is filled later
+      event_sequential_id_last = 0, // this is filled later
+      transaction_hash = None,
+    )
+    participantEventUpdate.events.iterator.flatMap {
+      case a: ParticipantEvent.Added =>
+        DbDto.addedEventDbDtos(
+          event_offset = offset.unwrap,
+          update_id = participantEventUpdate.updateId.toProtoPrimitive.toByteArray,
+          workflow_id = participantEventUpdate.workflowId,
+          record_time = participantEventUpdate.recordTime.underlying.micros,
+          synchronizer_id = participantEventUpdate.synchronizerId,
+          trace_context = serializedTraceContext,
+          event_sequential_id = 0, // this is filled later
+          node_id = a.nodeId,
+          reassignment_counter = a.reassignmentCounter,
+          representative_package_id = a.representativePackageId match {
+            case RepresentativePackageId.SameAsContractPackageId =>
+              a.contractInstance.inst.templateId.packageId
+            case RepresentativePackageId.DedicatedRepresentativePackageId(
+                  representativePackageId
+                ) =>
+              representativePackageId
+          },
+          participant_event_category = participantEventUpdate.category.asInt,
+          notPersistedContractId = a.contractInstance.inst.contractId,
+          internal_contract_id = a.contractInstance.internalContractId,
+          create_key_hash = a.contractInstance.inst.contractKeyWithMaintainers
+            .map(_.globalKey.hash.bytes.toHexString),
+          notPersistedContractKey =
+            a.contractInstance.inst.contractKeyWithMaintainers.map(_.globalKey),
+        )(
+          party_ids = a.contractInstance.inst.stakeholders,
+          template_id = templateIdWithPackageName(
+            a.contractInstance.inst.packageName,
+            a.contractInstance.inst.templateId,
+          ),
+        )
+
+      case r: ParticipantEvent.Removed =>
+        DbDto.removedEventDbDtos(
+          event_offset = offset.unwrap,
+          update_id = participantEventUpdate.updateId.toProtoPrimitive.toByteArray,
+          workflow_id = participantEventUpdate.workflowId,
+          record_time = participantEventUpdate.recordTime.underlying.micros,
+          synchronizer_id = participantEventUpdate.synchronizerId,
+          trace_context = serializedTraceContext,
+          event_sequential_id = 0, // this is filled later
+          node_id = r.nodeId,
+          deactivated_event_sequential_id = None, // this is filled later
+          exercise_actors = r.signatories,
+          reassignment_counter = r.reassignmentCounter,
+          participant_event_category = participantEventUpdate.category.asInt,
+          contract_id = r.contractId,
+          internal_contract_id = None, // this is filled later
+          template_id =
+            Ref.NameTypeConRef(Ref.PackageRef.Name(r.packageName), r.templateId.qualifiedName),
+          package_id = r.templateId.packageId,
+          stakeholders = r.stakeholders,
+          notPersistedContractKey = r.keyOpt.map(_.globalKey),
+        )
+    } ++ Seq(transactionMeta).iterator
+  }
 
   private def incrementCounterForEvent(
       metrics: IndexerMetrics,

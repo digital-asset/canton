@@ -46,6 +46,7 @@ import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 import monocle.macros.syntax.lens.*
 
 import java.util.concurrent.TimeUnit
+import scala.annotation.nowarn
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 /** Base for all participant configs - both local and remote */
@@ -384,9 +385,9 @@ object TestingTimeServiceConfig {
   *     Assigned/Unassigned events.
   *   - true: All contracts are represented as Assigned/Unassigned events.
   *
-  * Note: If multi-synchronizer is enabled via the EnableMultiSynchronizer flag, then Assigned and
-  * Unassigned event will be emitted when processing reassignments messages from the synchronizer
-  * regardless of the value of enableAllLedgerApiReassignments.
+  * Note: From protocol version 37, Assigned and Unassigned event will be emitted when processing
+  * reassignments messages from the synchronizer regardless of the value of
+  * enableAllLedgerApiReassignments.
   * @param crashAfterFailedValidation
   *   If true (default), the participant crashes when it detects a protocol violation that a correct
   *   node cannot cause, such as an approved request whose activeness check failed locally. The
@@ -406,8 +407,8 @@ object TestingTimeServiceConfig {
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
     maxUnzippedDarSize: Int = 1024 * 1024 * 1024,
-    batching: BatchingConfig = BatchingConfig(),
-    caching: CachingConfigs = CachingConfigs(),
+    batching: ParticipantBatchingConfig = ParticipantBatchingConfig(),
+    caching: ParticipantCachingConfigs = ParticipantCachingConfigs(),
     stores: ParticipantStoreConfig = ParticipantStoreConfig(),
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
       ParticipantProtocolVersion(ProtocolVersion.v36)
@@ -442,6 +443,7 @@ final case class ParticipantNodeParameterConfig(
     commitmentReduceParallelism: NonNegativeInt = NonNegativeInt.one,
     commitmentUseDbSnapshotForParticipantLookup: Boolean = false,
     autoSyncProtocolFeatureFlags: Boolean = true,
+    // TODO(#37616): Update the ScalaDoc note when removing support for PV=36
     enableAllLedgerApiReassignments: Boolean = false,
     crashAfterFailedValidation: Boolean = true,
     lsu: LsuConfig = LsuConfig(),
@@ -453,11 +455,9 @@ final case class ParticipantNodeParameterConfig(
 
 /** Config for the ACS commitment processing pipeline.
   *
-  * @param enableNewAcsCommitmentProcessor
-  *   whether the new ACS digest processor should be enabled or not. Default is false.
   * @param disableOldAcsCommitmentProcessor
   *   whether the old ACS commitment processor should be disabled. Default is on new protocol
-  *   versions.
+  *   versions. Does not have any effect on protocol versions 38 and above.
   * @param maxNumUpdatesBetweenCheckpoints
   *   the maximum number of acs updates after which a checkpoint should be written. Default is
   *   100000.
@@ -528,10 +528,10 @@ final case class ParticipantNodeParameterConfig(
   *   the number of parallel queries to fetch the contract payload of active contracts. The * higher
   *   the parallelism, the higher the potential load on the DB. Default is 6.
   */
+@nowarn("cat=deprecation")
 final case class AcsCommitmentConfig(
-    enableNewAcsCommitmentProcessor: Boolean = true,
-    disableOldAcsCommitmentProcessor: AcsCommitmentConfig.DisableOldAcsCommitmentProcessor =
-      AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.OnNewProtocolVersions,
+    disableOldAcsCommitmentProcessor: Option[AcsCommitmentConfig.DisableOldAcsCommitmentProcessor] =
+      None,
     maxNumUpdatesBetweenCheckpoints: PositiveInt = PositiveInt.tryCreate(100_000),
     counterpartyBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
     tracing: AcsDigestTracingMode = AcsDigestTracingMode.Disabled,
@@ -554,7 +554,13 @@ final case class AcsCommitmentConfig(
     acsFetchParallelism: PositiveInt = PositiveInt.tryCreate(16),
     maxParallelActiveIdQueries: PositiveInt = PositiveInt.tryCreate(12),
     maxParallelPayloadCreateQueries: PositiveInt = PositiveInt.tryCreate(6),
-)
+) {
+  private[canton] def doDisableOldAcsCommitmentProcessor
+      : AcsCommitmentConfig.DisableOldAcsCommitmentProcessor =
+    disableOldAcsCommitmentProcessor.getOrElse(
+      AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.OnNewProtocolVersions
+    )
+}
 
 object AcsCommitmentConfig {
 
@@ -570,18 +576,20 @@ object AcsCommitmentConfig {
     /** The ACS commitment processor is disabled on protocol versions that support the new
       * commitments.
       */
+    @deprecated("This flag is equivalent to Always.", since = "3.8.0")
     case object OnNewProtocolVersions extends DisableOldAcsCommitmentProcessor
 
-    /** The ACS commitment processor is running on all protocol versions. */
+    /** The ACS commitment processor is running on all protocol versions up to PV 37 inclusive */
     case object Never extends DisableOldAcsCommitmentProcessor
 
+    @nowarn("cat=deprecation")
     private[canton] def isOldProcessorEnabled(
         state: DisableOldAcsCommitmentProcessor,
         protocolVersion: ProtocolVersion,
     ): Boolean =
       state match {
         case Always => false
-        case Never => true
+        case Never => protocolVersion < ProtocolVersion.v38
         case OnNewProtocolVersions => protocolVersion < ProtocolVersion.v36
       }
   }

@@ -12,6 +12,8 @@ import com.digitalasset.canton.tea.v1.SubmissionAccountingServiceGrpc.Submission
 import com.digitalasset.canton.tea.v1.{
   RegisterSubmissionRequest,
   RegisterSubmissionResponse,
+  ReleaseSubmissionRequest,
+  ReleaseSubmissionResponse,
   SubmissionAccountingServiceGrpc,
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
@@ -37,6 +39,17 @@ class TeaSubmissionAccountingServiceGrpc(
     EitherT(
       service
         .registerSubmission(request)
+        .map(_.leftMap(_.asGrpcError))
+    ).asGrpcResponse
+  }
+
+  override def releaseSubmission(
+      request: ReleaseSubmissionRequest
+  ): Future[ReleaseSubmissionResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    EitherT(
+      service
+        .releaseSubmission(request)
         .map(_.leftMap(_.asGrpcError))
     ).asGrpcResponse
   }

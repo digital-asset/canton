@@ -323,6 +323,9 @@ object QueryCostTrackerImpl {
       "org.apache.pekko", // SlickProjection, RestartWithBackoffSource
       LoggerUtil.getClass.getName.stripSuffix("$"), // Drop Scala's trailing $
       MonadUtil.getClass.getName.stripSuffix("$"), // Drop Scala's trailing $
+      "com.digitalasset.canton.platform.store.dao.DbDispatcher",
+      "com.digitalasset.canton.logging.LoggingContextWithTrace",
+      "com.daml.logging.LoggingContext",
     )
 
   // in case we want to track a single class in a package that we generally want to ignore

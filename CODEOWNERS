@@ -29,10 +29,6 @@ CODEOWNERS @DACH-NY/canton-change-owners
 # Triggering a recompile on a branch does not require change owners approval
 /.ci/branches_to_be_fully_recompiled_in_ci.txt
 
-# changes to the sequencer driver API should be reviewed by the change owners
-# because the canton-drivers repository depends on it
-/community/sequencer-driver @DACH-NY/canton-change-owners @DACH-NY/canton-bft-sequencer
-
 # External KMS Driver API in Scala
 /community/kms-driver-api @DACH-NY/canton-change-owners @soren-da
 

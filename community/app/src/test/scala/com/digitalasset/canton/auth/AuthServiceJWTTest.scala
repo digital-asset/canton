@@ -3,39 +3,72 @@
 
 package com.digitalasset.canton.auth
 
-import com.daml.jwt.{AuthServiceJWTCodec, DecodedJwt, Error, JwtVerifierBase}
+import com.daml.jwt.{DecodedJwt, Error, JwtVerifierBase, StandardJWTPayload, StandardJWTTokenFormat}
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.DeprecatedFeaturesConfig
 import com.digitalasset.canton.logging.SuppressingLogger
+import org.scalatest.enablers.InspectorAsserting
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
 class AuthServiceJWTTest extends AnyWordSpec with BaseTest {
 
+  /** Rejects every token, for tests that only construct the auth service. */
   object DummyVerifier extends JwtVerifierBase {
     override def verify(jwt: com.daml.jwt.Jwt): Either[Error, DecodedJwt[String]] =
       Left(Error(Symbol("DummyVerifier"), "Not needed for config testing"))
   }
 
+  /** Treats the raw token text as the verified JSON payload, for tests that parse tokens. */
+  object PassThroughVerifier extends JwtVerifierBase {
+    override def verify(jwt: com.daml.jwt.Jwt): Either[Error, DecodedJwt[String]] =
+      Right(DecodedJwt("{}", jwt.value))
+  }
+
+  private def authService(
+      targetAudience: Option[String],
+      targetScope: Option[String],
+      enableScopeOnlyJwt: Boolean,
+      loggerFactory: SuppressingLogger,
+      verifier: JwtVerifierBase = DummyVerifier,
+      privileged: Boolean = false,
+  ): AuthServiceJWTBase =
+    AuthServiceJWT.apply(
+      verifier = verifier,
+      targetAudience = targetAudience,
+      targetScope = targetScope,
+      privileged = privileged,
+      accessLevel = AccessLevel.Admin,
+      loggerFactory = loggerFactory,
+      users = Seq.empty,
+      enableScopeOnlyJwt = enableScopeOnlyJwt,
+    )
+
+  /** Runs `f` with scope-only JWTs enabled and disabled, naming the flag value on failure. */
+  private def forEveryScopeOnlyJwtFlag[A](
+      f: Boolean => A
+  )(implicit asserting: InspectorAsserting[A]): asserting.Result =
+    forEvery(Seq(true, false)) { enableScopeOnlyJwt =>
+      withClue(s"enableScopeOnlyJwt = $enableScopeOnlyJwt")(f(enableScopeOnlyJwt))
+    }
+
   "AuthServiceJWT" should {
 
-    "log a deprecation warning for scope-only configurations" in {
+    // the config validation rejects a target scope without a target audience when the flag is off
+    "log a deprecation warning for scope-only configurations when scope-only JWTs are enabled" in {
       val testLogger = SuppressingLogger(getClass)
 
       testLogger.assertLogs(
-        AuthServiceJWT.apply(
-          verifier = DummyVerifier,
+        authService(
           targetAudience = None,
           targetScope = Some("my-scope"),
-          privileged = false,
-          accessLevel = AccessLevel.Admin,
+          enableScopeOnlyJwt = true,
           loggerFactory = testLogger,
-          users = Seq.empty,
-          warnOnJwtScopeUsage = false,
         ),
         log => {
           log.level shouldBe Level.WARN
-          log.message should include("Scope-based tokens have been configured")
-          log.message should include("This feature is deprecated")
+          log.message should include(DeprecatedFeaturesConfig.EnableScopeOnlyJwtKey)
+          log.message should include("scope-only tokens are accepted")
         },
       )
     }
@@ -44,15 +77,11 @@ class AuthServiceJWTTest extends AnyWordSpec with BaseTest {
       val testLogger = SuppressingLogger(getClass)
 
       testLogger.assertLogs(
-        AuthServiceJWT.apply(
-          verifier = DummyVerifier,
+        authService(
           targetAudience = Some("my-audience"),
           targetScope = Some("my-scope"),
-          privileged = false,
-          accessLevel = AccessLevel.Admin,
+          enableScopeOnlyJwt = true,
           loggerFactory = testLogger,
-          users = Seq.empty,
-          warnOnJwtScopeUsage = false,
         ),
         log => {
           log.level shouldBe Level.WARN
@@ -66,199 +95,171 @@ class AuthServiceJWTTest extends AnyWordSpec with BaseTest {
       val testLogger = SuppressingLogger(getClass)
 
       an[IllegalArgumentException] should be thrownBy {
-        AuthServiceJWT.apply(
-          verifier = DummyVerifier,
+        authService(
           targetAudience = None,
           targetScope = None,
-          privileged = true,
-          accessLevel = AccessLevel.Admin,
+          enableScopeOnlyJwt = true,
           loggerFactory = testLogger,
-          users = Seq.empty,
-          warnOnJwtScopeUsage = false,
+          privileged = true,
         )
       }
     }
 
     "log nothing and succeed for a clean, audience-based configuration" in {
-      val testLogger = SuppressingLogger(getClass)
+      forEveryScopeOnlyJwtFlag { enableScopeOnlyJwt =>
+        val testLogger = SuppressingLogger(getClass)
 
-      testLogger.assertLoggedWarningsAndErrorsSeq(
-        AuthServiceJWT.apply(
-          verifier = DummyVerifier,
-          targetAudience = Some("clean-audience"),
-          targetScope = None,
-          privileged = false,
-          accessLevel = AccessLevel.Admin,
-          loggerFactory = testLogger,
-          users = Seq.empty,
-          warnOnJwtScopeUsage = false,
-        ),
-        logs => logs shouldBe empty,
-      )
+        testLogger.assertLoggedWarningsAndErrorsSeq(
+          authService(
+            targetAudience = Some("clean-audience"),
+            targetScope = None,
+            enableScopeOnlyJwt = enableScopeOnlyJwt,
+            loggerFactory = testLogger,
+          ),
+          logs => logs shouldBe empty,
+        )
+      }
     }
+
     "log nothing and succeed for a configuration with neither target audience nor scope (default fallback)" in {
       val testLogger = SuppressingLogger(getClass)
 
       testLogger.assertLoggedWarningsAndErrorsSeq(
-        AuthServiceJWT.apply(
-          verifier = DummyVerifier,
+        authService(
           targetAudience = None,
           targetScope = None,
-          privileged = false,
-          accessLevel = AccessLevel.Admin,
+          enableScopeOnlyJwt = false,
           loggerFactory = testLogger,
-          users = Seq.empty,
-          warnOnJwtScopeUsage = false,
         ),
         logs => logs shouldBe empty,
       )
     }
+
+    "log a deprecation warning for the default fallback configuration when scope-only JWTs are enabled" in {
+      val testLogger = SuppressingLogger(getClass)
+
+      testLogger.assertLogs(
+        authService(
+          targetAudience = None,
+          targetScope = None,
+          enableScopeOnlyJwt = true,
+          loggerFactory = testLogger,
+        ),
+        log => {
+          log.level shouldBe Level.WARN
+          log.message should include(DeprecatedFeaturesConfig.EnableScopeOnlyJwtKey)
+          log.message should include("scope-only tokens are accepted")
+        },
+      )
+    }
   }
 
-  // Normally, tests use `SuppressingLogger(getClass)` to catch and silence warnings.
-  // However, the deprecation warning for JWT scopes is executed inside `AuthServiceJWTCodec`,
-  // which is a Scala `object` using a standard static SLF4J logger instance
-  // instead of Canton's context-aware `NamedLoggerFactory`, which normal Canton classes
-  // obtain by extending `NamedLogging`.
-  // To verify this runtime warning, the tests below directly manipulate Logback, the Java logging engine underlying
-  // the SLF4J interface.
   "Runtime token parsing" should {
-    import ch.qos.logback.classic.spi.ILoggingEvent
-    import ch.qos.logback.classic.Logger as LogbackLogger
-    import ch.qos.logback.core.read.ListAppender
-    import org.slf4j.LoggerFactory
-    import scala.jdk.CollectionConverters.*
-
-    // mock verifier that treats raw token text as verified internal JSON payload
-    object PassThroughVerifier extends JwtVerifierBase {
-      override def verify(jwt: com.daml.jwt.Jwt): Either[Error, DecodedJwt[String]] =
-        Right(DecodedJwt("{}", jwt.value))
-    }
-
     val legacyScopeBasedTokenJson = """{"sub": "legacyUser", "scope": "daml_ledger_api"}"""
     val audienceTokenJson =
       """{"sub": "modernUser", "aud": "https://daml.com/jwt/aud/participant/p1"}"""
 
-    "remain silent when processing audience-based tokens" in {
-      val codecLogger =
-        LoggerFactory.getLogger(AuthServiceJWTCodec.getClass).asInstanceOf[LogbackLogger]
+    // the two configurations that parse a token into the scope-only format
+    val scopeOnlyAcceptingTargets = Seq(
+      "no target" -> None,
+      "a target scope" -> Some("daml_ledger_api"),
+    )
 
-      val listAppender = new ListAppender[ILoggingEvent]()
-      listAppender.start()
-      codecLogger.addAppender(listAppender)
-
-      val oldAdditive = codecLogger.isAdditive
-      codecLogger.setAdditive(false)
-
-      try {
-        val testLogger = SuppressingLogger(this.getClass)
-        val authService = AuthServiceJWT.apply(
-          verifier = PassThroughVerifier,
-          targetAudience = None, // config with no audience or scope set
-          targetScope = None,
-          privileged = false,
-          accessLevel = AccessLevel.Admin,
-          loggerFactory = testLogger,
-          users = Seq.empty,
-          warnOnJwtScopeUsage = true,
-        )
-
-        // Send an audience-based token
-        authService.decodeToken(Some(s"Bearer $audienceTokenJson"), "ledger-api").futureValue
-        listAppender.list.asScala.exists(_.getLevel.toString == "WARN") shouldBe false
-
-      } finally {
-        codecLogger.detachAppender(listAppender)
-        codecLogger.setAdditive(oldAdditive)
-      }
-    }
-
-    "log a warning exactly once for legacy scope tokens when warnOnJwtScopeUsage is true and neither scope nor audience is configured" in {
-      // The generic SLF4J interface (org.slf4j.Logger) returned by LoggerFactory only exposes log-writing methods
-      // (.info, .warn). It lacks runtime configuration switches.
-      // We cast the SLF4J facade to Logback to expose configuration methods like .addAppender, .setAdditive
-      val codecLogger =
-        LoggerFactory.getLogger(AuthServiceJWTCodec.getClass).asInstanceOf[LogbackLogger]
-
-      // Intercepts the log stream and stores events in a list for assertions
-      val listAppender = new ListAppender[ILoggingEvent]()
-      listAppender.start()
-      codecLogger.addAppender(listAppender)
-
-      // save additivity state to restore later
-      val oldAdditive = codecLogger.isAdditive
-
-      // set additivity state to false in order to suppress log propagation
-      codecLogger.setAdditive(false)
-
-      try {
-        val testLogger = SuppressingLogger(this.getClass)
-        val authService = AuthServiceJWT.apply(
-          verifier = PassThroughVerifier,
-          targetAudience = None, // config with no audience or scope set
-          targetScope = None,
-          privileged = false,
-          accessLevel = AccessLevel.Admin,
-          loggerFactory = testLogger,
-          users = Seq.empty,
-          warnOnJwtScopeUsage = true,
-        )
-
-        // Send a legacy scope-based token -> triggers the warning
-        authService
-          .decodeToken(Some(s"Bearer $legacyScopeBasedTokenJson"), "ledger-api")
-          .futureValue
-        val warnLogs = listAppender.list.asScala.filter(_.getLevel.toString == "WARN")
-        warnLogs.size shouldBe 1
-        warnLogs.head.getFormattedMessage should include(
-          "Received scope-based token. Scope-based tokens are deprecated"
-        )
-
-        // send another legacy scope-based token -> this should not trigger the warning again
-        authService
-          .decodeToken(Some(s"Bearer $legacyScopeBasedTokenJson"), "ledger-api")
-          .futureValue
-        listAppender.list.asScala.count(_.getLevel.toString == "WARN") shouldBe 1
-
-      } finally {
-        // clean up: detach and restore standard logging
-        // failing to restore this state would break logging across all subsequent test suites.
-        codecLogger.detachAppender(listAppender)
-        codecLogger.setAdditive(oldAdditive)
-      }
-    }
-
-    "remain silent for legacy scope tokens when warnOnJwtScopeUsage is false" in {
-
-      val codecLogger =
-        LoggerFactory.getLogger(AuthServiceJWTCodec.getClass).asInstanceOf[LogbackLogger]
-      val listAppender = new ListAppender[ILoggingEvent]()
-      listAppender.start()
-      codecLogger.addAppender(listAppender)
-
-      val oldAdditive = codecLogger.isAdditive
-      codecLogger.setAdditive(false)
-
-      try {
-        val testLogger = SuppressingLogger(this.getClass)
-        val authService = AuthServiceJWT.apply(
-          verifier = PassThroughVerifier,
+    def parsingAuthService(
+        targetScope: Option[String],
+        enableScopeOnlyJwt: Boolean,
+    ): AuthServiceJWTBase = {
+      val testLogger = SuppressingLogger(this.getClass)
+      // a target scope always warns at startup and no target warns when the flag is on, see above
+      testLogger.suppressWarningsAndErrors(
+        authService(
           targetAudience = None,
-          targetScope = None,
-          privileged = false,
-          accessLevel = AccessLevel.Admin,
+          targetScope = targetScope,
+          enableScopeOnlyJwt = enableScopeOnlyJwt,
           loggerFactory = testLogger,
-          users = Seq.empty,
-          warnOnJwtScopeUsage = false,
+          verifier = PassThroughVerifier,
         )
+      )
+    }
 
-        authService
-          .decodeToken(Some(s"Bearer $legacyScopeBasedTokenJson"), "ledger-api")
+    "reject legacy scope tokens when scope-only JWTs are disabled" in {
+      forEvery(scopeOnlyAcceptingTargets) { case (label, targetScope) =>
+        withClue(label) {
+          val result = parsingAuthService(targetScope, enableScopeOnlyJwt = false)
+            .decodeToken(Some(s"Bearer $legacyScopeBasedTokenJson"), "ledger-api")
+            .futureValue
+          result.claimSet shouldBe ClaimSet.Unauthenticated
+          result.deferredWarning.value should include(
+            DeprecatedFeaturesConfig.ScopeOnlyJwtDisabledMessage
+          )
+        }
+      }
+    }
+
+    "accept legacy scope tokens when scope-only JWTs are enabled" in {
+      forEvery(scopeOnlyAcceptingTargets) { case (label, targetScope) =>
+        withClue(label) {
+          val result = parsingAuthService(targetScope, enableScopeOnlyJwt = true)
+            .decodeToken(Some(s"Bearer $legacyScopeBasedTokenJson"), "ledger-api")
+            .futureValue
+          result.claimSet shouldBe ClaimSet.AuthenticatedUser(
+            identityProviderId = None,
+            participantId = None,
+            userId = "legacyUser",
+            expiration = None,
+          )
+        }
+      }
+    }
+
+    "accept audience-based tokens regardless of the flag" in {
+      forEveryScopeOnlyJwtFlag { enableScopeOnlyJwt =>
+        val result = parsingAuthService(targetScope = None, enableScopeOnlyJwt)
+          .decodeToken(Some(s"Bearer $audienceTokenJson"), "ledger-api")
           .futureValue
-        listAppender.list.asScala.exists(_.getLevel.toString == "WARN") shouldBe false
-      } finally {
-        codecLogger.detachAppender(listAppender)
-        codecLogger.setAdditive(oldAdditive)
+        result.claimSet shouldBe ClaimSet.AuthenticatedUser(
+          identityProviderId = None,
+          participantId = Some("p1"),
+          userId = "modernUser",
+          expiration = None,
+        )
+      }
+    }
+  }
+
+  "rejectScopeOnlyJwtUnlessEnabled" should {
+    def payload(format: StandardJWTTokenFormat): StandardJWTPayload = StandardJWTPayload(
+      issuer = None,
+      userId = "user",
+      participantId = None,
+      exp = None,
+      format = format,
+      audiences = List.empty,
+      scope = None,
+    )
+    val scopePayload = payload(StandardJWTTokenFormat.Scope)
+    val audiencePayload = payload(StandardJWTTokenFormat.Audience)
+
+    "reject a scope-only payload when scope-only JWTs are disabled" in {
+      val error = AuthServiceJWT
+        .rejectScopeOnlyJwtUnlessEnabled(scopePayload, enableScopeOnlyJwt = false)
+        .left
+        .value
+      error.what.name shouldBe "scopeOnlyJwtDisabled"
+      error.message shouldBe DeprecatedFeaturesConfig.ScopeOnlyJwtDisabledMessage
+    }
+
+    "accept a scope-only payload when scope-only JWTs are enabled" in {
+      AuthServiceJWT
+        .rejectScopeOnlyJwtUnlessEnabled(scopePayload, enableScopeOnlyJwt = true)
+        .value shouldBe scopePayload
+    }
+
+    "accept an audience-based payload regardless of the flag" in {
+      forEveryScopeOnlyJwtFlag { enableScopeOnlyJwt =>
+        AuthServiceJWT
+          .rejectScopeOnlyJwtUnlessEnabled(audiencePayload, enableScopeOnlyJwt)
+          .value shouldBe audiencePayload
       }
     }
   }

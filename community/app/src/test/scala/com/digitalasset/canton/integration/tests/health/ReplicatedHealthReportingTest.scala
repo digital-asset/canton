@@ -25,11 +25,15 @@ import com.digitalasset.canton.integration.{
   IsolatedEnvironments,
   TestConsoleEnvironment,
 }
-import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.participant.sync.{ConnectedSynchronizer, SyncEphemeralState}
 import com.digitalasset.canton.resource.DbStorage
-import com.digitalasset.canton.sequencing.SequencedSerializedEvent
+import com.digitalasset.canton.sequencing.ConnectionSerializedEvent
+import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.{
+  TrustAssumptionViolated,
+  UnreachableTrustThreshold,
+}
 import com.digitalasset.canton.sequencing.client.{DelayedSequencerClient, SequencerClient}
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -43,7 +47,6 @@ import org.apache.pekko.http.scaladsl.Http
 import org.apache.pekko.http.scaladsl.model.HttpRequest
 import org.apache.pekko.http.scaladsl.unmarshalling.Unmarshal
 import org.scalatest.Assertion
-import org.slf4j.event.Level
 
 import scala.concurrent.Await
 import scala.concurrent.duration.*
@@ -105,7 +108,6 @@ trait HealthReportingTestHelper
     registerPlugin(
       UseSharedStorage.forParticipants("participant1", Seq("participant2"), loggerFactory)
     )
-    // TODO(#16089): Should this test also test sequencer HA when it is available?
   }
 
   protected def bootstrapSynchronizer(
@@ -398,22 +400,64 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
           activeMediator.id.uid.toString,
         )
         .value
-        .setDelayPolicy { (_: SequencedSerializedEvent) =>
+        .setDelayPolicy { (_: ConnectionSerializedEvent) =>
           throw new RuntimeException("Testing the liveness of mediator")
         }
 
       val activeParticipant = waitUntilOneActive(participant1, participant2)
-      // connecting participant will send topology transaction to mediator which will trigger the error
-      loggerFactory.assertLogs(SuppressionRule.Level(Level.ERROR))(
-        activeParticipant.synchronizers.connect_local(sequencer1, synchronizerAlias),
-        _.errorMessage should include("Testing the liveness of mediator"),
-      )
+      // The sequencer client keeps retrying, and every retry fails again on the same event. As the mediator's sole
+      // sequencer caused a failure, the first failure reaches the trust threshold of 1 and leaves no sequencer to reach
+      // it, which is reported once until an event is processed again.
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        {
+          // connecting participant will send topology transaction to mediator which will trigger the error
+          activeParticipant.synchronizers.connect_local(sequencer1, synchronizerAlias)
 
-      eventually() {
-        checkNotServing(healthActive, httpHealthConfig = Some(activeConfig))
-        checkLivenessNotServing(healthActive, httpHealthConfig = Some(activeConfig))
-        checkContainsState[ComponentHealthState.Failed](activeMediator, SequencerClient.healthName)
-      }
+          eventually() {
+            // The sequencer client reports a failed health
+            checkContainsState[ComponentHealthState.Failed](
+              activeMediator,
+              SequencerClient.healthName,
+            )
+          }
+          // The sequencer client is only a soft dependency of the mediator's readiness, and does not affect its liveness
+          checkServing(healthActive, httpHealthConfig = Some(activeConfig))
+          checkLivenessServing(healthActive, httpHealthConfig = Some(activeConfig))
+
+          // Once the processing succeeds again, the sequencer client recovers by itself
+          DelayedSequencerClient
+            .delayedSequencerClient("test", synchronizerId, activeMediator.id.uid.toString)
+            .value
+            .setDelayPolicy(_ => DelayedSequencerClient.Immediate)
+          eventually() {
+            checkContainsState[ComponentHealthState.Ok](activeMediator, SequencerClient.healthName)
+          }
+        },
+        LogEntry.assertLogSeq(
+          mustContainWithClue = Seq(
+            (
+              _.warningMessage should (include(
+                "Closing sequencer subscription due to handler exception"
+              ) and include("Testing the liveness of mediator")),
+              "handler exception reported as a warning",
+            ),
+            (
+              _.shouldBeCantonError(TrustAssumptionViolated.code),
+              "trust assumption violation reported",
+            ),
+            (
+              _.shouldBeCantonError(UnreachableTrustThreshold.code),
+              "unreachable trust threshold reported",
+            ),
+          ),
+          mayContain = Seq(
+            // Repeated at every retry
+            _.warningMessage should include(
+              "Closing sequencer subscription due to handler exception"
+            )
+          ),
+        ),
+      )
     }
   }
 

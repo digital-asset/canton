@@ -8,7 +8,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.sequencing.protocol.SignedContent
+import com.digitalasset.canton.sequencing.protocol.AggregatedSignedContent
 import com.digitalasset.canton.sequencing.{SequencedEventHandler, SequencerTestUtils}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
@@ -71,6 +71,6 @@ class EventTimestampCaptureTest extends AnyWordSpec with BaseTest with HasExecut
     }
   }
 
-  private def sign[A <: HasCryptographicEvidence](content: A): SignedContent[A] =
-    SignedContent(content, SymbolicCrypto.emptySignature, None, testedProtocolVersion)
+  private def sign[A <: HasCryptographicEvidence](content: A): AggregatedSignedContent[A] =
+    AggregatedSignedContent(content, SymbolicCrypto.emptySignature, testedProtocolVersion)
 }

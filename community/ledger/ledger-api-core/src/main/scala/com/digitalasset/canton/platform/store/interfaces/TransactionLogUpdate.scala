@@ -149,6 +149,16 @@ object TransactionLogUpdate {
     override def recordTime: Timestamp = update.recordTime.underlying
   }
 
+  final case class ParticipantEventUpdate(
+      offset: Offset,
+      update: Update.ParticipantEventUpdate,
+  ) extends TransactionLogUpdate {
+    override def traceContext: TraceContext = update.traceContext
+    override def completionStreamResponseO: Option[CompletionStreamResponse] = None
+    override def synchronizerId = update.synchronizerId.toProtoPrimitive
+    override def recordTime: Timestamp = update.recordTime.underlying
+  }
+
   /* Models all but divulgence events */
   sealed trait Event extends Product with Serializable {
     def eventOffset: Offset

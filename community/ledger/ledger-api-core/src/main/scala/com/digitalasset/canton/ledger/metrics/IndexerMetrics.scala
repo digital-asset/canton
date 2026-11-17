@@ -375,6 +375,7 @@ object IndexerMetrics {
       val reassignment = "reassignment"
       val topologyTransaction = "topology_transaction"
       val acsCommitment = "acs_commitment"
+      val participantEventContractUpdate = "participant_event_contract_update"
     }
 
     object status {

@@ -229,9 +229,9 @@ class SequencerCatchUpPerformanceIntegrationTest
         sequencers.map { case (k, sequencer) =>
           val newSequencer = sequencer.copy(
             sequencer = sequencer.sequencer match {
-              case ext: SequencerConfig.External =>
-                ext.copy(
-                  block = ext.block.copy(
+              case cfg: SequencerConfig.BftSequencer =>
+                cfg.copy(
+                  block = cfg.block.copy(
                     streamInstrumentation =
                       BlockSequencerStreamInstrumentationConfig(isEnabled = true)
                   )

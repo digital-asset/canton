@@ -8,14 +8,12 @@ import cats.data.{EitherT, Nested}
 import cats.implicits.catsSyntaxOptionId
 import cats.syntax.alternative.*
 import cats.syntax.either.*
-import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.MetricsContext.withExtraMetricLabels
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{LoggingConfig, ProcessingTimeout, TestingConfigInternal}
@@ -65,12 +63,12 @@ import com.digitalasset.canton.sequencing.client.SendTracker.{LatestAttempt, Lat
 import com.digitalasset.canton.sequencing.client.SequencerClient.{
   ConnectionContainer,
   SequencerTransports,
-  TrafficCostValidator,
 }
 import com.digitalasset.canton.sequencing.client.SequencerClientImpl.SequencerClientTimeSourcesPool
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.*
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.SequencerConnectionPoolConfig
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
 import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPool.SequencerSubscriptionPoolConfig
 import com.digitalasset.canton.sequencing.client.pool.{
   HasAcceptableSequencers,
@@ -127,7 +125,6 @@ import org.apache.pekko.{Done, NotUsed}
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.annotation.unused
 import scala.compat.java8.DurationConverters.FiniteDurationops
 import scala.concurrent.*
 import scala.concurrent.duration.*
@@ -300,30 +297,22 @@ abstract class SequencerClientImpl(
   private lazy val printer =
     new CantonPrettyPrinter(loggingConfig.api.maxStringLength, loggingConfig.api.maxMessageLines)
 
-  override def sendAsync(
+  override def prepareSend(
       batch: Batch[DefaultOpenEnvelope],
       currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
       timestamps: SendRequestTimestamps,
       messageId: MessageId,
       aggregationRule: Option[AggregationRule],
-      callback: SendCallback,
-      trafficCostValidator: TrafficCostValidator,
-      amplify: Boolean,
-      useConfirmationResponseAmplificationParameters: Boolean,
   )(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,
-  ): SendAsyncResult =
-    sendAsyncInternal(
+  ): EitherT[FutureUnlessShutdown, SendAsyncClientError, SequencerClientSend.PreparedSubmission] =
+    prepareSendInternal(
       batch,
       currentSnapshotApproximation,
       timestamps,
       messageId,
       aggregationRule,
-      callback,
-      trafficCostValidator,
-      amplify,
-      useConfirmationResponseAmplificationParameters,
       metricsContext,
     )
 
@@ -369,20 +358,16 @@ abstract class SequencerClientImpl(
       )
     } yield ()
 
-  private def sendAsyncInternal(
+  private def prepareSendInternal(
       batch: Batch[DefaultOpenEnvelope],
       currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
       timestamps: SendRequestTimestamps,
       messageId: MessageId,
       aggregationRule: Option[AggregationRule],
-      callback: SendCallback,
-      trafficCostValidator: TrafficCostValidator,
-      amplify: Boolean,
-      useConfirmationResponseAmplificationParameters: Boolean,
       metricsContext: MetricsContext,
   )(implicit
       traceContext: TraceContext
-  ): SendAsyncResult = {
+  ): EitherT[FutureUnlessShutdown, SendAsyncClientError, SequencerClientSend.PreparedSubmission] = {
     implicit val metricsContextImplicit: MetricsContext =
       metricsContext.withExtraLabels("synchronizer" -> psid.toString)
     withSpan("SequencerClient.sendAsync") { implicit traceContext => span =>
@@ -435,109 +420,135 @@ abstract class SequencerClientImpl(
         syncCryptoClient.currentSnapshotApproximation
       )(FutureUnlessShutdown.pure)
 
-      if (replayEnabled) {
-        logger.debug(s"$messageId shortcut due to replay")
-        val resF = for {
-          snapshot <- EitherT.liftF(snapshotF)
-          costO <- EitherT.liftF(
-            trafficStateController.flatTraverse(_.computeCost(batch, snapshot.ipsSnapshot))
-          )
-          requestE = mkRequestE(costO)
-          request <- EitherT.fromEither[FutureUnlessShutdown](requestE)
-          synchronizerParams <- synchronizerParamsF
-          _ <- EitherT.fromEither[FutureUnlessShutdown](
-            checkRequestSize(request, synchronizerParams.maxRequestSize)
-          )
-        } yield {
-          // Invoke the callback immediately, because it will not be triggered by replayed messages,
-          // as they will very likely have mismatching message ids.
-          val dummySendResult =
-            SendResult.Success(
-              Deliver.create(
-                previousTimestamp = None,
-                CantonTimestamp.now(),
-                psid,
-                messageIdO = None,
-                Batch(List.empty, protocolVersion),
-                Option.empty[TrafficReceipt],
-                protocolVersion = protocolVersion,
-              )
-            )
-
-          EitherT.pure[FutureUnlessShutdown, SendAsyncClientError](
-            callback(UnlessShutdown.Outcome(dummySendResult))
-          )
-        }
-
-        Nested(resF): SendAsyncResult
-      } else {
-        val sendResultPromise = PromiseUnlessShutdown.supervised[SendResult](
-          s"send result for message ID $messageId",
-          futureSupervisor,
+      for {
+        snapshot <- EitherT.liftF(snapshotF)
+        cost <- EitherT.liftF(
+          trafficStateController.flatTraverse(_.computeCost(batch, snapshot.ipsSnapshot))
         )
-        val wrappedCallback: SendCallback = { result =>
-          sendResultPromise.trySuccess(result).discard[Boolean]
-          callback(result)
-        }
-
-        def trackSend: Either[SendAsyncClientError, LatestAttemptRef] =
-          sendTracker
-            .track(
-              messageId,
-              timestamps.maxSequencingTime,
-              wrappedCallback,
-            )
-            .leftMap[SendAsyncClientError] { case SavePendingSendError.MessageIdAlreadyTracked =>
-              // we're already tracking this message id
-              SendAsyncClientError.DuplicateMessageId
-            }
-
-        def peekAtSendResult(): Option[UnlessShutdown[SendResult]] =
-          sendResultPromise.future.value.map(_.valueOr { ex =>
-            ErrorUtil.internalError(
-              new IllegalStateException(
-                s"The send result promise for message ID $messageId failed with an exception",
-                ex,
+        request <- EitherT.fromEither[FutureUnlessShutdown](mkRequestE(cost))
+        synchronizerParams <- synchronizerParamsF
+        _ <- EitherT.fromEither[FutureUnlessShutdown](
+          checkRequestSize(request, synchronizerParams.maxRequestSize)
+        )
+        prepared <-
+          if (replayEnabled) {
+            logger.debug(s"$messageId shortcut due to replay")
+            EitherT.rightT[FutureUnlessShutdown, SendAsyncClientError](new ReplayPreparedSubmission)
+          } else
+            for {
+              _ <- SubmissionRequestValidations
+                .checkSenderAndRecipientsAreRegistered(request, snapshot.ipsSnapshot)
+                .leftMap(_.toSendAsyncClientError)
+              acceptableSequencersO <- EitherT.right[SendAsyncClientError](
+                getAcceptableSequencers(snapshot.ipsSnapshot)
               )
+            } yield new PreparedSubmissionImpl(
+              messageId,
+              request,
+              snapshot,
+              timestamps,
+              acceptableSequencersO,
+              cost.map(_.cost.unwrap),
             )
-          })
+      } yield prepared
+    }
+  }
 
-        val resF = for {
-          snapshot <- EitherT.liftF(snapshotF)
-          cost <- EitherT.liftF(
-            trafficStateController.flatTraverse(_.computeCost(batch, snapshot.ipsSnapshot))
-          )
-          requestE = mkRequestE(cost)
-          request <- EitherT.fromEither[FutureUnlessShutdown](requestE)
-          synchronizerParams <- synchronizerParamsF
-          _ <- EitherT.fromEither[FutureUnlessShutdown](
-            checkRequestSize(request, synchronizerParams.maxRequestSize)
-          )
-          _ <- SubmissionRequestValidations
-            .checkSenderAndRecipientsAreRegistered(request, snapshot.ipsSnapshot)
-            .leftMap(_.toSendAsyncClientError)
-          acceptableSequencersO <- EitherT.right(getAcceptableSequencers(snapshot.ipsSnapshot))
-          _ <- cost
-            .traverse_(c => trafficCostValidator.validate(c.cost.unwrap, traceContext))
-            .leftMap[SendAsyncClientError](SendAsyncClientError.TrafficEnforcementRejected.apply)
-          latestAttemptRef <- EitherT.fromEither[FutureUnlessShutdown](trackSend)
-          _ = recorderO.foreach(_.recordSubmission(request))
-          res <- performSend(
-            messageId,
-            request,
-            amplify = amplify,
-            useConfirmationResponseAmplificationParameters =
-              useConfirmationResponseAmplificationParameters,
-            () => peekAtSendResult(),
-            latestAttemptRef,
-            snapshot,
-            timestamps.approximateTimestampForSigning,
-            acceptableSequencersO,
-          ).value
-        } yield res
+  private final class ReplayPreparedSubmission extends SequencerClientSend.PreparedSubmission {
+    override def trafficCost: Option[Long] = None
 
-        Nested(resF)
+    override def sendAsync(
+        callback: SendCallback,
+        amplify: Boolean,
+        useConfirmationResponseAmplificationParameters: Boolean,
+    ): SendAsyncResult = {
+      // Invoke the callback immediately, because it will not be triggered by replayed messages,
+      // as they will very likely have mismatching message ids.
+      val dummySendResult =
+        SendResult.Success(
+          Deliver.create(
+            previousTimestamp = None,
+            CantonTimestamp.now(),
+            psid,
+            messageIdO = None,
+            Batch(List.empty, protocolVersion),
+            Option.empty[TrafficReceipt],
+            protocolVersion = protocolVersion,
+          )
+        )
+      callback(UnlessShutdown.Outcome(dummySendResult))
+      Nested(
+        EitherT.pure[FutureUnlessShutdown, SendAsyncClientError](
+          EitherTUtil.unitUS[SendAsyncClientError]
+        )
+      )
+    }
+  }
+
+  private final class PreparedSubmissionImpl(
+      messageId: MessageId,
+      request: SubmissionRequest,
+      snapshot: SyncCryptoApi,
+      timestamps: SendRequestTimestamps,
+      acceptableSequencersO: Option[Set[SequencerId]],
+      override val trafficCost: Option[Long],
+  )(implicit traceContext: TraceContext, metricsContext: MetricsContext)
+      extends SequencerClientSend.PreparedSubmission {
+
+    override def sendAsync(
+        callback: SendCallback,
+        amplify: Boolean,
+        useConfirmationResponseAmplificationParameters: Boolean,
+    ): SendAsyncResult = {
+      val sendResultPromise = PromiseUnlessShutdown.supervised[SendResult](
+        s"send result for message ID $messageId",
+        futureSupervisor,
+      )
+      val wrappedCallback: SendCallback = { result =>
+        sendResultPromise.trySuccess(result).discard[Boolean]
+        callback(result)
       }
+
+      def trackSend: Either[SendAsyncClientError, LatestAttemptRef] =
+        sendTracker
+          .track(
+            messageId,
+            timestamps.maxSequencingTime,
+            wrappedCallback,
+          )
+          .leftMap[SendAsyncClientError] { case SavePendingSendError.MessageIdAlreadyTracked =>
+            // we're already tracking this message id
+            SendAsyncClientError.DuplicateMessageId
+          }
+
+      def peekAtSendResult(): Option[UnlessShutdown[SendResult]] =
+        sendResultPromise.future.value.map(_.valueOr { ex =>
+          ErrorUtil.internalError(
+            new IllegalStateException(
+              s"The send result promise for message ID $messageId failed with an exception",
+              ex,
+            )
+          )
+        })
+
+      val resF = for {
+        latestAttemptRef <- EitherT.fromEither[FutureUnlessShutdown](trackSend)
+        _ = recorderO.foreach(_.recordSubmission(request))
+        res <- performSend(
+          messageId,
+          request,
+          amplify = amplify,
+          useConfirmationResponseAmplificationParameters =
+            useConfirmationResponseAmplificationParameters,
+          () => peekAtSendResult(),
+          latestAttemptRef,
+          snapshot,
+          timestamps.approximateTimestampForSigning,
+          acceptableSequencersO,
+        ).value
+      } yield res
+
+      Nested(resF)
     }
   }
 
@@ -701,7 +712,6 @@ abstract class SequencerClientImpl(
       case SendAsyncClientError.DuplicateMessageId =>
         ("duplicate", "message id already registered with send tracker", true)
       case SendAsyncClientError.RequestInvalid(invalid) => ("invalid", invalid, true)
-      case SendAsyncClientError.TrafficEnforcementRejected(rpc) => ("traffic", rpc.cause, true)
     }
     // cancel pending send now as we know the request will never cause a sequenced result
     def message =
@@ -793,7 +803,10 @@ abstract class SequencerClientImpl(
         // Penalties
         error match {
           case SendAsyncClientError.RequestRefused(sendAsyncError) if sendAsyncError.isOverload =>
-            connection.increasePenalty(PositiveInt.one, "sequencer is overloaded")
+            connection.increasePenalty(
+              Penalty.SequencerOverloaded,
+              "sequencer is overloaded",
+            )
           case _ =>
         }
 
@@ -1617,6 +1630,7 @@ class RichSequencerClientImpl(
           member,
           preSubscriptionEvent,
           sequencerAggregator,
+          config.useNewAggregator,
         )
         sequencerSubscriptionPoolRef
           .putIfAbsent(sequencerSubscriptionPool)
@@ -2422,30 +2436,4 @@ object SequencerClient {
       sequencerId: SequencerId,
   ): NamedLoggerFactory =
     loggerFactory.append("sequencerId", sequencerId.uid.toString)
-
-  trait TrafficCostValidator {
-
-    /** Validates that the traffic cost is valid in the context of the submitting member and the
-      * current submission request.
-      *
-      * Practically, this is relevant for requests from submitting participants that perform traffic
-      * enforcement against local user traffic accounts.
-      */
-    def validate(
-        trafficCost: Long,
-        traceContext: TraceContext,
-    ): EitherT[FutureUnlessShutdown, RpcError, Unit]
-  }
-
-  object TrafficCostValidator {
-    val NoTrafficCostValidation: TrafficCostValidator = new TrafficCostValidator {
-      override def validate(
-          @unused trafficCost: Long,
-          @unused traceContext: TraceContext,
-      ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
-        EitherT[FutureUnlessShutdown, RpcError, Unit](
-          FutureUnlessShutdown.pure(Right(()))
-        )
-    }
-  }
 }

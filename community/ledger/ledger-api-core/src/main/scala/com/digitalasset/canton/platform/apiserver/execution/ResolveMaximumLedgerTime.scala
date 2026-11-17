@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.execution
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.ledger.participant.state.index.{
   MaximumLedgerTime,
   MaximumLedgerTimeService,
@@ -29,8 +29,6 @@ class ResolveMaximumLedgerTime(
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
-  private val directEc = DirectExecutionContext(noTracingLogger)
-
   def apply(
       processedDisclosedContracts: ImmArray[FatContractInstance],
       usedContractIds: Set[ContractId],
@@ -44,7 +42,7 @@ class ResolveMaximumLedgerTime(
 
     maximumLedgerTimeService
       .lookupMaximumLedgerTimeAfterInterpretation(contractIdsToBeLookedUp)
-      .map(adjustTimeForDisclosedContracts(_, processedDisclosedContracts))(directEc)
+      .map(adjustTimeForDisclosedContracts(_, processedDisclosedContracts))(directExecutionContext)
   }
 
   private def adjustTimeForDisclosedContracts(

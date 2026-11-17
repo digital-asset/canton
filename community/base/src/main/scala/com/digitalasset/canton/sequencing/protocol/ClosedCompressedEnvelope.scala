@@ -58,7 +58,7 @@ final case class ClosedCompressedEnvelope(
         "signatures",
         pvv,
         ValidationParam(ProtocolVersion.newBoundsOnPV37 -> maxSignaturesPerEnvelope),
-      )((element, _) => Signature.fromProtoV30(element))
+      )((element, _) => Signature.fromProtoV30(pvv, element))
   } yield ClosedUncompressedEnvelope.create(
     protoEnvelope.content,
     recipients,

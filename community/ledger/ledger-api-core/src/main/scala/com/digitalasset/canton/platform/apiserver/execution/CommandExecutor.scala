@@ -63,7 +63,11 @@ object CommandExecutor {
       .map(_.protocolVersion)
       .maxOption
       .getOrElse(ProtocolVersion.latest)
-    InterpretationConfig.forProtocolVersion(protocolVersion)
+    InterpretationConfig
+      .forProtocolVersion(protocolVersion)
+      // During interpretation in Phase 1, we want to fail on all contract key hash mismatches,
+      // independent of the protocol version.
+      .copy(errorOnContractKeyHashMismatch = true)
   }
 
   def apply(

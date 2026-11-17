@@ -19,6 +19,7 @@ import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
 import com.daml.ledger.javaapi
 import com.daml.ledger.javaapi.data.codegen.ContractCompanion
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.*
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.{
   LocalInstanceReference,
   LocalMediatorReference,
@@ -460,6 +461,23 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
       senderRef,
       dropAggregationRule = dropAggregationRule,
     )
+
+  /** Asserts that the participant emitted exactly one completion for the party after the offset.
+    * Waits up to `timeoutMillis` for a second completion, so that an extra completion fails the
+    * assertion.
+    */
+  def assertNoExtraCompletion(
+      participant: ParticipantReference,
+      party: PartyId,
+      offsetAtBeginning: Long,
+      timeoutMillis: Long = 10000,
+  ): Assertion =
+    participant.ledger_api.completions.list(
+      party,
+      2,
+      offsetAtBeginning,
+      timeout = NonNegativeDuration.ofMillis(timeoutMillis),
+    ) should have size 1
 
   /** Convenience method to create a [[SignedMessageTransform]] from a [[MessageTransform]], signing
     * and sending the submission request as the original.

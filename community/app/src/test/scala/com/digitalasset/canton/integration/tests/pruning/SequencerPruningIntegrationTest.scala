@@ -12,16 +12,13 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransform,
   ConfigTransforms,
-  EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
 }
-import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.Database
 import com.digitalasset.canton.synchronizer.sequencer.SequencerMemberStatus.Active
 import com.digitalasset.canton.synchronizer.sequencer.{
   SequencerMemberStatus,
   SequencerPruningStatus,
-  SequencerReaderConfig,
 }
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.util.HexString
@@ -40,13 +37,6 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
     config.NonNegativeFiniteDuration.ofMillis(500)
   protected val participant3SequencerClientAcknowledgementInterval =
     sequencerClientAcknowledgementInterval * 10
-
-  protected val dbSequencerConfig = Database(
-    reader = SequencerReaderConfig(
-      // effectively allow checkpointing every event
-      checkpointInterval = config.NonNegativeFiniteDuration.ofMillis(1)
-    )
-  )
 
   // drastically reduce the ack time so we are able to quickly prune data they've acknowledged
   protected val reduceSequencerClientAcknowledgementInterval: ConfigTransform =
@@ -379,34 +369,3 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
   }
 
 }
-
-trait SequencerNodePruningIntegrationTest extends SequencerPruningIntegrationTest {
-  override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1
-      .addConfigTransforms(
-        reduceSequencerClientAcknowledgementInterval,
-        reduceSequencerAcknowledgementConflateWindow,
-        increaseParticipant3AcknowledgementInterval,
-        ConfigTransforms.useStaticTime,
-        setupSequencerConfig,
-      )
-      .withSetup { implicit env =>
-        import env.*
-
-        participant1.synchronizers.connect_local(sequencer1, alias = daName)
-        participant2.synchronizers.connect_local(sequencer1, alias = daName)
-      }
-
-  private val setupSequencerConfig: ConfigTransform =
-    ConfigTransforms.updateSequencerConfig("sequencer1") { config =>
-      config
-        .focus(_.sequencer)
-        .replace(dbSequencerConfig)
-    }
-}
-
-// TODO(#16089): Currently this test cannot work due to the issue. This is why it's commented out.
-//class SequencerNodePruningIntegrationTestH2 extends SequencerNodePruningIntegrationTest {
-//  // The synchronizer config by default uses in-memory, so the synchronizer id doesn't survive a synchronizer restart
-//  registerPlugin(new UseH2(loggerFactory))
-//}

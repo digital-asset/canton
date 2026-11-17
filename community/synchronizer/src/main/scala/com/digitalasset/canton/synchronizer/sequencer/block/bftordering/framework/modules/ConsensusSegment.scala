@@ -4,10 +4,10 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules
 
 import cats.syntax.functor.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -35,12 +35,14 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SignedMessage,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   HasRepresentativeProtocolVersion,
   OriginalByteString,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
   VersioningCompanionContextMemoization,
@@ -239,8 +241,21 @@ object ConsensusSegment {
         super[HasProtocolVersionedWrapper].toByteString
     }
 
+    /** Deserialization context for BFT orderer consensus segment structures. The claimed originator
+      * is the node that signed the message and the actual sender is the node that delivered it, if
+      * known (it is `None` for nested messages).
+      */
+    final case class ConsensusSegmentDeserializationContext(
+        claimedOriginator: BftNodeId,
+        actualSender: Option[BftNodeId],
+        limits: BftOrdererLimits,
+    )
+
     object PrePrepare
-        extends VersioningCompanionContextMemoization[PrePrepare, (BftNodeId, Option[BftNodeId])] {
+        extends VersioningCompanionContextMemoization[
+          PrePrepare,
+          ConsensusSegmentDeserializationContext,
+        ] {
       override def name: String = "PrePrepare"
 
       def create(
@@ -261,10 +276,12 @@ object ConsensusSegment {
         )
 
       def fromProtoConsensusMessage(
-          claimedOriginatorAndActualSender: (BftNodeId, Option[BftNodeId]),
+          pvv: ProtocolVersionValidation,
+          context: ConsensusSegmentDeserializationContext,
           value: v30.ConsensusMessage,
       )(originalByteString: OriginalByteString): ParsingResult[PrePrepare] = {
-        val (claimedOriginator, actualSender) = claimedOriginatorAndActualSender
+        val ConsensusSegmentDeserializationContext(claimedOriginator, actualSender, limits) =
+          context
         for {
           header <- headerFromProto(value)
           _ <- validateClaimedOriginatorIsMessageOriginator(claimedOriginator, header, actualSender)
@@ -272,6 +289,8 @@ object ConsensusSegment {
             ProtoDeserializationError.OtherError("Not a PrePrepare message")
           )
           prePrepare <- ConsensusSegment.ConsensusMessage.PrePrepare.fromProto(
+            pvv,
+            limits,
             header.blockMetadata,
             header.viewNumber,
             protoPrePrepare,
@@ -282,6 +301,8 @@ object ConsensusSegment {
       }
 
       private def fromProto(
+          pvv: ProtocolVersionValidation,
+          limits: BftOrdererLimits,
           blockMetadata: BlockMetadata,
           viewNumber: ViewNumber,
           prePrepare: v30.PrePrepare,
@@ -293,9 +314,19 @@ object ConsensusSegment {
         for {
           protoCanonicalCommitSet <- ProtoConverter
             .required("bftTimeCanonicalCommitSet", prePrepare.bftTimeCanonicalCommitSet)
-          canonicalCommitSet <- CanonicalCommitSet.fromProto(protoCanonicalCommitSet)
+          canonicalCommitSet <- CanonicalCommitSet.fromProto(
+            pvv,
+            limits,
+            protoCanonicalCommitSet,
+          )
           proofs <- prePrepare.block match {
-            case Some(block) => block.proofs.traverse(ProofOfAvailability.fromProto)
+            case Some(block) =>
+              ProtoValidation.validateLengthThen(
+                block.proofs,
+                "proofs",
+                pvv,
+                ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxProofs),
+              )((proof, _) => ProofOfAvailability.fromProto(pvv, limits, proof))
             case None =>
               Left(ProtoDeserializationError.OtherError("Pre-prepare with no ordering block"))
           }
@@ -312,7 +343,7 @@ object ConsensusSegment {
       override val versioningTable: VersioningTable = VersioningTable(
         SupportedVersions.ProtoData30 ->
           VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.ConsensusMessage)(
-            supportedProtoVersionMemoized(_)(PrePrepare.fromProtoConsensusMessage),
+            supportedProtoVersionMemoizedPVV(_)(fromProtoConsensusMessage),
             _.toProto,
           )
       )
@@ -565,7 +596,10 @@ object ConsensusSegment {
     }
 
     object ViewChange
-        extends VersioningCompanionContextMemoization[ViewChange, (BftNodeId, Option[BftNodeId])] {
+        extends VersioningCompanionContextMemoization[
+          ViewChange,
+          ConsensusSegmentDeserializationContext,
+        ] {
       override def name: String = "ViewChange"
       def create(
           blockMetadata: BlockMetadata,
@@ -580,10 +614,12 @@ object ConsensusSegment {
         )
 
       def fromProtoConsensusMessage(
-          claimedOriginatorAndActualSender: (BftNodeId, Option[BftNodeId]),
+          pvv: ProtocolVersionValidation,
+          context: ConsensusSegmentDeserializationContext,
           value: v30.ConsensusMessage,
       )(originalByteString: OriginalByteString): ParsingResult[ViewChange] = {
-        val (claimedOriginator, actualSender) = claimedOriginatorAndActualSender
+        val ConsensusSegmentDeserializationContext(claimedOriginator, actualSender, limits) =
+          context
         for {
           header <- headerFromProto(value)
           _ <- validateClaimedOriginatorIsMessageOriginator(claimedOriginator, header, actualSender)
@@ -591,6 +627,8 @@ object ConsensusSegment {
             ProtoDeserializationError.OtherError("Not a ViewChange message")
           )
           viewChange <- ViewChange.fromProto(
+            pvv,
+            limits,
             header.blockMetadata,
             header.viewNumber,
             protoViewChange,
@@ -601,6 +639,8 @@ object ConsensusSegment {
       }
 
       private def fromProto(
+          pvv: ProtocolVersionValidation,
+          limits: BftOrdererLimits,
           blockMetadata: BlockMetadata,
           viewNumber: ViewNumber,
           viewChange: v30.ViewChange,
@@ -608,7 +648,12 @@ object ConsensusSegment {
           actualSender: Option[BftNodeId],
       )(originalByteString: OriginalByteString): ParsingResult[ViewChange] =
         for {
-          certs <- viewChange.consensusCerts.traverse(ConsensusCertificate.fromProto)
+          certs <- ProtoValidation.validateLengthThen(
+            viewChange.consensusCerts,
+            "consensus_certs",
+            pvv,
+            ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxConsensusCerts),
+          )((cert, _) => ConsensusCertificate.fromProto(pvv, limits, cert))
           rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
         } yield ConsensusSegment.ConsensusMessage.ViewChange(
           blockMetadata,
@@ -621,7 +666,7 @@ object ConsensusSegment {
       override val versioningTable: VersioningTable = VersioningTable(
         SupportedVersions.ProtoData30 ->
           VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.ConsensusMessage)(
-            supportedProtoVersionMemoized(_)(ViewChange.fromProtoConsensusMessage),
+            supportedProtoVersionMemoizedPVV(_)(fromProtoConsensusMessage),
             _.toProto,
           )
       )
@@ -670,7 +715,10 @@ object ConsensusSegment {
 
     @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
     object NewView
-        extends VersioningCompanionContextMemoization[NewView, (BftNodeId, Option[BftNodeId])] {
+        extends VersioningCompanionContextMemoization[
+          NewView,
+          ConsensusSegmentDeserializationContext,
+        ] {
       override def name: String = "NewView"
       def create(
           blockMetadata: BlockMetadata,
@@ -694,10 +742,12 @@ object ConsensusSegment {
       implicit val ordering: Ordering[ViewChange] = Ordering.by(viewChange => viewChange.from)
 
       def fromProtoConsensusMessage(
-          claimedOriginatorAndActualSender: (BftNodeId, Option[BftNodeId]),
+          pvv: ProtocolVersionValidation,
+          context: ConsensusSegmentDeserializationContext,
           value: v30.ConsensusMessage,
       )(originalByteString: OriginalByteString): ParsingResult[NewView] = {
-        val (claimedOriginator, actualSender) = claimedOriginatorAndActualSender
+        val ConsensusSegmentDeserializationContext(claimedOriginator, actualSender, limits) =
+          context
         for {
           header <- headerFromProto(value)
           _ <- validateClaimedOriginatorIsMessageOriginator(claimedOriginator, header, actualSender)
@@ -705,6 +755,8 @@ object ConsensusSegment {
             ProtoDeserializationError.OtherError(s"Not a $name message")
           )
           newView <- NewView.fromProto(
+            pvv,
+            limits,
             header.blockMetadata,
             header.viewNumber,
             protoNewView,
@@ -715,6 +767,8 @@ object ConsensusSegment {
       }
 
       private def fromProto(
+          pvv: ProtocolVersionValidation,
+          limits: BftOrdererLimits,
           blockMetadata: BlockMetadata,
           viewNumber: ViewNumber,
           newView: v30.NewView,
@@ -724,21 +778,41 @@ object ConsensusSegment {
         for {
           // We set the actual sender of nested messages to `None`
           //  as the sender is set in the outer message and is unused for nested messages.
-          viewChanges <- newView.viewChanges.traverse(
+          viewChanges <- ProtoValidation.validateLengthThen(
+            newView.viewChanges,
+            "view_changes",
+            pvv,
+            ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxViewChanges),
+          )((viewChange, _) =>
             SignedMessage.fromProtoWithNodeId(
+              pvv,
               v30.ConsensusMessage,
               SupportedVersions.ProtoData30,
             )(nestedClaimedOriginator =>
-              ViewChange.fromProtoConsensusMessage((nestedClaimedOriginator, None), _)
-            )
+              ViewChange.fromProtoConsensusMessage(
+                pvv,
+                ConsensusSegmentDeserializationContext(nestedClaimedOriginator, None, limits),
+                _,
+              )
+            )(viewChange)
           )
-          prePrepares <- newView.prePrepares.traverse(
+          prePrepares <- ProtoValidation.validateLengthThen(
+            newView.prePrepares,
+            "pre_prepares",
+            pvv,
+            ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxPrePrepares),
+          )((prePrepare, _) =>
             SignedMessage.fromProtoWithNodeId(
+              pvv,
               v30.ConsensusMessage,
               SupportedVersions.ProtoData30,
             )(nestedClaimedOriginator =>
-              PrePrepare.fromProtoConsensusMessage((nestedClaimedOriginator, None), _)
-            )
+              PrePrepare.fromProtoConsensusMessage(
+                pvv,
+                ConsensusSegmentDeserializationContext(nestedClaimedOriginator, None, limits),
+                _,
+              )
+            )(prePrepare)
           )
           rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
         } yield ConsensusSegment.ConsensusMessage.NewView(
@@ -753,7 +827,7 @@ object ConsensusSegment {
       override val versioningTable: VersioningTable = VersioningTable(
         SupportedVersions.ProtoData30 ->
           VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.ConsensusMessage)(
-            supportedProtoVersionMemoized(_)(NewView.fromProtoConsensusMessage),
+            supportedProtoVersionMemoizedPVV(_)(fromProtoConsensusMessage),
             _.toProto,
           )
       )

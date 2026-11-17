@@ -13,7 +13,12 @@ import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.sequencing.SequencerAggregator.SequencerAggregatorError
 import com.digitalasset.canton.sequencing.SequencerAggregator.SequencerAggregatorError.BogusEvent
-import com.digitalasset.canton.sequencing.{SequencedSerializedEvent, SequencerAggregator}
+import com.digitalasset.canton.sequencing.{
+  ConnectionSerializedEvent,
+  SequencedSerializedEvent,
+  SequencerAggregator,
+  SequencerTestUtils,
+}
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.util.{DelayUtil, MonadUtil, ResourceUtil}
@@ -76,7 +81,7 @@ class SequencerAggregatorTest
         .combineAndMergeEvent(sequencerAlice, event)
         .futureValueUS shouldBe Either.unit
 
-      aggregator.eventQueue.take() shouldBe event
+      aggregator.eventQueue.take() shouldBe aggregated(event)
     }
 
     "pass-through events in sequence" in { fixture =>
@@ -91,7 +96,7 @@ class SequencerAggregatorTest
         aggregator
           .combineAndMergeEvent(sequencerAlice, event)
           .futureValueUS shouldBe Either.unit
-        aggregator.eventQueue.take() shouldBe event
+        aggregator.eventQueue.take() shouldBe aggregated(event)
       }
     }
 
@@ -125,7 +130,7 @@ class SequencerAggregatorTest
       always() {
         p.isCompleted shouldBe false
       }
-      aggregator.eventQueue.take() shouldBe events(0)
+      aggregator.eventQueue.take() shouldBe aggregated(events(0))
       eventually() {
         p.isCompleted shouldBe true
       }
@@ -1080,16 +1085,18 @@ class SequencerAggregatorTest
 
   private def assertDownstreamMessage(
       aggregator: SequencerAggregator,
-      message: SequencedSerializedEvent,
+      message: ConnectionSerializedEvent,
   ): Assertion =
     clue("Expected a single downstream message") {
       aggregator.eventQueue.size() shouldBe 1
-      aggregator.eventQueue.take() shouldBe message
+      aggregator.eventQueue.take().signedEvent shouldBe SequencerTestUtils.aggregate(
+        message.signedEvent
+      )
     }
 
   private def assertCombinedDownstreamMessage(
       aggregator: SequencerAggregator,
-      events: SequencedSerializedEvent*
+      events: ConnectionSerializedEvent*
   ): Assertion = clue("Expected a single combined downstream message from multiple sequencers") {
     aggregator.eventQueue.size() shouldBe 1
     aggregator.eventQueue.take() shouldBe combinedMessage(aggregator, events*)
@@ -1102,14 +1109,14 @@ class SequencerAggregatorTest
 
   private def combinedMessage(
       aggregator: SequencerAggregator,
-      events: SequencedSerializedEvent*
+      events: ConnectionSerializedEvent*
   ): SequencedSerializedEvent =
     if (useNewAggregator) {
       // The aggregator combines the signatures in reverse order of appearance
-      val combinedSignatures =
-        NonEmptyUtil.fromUnsafe(events.reverse.flatMap(_.signedEvent.signatures))
       SequencedEventWithTraceContext(
-        events.head.signedEvent.copy(signatures = combinedSignatures)
+        SequencerAggregator.mergeSignatures(
+          NonEmptyUtil.fromUnsafe(events.reverse.map(_.signedEvent))
+        )
       )(traceContext)
     } else
       aggregator
@@ -1130,11 +1137,11 @@ class SequencerAggregatorTest
 
   private def runScenario(
       aggregator: SequencerAggregator,
-      sequencerIdAndEvents: Seq[(SequencerId, Seq[SequencedSerializedEvent])],
+      sequencerIdAndEvents: Seq[(SequencerId, Seq[ConnectionSerializedEvent])],
   ): ScenarioResults = {
     def runSubscription(
         sequencerId: SequencerId,
-        events: Seq[SequencedSerializedEvent],
+        events: Seq[ConnectionSerializedEvent],
     ): FutureUnlessShutdown[Seq[Either[SequencerAggregatorError, Unit]]] =
       MonadUtil.sequentialTraverse(events) { event =>
         for {

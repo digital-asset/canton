@@ -6,9 +6,8 @@ package com.digitalasset.canton.synchronizer.sequencer
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -34,6 +33,7 @@ import com.digitalasset.canton.sequencing.client.pool.InternalSequencerConnectio
   SequencerConnectionHealth,
 }
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionWithPekkoSubscribe
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
   SequencerSubscription,
@@ -95,7 +95,7 @@ class DirectSequencerConnection(
   override def fatal(reason: String)(implicit traceContext: TraceContext): Unit = ()
 
   // There is a single sequencer, so its penalty is irrelevant
-  override def increasePenalty(amount: PositiveInt, reason: String)(implicit
+  override def increasePenalty(amount: Penalty, reason: String)(implicit
       traceContext: TraceContext
   ): Unit = ()
 
@@ -209,9 +209,8 @@ class DirectSequencerConnection(
     val source = Source
       .futureSource(sourceF)
       .watchTermination() { (matF, terminationF) =>
-        val directExecutionContext = DirectExecutionContext(noTracingLogger)
         val killSwitchF = matF.map { case (killSwitch, _) => killSwitch }(directExecutionContext)
-        val killSwitch = new DelayedKillSwitch(killSwitchF, noTracingLogger)
+        val killSwitch = new DelayedKillSwitch(killSwitchF)
         val doneF = matF
           .flatMap { case (_, doneF) => doneF.unwrap }(directExecutionContext)
           .flatMap(_ => terminationF)(directExecutionContext)

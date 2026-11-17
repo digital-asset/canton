@@ -1,0 +1,43 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- Scripts of unusual shapes, for the recorder and the corpus rather than the engine.
+module Main where
+
+import DA.Action (foldlA)
+import Daml.Script
+import Keys
+
+-- submits nothing, so has no units
+noTransactions : Script ()
+noTransactions = do
+  _ <- allocateParty "nobody"
+  pure ()
+
+-- the transactions before the failure are kept
+failsHalfway : Script ()
+failsHalfway = do
+  bank <- allocateParty "bank"
+  b <- submit bank $ createCmd Bank with bank
+  submit bank $ exerciseCmd b OpenIfAbsent with owner = bank; number = "1"
+  _ <- submit bank $ exerciseCmd b Balance with number = "missing"
+  pure ()
+
+-- several commands in one transaction
+batched : Script ()
+batched = do
+  bank <- allocateParty "bank"
+  _ <- submit bank $
+    (,,)
+      <$> createCmd Bank with bank
+      <*> createCmd Account with bank; owner = bank; number = "1"; balance = 0
+      <*> createCmd Account with bank; owner = bank; number = "2"; balance = 0
+  pure ()
+
+-- a long chain, each transaction using the previous one's contract
+chain : Script ()
+chain = do
+  bank <- allocateParty "bank"
+  cid <- submit bank $ createCmd Account with bank; owner = bank; number = "c"; balance = 0
+  _ <- foldlA (\c i -> submit bank $ exerciseCmd c Deposit with amount = i) cid [1 .. 50]
+  pure ()

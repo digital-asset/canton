@@ -705,6 +705,9 @@ object Transaction {
     *   Input key mappings inferred during interpretation.
     * @param contractOrder
     *   The order of contract ids as they appear in the transaction.
+    * @param contractKeyMismatches
+    *   The contract key mismatches for the transaction. For each contract id, the first element of
+    *   the tuple is the declared key and the second element is the recomputed one.
     */
   final case class Metadata(
       submissionSeed: Option[crypto.Hash],
@@ -714,6 +717,10 @@ object Transaction {
       nodeSeeds: ImmArray[(NodeId, crypto.Hash)],
       globalKeyMapping: Map[GlobalKey, Vector[ContractId]],
       contractOrder: List[ContractId],
+      contractKeyMismatches: Map[
+        ContractId,
+        (Option[GlobalKeyWithMaintainers], Option[GlobalKeyWithMaintainers]),
+      ],
   ) {
     def dependsOnTime: Boolean =
       timeBoundaries != Time.Range.unconstrained

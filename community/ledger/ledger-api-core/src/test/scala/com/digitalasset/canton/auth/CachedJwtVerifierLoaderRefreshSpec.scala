@@ -18,9 +18,9 @@ import org.slf4j.event.Level.WARN
 
 import java.security.KeyPairGenerator
 import java.security.interfaces.{RSAPrivateKey, RSAPublicKey}
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import scala.concurrent.duration.*
-import scala.concurrent.{Await, Future}
+import scala.concurrent.{Await, Future, Promise}
 import scala.util.{Failure, Success}
 
 class CachedJwtVerifierLoaderRefreshSpec
@@ -65,12 +65,14 @@ class CachedJwtVerifierLoaderRefreshSpec
       connectionTimeout: FiniteDuration = 1.second,
       readTimeout: FiniteDuration = 1.second,
       autoRefreshTime: FiniteDuration = 0.seconds,
+      minRefreshInterval: FiniteDuration = 30.seconds,
   ): CachedJwtVerifierLoader =
     new CachedJwtVerifierLoader(
       cacheMaxSize = 10,
       cacheExpiration = cacheExpiration,
       connectionTimeout = connectionTimeout,
       readTimeout = readTimeout,
+      minRefreshInterval = minRefreshInterval,
       autoRefreshAfter = autoRefreshTime,
       loggerFactory = loggerFactory,
     )
@@ -137,7 +139,12 @@ class CachedJwtVerifierLoaderRefreshSpec
   "CachedJwtVerifierLoader with autoRefreshTime > 0" should {
     "serve cached entry during JWKS outage within the refresh window" in {
       ResourceUtil.withResourceM(
-        createCachedLoader(cacheExpiration = 30.seconds, autoRefreshTime = 100.millis)
+        // The rate limit for fetches also applies to background refreshes
+        createCachedLoader(
+          cacheExpiration = 30.seconds,
+          autoRefreshTime = 100.millis,
+          minRefreshInterval = 100.millis,
+        )
       ) { loader =>
         ResourceUtil.withResourceM(new ControllableJwksServer(jwks).start()) { jwksServer =>
           val token = generateToken()
@@ -182,6 +189,7 @@ class CachedJwtVerifierLoaderRefreshSpec
           connectionTimeout = 500.millis,
           readTimeout = 500.millis,
           autoRefreshTime = 1.second,
+          minRefreshInterval = 100.millis,
         ),
         entries =>
           forExactly(1, entries)(
@@ -234,13 +242,19 @@ class CachedJwtVerifierLoaderRefreshSpec
 private class ControllableJwksServer(jwksJson: String)(implicit system: ActorSystem)
     extends AutoCloseable {
   private val serving = new AtomicBoolean(true)
+  private val currentJwks = new AtomicReference[String](jwksJson)
+  private val fetches = new AtomicInteger(0)
+  private val held = new AtomicReference[Future[Unit]](Future.unit)
 
   private val route: Route = path("result") {
     get {
-      if (serving.get())
-        complete(HttpEntity(ContentTypes.`application/json`, jwksJson))
-      else
-        complete(StatusCodes.ServiceUnavailable)
+      fetches.incrementAndGet().discard
+      onSuccess(held.get()) {
+        if (serving.get())
+          complete(HttpEntity(ContentTypes.`application/json`, currentJwks.get()))
+        else
+          complete(StatusCodes.ServiceUnavailable)
+      }
     }
   }
 
@@ -256,6 +270,21 @@ private class ControllableJwksServer(jwksJson: String)(implicit system: ActorSys
   def serve(): Unit = serving.set(true)
 
   def fail(): Unit = serving.set(false)
+
+  /** Replaces the served JWKS document, e.g. to simulate a key rotation at the IDP. */
+  def setJwks(jwksJson: String): Unit = currentJwks.set(jwksJson)
+
+  /** Holds the responses to subsequent requests until the returned promise is completed, e.g. to
+    * simulate a slow IDP.
+    */
+  def holdResponses(): Promise[Unit] = {
+    val release = Promise[Unit]()
+    held.set(release.future)
+    release
+  }
+
+  /** Number of JWKS requests received so far, including failed ones. */
+  def fetchCount: Int = fetches.get()
 
   override def close(): Unit = stop()
 }

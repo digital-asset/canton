@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.topology
 
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.KeyPurpose.Signing
@@ -179,8 +179,7 @@ object SimulationCryptoProvider {
       loggerFactory: NamedLoggerFactory,
   ): SimulationCryptoProvider = {
 
-    implicit val ec: ExecutionContext =
-      DirectExecutionContext(loggerFactory.getLogger(this.getClass))
+    implicit val ec: ExecutionContext = directExecutionContext
 
     val pureCrypto = new SymbolicPureCrypto()
     val cryptoPublicStore = new InMemoryCryptoPublicStore(loggerFactory)

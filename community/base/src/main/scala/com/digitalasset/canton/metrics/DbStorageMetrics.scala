@@ -20,6 +20,8 @@ class DbStorageHistograms(val parent: MetricName)(implicit
   private[metrics] val prefix: MetricName = parent :+ "db-storage"
   private[metrics] val general = new DbQueueHistograms(prefix :+ "general")
   private[metrics] val write = new DbQueueHistograms(prefix :+ "write")
+  private[metrics] val indexer = new DbQueueHistograms(prefix :+ "indexer")
+  private[metrics] val ledgerApiServer = new DbQueueHistograms(prefix :+ "ledger-api-server")
 
 }
 
@@ -31,6 +33,11 @@ class DbStorageMetrics(
   val general: DbQueueMetrics = new DbQueueMetrics(histograms.general, metricsFactory)
 
   val write: DbQueueMetrics = new DbQueueMetrics(histograms.write, metricsFactory)
+
+  val indexer: DbQueueMetrics = new DbQueueMetrics(histograms.indexer, metricsFactory)
+
+  val ledgerApiServer: DbQueueMetrics =
+    new DbQueueMetrics(histograms.ledgerApiServer, metricsFactory)
 
   val internalContractIdsCacheSize: Gauge[Int] = metricsFactory.gauge(
     MetricInfo(

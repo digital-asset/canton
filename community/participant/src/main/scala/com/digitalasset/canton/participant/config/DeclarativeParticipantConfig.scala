@@ -58,7 +58,8 @@ import java.nio.file.Files
   *   if true, then any excess connection will be disabled
   * @param enableMultiSynchronizerTopologyFeatureFlag
   *   if true, then the participant will enable multi-synchronizers for all synchronizers it is
-  *   connected to
+  *   connected to that run a protocol version lower than 37 (multi-synchronizer is enabled without
+  *   the flag from protocol version 37)
   */
 final case class DeclarativeParticipantConfig(
     checkSelfConsistency: Boolean = true,
@@ -72,6 +73,7 @@ final case class DeclarativeParticipantConfig(
     removeUsers: Boolean = false,
     connections: Seq[DeclarativeConnectionConfig] = Seq(),
     removeConnections: Boolean = false,
+    // TODO(#37616): Remove when removing support for PV=36
     enableMultiSynchronizerTopologyFeatureFlag: Boolean = false,
 )
 

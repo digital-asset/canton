@@ -54,26 +54,28 @@ final class SequencedEventMonotonicityCheckerTest
       )
       val handler = mkHandler()
       val checkedHandler = checker.handler(handler)
-      val (batch1, batch2) = bobEvents.splitAt(2)
+      val (batch1, batch2) = bobEvents.map(aggregated).splitAt(2)
 
       checkedHandler(Traced(batch1)).handlerResultValue
       checkedHandler(Traced(batch2)).handlerResultValue
-      handler.invocations.get.flatMap(_.value) shouldBe bobEvents
+      handler.invocations.get.flatMap(_.value) shouldBe bobEvents.map(aggregated)
     }
 
     "detect non-monotonic timestamps" in { env =>
       import env.*
 
-      val event1 = createEvent(
-        timestamp = CantonTimestamp.ofEpochSecond(2),
-        previousTimestamp = Some(CantonTimestamp.ofEpochSecond(1)),
-        counter = 2L,
-      ).futureValueUS
-      val event2 = createEvent(
-        timestamp = CantonTimestamp.ofEpochSecond(2),
-        previousTimestamp = Some(CantonTimestamp.ofEpochSecond(2)),
-        counter = 3L,
-      ).futureValueUS
+      val event1 = aggregated(
+        createEvent(
+          timestamp = CantonTimestamp.ofEpochSecond(2),
+          previousTimestamp = Some(CantonTimestamp.ofEpochSecond(1)),
+        ).futureValueUS
+      )
+      val event2 = aggregated(
+        createEvent(
+          timestamp = CantonTimestamp.ofEpochSecond(2),
+          previousTimestamp = Some(CantonTimestamp.ofEpochSecond(2)),
+        ).futureValueUS
+      )
 
       val checker = new SequencedEventMonotonicityChecker(
         previousEventTimestamp = Some(CantonTimestamp.ofEpochSecond(1)),
@@ -98,28 +100,30 @@ final class SequencedEventMonotonicityCheckerTest
         previousEventTimestamp = None,
         loggerFactory,
       )
-      val eventsF = Source(bobEvents)
+      val eventsF = Source(bobEvents.map(aggregated))
         .map(Right(_))
         .withUniqueKillSwitchMat()(Keep.left)
         .via(checker.flow)
         .toMat(Sink.seq)(Keep.right)
         .run()
-      eventsF.futureValue.map(_.value) shouldBe bobEvents.map(Right(_))
+      eventsF.futureValue.map(_.value) shouldBe bobEvents.map(aggregated).map(Right(_))
     }
 
     "detect non-monotonic timestamps" in { env =>
       import env.*
 
-      val event1 = createEvent(
-        timestamp = CantonTimestamp.ofEpochSecond(2),
-        previousTimestamp = Some(CantonTimestamp.ofEpochSecond(1)),
-        counter = 2L,
-      ).futureValueUS
-      val event2 = createEvent(
-        timestamp = CantonTimestamp.ofEpochSecond(2),
-        previousTimestamp = Some(CantonTimestamp.ofEpochSecond(2)),
-        counter = 3L,
-      ).futureValueUS
+      val event1 = aggregated(
+        createEvent(
+          timestamp = CantonTimestamp.ofEpochSecond(2),
+          previousTimestamp = Some(CantonTimestamp.ofEpochSecond(1)),
+        ).futureValueUS
+      )
+      val event2 = aggregated(
+        createEvent(
+          timestamp = CantonTimestamp.ofEpochSecond(2),
+          previousTimestamp = Some(CantonTimestamp.ofEpochSecond(2)),
+        ).futureValueUS
+      )
 
       val checker = new SequencedEventMonotonicityChecker(
         previousEventTimestamp = Some(CantonTimestamp.ofEpochSecond(1)),

@@ -82,7 +82,7 @@ trait TransactionTreeFactory {
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
-      rbContext: RollbackContext,
+      rbContext: RollbackScope,
       absolutizer: ContractIdAbsolutizer,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
@@ -114,7 +114,7 @@ object TransactionTreeFactory {
       loggerFactory: NamedLoggerFactory,
       metrics: TransactionViewMetrics,
   )(implicit ex: ExecutionContext): TransactionTreeFactory =
-    new NextGenTransactionTreeFactory(
+    new TransactionTreeFactoryImpl(
       submittingParticipant,
       synchronizerId,
       cantonContractIdVersion,

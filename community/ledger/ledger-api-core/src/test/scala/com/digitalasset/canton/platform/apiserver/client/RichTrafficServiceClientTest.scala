@@ -24,6 +24,8 @@ import com.digitalasset.canton.tea.v1.{
   PruneResponse,
   RegisterSubmissionRequest,
   RegisterSubmissionResponse,
+  ReleaseSubmissionRequest,
+  ReleaseSubmissionResponse,
   SubmissionAccountingServiceGrpc,
   TrafficServiceGrpc,
   UpdateAccountRequest,
@@ -85,8 +87,13 @@ class RichTrafficServiceClientTest extends AnyWordSpec with BaseTest with HasExe
         )
       else if (request.submissionId == unavailableSubmissionId)
         Future.failed(Status.UNAVAILABLE.asRuntimeException())
-      else Future.successful(RegisterSubmissionResponse())
+      else Future.successful(RegisterSubmissionResponse(None))
     }
+
+    override def releaseSubmission(
+        request: ReleaseSubmissionRequest
+    ): Future[ReleaseSubmissionResponse] =
+      Future.successful(ReleaseSubmissionResponse())
   }
 
   private def withTrafficService(
@@ -145,7 +152,7 @@ class RichTrafficServiceClientTest extends AnyWordSpec with BaseTest with HasExe
             .value
             .futureValueUS
 
-        register("accepted") shouldBe Right(RegisterSubmissionResponse())
+        register("accepted") shouldBe Right(RegisterSubmissionResponse(None))
         val conflict = loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
           register(conflictingSubmissionId),
           _ shouldBe empty,

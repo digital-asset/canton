@@ -647,6 +647,8 @@ private[lf] object Pretty {
           prettyValue(verbose)(k) + text(" -> ") + prettyValue(verbose)(v)
         }
         text("GenMap(") + intercalate(text(", "), list.toSeq) + text(")")
+      case ValueUint256(x) =>
+        text(data.Uint256.toHexString(x))
     }
 
   object SExpr {

@@ -163,13 +163,11 @@ trait SequencerConnectionPool extends FlagCloseable with HasCloseContext with Na
   def metricsContext: MetricsContext
 
   /** Determine whether the connection pool can still reach the given threshold, ignoring the
-    * `ignored` connections and considering an additional `extraUndecided` number of undecided
-    * connections.
+    * `ignored` sequencer IDs.
     */
   def isThresholdStillReachable(
       threshold: PositiveInt,
-      ignored: Set[ConnectionConfig] = Set.empty,
-      extraUndecided: NonNegativeInt = NonNegativeInt.zero,
+      ignored: Set[SequencerId] = Set.empty,
   )(implicit
       traceContext: TraceContext
   ): Either[SequencerConnectionPoolError.ThresholdUnreachableError, Unit]
@@ -193,9 +191,14 @@ object SequencerConnectionPool {
     *   number of connections in the pool goes below the threshold, the pool's health will
     *   transition to `degraded` (or `failed` if it reaches 0).
     * @param minRestartConnectionDelay
-    *   The minimum duration after which a failed connection is restarted.
+    *   Initial delay before a failed sequencer connection is restarted.
     * @param maxRestartConnectionDelay
-    *   The maximum duration after which a failed connection is restarted.
+    *   Maximum delay before a failed sequencer connection is restarted. The delay doubles at every
+    *   restart up to this value, and goes back to `min_restart_delay` once a connection has stayed
+    *   validated for at least [[minStableConnectionDuration]].
+    * @param minStableConnectionDuration
+    *   Minimum duration a sequencer connection must stay validated for its restart delay to go back
+    *   to [[minRestartConnectionDelay]] when it fails.
     * @param warnConnectionValidationDelay
     *   The duration after which a warning is issued if a started connection still fails validation.
     * @param sequencerConnectionPenaltyConfig
@@ -210,6 +213,7 @@ object SequencerConnectionPool {
       trustThreshold: PositiveInt,
       minRestartConnectionDelay: NonNegativeFiniteDuration,
       maxRestartConnectionDelay: NonNegativeFiniteDuration,
+      minStableConnectionDuration: NonNegativeFiniteDuration,
       warnConnectionValidationDelay: NonNegativeFiniteDuration,
       sequencerConnectionPenaltyConfig: SequencerConnectionPenaltyConfig,
       expectedPsidO: Option[PhysicalSynchronizerId] = None,
@@ -273,6 +277,7 @@ object SequencerConnectionPool {
       param("trustThreshold", _.trustThreshold),
       param("minRestartConnectionDelay", _.minRestartConnectionDelay),
       param("maxRestartConnectionDelay", _.maxRestartConnectionDelay),
+      param("minStableConnectionDuration", _.minStableConnectionDuration),
       param("warnConnectionValidationDelay", _.warnConnectionValidationDelay),
       param("sequencerConnectionPenaltyConfig", _.sequencerConnectionPenaltyConfig),
       paramIfDefined("expectedPsidO", _.expectedPsidO),
@@ -337,6 +342,8 @@ object SequencerConnectionPool {
           sequencerConnections.sequencerConnectionPoolDelays.minRestartDelay,
         maxRestartConnectionDelay =
           sequencerConnections.sequencerConnectionPoolDelays.maxRestartDelay,
+        minStableConnectionDuration =
+          sequencerConnections.sequencerConnectionPoolDelays.minStableDuration,
         warnConnectionValidationDelay =
           sequencerConnections.sequencerConnectionPoolDelays.warnValidationDelay,
         sequencerConnectionPenaltyConfig = sequencerConnections.sequencerConnectionPenaltyConfig,
@@ -373,7 +380,8 @@ object SequencerConnectionPool {
   object SequencerConnectionPoolError {
     final case class InvalidConfigurationError(error: String) extends SequencerConnectionPoolError
     final case class TimeoutError(error: String) extends SequencerConnectionPoolError
-    final case class ThresholdUnreachableError(error: String) extends SequencerConnectionPoolError
+    final case class ThresholdUnreachableError(error: String, nbRemaining: Int)
+        extends SequencerConnectionPoolError
   }
 }
 

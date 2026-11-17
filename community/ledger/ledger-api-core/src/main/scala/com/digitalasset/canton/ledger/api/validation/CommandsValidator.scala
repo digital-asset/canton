@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
+import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.commands.Command.Command.{
   Create as ProtoCreate,
@@ -98,7 +99,7 @@ final class CommandsValidator(
       readAs = submitters.readAs,
       submittedAt = Time.Timestamp.assertFromInstant(currentUtcTime),
       // Unused for transaction preparation
-      deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration(Duration.ZERO),
+      deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration.Zero,
       commands = ApiCommands(
         commands = validatedCommands.to(ImmArray),
         ledgerEffectiveTime = ledgerEffectiveTimestamp,
@@ -442,12 +443,20 @@ final class CommandsValidator(
   ): Either[StatusRuntimeException, DeduplicationPeriod] =
     deduplicationPeriod match {
       case ProtoCommands.DeduplicationPeriod.Empty =>
-        Right(DeduplicationPeriod.DeduplicationDuration(maxDeduplicationDuration))
+        DeduplicationPeriod.DeduplicationDuration
+          .create(maxDeduplicationDuration)
+          .leftMap(error => invalidField("deduplication_period", error))
+
       case ProtoCommands.DeduplicationPeriod.DeduplicationDuration(duration) =>
         val deduplicationDuration = DurationConversion.fromProto(duration)
         DeduplicationPeriodValidator
           .validateNonNegativeDuration(deduplicationDuration)
-          .map(DeduplicationPeriod.DeduplicationDuration.apply)
+          .flatMap(duration =>
+            DeduplicationPeriod.DeduplicationDuration
+              .create(duration)
+              .leftMap(error => invalidField("deduplication_period", error))
+          )
+
       case ProtoCommands.DeduplicationPeriod.DeduplicationOffset(offset) =>
         if (offset < 0L)
           Left(
@@ -467,7 +476,6 @@ final class CommandsValidator(
             )
           )
     }
-
   private def validatePrefetchContractKeys(
       keys: Seq[PrefetchContractKey]
   )(implicit

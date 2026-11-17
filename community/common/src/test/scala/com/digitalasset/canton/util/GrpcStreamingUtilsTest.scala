@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.util
 
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext}
 import com.google.protobuf.{ByteString, StringValue}
@@ -323,6 +324,85 @@ final class GrpcStreamingUtilsTest
       requestObserver.onCompleted()
 
       response.future.futureValue shouldBe messages
+    }
+  }
+
+  "streamChunkedParsedFromClient" should {
+    def chunksOf(messages: Seq[String], chunkSize: Int): Seq[ByteString] = {
+      val out = new ByteArrayOutputStream()
+      messages.foreach(StringValue.of(_).writeDelimitedTo(out))
+      // chunk boundaries fall in the middle of the messages
+      out.toByteArray.grouped(chunkSize).map(ByteString.copyFrom).toSeq
+    }
+
+    def parse(in: java.io.InputStream) =
+      Option(StringValue.parseDelimitedFrom(in)).map(v => Right(v.getValue))
+
+    "extract the context from the first parsed message and still deliver all messages" in {
+      val messages = Seq("context", "second", "third")
+      val chunks = chunksOf(messages, 3)
+
+      val response = Promise[(String, Seq[String])]()
+      val responseObserver = new StreamObserver[(String, Seq[String])] {
+        override def onNext(value: (String, Seq[String])): Unit = response.success(value)
+        override def onError(t: Throwable): Unit = response.failure(t)
+        override def onCompleted(): Unit = ()
+      }
+
+      val requestObserver =
+        GrpcStreamingUtils
+          .streamChunkedParsedFromClient[ByteString, (String, Seq[String]), String, String](
+            responseObserver = responseObserver,
+            responseIfNoRequests = Success(("", Seq.empty)),
+            getBytes = identity,
+            parseMessage = parse,
+          )(contextFromFirstMessage = msg => Success(msg))(action =
+            (context, source) =>
+              FutureUnlessShutdown.outcomeF(source.runWith(Sink.seq).map(context -> _))
+          )
+
+      chunks.foreach(requestObserver.onNext)
+      requestObserver.onCompleted()
+
+      // the first message is part of the source as well
+      response.future.futureValue shouldBe ("context" -> messages)
+    }
+
+    "call onError exactly once if the context cannot be extracted, even if more chunks arrive" in {
+      val messages = "bad-context" +: Seq.tabulate(50)(i => s"message-$i")
+      val chunks = chunksOf(messages, 3)
+
+      val expectedException = new RuntimeException("cannot extract context")
+      val onErrorCounts = new AtomicInteger(0)
+      val responseObserver = new StreamObserver[String] {
+        override def onNext(value: String): Unit =
+          fail("processing the requests should not succeed")
+        override def onError(t: Throwable): Unit =
+          onErrorCounts.incrementAndGet().discard
+        override def onCompleted(): Unit = ()
+      }
+
+      val requestObserver =
+        GrpcStreamingUtils.streamChunkedParsedFromClient[ByteString, String, Unit, String](
+          responseObserver = responseObserver,
+          responseIfNoRequests = Success(""),
+          getBytes = identity,
+          parseMessage = parse,
+        )(contextFromFirstMessage = _ => scala.util.Failure(expectedException))(action =
+          (_, _) => fail("action must not run if the context extraction failed")
+        )
+
+      // must not throw, even though the input pipe gets closed after the failure
+      chunks.foreach(requestObserver.onNext)
+      requestObserver.onCompleted()
+
+      eventually() {
+        onErrorCounts.get() shouldBe 1
+      }
+      // give a potential second onError call the chance to happen
+      always() {
+        onErrorCounts.get() shouldBe 1
+      }
     }
   }
 

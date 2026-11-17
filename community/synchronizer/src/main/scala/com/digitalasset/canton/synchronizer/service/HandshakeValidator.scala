@@ -32,7 +32,7 @@ object HandshakeValidator {
     val clientVersions = clientVersionsP.map(ProtocolVersion.parseUnchecked)
     val minClientVersion = minClientVersionP.map(ProtocolVersion.parseUnchecked)
 
-    // New check introduced with pv35 to validate whether the binary used aligns with
+    // Validate whether the binary used aligns with
     // the expectations to prevent ledger forks and other incompatibilities because
     // of users running unstable development snapshots in production.
     // We learned this the hard way ...

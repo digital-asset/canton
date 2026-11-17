@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.store
 
 import cats.Monoid
+import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
@@ -25,7 +26,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingFromCompanion,
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.TopologyLimits
+import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, TopologyLimits}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -34,7 +35,10 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v30 as adminTopoV30
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
+import com.digitalasset.canton.topology.store.StoredTopologyTransaction.{
+  GenericStoredTopologyTransaction,
+  PositiveStoredTopologyTransaction,
+}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.{
   GenericStoredTopologyTransactions,
   NegativeStoredTopologyTransactions,
@@ -256,6 +260,8 @@ object StoredTopologyTransaction
 
   type GenericStoredTopologyTransaction =
     StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]
+  type PositiveStoredTopologyTransaction =
+    StoredTopologyTransaction[TopologyChangeOp.Replace, TopologyMapping]
 
 }
 
@@ -335,6 +341,14 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
   def latestTopologyChangeTimestamp()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[(SequencedTime, EffectiveTime)]]
+
+  /** Checks basic invariants of the store's contents (e.g. only 1 effective topology transaction
+    * per unique mapping key).
+    */
+  def checkConsistency(
+      synchronizerParameters: StaticSynchronizerParameters,
+      ignoreLsuPsidCheck: Boolean,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit]
 
   /** returns the current dispatching watermark
     *
@@ -671,7 +685,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
     */
   def findEffectiveStateChanges(
       fromEffectiveInclusive: CantonTimestamp,
-      filterTypes: Option[Seq[TopologyMapping.Code]] = None,
+      filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]] = None,
       onlyAtEffective: Boolean,
   )(implicit
       traceContext: TraceContext
@@ -743,6 +757,29 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       ev: StoreID <:< SynchronizerStore,
       errorLoggingContext: ErrorLoggingContext,
   ): FutureUnlessShutdown[Unit]
+
+  /** Finds the effective topology transactions with an effective time up to including
+    * `toInclusive`. In other words, the topology transactions that are effective as of
+    * `toInclusive.immediateSuccessor`.
+    *
+    * @param fromExclusive
+    *   the exclusive lower bound for the `validFrom` of the returned topology transaction. All
+    *   topology transaction up to this effective have been successfully processed before. Can be
+    *   set to `CantonTimestamp.MinValue` if no transaction has been processed before. This
+    *   parameter is used by crash recovery to not re-process previously processed transactions
+    *   again.
+    * @param toInclusive
+    *   the effective time of the node's onboarding transaction
+    * @param filterTypes
+    *   the type of topology transactions that should be included in the result
+    */
+  def findEffectiveStateChangesAtTopologyInit(
+      fromExclusive: EffectiveTime,
+      toInclusive: EffectiveTime,
+      filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]],
+  )(implicit
+      traceContext: TraceContext
+  ): Source[PositiveStoredTopologyTransaction, NotUsed]
 }
 
 object TopologyStore {

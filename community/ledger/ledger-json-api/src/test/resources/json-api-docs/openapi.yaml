@@ -2347,7 +2347,8 @@ paths:
       description: |-
         Get account state for a given account ID.
         Permissioned to users with CanDebitTrafficFrom for the account ID, CanDebitTrafficFromAnyAccount,
-        ActAsAnyParty, ExecuteAsAnyParty, or ActAs or ExecuteAs rights for the party with the same ID.
+        ActAsAnyParty, ExecuteAsAnyParty, ActAs or ExecuteAs rights for the party with the same ID,
+        or Ledger API admin users.
 
         NOTE: This endpoint is exposed only when traffic enforcement feature is enabled (canton.participants.participant1.traffic-enforcement.enabled = true)
       operationId: getV2TrafficAccountsAccount-id
@@ -2385,7 +2386,8 @@ paths:
         List accounts and their details.
         Accounts that were never credited or debited are not listed.
 
-        Permissioned to users holding CanActAsAnyParty, CanExecuteAsAnyParty or CanDebitTrafficFromAnyAccount rights.
+        Permissioned to users holding CanActAsAnyParty, CanExecuteAsAnyParty or CanDebitTrafficFromAnyAccount rights,
+        or Ledger API admin users.
 
         NOTE: This endpoint is exposed only when traffic enforcement feature is enabled (canton.participants.participant1.traffic-enforcement.enabled = true)
       operationId: getV2TrafficAccounts

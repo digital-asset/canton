@@ -55,3 +55,17 @@ jobs:
           # Scheduled runs always apply. A manual dispatch honors the "apply" checkbox, so it
           # defaults to a dry run and only writes topics when the box is ticked.
           command: python3 scripts/ci/update_rota_topics.py ${{ (github.event_name == 'schedule' || inputs.apply == true) && '--apply' || '' }}
+
+  # Any failure or cancellation on main (exit 1, crash, timeout) pings the CI rota in
+  # #team-canton-internal. The script sends no failure message of its own. A manual dry run
+  # (apply unchecked) is a preview and never alerts.
+  notify:
+    needs: [pick_runner, update-rota-slack-topics]
+    if: >-
+      always() &&
+      (github.event_name == 'schedule' || inputs.apply == true) &&
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    uses: ./.github/workflows/_notify.yml
+    secrets: inherit
+    with:
+      needs_json: ${{ toJSON(needs) }}

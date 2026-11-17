@@ -10,7 +10,8 @@ import com.daml.logging.entries.LoggingEntry
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.{DatabaseMetrics, Timed}
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
+import com.digitalasset.canton.config.{DbParametersConfig, QueryCostMonitoringConfig}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.{ComponentHealthState, HealthStatus, ReportsHealth}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -26,16 +27,18 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   TracedLogger,
 }
-import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.metrics.{DbQueueMetrics, LedgerApiServerMetrics}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
 import com.digitalasset.canton.platform.ResourceOwnerOps
 import com.digitalasset.canton.platform.config.ServerRole
+import com.digitalasset.canton.platform.store.dao.DbDispatcher.DummyRunnable
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.util.concurrent.ThreadFactoryBuilder
+import slick.util.{QueryCostTracker, QueryCostTrackerImpl}
 
 import java.sql.Connection
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
 import javax.sql.DataSource
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
@@ -59,6 +62,7 @@ private[dao] final class DbDispatcherImpl private[dao] (
     executorService: NamedExecutionContextExecutorService,
     overallWaitTimer: Timer,
     overallExecutionTimer: Timer,
+    queryCostTracker: Option[QueryCostTracker],
     val loggerFactory: NamedLoggerFactory,
 ) extends DbDispatcher
     with ReportsHealth
@@ -87,7 +91,15 @@ private[dao] final class DbDispatcherImpl private[dao] (
       implicit loggingContext: LoggingContextWithTrace => startWait =>
         {
           implicit val ec = executionContext
+          val costTracker: Option[(QueryCostTracker, Runnable)] =
+            queryCostTracker.map(_ -> new DummyRunnable())
+          costTracker.foreach { case (tracker, key) =>
+            tracker.register(key)
+          }
           Future {
+            costTracker.foreach { case (tracker, key) =>
+              tracker.scheduled(key)
+            }
             connectionProvider.runSQL(
               DbDispatcher.executeSql(
                 databaseMetrics = databaseMetrics,
@@ -99,7 +111,20 @@ private[dao] final class DbDispatcherImpl private[dao] (
             )
           }
             .flatMap(Future.fromTry)
-            .transform(identity, DbDispatcher.handleJdbcError(logger))
+            .transform(
+              { result =>
+                costTracker.foreach { case (tracker, key) =>
+                  tracker.completed(key)
+                }
+                result
+              },
+              { throwable =>
+                costTracker.foreach { case (tracker, key) =>
+                  tracker.failed(key)
+                }
+                DbDispatcher.handleJdbcError(logger)(throwable)
+              },
+            )
         }
     }
 
@@ -117,7 +142,7 @@ private[dao] final class DbDispatcherOfStorage(
 ) extends DbDispatcher
     with ReportsHealth
     with NamedLogging {
-  private implicit val directEc: ExecutionContext = DirectExecutionContext(noTracingLogger)
+  private implicit val directExecutionContextImplicit: ExecutionContext = directExecutionContext
 
   /** consider using executeSqlUS if possible */
   override def executeSql[T](databaseMetrics: DatabaseMetrics)(
@@ -155,6 +180,10 @@ private[dao] final class DbDispatcherOfStorage(
 
 object DbDispatcher {
 
+  private[dao] class DummyRunnable extends Runnable {
+    override def run(): Unit = ()
+  }
+
   def ofDbStorage(
       dbStorage: DbStorage,
       overallWaitTimer: Timer,
@@ -174,6 +203,10 @@ object DbDispatcher {
       connectionPoolSize: Int,
       connectionTimeout: FiniteDuration,
       metrics: LedgerApiServerMetrics,
+      dbQueueMetricsOpt: Option[DbQueueMetrics],
+      logQueryCostOpt: Option[QueryCostMonitoringConfig],
+      dbParametersConfigOpt: Option[DbParametersConfig],
+      schedulerOpt: Option[ScheduledExecutorService],
       loggerFactory: NamedLoggerFactory,
   ): ResourceOwner[DbDispatcher with ReportsHealth] = {
     val logger = loggerFactory.getLogger(getClass)
@@ -204,6 +237,19 @@ object DbDispatcher {
         metrics.index.db.threadpool.connection,
         serverRole.threadPoolSuffix,
       )
+      queryCostTrackerOpt = for {
+        dbQueueMetrics <- dbQueueMetricsOpt
+        logQueryCost <- logQueryCostOpt
+        dbParametersConfig <- dbParametersConfigOpt
+      } yield new QueryCostTrackerImpl(
+        logQueryCost = Some(logQueryCost),
+        metrics = dbQueueMetrics,
+        scheduler = schedulerOpt,
+        warnOnSlowQueryO = dbParametersConfig.warnOnSlowQuery.map(_.toInternal),
+        warnInterval = dbParametersConfig.warnOnSlowQueryInterval.toInternal,
+        numThreads = connectionPoolSize,
+        logger = logger,
+      )
       executor <- ResourceOwner
         .forExecutorService(
           () =>
@@ -224,11 +270,13 @@ object DbDispatcher {
           forcefulAwaitTerminationMillis = 5000, // ...and then waiting 5s more
         )
         .afterReleased(log("ExecutorService released"))
+        .afterReleased(queryCostTrackerOpt.foreach(_.shutdownNow()))
     } yield new DbDispatcherImpl(
       connectionProvider = connectionProvider,
       executorService = executor,
       overallWaitTimer = metrics.index.db.waitAll,
       overallExecutionTimer = metrics.index.db.execAll,
+      queryCostTracker = queryCostTrackerOpt,
       loggerFactory = loggerFactory,
     )
   }

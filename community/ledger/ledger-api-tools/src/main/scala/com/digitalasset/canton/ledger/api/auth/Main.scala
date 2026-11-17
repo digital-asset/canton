@@ -45,6 +45,7 @@ object Main {
       issuer: Option[String] = None,
       userId: String = "",
       participantId: Option[String] = None,
+      audience: Option[String] = None,
       exp: Option[Instant] = None,
       kid: Option[String] = None,
   ) extends Command
@@ -93,6 +94,7 @@ object Main {
                   issuerO,
                   userId,
                   participantIdO,
+                  audienceO,
                   exp,
                   kid,
                 )
@@ -101,14 +103,15 @@ object Main {
           ) =>
         val keyId = kid.getOrElse(defaultKeyId(signingKeyFile))
 
+        // --audience and --participantId are validated by the parser's checkConfig
         val payload = StandardJWTPayload(
-          issuerO,
-          userId,
-          participantIdO,
-          exp,
-          StandardJWTTokenFormat.Scope,
-          List.empty,
-          Some(AuthServiceJWTCodec.scopeLedgerApiFull),
+          issuer = issuerO,
+          userId = userId,
+          participantId = participantIdO,
+          exp = exp,
+          format = StandardJWTTokenFormat.Audience,
+          audiences = audienceO.toList,
+          scope = None,
         )
         val signingKey = KeyUtils
           .readRSAPrivateKeyFromDer(signingKeyFile)
@@ -225,12 +228,23 @@ object Main {
         opt[String]("participantId")
           .optional()
           .text(
-            "Restrict validity of the token to this participant ID. Default: None, token is valid for all participants."
+            "Restrict validity of the token to this participant ID: the token's audience becomes " +
+              "https://daml.com/jwt/aud/participant/<participantId>. " +
+              "Required unless --audience is given, and mutually exclusive with it."
           )
           .action((x, c) =>
             c.copy(command =
               c.command.map(_.asInstanceOf[GenerateToken].copy(participantId = Some(x)))
             )
+          ),
+        opt[String]("audience")
+          .optional()
+          .text(
+            "The audience (aud claim) of the token, as configured by target-audience on the participant. " +
+              "Required unless --participantId is given, and mutually exclusive with it."
+          )
+          .action((x, c) =>
+            c.copy(command = c.command.map(_.asInstanceOf[GenerateToken].copy(audience = Some(x))))
           ),
         opt[String]("exp")
           .optional()
@@ -250,5 +264,20 @@ object Main {
           ),
       )
       .discard
+
+    // The two options are mutually exclusive: the codec only writes the participant audience when
+    // no audience is given, and a participant configured with a `target-audience` never extracts
+    // the participant ID from the token, so a bespoke audience cannot restrict the participant.
+    checkConfig {
+      case Config(Some(GenerateToken(_, _, _, _, None, None, _, _))) =>
+        failure(
+          "Specify the audience with --audience, or the participant with --participantId to use the participant audience."
+        )
+      case Config(Some(GenerateToken(_, _, _, _, Some(_), Some(_), _, _))) =>
+        failure(
+          "--audience and --participantId are mutually exclusive: a participant with a configured target-audience does not restrict tokens to a participant ID."
+        )
+      case _ => success
+    }.discard
   }
 }

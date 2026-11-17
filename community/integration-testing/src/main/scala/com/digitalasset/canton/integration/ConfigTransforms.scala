@@ -33,10 +33,7 @@ import com.digitalasset.canton.platform.apiserver.SeedService
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
-import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
-  BftSequencer,
-  SequencerHighAvailabilityConfig,
-}
+import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.BftSequencer
 import com.digitalasset.canton.synchronizer.sequencer.config.{
   AlphaSequencerChannelConfig,
   SequencerNodeConfig,
@@ -148,38 +145,29 @@ object ConfigTransforms {
     ),
   )
 
-  lazy val enableNewAcsCommitmentProcessorPipeline: ConfigTransform =
+  lazy val lowerMaxNumUpdatesBetweenDigestCheckpoints: ConfigTransform =
     updateAllParticipantConfigs_(
-      _.focus(_.parameters.acsCommitments.enableNewAcsCommitmentProcessor)
-        .replace(true)
-        // Let's change the maxNumUpdatesBetweenCheckpoints to a very small value,
-        // so we always have a meaningful checkpoint (close to the ledger end)
-        // for AcsDigestConsistencyChecker
-        .focus(_.parameters.acsCommitments.maxNumUpdatesBetweenCheckpoints)
+      // Let's change the maxNumUpdatesBetweenCheckpoints to a very small value,
+      // so we always have a meaningful checkpoint (close to the ledger end)
+      // for AcsDigestConsistencyChecker
+      _.focus(_.parameters.acsCommitments.maxNumUpdatesBetweenCheckpoints)
         .replace(PositiveInt.one)
-    )
-
-  lazy val disableNewAcsCommitmentProcessorPipeline: ConfigTransform =
-    updateAllParticipantConfigs_(
-      _.focus(_.parameters.acsCommitments.enableNewAcsCommitmentProcessor).replace(false)
     )
 
   /** Disable the old acs commitment processor if the testedProtocolVersion meets or exceeds
     * ProtocolVersion.v36.
     */
   lazy val disableOldAcsCommitmentProcessor: ConfigTransform =
-    if (BaseTest.testedProtocolVersion >= ProtocolVersion.v36) {
-      updateAllParticipantConfigs_(
-        _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
-          .replace(AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Always)
-      )
-    } else identity
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
+        .replace(Some(AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Always))
+    )
 
   // TODO(#35107) remove after all tests work without this config transformation
   lazy val enableOldAcsCommitmentProcessor: ConfigTransform =
     updateAllParticipantConfigs_(
       _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
-        .replace(AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Never)
+        .replace(Some(AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Never))
     )
 
   def setAcsCommitmentSendDelay(min: Double, max: Double): ConfigTransform =
@@ -367,13 +355,13 @@ object ConfigTransforms {
               h2Config.focus(_.parameters.connectionTimeout).replace(newConnectionTimeout)
           }
         },
-        ConfigTransforms.setSigningKeysIfPV35OrHigher(
+        ConfigTransforms.setSigningKeys(
           if (sys.env.get("SESSION_SIGNING_KEYS_ENABLED").contains("true"))
             SessionSigningKeysConfig.enabled
           else SessionSigningKeysConfig.disabled
         ),
         ConfigTransforms.setAcsCommitmentSendDelay(0.0d, 0.0d),
-        enableNewAcsCommitmentProcessorPipeline,
+        lowerMaxNumUpdatesBetweenDigestCheckpoints,
         disableOldAcsCommitmentProcessor,
         enableTrafficAccounting,
       )
@@ -480,7 +468,7 @@ object ConfigTransforms {
 
   /** Use the given session signing keys config on all nodes with `nodeFilter(name)`.
     */
-  def setSigningKeysIfPV35OrHigher(
+  def setSigningKeys(
       sessionSigningKeysConfig: SessionSigningKeysConfig,
       nodeFilter: String => Boolean = _ => true,
   ): ConfigTransform =
@@ -511,33 +499,18 @@ object ConfigTransforms {
         .focus(_.parameters.timeouts.processing.sequencedEventProcessingBound)
         .replace(newSequencedEventProcessingBound)
 
-    // Update the payload to event margin so that the sequencer will not warn
-    // if the clock jumps forwards between when a payload has been written and batch is sequenced
-    def updateSequencerConfig(
-        sequencerConfig: SequencerConfig
-    ): SequencerConfig =
-      sequencerConfig match {
-        case dbConfig: SequencerConfig.Database =>
-          dbConfig
-            .focus(_.writer)
-            .modify(_.modify(payloadToEventMargin = config.NonNegativeFiniteDuration.ofDays(1000)))
-        case other => other
-      }
-
     val sequencerWriteBound = updateAllSequencerConfigs_(
-      _.focus(_.sequencer)
-        .modify(updateSequencerConfig)
-        // set token expiration interval to large value
-        // keeping it too low will mean that when you advance the clock by e.g. one hour
-        // the auth token will be removed and some send async requests will bounce randomly.
-        // unfortunately, some of the retry logic would depend on time advancing which isn't
-        // given in our integration test
-        .focus(_.publicApi.maxTokenExpirationInterval)
+      // set token expiration interval to large value
+      // keeping it too low will mean that when you advance the clock by e.g. one hour
+      // the auth token will be removed and some send async requests will bounce randomly.
+      // unfortunately, some of the retry logic would depend on time advancing which isn't
+      // given in our integration test
+      _.focus(_.publicApi.maxTokenExpirationInterval)
         .replace(config.NonNegativeFiniteDuration.ofDays(10000))
     )
 
     val disableSessionKeys =
-      ConfigTransforms.setSigningKeysIfPV35OrHigher(SessionSigningKeysConfig.disabled)
+      ConfigTransforms.setSigningKeys(SessionSigningKeysConfig.disabled)
 
     // Disable retries so that failed pings won't run forever
     val disablePingRetries = setPingRetries(false)
@@ -674,6 +647,13 @@ object ConfigTransforms {
   ): ConfigTransform =
     updateAllSequencerClientConfigs((_, _, config) => update(config))
 
+  /** Re-enables the deprecated scope-only JWTs (tokens with a scope but no audience) on the Ledger
+    * API and on the admin API of every node.
+    */
+  // TODO (i#33090): remove together with the scope-only token format
+  def enableScopeOnlyJwt: ConfigTransform =
+    _.focus(_.features.deprecated.enableScopeOnlyJwt).replace(true)
+
   def enableAdvancedCommands(
       featureFlag: FeatureFlag
   ): ConfigTransform =
@@ -789,49 +769,16 @@ object ConfigTransforms {
         .replace(interval)
     )
 
-  def updateAllDatabaseSequencerConfigs(
-      updateDbSequencerConfig: SequencerConfig.Database => SequencerConfig.Database
-  ): ConfigTransform = {
-    def update: SequencerConfig => SequencerConfig = {
-      case x: SequencerConfig.Database => updateDbSequencerConfig(x)
-      case x => x
-    }
-    updateAllSequencerConfigs_(
-      _.focus(_.sequencer).modify(update)
-    )
-  }
-
   def updateAllBlockSequencerConfigs(
       updateBlockSequencerConfig: BlockSequencerConfig => BlockSequencerConfig
   ): ConfigTransform = {
     def update: SequencerConfig => SequencerConfig = {
-      case x: SequencerConfig.External =>
-        x.focus(_.block).modify(updateBlockSequencerConfig)
       case x: SequencerConfig.BftSequencer =>
         x.focus(_.block).modify(updateBlockSequencerConfig)
       case x => x
     }
     updateAllSequencerConfigs_(_.focus(_.sequencer).modify(update))
   }
-
-  def updateDatabaseSequencerPruningBatchSize(batchSize: PositiveInt): ConfigTransform =
-    updateAllDatabaseSequencerConfigs(
-      _.focus(_.pruning.maxPruningBatchSize).replace(batchSize)
-    )
-
-  def updateSequencerCheckpointInterval(interval: NonNegativeFiniteDuration): ConfigTransform =
-    updateAllDatabaseSequencerConfigs(
-      _.focus(_.reader.checkpointInterval).replace(interval.toConfig)
-    )
-
-  def updateSequencerExclusiveStorageFailoverInterval(
-      interval: PositiveFiniteDuration
-  ): ConfigTransform =
-    updateAllDatabaseSequencerConfigs(
-      _.focus(_.highAvailability).some
-        .andThen(GenLens[SequencerHighAvailabilityConfig](_.exclusiveStorage.connectionPool))
-        .modify(_.copy(healthCheckPeriod = interval.toConfig, activeTimeout = interval.toConfig))
-    )
 
   def updateSynchronizerTimeTrackerConfigs_(
       update: SynchronizerTimeTrackerConfig => SynchronizerTimeTrackerConfig
@@ -1020,6 +967,23 @@ object ConfigTransforms {
     )
   )
 
+  def enableAlphaAcsReplicationSupport(
+      participantsWithAcsReplicationInterceptor: Map[
+        String,
+        AlphaAcsReplicationConfig.TestInterceptor,
+      ] = Map.empty
+  ): Seq[ConfigTransform] = Seq(updateAllParticipantConfigs { case (name, config) =>
+    val testInterceptor = participantsWithAcsReplicationInterceptor.get(name)
+    config
+      .focus(_.parameters.alphaAcsReplicationSupport)
+      .replace(Some(AlphaAcsReplicationConfig(testInterceptor = testInterceptor)))
+  }) ++ Seq(
+    updateAllSequencerConfigs_(
+      _.focus(_.parameters.alphaSequencerChannelSupport)
+        .replace(Some(AlphaSequencerChannelConfig()))
+    )
+  )
+
   def setDelayLoggingThreshold(duration: config.NonNegativeFiniteDuration): ConfigTransform =
     _.focus(_.monitoring.logging.delayLoggingThreshold).replace(duration)
 
@@ -1049,7 +1013,7 @@ object ConfigTransforms {
     * ProtocolVersion.v37.
     */
   def enableMultiSynchronizerTopologyFeatureFlag: ConfigTransform =
-    if (BaseTest.testedProtocolVersion <= ProtocolVersion.v36) {
+    if (BaseTest.testedProtocolVersion == ProtocolVersion.v36) {
       { (cantonConfig: CantonConfig) =>
         cantonConfig.focus(_.parameters.enableAlphaStateViaConfig).replace(true)
       }.compose(

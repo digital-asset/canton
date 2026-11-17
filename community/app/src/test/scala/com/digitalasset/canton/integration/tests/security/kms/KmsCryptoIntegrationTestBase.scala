@@ -3,9 +3,19 @@
 
 package com.digitalasset.canton.integration.tests.security.kms
 
-import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
+import com.digitalasset.canton.SequencerAlias
+import com.digitalasset.canton.admin.api.client.data.{
+  SequencerConnections,
+  StaticSynchronizerParameters,
+  SynchronizerConnectionConfig,
+}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{CryptoProvider, KmsConfig, NonNegativeFiniteDuration}
+import com.digitalasset.canton.config.{
+  CryptoProvider,
+  KmsConfig,
+  NonNegativeFiniteDuration,
+  SynchronizerTimeTrackerConfig,
+}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.bootstrap.InitializedSynchronizer
@@ -25,6 +35,10 @@ trait KmsCryptoIntegrationTestBase extends TopologyManagementHelper {
   protected lazy val protectedNodes: Set[String] = Set("participant1")
 
   protected def otherConfigTransforms: Seq[ConfigTransform] = Seq.empty
+
+  /** The time tracker configuration of the participants' connections to the synchronizer. */
+  protected def synchronizerTimeTrackerConfig: SynchronizerTimeTrackerConfig =
+    SynchronizerTimeTrackerConfig()
 
   protected def kmsConfig: KmsConfig
 
@@ -139,7 +153,18 @@ trait KmsCryptoIntegrationTestBase extends TopologyManagementHelper {
         participant2.health.wait_for_initialized()
 
         Seq(participant1, participant2).foreach(
-          _.synchronizers.connect_local(sequencer1, alias = daName)
+          _.synchronizers.connect_by_config(
+            SynchronizerConnectionConfig(
+              synchronizerAlias = daName,
+              // the same sequencer alias as `connect_local` assigns
+              sequencerConnections = SequencerConnections.single(
+                sequencer1.sequencerConnection
+                  .withAlias(SequencerAlias.tryCreate(sequencer1.name))
+              ),
+              timeTracker = synchronizerTimeTrackerConfig,
+            ),
+            synchronize = Some(env.commandTimeouts.bounded),
+          )
         )
       }
       .withTeardown(_ => teardown())

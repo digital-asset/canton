@@ -24,7 +24,13 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.config.UpdatesStreamsConfig
 import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.Ids
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{RawEvent, RawThinEvent}
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
+  RawEvent,
+  RawFatAddEvent,
+  RawParticipantEvent,
+  RawRemoveEvent,
+  RawThinEvent,
+}
 import com.digitalasset.canton.platform.store.backend.common.{
   EventPayloadSourceForUpdatesAcsDelta,
   EventPayloadSourceForUpdatesLedgerEffects,
@@ -166,22 +172,20 @@ class UpdatesStreamReader(
       new QueueBasedConcurrencyLimiter(maxParallelPayloadQueries, executionContext)
     val deserializationQueriesLimiter =
       new QueueBasedConcurrencyLimiter(transactionsProcessingParallelism, executionContext)
-    val txFilters: Set[DecomposedFilter] =
-      internalUpdateFormat.includeTransactions
-        .map(_.internalEventFormat.templatePartiesFilter)
-        .toList
-        .flatMap(txFilteringConstraints =>
-          FilterUtils.decomposeFilters(txFilteringConstraints).toList
-        )
-        .toSet
-    val reassignmentsFilters: Set[DecomposedFilter] =
-      internalUpdateFormat.includeReassignments
+
+    def decompose(eventFormat: Option[InternalEventFormat]): Set[DecomposedFilter] =
+      eventFormat
         .map(_.templatePartiesFilter)
         .toList
-        .flatMap(reassignmentsFilteringConstraints =>
-          FilterUtils.decomposeFilters(reassignmentsFilteringConstraints).toList
-        )
+        .flatMap(filteringConstraints => FilterUtils.decomposeFilters(filteringConstraints).toList)
         .toSet
+
+    val txFilters: Set[DecomposedFilter] = decompose(
+      internalUpdateFormat.includeTransactions.map(_.internalEventFormat)
+    )
+    val reassignmentsFilters: Set[DecomposedFilter] = decompose(
+      internalUpdateFormat.includeReassignments
+    )
     val txAndReassignmentFilters =
       txFilters.filter(reassignmentsFilters)
     val justTxFilters =
@@ -228,6 +232,7 @@ class UpdatesStreamReader(
           queryRange = queryRange,
           txInternalEventFormat = Some(internalEventFormat),
           reassignmentInternalEventFormat = internalUpdateFormat.includeReassignments,
+          internalUpdateFormat = internalUpdateFormat,
           txAndReassignmentFilters = txAndReassignmentFilters,
           justTxFilters = justTxFilters,
           justReassignmentFilters = justReassignmentFilters,
@@ -241,6 +246,7 @@ class UpdatesStreamReader(
           queryRange = queryRange,
           txInternalEventFormat = Some(internalEventFormat),
           reassignmentInternalEventFormat = internalUpdateFormat.includeReassignments,
+          internalUpdateFormat = internalUpdateFormat,
           txAndReassignmentFilters = txAndReassignmentFilters,
           justTxFilters = justTxFilters,
           justReassignmentFilters = justReassignmentFilters,
@@ -254,6 +260,7 @@ class UpdatesStreamReader(
           queryRange = queryRange,
           txInternalEventFormat = None,
           reassignmentInternalEventFormat = internalUpdateFormat.includeReassignments,
+          internalUpdateFormat = internalUpdateFormat,
           txAndReassignmentFilters = txAndReassignmentFilters,
           justTxFilters = justTxFilters,
           justReassignmentFilters = justReassignmentFilters,
@@ -326,6 +333,7 @@ class UpdatesStreamReader(
                 _.internalEventFormat.eventProjectionProperties
               ),
               lfValueTranslation = lfValueTranslation,
+              transactionShape = internalUpdateFormat.includeTransactions.map(_.transactionShape),
             )(reverseIfDescendingOrder(descendingOrder, rawEvents))(
               convertReassignment = reassignment =>
                 Offset.tryFromLong(reassignment.offset) -> UpdateResponse.ProtoUpdate(
@@ -385,6 +393,7 @@ class UpdatesStreamReader(
       queryRange: EventsRange,
       txInternalEventFormat: Option[InternalEventFormat],
       reassignmentInternalEventFormat: Option[InternalEventFormat],
+      internalUpdateFormat: InternalUpdateFormat,
       txAndReassignmentFilters: Set[DecomposedFilter],
       justTxFilters: Set[DecomposedFilter],
       justReassignmentFilters: Set[DecomposedFilter],
@@ -429,7 +438,7 @@ class UpdatesStreamReader(
                   witnessO = filter.party,
                   templateIdO = filter.templateId,
                 )
-                .filteredForEventTypes(Set(PersistentEventType.Create)),
+                .filteredForEventTypes(Set(PersistentEventType.Create, PersistentEventType.Add)),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
               metricForLast =
@@ -451,7 +460,7 @@ class UpdatesStreamReader(
                   witnessO = filter.party,
                   templateIdO = filter.templateId,
                 )
-                .filteredForEventTypes(Set(PersistentEventType.Assign)),
+                .filteredForEventTypes(Set(PersistentEventType.Assign, PersistentEventType.Add)),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
               metricForLast =
@@ -498,7 +507,9 @@ class UpdatesStreamReader(
                   witnessO = filter.party,
                   templateIdO = filter.templateId,
                 )
-                .filteredForEventTypes(Set(PersistentEventType.ConsumingExercise)),
+                .filteredForEventTypes(
+                  Set(PersistentEventType.ConsumingExercise, PersistentEventType.Remove)
+                ),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
               metricForLast =
@@ -520,7 +531,9 @@ class UpdatesStreamReader(
                   witnessO = filter.party,
                   templateIdO = filter.templateId,
                 )
-                .filteredForEventTypes(Set(PersistentEventType.Unassign)),
+                .filteredForEventTypes(
+                  Set(PersistentEventType.Unassign, PersistentEventType.Remove)
+                ),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
               metricForLast =
@@ -562,6 +575,7 @@ class UpdatesStreamReader(
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
         queryName = "AcsDelta/Activate",
+        internalUpdateFormat = internalUpdateFormat,
       )
     val payloadsDeactivate =
       fetchPayloads(
@@ -585,6 +599,7 @@ class UpdatesStreamReader(
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
         queryName = "AcsDelta/Deactivate",
+        internalUpdateFormat = internalUpdateFormat,
       )
 
     payloadsActivate
@@ -595,6 +610,7 @@ class UpdatesStreamReader(
       queryRange: EventsRange,
       txInternalEventFormat: Option[InternalEventFormat],
       reassignmentInternalEventFormat: Option[InternalEventFormat],
+      internalUpdateFormat: InternalUpdateFormat,
       txAndReassignmentFilters: Set[DecomposedFilter],
       justTxFilters: Set[DecomposedFilter],
       justReassignmentFilters: Set[DecomposedFilter],
@@ -642,7 +658,7 @@ class UpdatesStreamReader(
                   witnessO = filter.party,
                   templateIdO = filter.templateId,
                 )
-                .filteredForEventTypes(Set(PersistentEventType.Create)),
+                .filteredForEventTypes(Set(PersistentEventType.Create, PersistentEventType.Add)),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
               metricForLast =
@@ -664,7 +680,7 @@ class UpdatesStreamReader(
                   witnessO = filter.party,
                   templateIdO = filter.templateId,
                 )
-                .filteredForEventTypes(Set(PersistentEventType.Assign)),
+                .filteredForEventTypes(Set(PersistentEventType.Assign, PersistentEventType.Add)),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
               metricForLast =
@@ -743,7 +759,9 @@ class UpdatesStreamReader(
                   witnessO = filter.party,
                   templateIdO = filter.templateId,
                 )
-                .filteredForEventTypes(Set(PersistentEventType.ConsumingExercise)),
+                .filteredForEventTypes(
+                  Set(PersistentEventType.ConsumingExercise, PersistentEventType.Remove)
+                ),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
               metricForLast =
@@ -765,7 +783,9 @@ class UpdatesStreamReader(
                   witnessO = filter.party,
                   templateIdO = filter.templateId,
                 )
-                .filteredForEventTypes(Set(PersistentEventType.Unassign)),
+                .filteredForEventTypes(
+                  Set(PersistentEventType.Unassign, PersistentEventType.Remove)
+                ),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
               metricForLast =
@@ -881,6 +901,7 @@ class UpdatesStreamReader(
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
         queryName = "LedgerEffects/Activate",
+        internalUpdateFormat = internalUpdateFormat,
       )
     val payloadsDeactivate =
       fetchPayloads(
@@ -904,6 +925,7 @@ class UpdatesStreamReader(
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
         queryName = "LedgerEffects/Deactivate",
+        internalUpdateFormat = internalUpdateFormat,
       )
     val payloadsVariousWitnessed =
       fetchPayloads(
@@ -927,6 +949,7 @@ class UpdatesStreamReader(
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
         queryName = "LedgerEffects/VariousWitnessed",
+        internalUpdateFormat = internalUpdateFormat,
       )
 
     payloadsActivate
@@ -1016,6 +1039,7 @@ class UpdatesStreamReader(
       contractStore: LedgerApiContractStore,
       skipPruningChecks: Boolean,
       queryName: String,
+      internalUpdateFormat: InternalUpdateFormat,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[RawEvent, NotUsed] = {
@@ -1033,6 +1057,8 @@ class UpdatesStreamReader(
               skipPruningChecks = skipPruningChecks,
               ids = ids,
               fetchEvents = fetchEvents,
+              filterParticipantEvents =
+                UpdatesStreamReader.participantEventFilter(internalUpdateFormat),
               pruningOffsetService = pruningOffsetService,
               queryValidRange = queryValidRange,
               dbDispatcher = dbDispatcher,
@@ -1063,6 +1089,44 @@ object UpdatesStreamReader {
       if (descendingOrder) vec.reverse else vec
   }
 
+  private def participantEventPredicate(
+      eventFormat: InternalEventFormat
+  )(event: RawEvent): Boolean = event match {
+    case pe: RawFatAddEvent =>
+      eventFormat.templatePartiesFilter.apply(
+        pe.fatCreatedEventProperties.fatContract.templateId
+          .toFullIdentifier(pe.fatCreatedEventProperties.fatContract.packageName)
+          .toNameTypeConRef,
+        pe.fatCreatedEventProperties.fatContract.stakeholders.map(_.toString),
+      )
+    case pe: RawRemoveEvent =>
+      eventFormat.templatePartiesFilter.apply(
+        pe.templateId.toNameTypeConRef,
+        pe.witnessParties,
+      )
+    case _ => true
+  }
+
+  def participantEventFilter(
+      internalUpdateFormat: InternalUpdateFormat
+  ): Vector[RawEvent] => Vector[RawEvent] = {
+    val transactionFormat = internalUpdateFormat.includeTransactions
+      .map(_.internalEventFormat)
+      .map(participantEventPredicate)
+    val reassignmentFormat =
+      internalUpdateFormat.includeReassignments.map(participantEventPredicate)
+
+    (events: Vector[RawEvent]) => {
+      events.filter {
+        case p: RawParticipantEvent if p.participantEventProperties.category.renderAsReassignment =>
+          reassignmentFormat.exists(_(p))
+        case p: RawParticipantEvent if p.participantEventProperties.category.renderAsTransaction =>
+          transactionFormat.exists(_(p))
+        case _ => true
+      }
+    }
+  }
+
   def fetchContractPayloadsInternal(
       queryRange: EventsRange,
       dbMetric: DatabaseMetrics,
@@ -1070,6 +1134,7 @@ object UpdatesStreamReader {
       skipPruningChecks: Boolean,
       ids: Iterable[Long],
       fetchEvents: (Iterable[Long], Connection) => Vector[RawThinEvent],
+      filterParticipantEvents: Vector[RawEvent] => Vector[RawEvent],
       pruningOffsetService: PruningOffsetService,
       queryValidRange: QueryValidRange,
       dbDispatcher: DbDispatcher,
@@ -1110,5 +1175,6 @@ object UpdatesStreamReader {
         .flatMap(UpdateReader.withFatContractIfNeeded(contractStore))
     }
       .map(UpdateReader.tryToResolveFatInstance)
+      .map(_.pipe(filterParticipantEvents))
   }
 }

@@ -59,7 +59,7 @@ import monocle.macros.syntax.lens.*
 final case class EnvironmentDefinition(
     override val baseConfig: CantonConfig,
     override val testingConfig: TestingConfigInternal =
-      TestingConfigInternal(warnOnAcsCommitmentDegradation = false, warnOnJwtScopeUsage = false),
+      TestingConfigInternal(warnOnAcsCommitmentDegradation = false),
     override val setups: List[TestConsoleEnvironment => Unit] = Nil,
     override val teardown: Unit => Unit = _ => (),
     override val configTransforms: Seq[ConfigTransform] = ConfigTransforms.defaults,

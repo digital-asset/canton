@@ -38,11 +38,7 @@ trait LedgerApiIterativePruningTest extends CommunityIntegrationTest with Shared
 
         sequencer1.topology.synchronizer_parameters.propose_update(
           daId,
-          _.copy(
-            confirmationResponseTimeout = transactionTolerance,
-            mediatorReactionTimeout = transactionTolerance,
-            reconciliationInterval = PositiveDurationSeconds(transactionTolerance.asJava),
-          ),
+          _.copy(reconciliationInterval = PositiveDurationSeconds(transactionTolerance.asJava)),
         )
       }
 

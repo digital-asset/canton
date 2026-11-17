@@ -10,13 +10,14 @@ import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.UnassignmentData.ReassignmentGlobalOffset
 import com.digitalasset.canton.data.{CantonTimestamp, Offset, UnassignmentData}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.protocol.reassignment.{
   AssignmentData,
   IncompleteReassignmentData,
@@ -50,7 +51,7 @@ class DbReassignmentStore(
     indexedStringStore: IndexedStringStore,
     futureSupervisor: FutureSupervisor,
     exitOnFatalFailures: Boolean,
-    batchingConfig: BatchingConfig,
+    batchingConfig: ParticipantBatchingConfig,
     participantId: ParticipantId,
     offlineTopologyLookup: OfflineTopologyLookup,
     override protected val timeouts: ProcessingTimeout,

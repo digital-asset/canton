@@ -147,7 +147,7 @@ object InformeeMessage
           "InformeeMessage.submittingParticipantSignature",
           submittingParticipantSignaturePO,
         )
-        .flatMap(Signature.fromProtoV30)
+        .flatMap(Signature.fromProtoV30(pvv, _))
       // Always use proto version matching the proto tag in the versioningTable
       // to access the representative protocol version
       rpv <- InformeeMessage.protocolVersionRepresentativeFor(ProtoVersion(30))

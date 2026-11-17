@@ -1,0 +1,236 @@
+# get counts from values, defaulting to 1
+{{- $podCount := $.Values.participant.podCount | default 1 | int }}
+{{- $partPortCount := $.Values.participant.instancesPerPod | default 3 | int }}
+
+# pull global db credentials
+{{- $pgUser := $.Values.postgres.user }}
+{{- $pgPassword := $.Values.postgres.password }}
+{{- $pgDatabase := $.Values.postgres.database }}
+{{- $pgPort := $.Values.postgres.port }}
+
+# loop through and create the deployments/pods
+{{- range $p, $e1 := until $podCount }}
+
+# setup the pod number (1, 2, 3...)
+{{- $podNum := add $p 1 }}
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  # just one pvc per pod since there's only one postgres db here
+  name: {{ $.Release.Name }}-participant-pvc-{{ $podNum }}
+  labels:
+    app: participants{{ $podNum }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: premium-rwo
+  resources:
+    requests:
+      storage: 500Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Release.Name }}-participants{{ $podNum }}
+  labels:
+    app: participants{{ $podNum }}
+spec:
+  replicas: 1
+  # Never run old and new participant simultaneously.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: participants{{ $podNum }}
+  template:
+    metadata:
+      labels:
+        app: participants{{ $podNum }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "10013"
+        # Forces a new Pod whenever the image version changes
+        perf-test/version: {{ $.Values.image.tag | quote }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        # participant app container
+        - name: participants{{ $podNum }}
+          resources:
+            limits:
+              cpu: {{ $.Values.participant.resources.cpu | quote }}
+              memory: {{ $.Values.participant.resources.memory | quote }}
+            requests:
+              cpu: {{ $.Values.participant.resources.cpu | quote }}
+              memory: {{ $.Values.participant.resources.memory | quote }}
+          image: "{{ $.Values.image.repo }}/canton-perf-participants:{{ $.Values.image.tag }}"
+          ports:
+          # inner loop 1: generate multiple exposed ports for this container
+          {{- range $c, $e2 := until $partPortCount }}
+
+          # completely localized index logic - resets for every pod!
+          {{- $x := add $c 1 }}
+          {{- $baseOffset := mul $x 10 }}
+
+          # 10001 + 10 = 10011, 10001 + 20 = 10021
+          {{- $ledgerApiPort := add 10001 $baseOffset }}
+          # 10002 + 10 = 10012, 10002 + 20 = 10022
+          {{- $adminApiPort := add 10002 $baseOffset }}
+            
+            - name: ledger-api-{{ $x }}
+              containerPort: {{ $ledgerApiPort | int }}
+            - name: admin-api-{{ $x }}
+              containerPort: {{ $adminApiPort | int }}
+          {{- end }}
+          env:
+            - name: JAVA_OPTS
+              value: -XX:MaxRAMPercentage=75.0
+            - name: POSTGRES_HOST
+              value: "127.0.0.1"
+            - name: POSTGRES_USER
+              value: {{ $pgUser | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ $pgPassword | quote }}
+            - name: POSTGRES_PORT
+              value: {{ $pgPort | quote }}
+            - name: LOG_LEVEL_STDOUT
+              value: {{ $.Values.logLevel | quote}}
+            - name: LOG_LEVEL_CANTON
+              value: {{ $.Values.logLevel | quote}}
+            - name: ADDITIONAL_CONFIG_CONTRACT_CACHE
+              value: {{ $.Values.contractCacheConfig | nindent 16 }}
+            - name: WAIT_UNTIL_READY_MINUTES
+              value: "30"
+            - name: ADDITIONAL_CONFIG_GC_LOGGING
+              value: canton.monitoring.logging.jvm-gc.enabled=true
+            - name: RATE_TYPE
+              value: {{ $.Values.rate.type | quote }}
+            - name: FIXED_RATE
+              value: {{ $.Values.rate.fixedRate | quote }}
+            - name: TARGET_LATENCY_MS
+              value: {{ $.Values.rate.targetLatencyMs | quote }}
+            - name: NUM_ASSETS_PER_ISSUER
+              value: {{ $.Values.runConfig.numAssetsPerIssuer | quote }}
+            - name: RUN_TYPE
+              value: {{ $.Values.runConfig.runType | quote }}
+            - name: ISSUERS_PER_NODE
+              value: {{ $.Values.runConfig.numIssuersPerNode | quote }}
+            - name: NUM_ACCOUNTS_PER_ISSUER
+              value: {{ $.Values.runConfig.numAccountsPerIssuer | quote }}
+
+        # postgres container
+        - name: postgres
+          resources:
+            limits:
+              cpu: {{ $.Values.postgres.resources.cpu | quote }}
+              memory: {{ $.Values.postgres.resources.memory | quote }}
+            requests:
+              cpu: {{ $.Values.postgres.resources.cpu | quote }}
+              memory: {{ $.Values.postgres.resources.memory | quote }}
+          image: {{ $.Values.postgres.image }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          args:
+            - -c
+            - max_connections=200
+            - -c
+            - shared_buffers=10GB
+            - -c
+            - effective_cache_size=12GB
+            - -c
+            - maintenance_work_mem=1GB
+            - -c
+            - checkpoint_completion_target=0.9
+            - -c
+            - checkpoint_timeout=1800
+            - -c
+            - wal_buffers=16MB
+            - -c
+            - default_statistics_target=100
+            - -c
+            - random_page_cost=1.1
+            - -c
+            - effective_io_concurrency=200
+            - -c
+            - work_mem=20360kB
+            - -c
+            - huge_pages=try
+            - -c
+            - min_wal_size=2GB
+            - -c
+            - max_wal_size=50GB
+            - -c
+            - max_worker_processes=8
+            - -c
+            - max_parallel_workers_per_gather=4
+            - -c
+            - max_parallel_workers=8
+            - -c
+            - max_parallel_maintenance_workers=4
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_HOST_AUTH_METHOD
+              value: trust
+            - name: POSTGRES_USER
+              value: {{ $pgUser | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ $pgPassword | quote }}
+            - name: POSTGRES_DB
+              value: {{ $pgDatabase | quote }}
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+            - name: init-script
+              mountPath: /docker-entrypoint-initdb.d/init.sh
+              subPath: init.sh
+
+      volumes:
+        - name: pgdata
+          persistentVolumeClaim:
+            claimName: {{ $.Release.Name }}-participant-pvc-{{ $podNum }}
+        - name: init-script
+          configMap:
+            name: {{ $.Release.Name }}-participant-init
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # static service name per pod (participant-1, participant-2, etc.)
+  name: participants{{ $podNum }}
+  labels:
+    app: participants{{ $podNum }}
+spec:
+  type: ClusterIP
+  selector:
+    app: participants{{ $podNum }}
+  ports:
+    # inner loop 2: map all the generated api ports to the service
+    {{- range $c, $e2 := until $partPortCount }}
+    
+    {{- $x := add $c 1 }}
+    {{- $baseOffset := mul $x 10 }}
+    {{- $ledgerApiPort := add 10001 $baseOffset }}
+    {{- $adminApiPort := add 10002 $baseOffset }}
+    
+    - name: ledger-api-{{ $x }}
+      port: {{ $ledgerApiPort | int }}
+      targetPort: ledger-api-{{ $x }}
+      protocol: TCP
+    - name: admin-api-{{ $x }}
+      port: {{ $adminApiPort | int }}
+      targetPort: admin-api-{{ $x }}
+      protocol: TCP
+  {{- end }}
+    
+    - name: postgres
+      port: {{ $.Values.postgres.port | int }}
+      targetPort: postgres
+      protocol: TCP
+{{- end }}

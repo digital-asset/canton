@@ -664,8 +664,9 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
 
         val sig_k1_emptySignature = Signature
           .fromProtoV30(
+            testedProtocolVersionValidation,
             ns1k1_k1.signatures.head1.signature.toProtoV30
-              .copy(signature = ByteString.empty())
+              .copy(signature = ByteString.empty()),
           )
           .value
         val ns1k1_k1WithEmptySignature = {

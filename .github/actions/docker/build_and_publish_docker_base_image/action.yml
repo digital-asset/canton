@@ -2,9 +2,6 @@ name: Build and Publish Docker Base Image
 description: Builds and publishes the base Docker image for Canton.
 
 inputs:
-  gac_json:
-    description: Google Cloud service account credentials JSON
-    required: true
   oci_registry:
     description: OCI registry hostname
     required: true
@@ -22,8 +19,11 @@ runs:
     - name: Log Docker into GCR
       uses: ./.github/actions/docker/docker_log_into_gcr
       with:
-        gac_json: ${{ inputs.gac_json }}
         oci_registry: ${{ inputs.oci_registry }}
+
+    # build_canton_image.sh deletes staging tags with gcloud
+    - name: Setup gcloud SDK
+      uses: google-github-actions/setup-gcloud@v3
 
     - name: Setup QEMU and Buildx
       uses: ./.github/actions/docker/setup_qemu_and_buildx

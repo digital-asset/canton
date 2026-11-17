@@ -4,6 +4,7 @@
 package com.digitalasset.canton.protocol
 
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.protocol.TransactionMetadata.ContractKeyHashMismatches
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Time}
 import com.digitalasset.daml.lf.transaction.NodeId
@@ -22,6 +23,7 @@ final case class TransactionMetadata(
     ledgerTime: CantonTimestamp,
     preparationTime: CantonTimestamp,
     seeds: Map[LfNodeId, LfHash],
+    contractKeyHashMismatches: ContractKeyHashMismatches,
 )
 
 object TransactionMetadata {
@@ -30,6 +32,7 @@ object TransactionMetadata {
       ledgerTime = ledgerTime,
       preparationTime = CantonTimestamp(metadata.preparationTime),
       seeds = metadata.nodeSeeds.toSeq.toMap,
+      contractKeyHashMismatches = metadata.contractKeyMismatches,
     )
 
   def fromTransactionMeta(
@@ -43,6 +46,11 @@ object TransactionMetadata {
       CantonTimestamp(metaLedgerEffectiveTime),
       CantonTimestamp(metaPreparationTime),
       seeds.toSeq.toMap,
+      // Contract key hash mismatches are caught during interpretation in Phase 1 already
+      // and don't need to be propagated here.
+      Map.empty,
     )
 
+  type ContractKeyHashMismatches =
+    Map[LfContractId, (Option[LfGlobalKeyWithMaintainers], Option[LfGlobalKeyWithMaintainers])]
 }

@@ -4,12 +4,12 @@
 package com.digitalasset.canton.synchronizer.sequencer.store
 
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerBatchingConfig
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 
@@ -18,7 +18,7 @@ import scala.concurrent.ExecutionContext
 trait DbSequencerStorePruning {
   this: NamedLogging & DbStore =>
 
-  protected val batchingConfig: BatchingConfig
+  protected val batchingConfig: SequencerBatchingConfig
 
   import storage.api.*
 

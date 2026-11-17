@@ -35,7 +35,7 @@ final class TrafficServiceAuthorization(
 
   override def getAccount(request: GetAccountRequest): Future[GetAccountResponse] =
     authorizer.rpc(service.getAccount)(
-      RequiredClaim.DebitTrafficFrom(request.accountId, acceptExecuteRights = true)
+      RequiredClaim.AdminOrDebitTrafficFrom(request.accountId, acceptExecuteRights = true)
     )(request)
 
   override def updateAccount(request: UpdateAccountRequest): Future[UpdateAccountResponse] =
@@ -43,7 +43,7 @@ final class TrafficServiceAuthorization(
 
   override def listAccounts(request: ListAccountsRequest): Future[ListAccountsResponse] =
     authorizer.rpc(service.listAccounts)(
-      RequiredClaim.ListTrafficAccounts(acceptExecuteRights = true)
+      RequiredClaim.AdminOrListTrafficAccounts(acceptExecuteRights = true)
     )(request)
 
   override def prune(request: PruneRequest): Future[PruneResponse] =

@@ -46,7 +46,9 @@ object StoredParties
 
   override def name: String = "stored parties"
 
-  def fromProtoV30(proto0: v30.StoredParties): ParsingResult[StoredParties] = {
+  // Only reached through fromTrusted*: stored parties are read from the node's own database.
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
+  private def fromProtoV30(proto0: v30.StoredParties): ParsingResult[StoredParties] = {
     val v30.StoredParties(partiesP) = proto0
     for {
       parties <- ProtoValidation.validateThen(

@@ -4,11 +4,11 @@
 package com.digitalasset.canton.participant.store.db
 
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.store.ActiveContractStoreTest
 import com.digitalasset.canton.participant.store.db.DbActiveContractStoreTest.maxSynchronizerIndex
 import com.digitalasset.canton.participant.store.db.DbContractStoreTest.createDbContractStoreForTesting
@@ -68,7 +68,7 @@ trait DbActiveContractStoreTest extends AsyncWordSpec with BaseTest with ActiveC
           synchronizerId,
           enableAdditionalConsistencyChecks = Some(1000),
           PrunableByTimeParameters.testingParams,
-          BatchingConfig(),
+          ParticipantBatchingConfig(),
           indexStore,
           timeouts,
           loggerFactory,
@@ -115,7 +115,7 @@ class ActiveContractStoreTestPostgres extends DbActiveContractStoreTest with Pos
       synchronizerId,
       enableAdditionalConsistencyChecks = None,
       PrunableByTimeParameters.testingParams,
-      BatchingConfig(),
+      ParticipantBatchingConfig(),
       indexStore,
       timeouts,
       loggerFactory,

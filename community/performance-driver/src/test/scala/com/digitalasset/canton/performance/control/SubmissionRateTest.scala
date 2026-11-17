@@ -6,17 +6,19 @@ package com.digitalasset.canton.performance.control
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.api.testing.InMemoryMetricsFactory
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.performance.control.SubmissionRate.{FixedRate, TargetLatency}
 import com.google.common.util.concurrent.AtomicDouble
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
-import scala.concurrent.{ExecutionContext, Promise}
+import scala.concurrent.Promise
 
 abstract class SubmissionRateTest extends AnyWordSpec with BaseTest {
 
-  protected implicit val ec: ExecutionContext = directExecutionContext
+  protected implicit val dec: DirectExecutionContext = directExecutionContext
 
   type SR <: SubmissionRate
   protected def mkSubmissionRate(now: () => CantonTimestamp): SR

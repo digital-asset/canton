@@ -8,11 +8,6 @@ import com.digitalasset.canton.config.SharedCantonConfig
 import com.digitalasset.canton.console.{FeatureFlag, ParticipantReference}
 import com.digitalasset.canton.integration.plugins.UseExternalProcess
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.config.{
-  AcsCommitmentConfig,
-  ParticipantNodeConfig,
-  RemoteParticipantConfig,
-}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.NoTracing
 import org.scalatest.concurrent.Eventually
@@ -65,38 +60,16 @@ class AcsDigestConsistencyChecker(
 
     val allParticipantAndSynchronizerPairs: Seq[(ParticipantReference, SynchronizerId)] =
       activeParticipants.flatMap { participant =>
-        val config: AcsCommitmentConfig = participant.config match {
-          case localParticipantConfig: ParticipantNodeConfig =>
-            localParticipantConfig.parameters.acsCommitments
-          case _: RemoteParticipantConfig =>
-            val acsConfigO = for {
-              externalPlugin <- externalPluginO
-              cantonConfig <- externalPlugin.configs.get(participant.name)
-              participantConfig <- cantonConfig.participants.get(participant.name)
-            } yield participantConfig.parameters.acsCommitments
+        logger.info(
+          s"Checking participant ACS digest consistency for participant ${participant.name}..."
+        )
+        val synchronizerIds = participant.synchronizers
+          .list_registered()
+          .flatMap(_._2.toOption)
+          .map(_.logical)
 
-            acsConfigO.getOrElse(
-              throw new RuntimeException(
-                s"Participant config is not available for external participant ${participant.name}"
-              )
-            )
-        }
-
-        if (config.enableNewAcsCommitmentProcessor) {
-          participant.health.status
-          logger.info(
-            s"Checking participant ACS digest consistency for participant ${participant.name}..."
-          )
-          val synchronizerIds = participant.synchronizers
-            .list_registered()
-            .flatMap(_._2.toOption)
-            .map(_.logical)
-
-          synchronizerIds.map { synchronizerId =>
-            (participant, synchronizerId)
-          }
-        } else {
-          List.empty
+        synchronizerIds.map { synchronizerId =>
+          (participant, synchronizerId)
         }
       }
 

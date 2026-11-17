@@ -50,6 +50,7 @@ import com.digitalasset.canton.participant.protocol.validation.{
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend.TrafficRegistration
 import com.digitalasset.canton.platform.apiserver.services.command.{
   SubmissionAccounting,
   TrafficEnforcementBackend,
@@ -132,7 +133,7 @@ class TransactionProcessor(
         new ExternalCallCheck(
           participantId,
           externalCallValidator,
-          participantNodeParameters.general.batchingConfig.parallelism,
+          participantNodeParameters.batchingConfig.parallelism,
           loggerFactory,
         ),
         commandProgressTracker,
@@ -159,19 +160,26 @@ class TransactionProcessor(
       "type" -> "send-confirmation-request",
     )
 
-  override protected def validateLocalTrafficCost(
-      submissionParam: TransactionProcessingSteps.SubmissionParam
-  )(
+  // We don't release: TEA removes the correlation when it sees the rejection completion.
+  override protected def registerTrafficCost(
+      submissionParam: TransactionProcessingSteps.SubmissionParam,
       trafficCost: Long,
-      traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
-    TrafficEnforcementBackend.registerIfEnabled(
-      trafficEnforcementBackendO,
-      submissionParam.submitterInfo.changeId,
-      submissionParam.submitterInfo.submissionId,
-      submissionParam.accounting,
-      trafficCost,
-    )(ErrorLoggingContext.fromTracedLogger(logger)(traceContext), ec)
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, RpcError, Option[TrafficRegistration]] =
+    TrafficEnforcementBackend
+      .registerIfEnabled(
+        trafficEnforcementBackendO,
+        submissionParam.submitterInfo.changeId,
+        submissionParam.submitterInfo.submissionId,
+        submissionParam.accounting,
+        trafficCost,
+      )(ErrorLoggingContext.fromTracedLogger(logger)(traceContext), ec)
+      .map(_ => None)
+
+  override protected def releaseTrafficRegistration(registration: TrafficRegistration)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
 
   def submit(
       submitterInfo: SubmitterInfo,

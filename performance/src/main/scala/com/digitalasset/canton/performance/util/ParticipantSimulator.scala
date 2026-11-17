@@ -625,6 +625,7 @@ class ParticipantSimulator(
       pid,
       initialSubscriptionEventO = None,
       sequencerAggregator,
+      nodeParameters.sequencerClient.useNewAggregator,
     )
 
     sequencerSubscriptionPool.start()

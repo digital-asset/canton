@@ -13,6 +13,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination.Persistence
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator.AcsReplicationRequestId
 import com.digitalasset.canton.participant.store.AcsReplicationStateManager.{
@@ -171,12 +172,25 @@ final class AcsReplicationStateManager(
     */
   def update(requestId: AcsReplicationRequestId, modify: Modification)(implicit
       traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, AcsReplicationStatus] =
+    updateIf(requestId, modify, _ => Either.unit)
+
+  /** Like [[update]], but only if the existing status satisfies the precondition checked within the
+    * simple execution queue.
+    */
+  private def updateIf(
+      requestId: AcsReplicationRequestId,
+      modify: Modification,
+      precondition: AcsReplicationStatus => Either[String, Unit],
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, AcsReplicationStatus] = executionQueue.executeEUS(
     for {
       previousStatus <- EitherT.fromEither[FutureUnlessShutdown](
         acsReplications
           .get(requestId)
           .toRight(s"ACS replication $requestId does not exist")
+          .flatMap(status => precondition(status).map(_ => status))
       )
       updatedStatus = modify(previousStatus)
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
@@ -205,6 +219,41 @@ final class AcsReplicationStateManager(
   def update_(requestId: AcsReplicationRequestId, modify: Modification)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = update(requestId, modify).map(_ => ())
+
+  /** Resets an existing ACS replication progress to zero and sets a new output stream destination.
+    *
+    * Unlike [[update]], this is allowed to change the replication destination parameter. As
+    * replications to output streams are never persisted, only the in-memory state is updated.
+    *
+    * @return
+    *   the reset status or an error if the ACS replication does not exist or cannot be restarted
+    */
+  def resetProgress(
+      requestId: AcsReplicationRequestId,
+      destination: AcsReplicationDestination.OutputStream,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, AcsReplicationStatus] = executionQueue.executeEUS(
+    EitherT.fromEither[FutureUnlessShutdown](
+      for {
+        previousStatus <- acsReplications
+          .get(requestId)
+          .toRight(s"ACS replication $requestId does not exist")
+        _ <- Either.cond(
+          previousStatus.restartRequiresReplicationFromBeginning,
+          (),
+          s"ACS replication $requestId exists but cannot be restarted: $previousStatus",
+        )
+        restartedStatus = previousStatus.resetProgress(destination)
+        _ <- Either.cond(
+          !shouldStatusBePersisted(previousStatus) && !shouldStatusBePersisted(restartedStatus),
+          (),
+          s"ACS replication $requestId with persisted status cannot be restarted",
+        )
+      } yield restartedStatus.tap(acsReplications.put(requestId, _).discard)
+    ),
+    s"restart $requestId",
+  )
 
   /** Fetches a status if the request id exists. When the output is used to describe an update, it
     * is important that the update only modifies the portion of the status that is changing and does
@@ -253,11 +302,28 @@ final class AcsReplicationStateManager(
   ): Option[AcsReplicationStatus.AcsReplicationProgress] =
     get(requestId).flatMap(_.replicationO)
 
+  /** Updates the progress only if it's been reported by the current ACS Replication Processor (or
+    * no processor at all).
+    *
+    * If the update comes from a superseded ACS replication processor (in case of ACS replication
+    * restart), it is rejected.
+    */
   override def updateAcsReplicationProgress(
       requestId: AcsReplicationRequestId,
       progress: AcsReplicationStatus.AcsReplicationProgress,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
-    update_(requestId, _.modifyReplication(_ => progress))
+    updateIf(
+      requestId,
+      _.modifyReplication(_ => progress),
+      status =>
+        Either.cond(
+          progress.processorO.forall(processor =>
+            status.replicationO.flatMap(_.processorO).exists(_ eq processor)
+          ),
+          (),
+          s"Rejecting progress update of superseded ACS replication processor $requestId",
+        ),
+    ).map(_ => ())
 
   /** Decides whether a status should be persisted to pending operations store.
     *

@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.Eval
 import cats.data.EitherT
 import cats.implicits.*
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.{
@@ -25,12 +26,16 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewType.UnassignmentViewType
+import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors
 import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{DefaultPromiseUnlessShutdownFactory, FutureUnlessShutdown}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, LogEntry}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, LogEntry, NamedLoggingContext}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.admin.party.{
+  FreezingToOnboardingScheduler,
+  OnboardingClearanceScheduler,
+}
 import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.{LedgerApiIndexer, LedgerApiStore}
@@ -43,6 +48,7 @@ import com.digitalasset.canton.participant.protocol.EngineController.EngineAbort
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   IncompleteLightViewTree,
   MalformedPayload,
+  SequencerRequestError,
 }
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.{
   mkActivenessResult,
@@ -65,9 +71,13 @@ import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentVal
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.ViewHashAndRecipients
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
 import com.digitalasset.canton.participant.protocol.submission.{
+  ChangeIdHash,
   EncryptedViewMessageFactory,
+  InFlightSubmission,
   InFlightSubmissionSynchronizerTracker,
+  InFlightSubmissionTracker,
   SeedGenerator,
+  UnsequencedSubmission,
 }
 import com.digitalasset.canton.participant.protocol.validation.{
   AuthenticationError,
@@ -95,6 +105,7 @@ import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
@@ -149,6 +160,7 @@ import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -197,7 +209,23 @@ final class UnassignmentProcessingStepsTest
       submissionId = None,
       LedgerUserId.assertFromString("tests"),
       workflowId = None,
+      maxSequencingTime = ReassignmentDataHelpers.maxSequencingTimeFor(testedProtocolVersion),
     )
+
+  private def submissionInfo(submitter: LfPartyId): ReassignmentSubmissionInfo =
+    ReassignmentSubmissionInfo(
+      submitter,
+      submittingParticipant,
+      LedgerCommandId.assertFromString("unassignment-processing-steps-command-id"),
+      submissionId = None,
+      LedgerUserId.assertFromString("tests"),
+      workflowId = None,
+    )
+
+  private def changeIdHash(submitter: LfPartyId): ChangeIdHash = {
+    val info = submissionInfo(submitter)
+    ChangeIdHash.ledgerApiUnassignment(info.userId, info.commandId, info.submitter)
+  }
 
   private lazy val adminSubmitter: LfPartyId = submittingParticipant.adminParty.toLf
 
@@ -245,6 +273,7 @@ final class UnassignmentProcessingStepsTest
       mock[InFlightSubmissionSynchronizerTracker],
       mock[AcsCommitmentSender],
       mock[OnboardingClearanceScheduler],
+      mock[FreezingToOnboardingScheduler],
       persistentState,
       ledgerApiIndexer,
       contractStore,
@@ -338,6 +367,7 @@ final class UnassignmentProcessingStepsTest
   private def createReassignmentCoordination(
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi = cryptoSnapshot,
       approximateTimestamp: CantonTimestamp = CantonTimestamp.Epoch,
+      onStaticSynchronizerParameterLookup: () => Unit = () => (),
   ) =
     TestReassignmentCoordination(
       synchronizers = Set(Target(sourceSynchronizer.unwrap), targetSynchronizer),
@@ -346,6 +376,7 @@ final class UnassignmentProcessingStepsTest
       awaitTimestampOverride = Some(None),
       loggerFactory = loggerFactory,
       packages = Seq(ExampleContractFactory.packageId),
+      onStaticSynchronizerParameterLookup = onStaticSynchronizerParameterLookup,
     )(directExecutionContext)
 
   private lazy val coordination: ReassignmentCoordination =
@@ -817,12 +848,14 @@ final class UnassignmentProcessingStepsTest
       val state = mkState
       val submissionParam =
         UnassignmentProcessingSteps.SubmissionParam(
-          submitterMetadata = submitterMetadata(party1),
+          submissionInfo = submissionInfo(party1),
           Seq(contractId),
           targetSynchronizer,
           overrideSourceValidationPkgIds = Source(Map.empty),
           overrideTargetValidationPkgIds = Target(Map.empty),
+          validatedContractPackageIds = Map.empty,
           accounting = SubmissionAccounting.NoAccount,
+          changeIdHash = changeIdHash(party1),
         )
 
       for {
@@ -846,16 +879,168 @@ final class UnassignmentProcessingStepsTest
       } yield succeed
     }
 
+    def createSubmission(state: SyncEphemeralState): FutureUnlessShutdown[
+      (unassignmentProcessingSteps.Submission, unassignmentProcessingSteps.PendingSubmissionData)
+    ] = {
+      val submissionParam =
+        UnassignmentProcessingSteps.SubmissionParam(
+          submissionInfo = submissionInfo(party1),
+          Seq(contractId),
+          targetSynchronizer,
+          overrideSourceValidationPkgIds = Source(Map.empty),
+          overrideTargetValidationPkgIds = Target(Map.empty),
+          validatedContractPackageIds = Map.empty,
+          accounting = SubmissionAccounting.NoAccount,
+          changeIdHash = changeIdHash(party1),
+        )
+      for {
+        _ <- state.contractStore.storeContract(contract)
+        _ <- persistentState.activeContractStore
+          .markContractsCreated(
+            Seq(contractId -> initialReassignmentCounter),
+            TimeOfChange(targetTs.unwrap),
+          )
+          .value
+        created <- unassignmentProcessingSteps
+          .createSubmission(
+            submissionParam,
+            sourceMediator,
+            state,
+            cryptoSnapshot,
+            _ => CantonTimestamp.MaxValue,
+          )
+          .valueOrFail("prepare submission failed")
+      } yield created
+    }
+
+    def createTrackedSubmission(
+        state: SyncEphemeralState
+    ): FutureUnlessShutdown[unassignmentProcessingSteps.ReassignmentsSubmission] =
+      createSubmission(state).map(created =>
+        inside(created) {
+          case (submission: unassignmentProcessingSteps.ReassignmentsSubmission, _) => submission
+        }
+      )
+
+    def prepareBatch(
+        state: SyncEphemeralState,
+        submission: unassignmentProcessingSteps.ReassignmentsSubmission,
+    ): FutureUnlessShutdown[unassignmentProcessingSteps.PreparedBatch] =
+      submission
+        .prepareBatch(
+          CantonTimestamp.Epoch,
+          CantonTimestamp.MaxValue,
+          state.sessionKeyStore,
+        )
+        .valueOrFail("prepare batch failed")
+
+    "record the pending submission at creation if the submission is not tracked" onlyRunLessThan ProtocolVersion.v38 in {
+      val state = mkState
+      for {
+        created <- createSubmission(state)
+      } yield inside(created) {
+        case (
+              submission: unassignmentProcessingSteps.UntrackedReassignmentsSubmission,
+              Some(pendingSubmission),
+            ) =>
+          state.pendingUnassignmentSubmissions.get(submission.pendingSubmissionId) shouldBe Some(
+            pendingSubmission
+          )
+      }
+    }
+
+    "record the pending submission once its batch is prepared" onlyRunWithOrGreaterThan ProtocolVersion.v38 in {
+      val state = mkState
+      for {
+        submission <- createTrackedSubmission(state)
+        pendingBeforeBatch = state.pendingUnassignmentSubmissions.contains(submission.rootHash)
+        _ <- prepareBatch(state, submission)
+      } yield {
+        pendingBeforeBatch shouldBe false
+        state.pendingUnassignmentSubmissions.get(submission.rootHash) shouldBe Some(
+          submission.pendingSubmission
+        )
+      }
+    }
+
+    "reject a submission whose send fails with an unsequenced completion" onlyRunWithOrGreaterThan ProtocolVersion.v38 in {
+      val state = mkState
+      for {
+        submission <- createTrackedSubmission(state)
+        batch <- prepareBatch(state, submission)
+      } yield {
+        val rejection = batch
+          .submissionErrorTrackingData(
+            SequencerRequestError(SendAsyncClientError.RequestFailed("test"))
+          )
+          .rejectionEvent(CantonTimestamp.Epoch, UUID.randomUUID())(
+            NamedLoggingContext(loggerFactory, traceContext),
+            traceContext,
+          )
+        rejection.isTransaction shouldBe false
+        rejection.completionInfo.commandId shouldBe submissionInfo(party1).commandId
+        rejection.reasonTemplate.message should startWith(
+          TransactionProcessor.SubmissionErrors.SequencerRequest.id
+        )
+      }
+    }
+
+    "report the cause of a definitive failure in the submission result" onlyRunWithOrGreaterThan ProtocolVersion.v38 in {
+      val state = mkState
+      for {
+        submission <- createTrackedSubmission(state)
+        batch <- prepareBatch(state, submission)
+      } yield {
+        val trackingData = batch.submissionErrorTrackingData(
+          SequencerRequestError(SendAsyncClientError.RequestFailed("test"))
+        )
+        inside(submission.onDefinitiveFailure(Some(trackingData))) {
+          case UnassignmentProcessingSteps.UnassignmentSubmissionFailure(Some(cause)) =>
+            cause.message should startWith(
+              TransactionProcessor.SubmissionErrors.SequencerRequest.id
+            )
+        }
+        submission.onDefinitiveFailure(None) shouldBe UnassignmentProcessingSteps
+          .UnassignmentSubmissionFailure(None)
+      }
+    }
+
+    "reject a submission already in flight with SUBMISSION_ALREADY_IN_FLIGHT" onlyRunWithOrGreaterThan ProtocolVersion.v38 in {
+      val state = mkState
+      for {
+        submission <- createTrackedSubmission(state)
+      } yield {
+        val inFlight = InFlightSubmission(
+          submission.changeIdHash,
+          submission.submissionId,
+          sourceSynchronizer.unwrap.logical,
+          UUID.randomUUID(),
+          None,
+          UnsequencedSubmission(CantonTimestamp.MaxValue, submission.submissionTimeoutTrackingData),
+          traceContext,
+        )
+        val error = submission.embedInFlightSubmissionTrackerError(
+          InFlightSubmissionTracker.SubmissionAlreadyInFlight(inFlight, inFlight)
+        )
+        inside(error) {
+          case alreadyInFlight: ReassignmentSubmissionErrors.SubmissionAlreadyInFlight =>
+            alreadyInFlight.code.id shouldBe ConsistencyErrors.SubmissionAlreadyInFlight.id
+        }
+      }
+    }
+
     "check that the target synchronizer is not equal to the source synchronizer" in {
       val state = mkState
       val contract = ExampleContractFactory.build()
       val submissionParam = UnassignmentProcessingSteps.SubmissionParam(
-        submitterMetadata = submitterMetadata(party1),
+        submissionInfo = submissionInfo(party1),
         Seq(contract.contractId),
         Target(sourceSynchronizer.unwrap),
         overrideSourceValidationPkgIds = Source(Map.empty),
         overrideTargetValidationPkgIds = Target(Map.empty),
+        validatedContractPackageIds = Map.empty,
         accounting = SubmissionAccounting.NoAccount,
+        changeIdHash = changeIdHash(party1),
       )
 
       for {
@@ -880,7 +1065,7 @@ final class UnassignmentProcessingStepsTest
       val state = mkState
       val submissionParam =
         UnassignmentProcessingSteps.SubmissionParam(
-          submitterMetadata = submitterMetadata(party1),
+          submissionInfo = submissionInfo(party1),
           Seq(contractId),
           targetSynchronizer,
           overrideSourceValidationPkgIds = invalidPackageId match {
@@ -891,7 +1076,9 @@ final class UnassignmentProcessingStepsTest
             case Source(_) => Target(Map.empty)
             case Target(rpId) => Target(Map(contractId -> rpId))
           },
+          validatedContractPackageIds = Map.empty,
           accounting = SubmissionAccounting.NoAccount,
+          changeIdHash = changeIdHash(party1),
         )
 
       val contractValidator =
@@ -948,12 +1135,14 @@ final class UnassignmentProcessingStepsTest
       val state = mkState
       val submissionParam =
         UnassignmentProcessingSteps.SubmissionParam(
-          submitterMetadata = submitterMetadata(party1),
+          submissionInfo = submissionInfo(party1),
           Seq(noPackageContract.contractId),
           targetSynchronizer,
           overrideSourceValidationPkgIds = Source(Map.empty),
           overrideTargetValidationPkgIds = Target(Map.empty),
+          validatedContractPackageIds = Map.empty,
           accounting = SubmissionAccounting.NoAccount,
+          changeIdHash = changeIdHash(party1),
         )
 
       for {
@@ -1210,7 +1399,6 @@ final class UnassignmentProcessingStepsTest
   }
 
   "get commit set and contracts to be stored and event" should {
-    val state = mkState
     val rootHash = TestHash.dummyRootHash
     val reassignmentResult =
       ConfirmationResultMessage.create(
@@ -1249,12 +1437,9 @@ final class UnassignmentProcessingStepsTest
         testedProtocolVersion,
       )
     }
-    val signedContent = SignedContent(
-      deliver,
-      SymbolicCrypto.emptySignature,
-      None,
-      testedProtocolVersion,
-    )
+    val signedContent =
+      AggregatedSignedContent(deliver, SymbolicCrypto.emptySignature, testedProtocolVersion)
+
     val assignmentExclusivity = synchronizerParameters
       .assignmentExclusivityLimitFor(targetTs.unwrap)
       .value
@@ -1276,11 +1461,13 @@ final class UnassignmentProcessingStepsTest
         packageVettingResult = None,
         submitterCheckResult = None,
         multiSynchronizerFeatureFlagCheckResult = None,
+        replayCheckResult = None,
       ),
       reassigningParticipantValidationResult =
         ReassigningParticipantValidationResult(EitherT.pure(()), errors = Nil),
     )
     val pendingUnassignment = PendingUnassignment(
+      freshOwnTimelyTx = true,
       RequestId(CantonTimestamp.Epoch),
       RequestCounter(1),
       SequencerCounter(1),
@@ -1302,12 +1489,44 @@ final class UnassignmentProcessingStepsTest
               NoOpeningErrors(signedContent),
               reassignmentResult.verdict,
               pendingUnassignment,
-              state.pendingUnassignmentSubmissions,
+              None,
               crypto.pureCrypto,
             )
             .failOnShutdown
         )("get commit set and contract to be stored and event")
       } yield result.commitSet.nonEmpty shouldBe true
+    }
+
+    def automaticAssignmentScheduled(
+        pendingSubmissionDataO: Option[Some[PendingReassignmentSubmission]]
+    ): Future[Boolean] = {
+      val scheduled = new AtomicBoolean(false)
+      val steps = createUnassignmentProcessingSteps(reassignmentCoordination =
+        createReassignmentCoordination(onStaticSynchronizerParameterLookup =
+          () => scheduled.set(true)
+        )
+      )
+      valueOrFail(
+        steps
+          .getCommitSetAndContractsToBeStoredAndEventFactory(
+            NoOpeningErrors(signedContent),
+            reassignmentResult.verdict,
+            pendingUnassignment,
+            pendingSubmissionDataO,
+            crypto.pureCrypto,
+          )
+          .failOnShutdown
+      )("get commit set and contract to be stored and event").map(_ => scheduled.get())
+    }
+
+    "schedule the automatic assignment if the participant did not submit the unassignment" in {
+      automaticAssignmentScheduled(pendingSubmissionDataO = None).map(_ shouldBe true)
+    }
+
+    "not schedule the automatic assignment if the participant submitted the unassignment" in {
+      automaticAssignmentScheduled(
+        pendingSubmissionDataO = Some(Some(PendingReassignmentSubmission(_ => reassignmentId)))
+      ).map(_ shouldBe false)
     }
 
     "fail with mediator is not active anymore" in {
@@ -1320,7 +1539,7 @@ final class UnassignmentProcessingStepsTest
                 reassignmentResult.verdict,
                 // request used MediatorGroupIndex.zero
                 pendingUnassignment.copy(mediator = MediatorGroupRecipient(MediatorGroupIndex.one)),
-                state.pendingUnassignmentSubmissions,
+                None,
                 crypto.pureCrypto,
               )
               .failOnShutdown
@@ -1351,7 +1570,7 @@ final class UnassignmentProcessingStepsTest
           NoOpeningErrors(signedContent),
           reassignmentResult.verdict,
           failingActivenessValidation,
-          state.pendingUnassignmentSubmissions,
+          None,
           crypto.pureCrypto,
         )
         .failOnShutdown
@@ -1406,7 +1625,7 @@ final class UnassignmentProcessingStepsTest
             NoOpeningErrors(signedContent),
             reassignmentResult.verdict,
             failingUnassignmentValidation,
-            state.pendingUnassignmentSubmissions,
+            None,
             crypto.pureCrypto,
           )
           .failOnShutdown
@@ -1432,6 +1651,29 @@ final class UnassignmentProcessingStepsTest
       inside(updateO) { case Some(rejected: Update.SequencedCommandRejected) =>
         rejected.completionInfo.submissionId shouldBe Some(submissionId)
       }
+    }
+
+    def rejectedCommandUpdate(freshOwnTimelyTx: Boolean) = {
+      val ts = CantonTimestamp.Epoch
+      unassignmentProcessingSteps
+        .eventAndSubmissionIdForRejectedCommand(
+          ts,
+          SequencerCounter(0),
+          submitterMetadata(party1),
+          TestHash.dummyRootHash,
+          freshOwnTimelyTx,
+          TransactionProcessor.SubmissionErrors.NoViewWithValidRecipients.Error(ts),
+          NonNegativeLong.zero,
+        )
+        ._1
+    }
+
+    "not report a completion if the request is not fresh own timely" onlyRunWithOrGreaterThan ProtocolVersion.v38 in {
+      rejectedCommandUpdate(freshOwnTimelyTx = false) shouldBe None
+    }
+
+    "report a completion before the replay protection for reassignments even if the request is not fresh own timely" onlyRunWhen (testedProtocolVersion < ProtocolVersion.v38) in {
+      rejectedCommandUpdate(freshOwnTimelyTx = false) shouldBe defined
     }
   }
 

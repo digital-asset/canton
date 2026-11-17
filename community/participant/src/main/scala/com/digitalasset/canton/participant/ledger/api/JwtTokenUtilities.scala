@@ -17,20 +17,22 @@ import java.time.{Duration, Instant}
 /** some helpers in other to use with ad-hoc JWT authentication */
 object JwtTokenUtilities {
 
+  /** Builds an HMAC256-signed token for the given audience (`aud` claim) for ad-hoc authentication.
+    */
   def buildUnsafeToken(
       secret: String,
+      audience: String,
       userId: Option[String] = None,
       exp: Option[Instant] = Some(Instant.now().plusNanos(Duration.ofMinutes(5).toNanos)),
-      scope: Option[String] = None,
   ): String = {
     val payload = StandardJWTPayload(
       issuer = None,
       userId = userId.getOrElse(UserManagementStore.DefaultParticipantAdminUserId),
       participantId = None,
       exp = exp,
-      format = StandardJWTTokenFormat.Scope,
-      audiences = List.empty,
-      scope = scope.fold(Some(AuthServiceJWTCodec.scopeLedgerApiFull))(Some(_)),
+      format = StandardJWTTokenFormat.Audience,
+      audiences = List(audience),
+      scope = None,
     )
     // stolen from com.digitalasset.canton.ledger.api.auth.Main
     val jwtPayload = AuthServiceJWTCodec.compactPrint(payload)

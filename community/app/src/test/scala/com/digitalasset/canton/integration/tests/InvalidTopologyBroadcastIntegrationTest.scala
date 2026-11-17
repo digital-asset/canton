@@ -676,13 +676,14 @@ class InvalidTopologyBroadcastIntegrationTest
   def emptySignature(signedBy: Fingerprint): Signature =
     Signature
       .fromProtoV30(
+        testedProtocolVersionValidation,
         v30.Signature(
           SIGNATURE_FORMAT_RAW,
           ByteString.EMPTY,
           signedBy.toProtoPrimitive,
           SIGNING_ALGORITHM_SPEC_UNSPECIFIED,
           signatureDelegation = None,
-        )
+        ),
       )
       .value
 

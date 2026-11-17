@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.client.pool
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
@@ -25,6 +24,7 @@ import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, GrpcError}
 import com.digitalasset.canton.sequencing.MaybeCompressedSequencedEventHandler
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.SendAsyncClientResponseError
 import com.digitalasset.canton.sequencing.client.pool.Connection.{ConnectionConfig, ConnectionError}
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
 import com.digitalasset.canton.sequencing.client.transports.{
   GrpcClientTransportHelpers,
   GrpcSequencerClientAuth,
@@ -88,7 +88,7 @@ class GrpcSequencerConnection(
   override def fatal(reason: String)(implicit traceContext: TraceContext): Unit =
     underlying.fatal(reason)
 
-  override def increasePenalty(amount: PositiveInt, reason: String)(implicit
+  override def increasePenalty(amount: Penalty, reason: String)(implicit
       traceContext: TraceContext
   ): Unit =
     penaltyModifier.increase(amount, reason)

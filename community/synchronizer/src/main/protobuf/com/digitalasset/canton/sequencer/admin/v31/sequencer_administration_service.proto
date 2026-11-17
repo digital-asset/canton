@@ -17,4 +17,5 @@ message OnboardingStateForSequencerV2 {
   optional bytes topology_transaction = 1;
   optional bytes static_synchronizer_parameters = 2;
   SequencerSnapshot sequencer_snapshot = 3;
+  optional string synchronizer_id = 4;
 }

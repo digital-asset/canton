@@ -60,8 +60,13 @@ class RetransmissionMessageValidator(epoch: Epoch) {
       val numberOfBlocksInSegment = segment.slotNumbers.size
       (segmentStatus match {
         case SegmentStatus.Complete => Right(())
-        case SegmentStatus.InViewChange(_, vcs, blocks) =>
+        case SegmentStatus.InViewChange(remoteViewNumber, vcs, blocks) =>
           for {
+            _ <- Either.cond(
+              remoteViewNumber > 0L,
+              (),
+              s"remoteViewNumber must be > 0, got $remoteViewNumber",
+            )
             _ <- Either.cond(vcs.sizeIs == numberOfNodes, (), s"wrong size of view-change list")
             _ <- Either.cond(
               blocks.sizeIs == numberOfBlocksInSegment,
@@ -69,13 +74,18 @@ class RetransmissionMessageValidator(epoch: Epoch) {
               s"wrong size of block completion list",
             )
           } yield ()
-        case SegmentStatus.InProgress(_, blocks) =>
+        case SegmentStatus.InProgress(remoteViewNumber, blocks) =>
           val allBlocksWellFormed = blocks.forall {
             case BlockStatus.InProgress(_, prepares, commits) =>
               prepares.sizeIs == numberOfNodes && commits.sizeIs == numberOfNodes
             case _ => true
           }
           for {
+            _ <- Either.cond(
+              remoteViewNumber >= 0L,
+              (),
+              s"remoteViewNumber must be >= 0, got $remoteViewNumber",
+            )
             _ <- Either.cond(
               blocks.sizeIs == numberOfBlocksInSegment,
               (),

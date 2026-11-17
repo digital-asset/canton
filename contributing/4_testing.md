@@ -34,10 +34,10 @@ In summary:
 Integration testing with the BFT sequencer
 ------------------------------------------
 
-The BFT sequencer largely replaces the reference sequencer in integration tests and there are some important things
+The BFT sequencer has fully replaced the reference sequencer in integration tests and there are some important things
 to keep in mind when using it:
 
-- While the number of sequencers is not important when using the reference sequencer (which is really a centralized
+- While the number of sequencers was not important when using the reference sequencer (which was really a centralized
   DB-based sequencer under the hood), it is very important when using the BFT sequencer
   (and decentralized sequencers in general) since it affects liveness and sequencing time behavior.
   - E.g.: sequencers set grows from 1 to 2, sequencer 2 enters the ordering topology but is still onboarding

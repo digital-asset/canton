@@ -9,7 +9,7 @@ import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.BaseTest.getResourcePath
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config.CantonRequireTypes.String255
-import com.digitalasset.canton.config.{CachingConfigs, PackageMetadataViewConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.{PackageMetadataViewConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.error.PackageServiceErrors
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -24,6 +24,7 @@ import com.digitalasset.canton.participant.admin.PackageServiceTest.{
   readPingAdminWorkflowBytes,
 }
 import com.digitalasset.canton.participant.admin.data.UploadDarData
+import com.digitalasset.canton.participant.config.PackageUpgradeCacheConfig
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.store.memory.{
@@ -119,7 +120,10 @@ abstract class BasePackageServiceTest(enableStrictDarValidation: Boolean)
     val mutablePackageMetadataView = new MutablePackageMetadataViewImpl(
       clock,
       packageStore,
-      new PackageUpgradeValidator(CachingConfigs.defaultPackageUpgradeCache, loggerFactory),
+      new PackageUpgradeValidator(
+        PackageUpgradeCacheConfig.defaultPackageUpgradeCache,
+        loggerFactory,
+      ),
       loggerFactory,
       PackageMetadataViewConfig(),
       processingTimeouts,

@@ -120,6 +120,8 @@ private[lf] final class ExtendedValueTranslator(
       case ValueParty(party) => SValue.SParty(party)
       case ValueBool(b) => SValue.SBool(b)
       case ValueUnit => SValue.SUnit
+      case ValueUint256(_) =>
+        throw TranslationFailed.InvalidExtendedValue("Uint256 not supported")
     }
 
   def translateExtendedValue(

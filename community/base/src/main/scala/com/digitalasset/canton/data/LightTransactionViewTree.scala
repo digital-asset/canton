@@ -317,8 +317,6 @@ object LightTransactionViewTree
       lightViewTrees: Seq[(A, Option[ByCiphertextId])],
   ): ToFullViewTreesResult[A, B] = {
 
-    val validateKeys = TransactionView.ValidateKeys(protocolVersion)
-
     val lightViewTreesBoxedInPostOrder = lightViewTrees.sortBy { case (a, _) =>
       lens.get(a)._1.viewPosition
     }(ViewPosition.orderViewPosition.toOrdering).reverse
@@ -344,10 +342,10 @@ object LightTransactionViewTree
           lightViewTree.subviewReferences.map(fullViewByReference).unzip
         val fullSubviews = TransactionSubviews(fullSubviewsSeq)(protocolVersion, hashOps)
         val fullView =
-          lightViewTree.view.tryCopy(validateKeys = validateKeys, subviews = fullSubviews)
+          lightViewTree.view.tryCopy(validateKeys = true, subviews = fullSubviews)
         val fullViewTree = FullTransactionViewTree.tryCreate(
           lightViewTree.tree.mapUnblindedRootViews(
-            _.replace(fullView.viewHash, fullView, validateKeys)
+            _.replace(fullView.viewHash, fullView, validateKeys = true)
           )
         )
         val cs = RoseTree(c, subviewCs*)
@@ -415,11 +413,12 @@ object LightTransactionViewTree
       byCiphertextIdMapO: Option[Map[ViewHash, ByCiphertextId]],
       protocolVersion: ProtocolVersion,
   ): Either[String, LightTransactionViewTree] = {
-    val validateKeys = TransactionView.ValidateKeys(protocolVersion)
     val withBlindedSubviews =
-      tvt.view.tryCopy(validateKeys = validateKeys, subviews = tvt.view.subviews.blindFully)
+      tvt.view.tryCopy(validateKeys = true, subviews = tvt.view.subviews.blindFully)
     val genTransactionTree =
-      tvt.tree.mapUnblindedRootViews(_.replace(tvt.viewHash, withBlindedSubviews, validateKeys))
+      tvt.tree.mapUnblindedRootViews(
+        _.replace(tvt.viewHash, withBlindedSubviews, validateKeys = true)
+      )
     // you must have one key for each subview (to be able to decrypt them)
     for {
       _ <- Either.cond(

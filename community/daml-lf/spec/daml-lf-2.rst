@@ -4334,6 +4334,11 @@ Party functions
   Given the string representation of the party, returns the party,
   if the input string is a `PartyId strings <Literals_>`_.
 
+* ``TEXT_TO_CONTRACT_ID :  ∀ (α : *) . 'Text' → 'Optional' 'ContractId' α``
+
+  Given the string representation of the contract ID, returns the contract ID,
+  if the input string is a `ContractId strings <Literals_>`_.
+
 ContractId functions
 ~~~~~~~~~~~~~~~~~~~~
 

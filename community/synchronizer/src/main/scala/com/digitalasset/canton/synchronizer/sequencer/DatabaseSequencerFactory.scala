@@ -4,11 +4,15 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerBatchingConfig,
+  SequencerCachingConfigs,
+}
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -19,12 +23,11 @@ import scala.concurrent.ExecutionContext
 abstract class DatabaseSequencerFactory(
     config: DatabaseSequencerConfig,
     storage: Storage,
-    cachingConfigs: CachingConfigs,
-    batchingConfig: BatchingConfig,
+    cachingConfigs: SequencerCachingConfigs,
+    batchingConfig: SequencerBatchingConfig,
     override val timeouts: ProcessingTimeout,
     protocolVersion: ProtocolVersion,
     sequencerId: SequencerId,
-    blockSequencerMode: Boolean,
     metrics: SequencerMetrics,
 )(implicit ec: ExecutionContext)
     extends SequencerFactory
@@ -39,7 +42,6 @@ abstract class DatabaseSequencerFactory(
       timeouts = timeouts,
       loggerFactory = loggerFactory,
       sequencerMember = sequencerId,
-      blockSequencerMode = blockSequencerMode,
       cachingConfigs = cachingConfigs,
       batchingConfig = batchingConfig,
       // Overriding the store's close context with the writers, so that when the writer gets closed, the store

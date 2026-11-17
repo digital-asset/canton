@@ -91,7 +91,7 @@ object LsuSequencingTestMessage extends VersioningCompanion[LsuSequencingTestMes
         contentP,
       )
       signature <- ProtoConverter.parseRequired(
-        Signature.fromProtoV30,
+        Signature.fromProtoV30(pvv, _),
         "signature",
         signatureP,
       )

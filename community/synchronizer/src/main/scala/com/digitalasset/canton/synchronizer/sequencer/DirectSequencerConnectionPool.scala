@@ -132,8 +132,7 @@ class DirectSequencerConnectionPool(
 
   override def isThresholdStillReachable(
       threshold: PositiveInt,
-      ignored: Set[ConnectionConfig],
-      extraUndecided: NonNegativeInt,
+      ignored: Set[SequencerId],
   )(implicit
       traceContext: TraceContext
   ): Either[SequencerConnectionPoolError.ThresholdUnreachableError, Unit] = Either.unit
@@ -156,6 +155,7 @@ object DirectSequencerConnectionPool {
     // Not relevant for the direct pool
     minRestartConnectionDelay = NonNegativeFiniteDuration.Zero,
     maxRestartConnectionDelay = NonNegativeFiniteDuration.Zero,
+    minStableConnectionDuration = NonNegativeFiniteDuration.Zero,
     warnConnectionValidationDelay = NonNegativeFiniteDuration.Zero,
     sequencerConnectionPenaltyConfig = SequencerConnectionPenaltyConfig.default,
   )

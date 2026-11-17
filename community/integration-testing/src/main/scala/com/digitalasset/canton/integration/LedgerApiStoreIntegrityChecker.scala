@@ -59,6 +59,9 @@ class LedgerApiStoreIntegrityChecker(
         .initialize(
           storageConfig = storageConfig,
           storage = None,
+          storageMetricsOpt = None,
+          logQueryCostOpt = None,
+          schedulerOpt = None,
           ledgerParticipantId = LedgerParticipantId.assertFromString("fakeid"),
           ledgerApiDatabaseConnectionTimeout = LedgerApiServerConfig().databaseConnectionTimeout,
           ledgerApiPostgresDataSourceConfig = PostgresDataSourceConfig(),

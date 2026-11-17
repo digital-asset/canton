@@ -54,17 +54,6 @@ trait ReceivedAcsCommitmentValidator {
 }
 
 object ReceivedAcsCommitmentValidator {
-  object Noop extends ReceivedAcsCommitmentValidator {
-    override def validateAndPublish(
-        ts: CantonTimestamp,
-        envelopes: NonEmpty[Seq[OpenEnvelope[AcsCommitmentProtocolMessage]]],
-        publish: PublishUpdateViaRecordOrderPublisher[ReceivedAcsCommitment],
-    )(implicit traceContext: TraceContext): HandlerResult = {
-      publish.apply(None)
-      HandlerResult.done
-    }
-  }
-
   def updateId(
       localParticipantId: ParticipantId,
       synchronizerId: PhysicalSynchronizerId,

@@ -206,6 +206,38 @@ class ReassignmentServiceIntegrationTest
       )
     }
 
+    "allow to reuse the command id of a completed unassignment" in { implicit env =>
+      import env.*
+
+      val signatory = party1a
+      val observer = party2
+      val contract1 = IouSyntax.createIou(participant1, Some(daId))(signatory, observer)
+      val contract2 = IouSyntax.createIou(participant1, Some(daId))(signatory, observer)
+
+      // The client sees the completion only after its in-flight entry is deleted
+      val (unassigned1, completion1) = unassign(
+        cid = contract1.id.toLf,
+        source = daId,
+        target = acmeId,
+        submittingParty = signatory.toLf,
+      )
+      val (unassigned2, completion2) = unassign(
+        cid = contract2.id.toLf,
+        source = daId,
+        target = acmeId,
+        submittingParty = signatory.toLf,
+      )
+
+      completion2.commandId shouldBe completion1.commandId
+      completion2.status.value shouldBe Status()
+
+      // Cleaning
+      assign(unassigned1.reassignmentId, daId, acmeId, signatory.toLf)
+      assign(unassigned2.reassignmentId, daId, acmeId, signatory.toLf)
+      IouSyntax.archive(participant1)(contract1, signatory)
+      IouSyntax.archive(participant1)(contract2, signatory)
+    }
+
     "completion events are only emitted on the submitting participant" in { implicit env =>
       import env.*
 

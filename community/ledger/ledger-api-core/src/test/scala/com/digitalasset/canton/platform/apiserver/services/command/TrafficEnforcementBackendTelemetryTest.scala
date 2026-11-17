@@ -227,7 +227,7 @@ class TrafficEnforcementBackendTelemetryTest
             CostEstimateWithReassignments(NonNegativeLong.tryCreate(trafficCost), Seq.empty),
           )
           .futureValueUS
-      else backend.registerSubmission(info(row.actAs), trafficCost).futureValueUS
+      else backend.registerSubmission(info(row.actAs), trafficCost).futureValueUS.map(_ => ())
 
     def invoke(): Assertion = row.expectedResult match {
       case Allowed => call() shouldBe Right(())
@@ -256,7 +256,7 @@ class TrafficEnforcementBackendTelemetryTest
     ).longValue() shouldBe 1L
   }
 
-  private val registered = Some(Right(RegisterSubmissionResponse()))
+  private val registered = Some(Right(RegisterSubmissionResponse(None)))
 
   /** The same `recordOutcome` call feeds the span and metrics, so each scenario asserts both to
     * catch any drift.
@@ -407,10 +407,10 @@ class TrafficEnforcementBackendTelemetryTest
 
     "run the registration under a trace context that is a child of the enforcement span" in {
       val client = mock[RichTrafficServiceClient]
-      stubRegistration(client, Right(RegisterSubmissionResponse()))
+      stubRegistration(client, Right(RegisterSubmissionResponse(None)))
       val backend = newBackend(trafficServiceClient = client)
 
-      backend.registerSubmission(info(Set(alice)), trafficCost).futureValueUS shouldBe Right(())
+      backend.registerSubmission(info(Set(alice)), trafficCost).futureValueUS shouldBe Right(None)
 
       val traceContextCaptor = ArgCaptor[TraceContext]
       verify(client).registerSubmission(any[RegisterSubmissionRequest])(traceContextCaptor)
@@ -425,13 +425,13 @@ class TrafficEnforcementBackendTelemetryTest
         client.registerSubmission(any[RegisterSubmissionRequest])(any[TraceContext])
       ).thenAnswer { (_: RegisterSubmissionRequest) =>
         Threading.sleep(scala.util.Random.nextLong(10) + 1)
-        EitherT.rightT[FutureUnlessShutdown, GrpcError](RegisterSubmissionResponse())
+        EitherT.rightT[FutureUnlessShutdown, GrpcError](RegisterSubmissionResponse(None))
       }.discard
       val backend = newBackend(trafficServiceClient = client)
 
       val times = 5
       (1 to times).foreach { _ =>
-        backend.registerSubmission(info(Set(alice)), trafficCost).futureValueUS shouldBe Right(())
+        backend.registerSubmission(info(Set(alice)), trafficCost).futureValueUS shouldBe Right(None)
       }
 
       val values = recordedDurations(SuccessStatus, expectedCount = times)

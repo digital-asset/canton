@@ -4,9 +4,10 @@
 package com.digitalasset.canton.platform.indexer
 
 import com.daml.ledger.resources.ResourceOwner
+import com.digitalasset.canton.config.{DbParametersConfig, QueryCostMonitoringConfig}
 import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.metrics.{DbQueueMetrics, LedgerApiServerMetrics}
 import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater
 import com.digitalasset.canton.platform.indexer.ha.HaConfig
@@ -32,6 +33,7 @@ import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.*
 
+import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.{ExecutionContext, Future}
 
 object JdbcIndexer {
@@ -54,6 +56,10 @@ object JdbcIndexer {
       sequentialPostProcessor: Update => Unit,
       contractStore: LedgerApiContractStore,
       disableMergeAndHashJoins: Boolean,
+      dbQueueMetricsOpt: Option[DbQueueMetrics],
+      logQueryCostOpt: Option[QueryCostMonitoringConfig],
+      dbParametersConfigOpt: Option[DbParametersConfig],
+      schedulerOpt: Option[ScheduledExecutorService],
   )(implicit materializer: Materializer) {
 
     def initialized()(implicit traceContext: TraceContext): ResourceOwner[Indexer] = {
@@ -171,6 +177,10 @@ object JdbcIndexer {
         loggerFactory = loggerFactory,
         indexerDbDispatcherOverride = indexerDbDispatcherOverride,
         clock = clock,
+        dbQueueMetricsOpt = dbQueueMetricsOpt,
+        logQueryCostOpt = logQueryCostOpt,
+        dbParametersConfigOpt = dbParametersConfigOpt,
+        schedulerOpt = schedulerOpt,
       )
     }
   }

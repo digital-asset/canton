@@ -21,13 +21,11 @@ on:
         description: GitHub Actions runner label
         required: true
         type: string
-    secrets:
-      GAC_JSON:
-        required: false
 
 permissions:
   actions: read
   contents: read
+  id-token: write
 
 jobs:
   build_and_publish_docker:
@@ -59,7 +57,6 @@ jobs:
       - name: Build and publish docker base image
         uses: ./.github/actions/docker/build_and_publish_docker_base_image
         with:
-          gac_json: ${{ secrets.GAC_JSON }}
           oci_registry: ${{ env.OCI_REGISTRY }}
           nightly_release: ${{ inputs.is_nightly_workflow }}
           release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}

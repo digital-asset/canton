@@ -172,12 +172,13 @@ class AcsReplicationTargetParticipantProcessor(
             )
             deltaAcsDigest = acsDigestHelper.computeDeltaDigest(validatedContracts)
             acsDigestHashWithDelta = acsDigestHelper.computeUnionHash(deltaAcsDigest)
-            checkpoint <- acsReplicationContractHandler.handleValidatedContracts(
-              validatedContracts,
+            checkpoint <- acsReplicationContractHandler.handleContracts(
+              contracts,
               AcsTransferCheckpoint(
                 replicationProgress.processedContractCount,
                 replicationProgress.nextPersistenceCounter,
               ),
+              psid.logical,
             )
             _ <- replicationProgressState.updateAcsReplicationProgress(
               requestId,
@@ -193,6 +194,12 @@ class AcsReplicationTargetParticipantProcessor(
             _ = acsDigestHelper.applyDelta(deltaAcsDigest)
             _ = processorStore.setProcessedContractsCount(checkpoint.processedContractCount)
           } yield ()
+        // Used in test where TP restarts ACS replication after SP has sent all ACS.
+        case _: AcsReplicationSourceParticipantMessage.EndOfAcs
+            if testOnlyInterceptor
+              .onTargetParticipantReceivedEndOfAcs() != AcsReplicationTestInterceptor.Proceed =>
+          logger.info("Test interceptor ignores EndOfAcs received from source participant")
+          EitherTUtil.unitUS[String]
         case AcsReplicationSourceParticipantMessage.EndOfAcs(
               acsDigest,
               acsDigestByteString,
@@ -204,6 +211,7 @@ class AcsReplicationTargetParticipantProcessor(
           if (logger.underlying.isDebugEnabled()) {
             logger.debug(s"Received AcsDigest $acsDigest with signature $signature")
           }
+
           for {
             _ <- EitherT.fromEither[FutureUnlessShutdown](verifyAcsDigest(acsDigest))
             _ <- EitherTUtil.ifThenET(!config.disableAcsDigestSourceSignatureValidation)(

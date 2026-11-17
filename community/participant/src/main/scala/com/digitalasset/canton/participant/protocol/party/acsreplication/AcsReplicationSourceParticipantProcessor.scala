@@ -344,6 +344,12 @@ final class AcsReplicationSourceParticipantProcessor private (
 
   override protected def hasEndOfACSBeenReached: Boolean = processorStore.hasEndOfACSBeenReached
 
+  /** SP should still reconnect after sending all ACS in case TP decides to restart the ACS
+    * replication.
+    */
+  override protected def notifyOnDisconnectAfterEndOfAcs(status: Either[String, Unit]): Boolean =
+    status.isLeft
+
   override def onClosed(): Unit = {
     processorStore.resetConnection()
     super.onClosed()

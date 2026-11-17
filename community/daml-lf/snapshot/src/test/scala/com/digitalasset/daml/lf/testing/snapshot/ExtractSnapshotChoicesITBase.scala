@@ -7,6 +7,7 @@ package testing.snapshot
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.integration.plugins.UseProgrammableSequencer
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -14,11 +15,14 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
 }
 import com.digitalasset.canton.participant.admin.PackageService.DarMainPackageId
+import com.digitalasset.canton.synchronizer.sequencer.SendPolicy.processTimeProofs
+import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.daml.lf.data.Ref
 import monocle.macros.syntax.lens.*
 import org.scalatest.BeforeAndAfterEach
 
 import java.nio.file.{FileSystems, Files, Path}
+import scala.concurrent.Future
 
 // Integration tests need to live in the package com.digitalasset.canton.integration.tests, so we
 // make the test base an abstract class
@@ -26,6 +30,7 @@ abstract class ExtractSnapshotChoicesITBase
     extends CommunityIntegrationTest
     with SharedEnvironmentWithStaticTime
     with EntitySyntax
+    with HasProgrammableSequencer
     with BeforeAndAfterEach {
 
   private val participantId = Ref.ParticipantId.assertFromString("participant1")
@@ -60,12 +65,30 @@ abstract class ExtractSnapshotChoicesITBase
         }
       }
 
+  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
+
   override def afterEach(): Unit =
     Files.newDirectoryStream(snapshotDir).forEach(Files.delete)
 
   "Correctly extract choice names from a snapshot file with and without filtering" in {
     implicit env =>
       import env.*
+
+      // The scripts advance the sim clock from outside of this JVM. With the BFT sequencer, block
+      // timestamps lag the sim clock, so a request submitted right after an advance could be
+      // sequenced with a stale timestamp. Hold back confirmation requests until the sequencer has
+      // observed the current sim time.
+      val simClock = environment.simClock.value
+      val timeTracker = sequencer1.underlying.value.sequencer.timeTracker
+      getProgrammableSequencer(sequencer1.name).setPolicy(
+        "wait for sequencer to observe sim time"
+      ) {
+        processTimeProofs { implicit traceContext => submissionRequest =>
+          if (submissionRequest.isConfirmationRequest)
+            SendDecision.HoldBack(timeTracker.awaitTick(simClock.now).getOrElse(Future.unit))
+          else SendDecision.Process
+        }
+      }
 
       // Generate a snapshot file by running all daml-script's in ReplayBenchmark.dar
       runScript(

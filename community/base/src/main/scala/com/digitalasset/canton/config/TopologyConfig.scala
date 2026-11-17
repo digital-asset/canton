@@ -49,6 +49,7 @@ final case class TopologyConfig(
     broadcastBatchSize: PositiveInt = defaultBroadcastBatchSize,
     broadcastRetryDelay: NonNegativeFiniteDuration = defaultBroadcastRetryDelay,
     validateInitialTopologySnapshot: Boolean = true,
+    checkInitialTopologySnapshotConsistency: Boolean = true,
     disableOptionalTopologyChecks: Boolean = false,
     dispatchQueueBackpressureLimit: NonNegativeInt = defaultDispatchQueueBackpressureLimit,
     useTimeProofsToObserveEffectiveTime: Boolean = false,

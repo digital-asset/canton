@@ -17,6 +17,7 @@ import com.digitalasset.canton.sequencing.traffic.EventCostCalculator.{
 }
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
@@ -64,7 +65,7 @@ object EventCostCalculator {
   final case class EventCostDetails(
       costMultiplier: PositiveInt,
       groupToMembersSize: Map[GroupRecipient, Int],
-      envelopes: Map[ClosedEnvelope, EnvelopeCostDetails],
+      envelopes: List[(ClosedEnvelope, EnvelopeCostDetails)],
       eventCost: NonNegativeLong,
   ) extends PrettyPrintingFromCompanion {
     override def prettyCompanion: PrettyPrintingCompanion[EventCostDetails] = EventCostDetails
@@ -75,7 +76,7 @@ object EventCostCalculator {
       param("event cost", _.eventCost),
       param("cost multiplier", _.costMultiplier),
       param("group to members size", _.groupToMembersSize),
-      param("envelopes cost details", _.envelopes.values.toSeq),
+      param("envelopes cost details", _.envelopes.map { case (_, costDetails) => costDetails }),
     )
   }
 }
@@ -88,12 +89,19 @@ class EventCostCalculator(override val loggerFactory: NamedLoggerFactory) extend
       costMultiplier: PositiveInt,
       groupToMembers: Map[GroupRecipient, Set[Member]],
       baseEventCost: NonNegativeLong,
+      protocolVersion: ProtocolVersion,
   ): EventCostDetails = {
     val envelopeCosts = event.envelopes
       .map(envelope => envelope -> computeEnvelopeCost(costMultiplier, groupToMembers)(envelope))
-      .toMap
-    val eventCost =
-      NonNegativeLong.tryCreate(envelopeCosts.values.map(_.finalCost).sum) + baseEventCost
+    val cost = if (protocolVersion <= ProtocolVersion.v37) {
+      // flatten the envelopes first, then calculate costs (i37753)
+      envelopeCosts.toMap.map { case (_, costDetails) => costDetails.finalCost }.sum
+    } else {
+      envelopeCosts.map { case (_, costDetails) => costDetails.finalCost }.sum
+    }
+
+    val eventCost = NonNegativeLong.tryCreate(cost) + baseEventCost
+
     EventCostDetails(
       costMultiplier,
       groupToMembers.view.mapValues(_.size).toMap,

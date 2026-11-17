@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics.updateTimer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -30,12 +31,14 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.{v30, v31}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 
 import java.time.{Duration, Instant}
 
 class P2PNetworkInModule[E <: Env[E]](
     metrics: BftOrderingMetrics,
+    pvv: ProtocolVersionValidation,
+    limits: BftOrdererLimits,
     override val availability: ModuleRef[Availability.Message[E]],
     override val consensus: ModuleRef[Consensus.Message[E]],
     override val loggerFactory: NamedLoggerFactory,
@@ -95,7 +98,7 @@ class P2PNetworkInModule[E <: Env[E]](
 
       case Message.AvailabilityMessage(availabilityMessage) =>
         AvailabilityModule
-          .parseNetworkMessage(availabilityMessage)
+          .parseNetworkMessage(pvv, limits, availabilityMessage)
           .fold(
             errorMessage =>
               logger.warn(
@@ -107,7 +110,7 @@ class P2PNetworkInModule[E <: Env[E]](
 
       case Message.ConsensusMessage(consensusMessage) =>
         IssConsensusModule
-          .parseNetworkMessage(consensusMessage, actualSender = sentBy)
+          .parseNetworkMessage(pvv, limits, consensusMessage, actualSender = sentBy)
           .map(msg => Consensus.ConsensusMessage.PbftUnverifiedNetworkMessage(msg))
           .fold(
             errorMessage =>
@@ -137,7 +140,7 @@ class P2PNetworkInModule[E <: Env[E]](
 
       case Message.RetransmissionMessage(message) =>
         IssConsensusModule
-          .parseRetransmissionMessage(sentBy, message)
+          .parseRetransmissionMessage(pvv, limits, sentBy, message)
           .fold(
             errorMessage =>
               logger.warn(
@@ -151,15 +154,15 @@ class P2PNetworkInModule[E <: Env[E]](
         val parsedSignedMessage =
           if (synchronizerProtocolVersion >= ProtocolVersion.v37)
             SignedMessage
-              .fromProto(v31.StateTransferMessage, SupportedVersions.ProtoData31)(
+              .fromProto(pvv, v31.StateTransferMessage, SupportedVersions.ProtoData31)(
                 IssConsensusModule
-                  .parseStateTransferMessage31(sentBy, _)
+                  .parseStateTransferMessage31(pvv, limits, sentBy, _)
               )(message)
           else
             SignedMessage
-              .fromProto(v30.StateTransferMessage, SupportedVersions.ProtoData30)(
+              .fromProto(pvv, v30.StateTransferMessage, SupportedVersions.ProtoData30)(
                 IssConsensusModule
-                  .parseStateTransferMessage(sentBy, _)
+                  .parseStateTransferMessage(pvv, limits, sentBy, _)
               )(message)
         parsedSignedMessage
           .fold(

@@ -23,13 +23,7 @@ import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeNumeric,
   PositiveInt,
 }
-import com.digitalasset.canton.config.{
-  BatchingConfig,
-  CachingConfigs,
-  CantonConfig,
-  DefaultProcessingTimeouts,
-  RequireTypes,
-}
+import com.digitalasset.canton.config.{CantonConfig, DefaultProcessingTimeouts, RequireTypes}
 import com.digitalasset.canton.console.{
   InstanceReference,
   LocalMediatorReference,
@@ -65,6 +59,10 @@ import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTr
 import com.digitalasset.canton.synchronizer.block.data.db.DbSequencerBlockStore
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SequencerWriterConfig
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerBatchingConfig,
+  SequencerCachingConfigs,
+}
 import com.digitalasset.canton.synchronizer.sequencer.store.DbSequencerStore
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SequencerId}
@@ -194,9 +192,8 @@ abstract class BaseSynchronizerRestartTest
       timeouts = DefaultProcessingTimeouts.testing,
       loggerFactory = loggerFactory,
       sequencerMember = SequencerId(DefaultTestIdentities.physicalSynchronizerId.uid),
-      blockSequencerMode = true,
-      cachingConfigs = CachingConfigs(),
-      batchingConfig = BatchingConfig(),
+      cachingConfigs = SequencerCachingConfigs(),
+      batchingConfig = SequencerBatchingConfig(),
       sequencerMetrics = SequencerMetrics.noop(getClass.getName),
     )
 
@@ -205,7 +202,7 @@ abstract class BaseSynchronizerRestartTest
       testedProtocolVersion,
       timeouts,
       loggerFactory,
-      batchingConfig = BatchingConfig(),
+      batchingConfig = SequencerBatchingConfig(),
       sequencerStore,
     )
 

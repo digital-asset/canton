@@ -11,6 +11,7 @@ import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.testing.InMemoryMetricsFactory
 import com.daml.metrics.api.{MetricName, MetricsContext}
+import com.daml.metrics.grpc.DamlGrpcServerMetrics
 import com.daml.metrics.{ExecutorServiceMetrics, HealthMetrics, OnDemandMetricsReader}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
@@ -28,7 +29,6 @@ import com.digitalasset.canton.health.{
   LivenessHealthService,
 }
 import com.digitalasset.canton.lifecycle.{LifeCycle, ShutdownFailedException}
-import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.metrics.{
   CommonMockMetrics,
   CryptoMetrics,
@@ -85,8 +85,8 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
     override val monitoring: NodeMonitoringConfig = NodeMonitoringConfig()
     override val topology: TopologyConfig = TopologyConfig.NotUsed
     override def parameters: LocalNodeParametersConfig = new LocalNodeParametersConfig {
-      override def batching: BatchingConfig = BatchingConfig()
-      override def caching: CachingConfigs = CachingConfigs()
+      override def batching: BatchingConfig = TestBatchingConfig()
+      override def caching: CachingConfigs = TestCachingConfigs()
 
       override def devVersionSupport: Boolean = false
       override def alphaVersionSupport: Boolean = false
@@ -103,10 +103,11 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
       enablePreviewFeatures: Boolean = false,
       enableTestingFeatures: Boolean = false,
       enableKeyDownload: Boolean = false,
+      enableScopeOnlyJwt: Boolean = false,
       processingTimeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing,
       sequencerClient: SequencerClientConfig = SequencerClientConfig(),
-      cachingConfigs: CachingConfigs = CachingConfigs(),
-      batchingConfig: BatchingConfig = BatchingConfig(),
+      cachingConfigs: CachingConfigs = TestCachingConfigs(),
+      batchingConfig: BatchingConfig = TestBatchingConfig(),
       nonStandardConfig: Boolean = false,
       dbMigrateAndStart: Boolean = false,
       disableUpgradeValidation: Boolean = false,
@@ -127,8 +128,7 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
   case class TestMetrics(
       prefix: MetricName = MetricName("test-metrics"),
       openTelemetryMetricsFactory: LabeledMetricsFactory = metricsFactory,
-      grpcMetrics: GrpcServerMetricsX =
-        (LedgerApiServerMetrics.ForTesting.grpc, LedgerApiServerMetrics.ForTesting.requests),
+      grpcMetrics: DamlGrpcServerMetrics = LedgerApiServerMetrics.ForTesting.grpc,
       healthMetrics: HealthMetrics = LedgerApiServerMetrics.ForTesting.health,
       storageMetrics: DbStorageMetrics = CommonMockMetrics.dbStorage,
       cryptoMetrics: CryptoMetrics = CommonMockMetrics.cryptoMetrics,

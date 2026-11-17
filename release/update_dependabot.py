@@ -2,8 +2,8 @@
 """Sync .github/dependabot.yml to the set of supported release lines.
 
 Supported release lines are listed, one `major.minor` per line, in
-`release/supported-release-lines.txt` (the source of truth, also intended to
-drive scheduled CI workflows). This rewrites dependabot.yml so the per-line
+`release/supported-release-lines.txt` (the source of truth, also read by
+release/dispatch_nightly.py). This rewrites dependabot.yml so the per-line
 entries cover exactly those lines: for each supported line it appends a clone of
 the covered base entries (PER_LINE_ECOSYSTEMS, docker for now) with
 `target-branch: "release-line-X.Y"`, and drops per-line entries for lines that

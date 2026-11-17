@@ -2,12 +2,12 @@ name: Canton Nightly Workflow
 on:
   # TODO(#34877): Re-enable workflow_dispatch and the separate nightly scheduler
   # after the CircleCI migration is complete. Until then, keep this workflow
-  # limited to workflow_dispatch for manual testing and parity with CircleCI.
-  workflow_dispatch:
+  # limited to temporary gha-migration/* push testing.
+  # workflow_dispatch:
   # Optional parity/testing trigger while migrating from CircleCI.
-#  push:
-#    branches:
-#      - 'gha-migration/*'
+  push:
+    branches:
+      - 'gha-migration/*'
 
 jobs:
   pick_runner:
@@ -68,6 +68,11 @@ jobs:
     name: Build Docs Snippets
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_build_docs_snippets.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -88,6 +93,11 @@ jobs:
     name: Unstable Test 36
     needs: [pick_runner, package_community]
     uses: ./.github/workflows/_unstable_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -97,32 +107,32 @@ jobs:
     name: Test 36 With Java 17
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       override_java_version_for_tests: "17"
       protocol_version: "36"
-      job_name: test_with_java17
+      job_name: test_36_with_java17
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test_37:
-    name: Test Protocol Version 37
-    needs: [pick_runner, compile]
-    uses: ./.github/workflows/_test.yml
-    secrets: inherit
-    with:
-      override_java_version_for_tests: ""
-      protocol_version: "37"
-      job_name: test_37
-      runner: ${{ needs.pick_runner.outputs.runner }}
-
-  ledger_api_compatibility_tests_36:
+  ledger_api_compatibility_tests_37:
     name: Ledger API Compatibility Tests
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_ledger_api_compatibility_tests.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
-      protocol_version: '36'
+      protocol_version: '37'
+      job_name: ledger_api_compatibility_test_37
 
   protocol_continuity_test_all:
     name: Protocol Continuity Test All
@@ -136,10 +146,16 @@ jobs:
     name: Stability Crash Recovery Test
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_stability_crash_recovery_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
+      job_name: stability_crash_recovery_test_36
 
   package_jsonapi:
     name: Package JSON API
@@ -165,16 +181,36 @@ jobs:
     name: External Parties Test 36
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_external_parties_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       override_java_version_for_tests: ""
       protocol_version: "36"
+      job_name: external_parties_test_36
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   nightly_integration_test_36:
     name: Nightly Integration Test 36
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_nightly_integration_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+
+  model_based_test_36:
+    name: Model Based Test 36
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_model_based_test.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -184,6 +220,10 @@ jobs:
     name: Build and Publish Docker
     needs: [pick_runner, package_community, nightly_integration_test_36]
     uses: ./.github/workflows/_build_and_publish_docker.yml
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     secrets: inherit
     with:
       is_nightly_workflow: true
@@ -197,6 +237,7 @@ jobs:
     secrets: inherit
     permissions:
       contents: read
+      id-token: write
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
       is_nightly_workflow: true
@@ -213,6 +254,10 @@ jobs:
       - package_kms_driver
       - compile
     uses: ./.github/workflows/_publish_release.yml
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -231,14 +276,14 @@ jobs:
       - build_docs
       - unstable_test_36
       - test_36_with_java17
-      - test_37
-      - ledger_api_compatibility_tests_36
+      - ledger_api_compatibility_tests_37
       - protocol_continuity_test_all
       - stability_crash_recovery_test_36
       - package_jsonapi
       - assembly_ledger_api_test_tool
       - external_parties_test_36
       - nightly_integration_test_36
+      - model_based_test_36
       - build_and_publish_docker
       - publish_libraries
       - publish_release
@@ -249,14 +294,3 @@ jobs:
     secrets: inherit
     with:
       needs_json: ${{ toJSON(needs) }}
-      # Keep required-notify runner selection independent from pick_runner output to avoid
-      # issues with notify if pick_runner fails before emitting outputs.
-      # Keep repo-to-runner labels in sync with .github/actions/utils/pick_runner/action.yml.
-      runner: >-
-        ${{
-          case(
-            github.repository == 'DACH-NY/canton', 'dach-ny-canton',
-            github.repository == 'digital-asset/canton', 'digital-asset-canton',
-            'ubuntu-latest'
-          )
-        }}

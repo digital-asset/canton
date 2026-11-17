@@ -23,7 +23,7 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
-import com.digitalasset.canton.sequencing.SequencedSerializedEvent
+import com.digitalasset.canton.sequencing.ConnectionSerializedEvent
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestMalformed
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
@@ -982,7 +982,7 @@ trait SequencerApiTestUtils
       startTimestamp: Option[CantonTimestamp] = None,
   )(implicit
       materializer: Materializer
-  ): FutureUnlessShutdown[Seq[(Member, SequencedSerializedEvent)]] =
+  ): FutureUnlessShutdown[Seq[(Member, ConnectionSerializedEvent)]] =
     // TODO(#33650) – replace with unboundedTraverseFilter; OK because members are statically bounded to a small number
     members
       .parTraverseFilter { member =>
@@ -1010,7 +1010,7 @@ trait SequencerApiTestUtils
       }
 
   protected def firstEventTimestamp(forMember: Member)(
-      reads: Seq[(Member, SequencedSerializedEvent)]
+      reads: Seq[(Member, ConnectionSerializedEvent)]
   ): Option[CantonTimestamp] =
     reads.collectFirst { case (`forMember`, event) => event.timestamp }
 
@@ -1055,7 +1055,7 @@ trait SequencerApiTestUtils
 
   protected def checkMessages(
       expectedMessages: Seq[EventDetails],
-      receivedMessages: Seq[(Member, SequencedSerializedEvent)],
+      receivedMessages: Seq[(Member, ConnectionSerializedEvent)],
       expectEnvelopes: Boolean = true,
   ): Assertion = {
 
@@ -1111,7 +1111,7 @@ trait SequencerApiTestUtils
   }
 
   def checkRejection(
-      got: Seq[(Member, SequencedSerializedEvent)],
+      got: Seq[(Member, ConnectionSerializedEvent)],
       sender: Member,
       expectedMessageId: MessageId,
       expectedTrafficReceipt: Option[TrafficReceipt],

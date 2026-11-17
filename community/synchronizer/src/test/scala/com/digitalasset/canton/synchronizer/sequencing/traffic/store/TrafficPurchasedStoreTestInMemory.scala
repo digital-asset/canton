@@ -21,7 +21,6 @@ class TrafficPurchasedStoreTestInMemory
         new InMemorySequencerStore(
           testedProtocolVersion,
           SequencerId(DefaultTestIdentities.physicalSynchronizerId.uid),
-          true,
           loggerFactory,
           timeouts,
           SequencerMetrics.noop(getClass.getName),

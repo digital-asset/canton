@@ -12,13 +12,10 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
-import com.digitalasset.canton.synchronizer.sequencer.HASequencerExclusiveStorageBuilder.ExclusiveStorage
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
   BftSequencer,
   DeprecatedSequencerConfig,
-  External,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.DriverBlockSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
 import com.digitalasset.canton.synchronizer.sequencer.time.{
@@ -33,7 +30,6 @@ import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 
-import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor}
 
 trait SequencerFactory extends FlagCloseable with HasCloseContext {
@@ -69,94 +65,17 @@ object SequencerMetaFactory {
   def createFactory(
       protocolVersion: ProtocolVersion,
       health: Option[SequencerHealthConfig],
-      clock: Clock,
-      scheduler: ScheduledExecutorService,
       metrics: SequencerMetrics,
       executorServiceMetrics: ExecutorServiceMetrics,
       storage: Storage,
       sequencerId: SequencerId,
       nodeParameters: SequencerNodeParameters,
       publicApi: PublicServerConfig,
-      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(
       sequencerConfig: SequencerConfig
   )(implicit executionContext: ExecutionContextExecutor): SequencerFactory =
     sequencerConfig match {
-      case databaseConfig: SequencerConfig.Database =>
-        // if we're configured for high availability switch to using a writer storage factory that will
-        // dynamically determine a node instance index and ensure that all sensitive writes are performed
-        // while holding an exclusive lock for that instance.
-        val writerStorageFactory =
-          if (databaseConfig.highAvailabilityEnabled)
-            new HASequencerWriterStoreFactory(
-              protocolVersion,
-              databaseConfig.highAvailability.getOrElse(
-                throw new IllegalStateException("HA config not set despite being enabled")
-              ),
-              nodeParameters.loggingConfig.queryCost,
-              Some(scheduler),
-              sequencerId,
-              nodeParameters.cachingConfigs,
-              nodeParameters.batchingConfig,
-              metrics,
-              nodeParameters.processingTimeouts,
-              exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
-              futureSupervisor,
-              loggerFactory,
-            )
-          else
-            SequencerWriterStoreFactory.singleInstance
-
-        // under high availability create a separate, exclusive DbStorageMulti to manage
-        // configuration stored in the database and also for use by pruning.
-        val exclusiveStorageBuilder =
-          Option.when[
-            Storage => Either[HASequencerExclusiveStorageBuilder.CreateError, ExclusiveStorage]
-          ](
-            databaseConfig.highAvailabilityEnabled
-          )(
-            new HASequencerExclusiveStorageBuilder(
-              databaseConfig.highAvailability
-                .getOrElse(
-                  throw new IllegalStateException("HA config not set despite being enabled")
-                )
-                .exclusiveStorage,
-              nodeParameters.loggingConfig.queryCost,
-              scheduler,
-              nodeParameters.processingTimeouts,
-              exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
-              futureSupervisor,
-              loggerFactory,
-            ).create
-          )
-
-        val pruningSchedulerBuilder: (Storage, Sequencer) => DatabaseSequencerPruningScheduler = {
-          case (storage, sequencer) =>
-            new DatabaseSequencerPruningScheduler(
-              clock,
-              sequencer,
-              storage,
-              databaseConfig.pruning,
-              nodeParameters.processingTimeouts,
-              loggerFactory,
-            )
-        }
-
-        new HADatabaseSequencerFactory(
-          databaseConfig,
-          storage,
-          protocolVersion,
-          writerStorageFactory,
-          exclusiveStorageBuilder,
-          pruningSchedulerBuilder,
-          health,
-          metrics,
-          sequencerId,
-          nodeParameters,
-          loggerFactory,
-        )
-
       case BftSequencer(blockSequencerConfig, config) =>
         new BftSequencerFactory(
           config,
@@ -169,20 +88,6 @@ object SequencerMetaFactory {
           nodeParameters,
           metrics,
           executorServiceMetrics,
-          loggerFactory,
-          blockSequencerConfig.testingInterceptor,
-        )
-
-      case External(blockSequencerConfig, config) =>
-        DriverBlockSequencerFactory(
-          config,
-          blockSequencerConfig,
-          health,
-          storage,
-          protocolVersion,
-          sequencerId,
-          nodeParameters,
-          metrics,
           loggerFactory,
           blockSequencerConfig.testingInterceptor,
         )

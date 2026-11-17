@@ -131,7 +131,7 @@ final case class SequencerSnapshot(
 }
 
 object SequencerSnapshot
-    extends VersioningCompanionContext2E[SequencerSnapshot, SequencerSnapshot, ProtocolVersion]
+    extends VersioningCompanion2E[SequencerSnapshot, SequencerSnapshot]
     with PrettyPrintingCompanion[SequencerSnapshot] {
 
   override protected val pretty: Pretty[SequencerSnapshot] = prettyOfClass(
@@ -147,12 +147,12 @@ object SequencerSnapshot
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec.applyE(ProtocolVersion.v36)(v30.SequencerSnapshot)(
-      supportedProtoVersion(_)(fromProtoV30),
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     ),
     // v31 can represent every member status, so its serialization never fails.
     ProtoVersion(31) -> VersionedProtoCodec.applyE(ProtocolVersion.v37)(v31.SequencerSnapshot)(
-      supportedProtoVersion(_)(fromProtoV31),
+      supportedProtoVersionPVV(_)(fromProtoV31),
       _.toProtoV31.asRight[String],
     ),
   )
@@ -194,7 +194,7 @@ object SequencerSnapshot
     )
   }
 
-  private def parseInFlightAggregationWithId(expectedProtocolVersion: ProtocolVersion)(
+  private def parseInFlightAggregationWithId(pvv: ProtocolVersionValidation)(
       proto: v30.SequencerSnapshot.InFlightAggregationWithId
   ): ParsingResult[(AggregationId, InFlightAggregation)] = {
     val v30.SequencerSnapshot.InFlightAggregationWithId(
@@ -209,14 +209,14 @@ object SequencerSnapshot
       aggregatedSendersP <- ProtoValidation.validateLength(
         aggregatedSendersP,
         "aggregated_senders",
-        ProtocolVersionValidation.NoValidation,
+        pvv,
         ProtoValidation.MaxCollectionSize,
       )
       aggregationId <- AggregationId.fromProtoPrimitive(aggregationIdP)
       aggregationRule <- ProtoConverter.parseRequired(
         AggregationRule
           .fromProtoV30(
-            ProtocolVersionValidation(expectedProtocolVersion),
+            pvv,
             _,
           ),
         "v30.SequencerSnapshot.InFlightAggregationWithId.aggregation_rule",
@@ -239,7 +239,7 @@ object SequencerSnapshot
               signaturesByEnvelopeP <- ProtoValidation.validateLength(
                 signaturesByEnvelopeP,
                 "signatures_by_envelope",
-                ProtocolVersionValidation.NoValidation,
+                pvv,
                 ProtoValidation.MaxCollectionSize,
               )
               signatures <- signaturesByEnvelopeP.traverse {
@@ -248,10 +248,12 @@ object SequencerSnapshot
                     sigsOnEnv <- ProtoValidation.validateLength(
                       sigsOnEnv,
                       "signatures",
-                      ProtocolVersionValidation.NoValidation,
+                      pvv,
                       ProtoValidation.MaxCollectionSize,
                     )
-                    sigs <- sigsOnEnv.traverse(Signature.fromProtoV30)
+                    sigs <- sigsOnEnv.traverse(
+                      Signature.fromProtoV30(pvv, _)
+                    )
                   } yield sigs
               }
             } yield sender -> AggregationBySender(sequencingTimestamp, signatures)
@@ -268,13 +270,14 @@ object SequencerSnapshot
   }
 
   private def parsePreviousTimestamps(
-      memberPreviousTimestamps: Seq[v30.SequencerSnapshot.MemberPreviousTimestamp]
+      pvv: ProtocolVersionValidation,
+      memberPreviousTimestamps: Seq[v30.SequencerSnapshot.MemberPreviousTimestamp],
   ) =
     ProtoValidation
       .validateLengthThen(
         memberPreviousTimestamps,
         "member_previous_timestamps",
-        ProtocolVersionValidation.NoValidation,
+        pvv,
         ProtoValidation.MaxCollectionSize,
       ) { case (v30.SequencerSnapshot.MemberPreviousTimestamp(member, timestamp), _) =>
         Member
@@ -284,14 +287,14 @@ object SequencerSnapshot
       .map(_.toMap)
 
   def fromProtoV30(
-      expectedProtocolVersion: ProtocolVersion,
+      pvv: ProtocolVersionValidation,
       request: v30.SequencerSnapshot,
   ): ParsingResult[SequencerSnapshot] =
     for {
       lastTs <- CantonTimestamp.fromProtoPrimitive(request.latestTimestamp)
-      previousTimestamps <- parsePreviousTimestamps(request.memberPreviousTimestamps)
+      previousTimestamps <- parsePreviousTimestamps(pvv, request.memberPreviousTimestamps)
       status <- ProtoConverter.parseRequired(
-        SequencerPruningStatus.fromProtoV30,
+        SequencerPruningStatus.fromProtoV30(pvv, _),
         "status",
         request.status,
       )
@@ -299,26 +302,22 @@ object SequencerSnapshot
         .validateLengthThen(
           request.inFlightAggregations,
           "in_flight_aggregations",
-          ProtocolVersionValidation.NoValidation,
+          pvv,
           ProtoValidation.MaxCollectionSize,
-        )((proto, _) => parseInFlightAggregationWithId(expectedProtocolVersion)(proto))
+        )((proto, _) => parseInFlightAggregationWithId(pvv)(proto))
         .map(_.toMap)
       trafficPurchased <- ProtoValidation.validateLengthThen(
         request.trafficPurchased,
         "traffic_purchased",
-        ProtocolVersionValidation.NoValidation,
+        pvv,
         ProtoValidation.MaxCollectionSize,
-      )((tp, _) =>
-        TrafficPurchased.fromProtoV30(ProtocolVersionValidation(expectedProtocolVersion), tp)
-      )
+      )((tp, _) => TrafficPurchased.fromProtoV30(pvv, tp))
       trafficConsumed <- ProtoValidation.validateLengthThen(
         request.trafficConsumed,
         "traffic_consumed",
-        ProtocolVersionValidation.NoValidation,
+        pvv,
         ProtoValidation.MaxCollectionSize,
-      )((tc, _) =>
-        TrafficConsumed.fromProtoV30(ProtocolVersionValidation(expectedProtocolVersion), tc)
-      )
+      )((tc, _) => TrafficConsumed.fromProtoV30(pvv, tc))
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield SequencerSnapshot(
       lastTs,
@@ -332,14 +331,14 @@ object SequencerSnapshot
     )(rpv)
 
   def fromProtoV31(
-      expectedProtocolVersion: ProtocolVersion,
+      pvv: ProtocolVersionValidation,
       request: v31.SequencerSnapshot,
   ): ParsingResult[SequencerSnapshot] =
     for {
       lastTs <- CantonTimestamp.fromProtoPrimitive(request.latestTimestamp)
-      previousTimestamps <- parsePreviousTimestamps(request.memberPreviousTimestamps)
+      previousTimestamps <- parsePreviousTimestamps(pvv, request.memberPreviousTimestamps)
       status <- ProtoConverter.parseRequired(
-        SequencerPruningStatus.fromProtoV31,
+        SequencerPruningStatus.fromProtoV31(pvv, _),
         "status",
         request.status,
       )
@@ -347,26 +346,22 @@ object SequencerSnapshot
         .validateLengthThen(
           request.inFlightAggregations,
           "in_flight_aggregations",
-          ProtocolVersionValidation.NoValidation,
+          pvv,
           ProtoValidation.MaxCollectionSize,
-        )((proto, _) => parseInFlightAggregationWithId(expectedProtocolVersion)(proto))
+        )((proto, _) => parseInFlightAggregationWithId(pvv)(proto))
         .map(_.toMap)
       trafficPurchased <- ProtoValidation.validateLengthThen(
         request.trafficPurchased,
         "traffic_purchased",
-        ProtocolVersionValidation.NoValidation,
+        pvv,
         ProtoValidation.MaxCollectionSize,
-      )((tp, _) =>
-        TrafficPurchased.fromProtoV30(ProtocolVersionValidation(expectedProtocolVersion), tp)
-      )
+      )((tp, _) => TrafficPurchased.fromProtoV30(pvv, tp))
       trafficConsumed <- ProtoValidation.validateLengthThen(
         request.trafficConsumed,
         "traffic_consumed",
-        ProtocolVersionValidation.NoValidation,
+        pvv,
         ProtoValidation.MaxCollectionSize,
-      )((tc, _) =>
-        TrafficConsumed.fromProtoV30(ProtocolVersionValidation(expectedProtocolVersion), tc)
-      )
+      )((tc, _) => TrafficConsumed.fromProtoV30(pvv, tc))
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
     } yield SequencerSnapshot(
       lastTs,

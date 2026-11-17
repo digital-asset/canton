@@ -13,7 +13,7 @@ import cats.{Functor, Show}
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
+import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
@@ -43,6 +43,10 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.PruningError.UnsafePruningPoint
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerBatchingConfig,
+  SequencerCachingConfigs,
+}
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore.SequencerPruningResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.Member
@@ -361,19 +365,6 @@ final case class Sequenced[+P](
 sealed trait SavePayloadsError
 object SavePayloadsError {
 
-  /** We found an existing payload with the same key
-    * @param payloadId
-    *   the payload insert that failed
-    * @param conflictingInstanceDiscriminator
-    *   The discriminator of the instance that successfully inserted a payload with this id. The
-    *   discriminator is logged at debug upon sequencer writer startup so is possible to discover
-    *   which instance did the write.
-    */
-  final case class ConflictingPayloadId(
-      payloadId: PayloadId,
-      conflictingInstanceDiscriminator: UUID,
-  ) extends SavePayloadsError
-
   /** We should have already inserted the payload but it wasn't there when reading. Likely can only
     * be caused by the payload being removed unexpectedly.
     */
@@ -564,11 +555,6 @@ trait SequencerStore
   protected def timeouts: ProcessingTimeout
 
   protected def sequencerMetrics: SequencerMetrics
-
-  /** Whether the sequencer store operates is used for a block sequencer or a standalone database
-    * sequencer.
-    */
-  def blockSequencerMode: Boolean
 
   /** Validate that the commit mode of a session is inline with the configured expected commit mode.
     * Return a human readable message about the mismatch in commit modes if not.
@@ -1240,9 +1226,8 @@ object SequencerStore {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       sequencerMember: Member,
-      blockSequencerMode: Boolean,
-      cachingConfigs: CachingConfigs,
-      batchingConfig: BatchingConfig,
+      cachingConfigs: SequencerCachingConfigs,
+      batchingConfig: SequencerBatchingConfig,
       sequencerMetrics: SequencerMetrics,
       overrideCloseContext: Option[CloseContext] = None,
   )(implicit executionContext: ExecutionContext): SequencerStore =
@@ -1251,7 +1236,6 @@ object SequencerStore {
         new InMemorySequencerStore(
           protocolVersion,
           sequencerMember,
-          blockSequencerMode = blockSequencerMode,
           loggerFactory,
           timeouts,
           sequencerMetrics = sequencerMetrics,
@@ -1265,7 +1249,6 @@ object SequencerStore {
           timeouts,
           loggerFactory,
           sequencerMember,
-          blockSequencerMode = blockSequencerMode,
           cachingConfigs = cachingConfigs,
           batchingConfig = batchingConfig,
           sequencerMetrics = sequencerMetrics,

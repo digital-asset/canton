@@ -28,7 +28,6 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.examples.java.iou
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
-import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -59,14 +58,8 @@ trait SecuredApisIntegrationTest
     with SecurityTestSuite
     with AccessTestScenario {
 
-  // TODO (i#33090): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
-  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
-  override def beforeAll(): Unit =
-    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
-      super.beforeAll()
-    }
-
   private val mySecret = NonEmptyString.tryCreate("pyjama")
+  private val audience = "ledger-api-audience"
 
   private val expirationLeeway: Long = 3600
 
@@ -79,8 +72,9 @@ trait SecuredApisIntegrationTest
       Some(
         JwtTokenUtilities.buildUnsafeToken(
           secret,
-          Some(UserManagementStore.DefaultParticipantAdminUserId),
+          userId = Some(UserManagementStore.DefaultParticipantAdminUserId),
           exp = expiration,
+          audience = audience,
         )
       )
     )
@@ -189,7 +183,7 @@ trait SecuredApisIntegrationTest
               AuthServiceConfig
                 .UnsafeJwtHmac256(
                   secret = mySecret,
-                  targetAudience = None,
+                  targetAudience = Some(audience),
                   targetScope = None,
                 )
             )
@@ -258,8 +252,11 @@ trait SecuredApisIntegrationTest
           adminApi = p1.adminApi.clientConfig,
           ledgerApi = p1.ledgerApi.clientConfig,
           token = Some(
-            JwtTokenUtilities
-              .buildUnsafeToken("invalid", Some(UserManagementStore.DefaultParticipantAdminUserId))
+            JwtTokenUtilities.buildUnsafeToken(
+              "invalid",
+              userId = Some(UserManagementStore.DefaultParticipantAdminUserId),
+              audience = audience,
+            )
           ),
         )
         val v1 = copyWith(iv1, mySecret.unwrap)
@@ -430,7 +427,7 @@ trait SecuredApisIntegrationTest
         participant1.config.ledgerApi.authServices shouldBe Seq(
           AuthServiceConfig.UnsafeJwtHmac256(
             secret = mySecret,
-            targetAudience = None,
+            targetAudience = Some(audience),
             targetScope = None,
           )
         )
@@ -539,7 +536,8 @@ trait SecuredApisIntegrationTest
             participant1,
             JwtTokenUtilities.buildUnsafeToken(
               mySecret.unwrap,
-              Some(bankUser),
+              userId = Some(bankUser),
+              audience = audience,
             ),
           )
 
@@ -548,7 +546,8 @@ trait SecuredApisIntegrationTest
             participant1,
             JwtTokenUtilities.buildUnsafeToken(
               mySecret.unwrap,
-              Some(ownerUser),
+              userId = Some(ownerUser),
+              audience = audience,
             ),
           )
 

@@ -9,8 +9,8 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
-import com.digitalasset.canton.version.ProtoVersion
 import com.digitalasset.canton.version.v1.UntypedVersionedMessage
+import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersionValidation}
 import com.google.protobuf.ByteString
 
 /** The claimed BFT node that originated this protocol message.
@@ -62,6 +62,7 @@ object SignedMessage {
       MessageT <: ProtocolVersionedMemoizedEvidence & MessageFrom,
       Proto <: scalapb.GeneratedMessage,
   ](
+      pvv: ProtocolVersionValidation,
       p: scalapb.GeneratedMessageCompanion[Proto],
       expectedProtoVersion: ProtoVersion,
   )(
@@ -69,7 +70,7 @@ object SignedMessage {
   )(
       proto: v30.SignedMessage
   ): ParsingResult[SignedMessage[MessageT]] =
-    fromProtoWithNodeId(p, expectedProtoVersion)(_ => parse)(proto)
+    fromProtoWithNodeId(pvv, p, expectedProtoVersion)(_ => parse)(proto)
 
   /** Parses the outer `v30.SignedMessage` wrapper's claimed origin and supplies it to the message
     * parser.
@@ -83,6 +84,7 @@ object SignedMessage {
       A <: ProtocolVersionedMemoizedEvidence & MessageFrom,
       Proto <: scalapb.GeneratedMessage,
   ](
+      pvv: ProtocolVersionValidation,
       p: scalapb.GeneratedMessageCompanion[Proto],
       expectedProtoVersion: ProtoVersion,
   )(
@@ -110,7 +112,7 @@ object SignedMessage {
       )
       protoMessage <- ProtoConverter.protoParser(p.parseFrom)(unVersionedBytes)
       message <- parse(claimedFrom)(protoMessage)(proto.message)
-      signature <- Signature.fromProtoV30(proto.getSignature)
+      signature <- Signature.fromProtoV30(pvv, proto.getSignature)
     } yield SignedMessage(message, signature)
   }
 

@@ -237,7 +237,7 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
     // wait until the system really started up
     eventually(timeUntilSuccess = 2.minutes) {
       val mode = runners.headOption.value.status().collectFirst {
-        case DriverStatus.MasterStatus(_, mode, _, _, _, _) => mode
+        case DriverStatus.MasterStatus(_, mode, _, _, _, _, _) => mode
       }
       mode should contain("THROUGHPUT")
     }

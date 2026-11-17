@@ -1,0 +1,30 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- Version 2 of Asset: adds an optional field and a choice, and changes Split's body.
+module Asset where
+
+template Asset
+  with
+    issuer : Party
+    owner : Party
+    amount : Int
+    note : Optional Text
+  where
+    signatory issuer
+    observer owner
+
+    choice Split : (ContractId Asset, ContractId Asset)
+      with
+        part : Int
+      controller issuer
+      do
+        a <- create this with amount = part; note = Some "split"
+        b <- create this with amount = amount - part; note = Some "split"
+        pure (a, b)
+
+    choice Annotate : ContractId Asset
+      with
+        text : Text
+      controller issuer
+      do create this with note = Some text

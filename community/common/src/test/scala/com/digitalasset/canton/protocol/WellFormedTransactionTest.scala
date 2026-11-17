@@ -3,12 +3,21 @@
 
 package com.digitalasset.canton.protocol
 
-import com.digitalasset.canton.data.PathRollbackContextFactory
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{Stage, WithSuffixes, WithoutSuffixes}
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageName, LfPartyId}
+import com.digitalasset.canton.util.LfTransactionBuilder.defaultTemplateId
+import com.digitalasset.canton.{
+  BaseTest,
+  HasExecutionContext,
+  LfPackageId,
+  LfPackageName,
+  LfPartyId,
+}
 import com.digitalasset.daml.lf.crypto
-import com.digitalasset.daml.lf.data.ImmArray
+import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.transaction.test.TreeTransactionBuilder.NodeOps
+import com.digitalasset.daml.lf.transaction.test.{TestIdFactory, TreeTransactionBuilder}
 import com.digitalasset.daml.lf.transaction.{NodeId, SerializationVersion}
 import com.digitalasset.daml.lf.value.Value.VersionedValue
 import org.scalatest.prop.{TableFor3, TableFor4}
@@ -27,26 +36,49 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
       arg: VersionedValue = ExampleTransactionFactory.defaultVersionedValue,
       signatories: Set[LfPartyId] = Set(signatory),
       key: Option[LfGlobalKeyWithMaintainers] = None,
+      packageId: LfPackageId = defaultTemplateId.packageId,
   ): LfNodeCreate =
     ExampleTransactionFactory.createNode(
       cid,
       signatories = signatories,
       arg = arg,
       key = key,
+      templateId = Ref.Identifier(packageId, defaultTemplateId.qualifiedName),
     )
 
-  def fetchNode(cid: LfContractId): LfNodeFetch =
+  def fetchNode(
+      cid: LfContractId,
+      packageId: LfPackageId = defaultTemplateId.packageId,
+  ): LfNodeFetch =
     ExampleTransactionFactory.fetchNode(
       cid,
       actingParties = Set(submitter),
       signatories = Set(signatory),
+      templateId = Ref.Identifier(packageId, defaultTemplateId.qualifiedName),
     )
 
-  def exerciseNode(cid: LfContractId, child: Int): LfNodeExercises =
+  def exerciseNode(
+      cid: LfContractId,
+      children: Seq[Int] = Seq.empty,
+      packageId: LfPackageId = defaultTemplateId.packageId,
+  ): LfNodeExercises =
     ExampleTransactionFactory.exerciseNode(
       cid,
-      children = List(nodeId(child)),
+      children = children.toList.map(nodeId),
       signatories = Set(signatory),
+      templateId = Ref.Identifier(packageId, defaultTemplateId.qualifiedName),
+    )
+
+  def queryByKeyNode(
+      cids: Seq[LfContractId],
+      packageId: LfPackageId = defaultTemplateId.packageId,
+  ): LfNodeQueryByKey =
+    ExampleTransactionFactory.queryByKeyNode(
+      defaultGlobalKey.copy(templateId =
+        Ref.Identifier(packageId, defaultTemplateId.qualifiedName)
+      ),
+      maintainers = Set(signatory),
+      resolution = cids.toVector,
     )
 
   private def nid(i: Int): String = """NodeId\(""" + i.toString + """.*\)"""
@@ -69,13 +101,13 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
       ),
       (
         "Dangling exercise child",
-        factory.versionedTransactionWithSeeds(Seq(0), exerciseNode(lfAbs, child = 1)),
+        factory.versionedTransactionWithSeeds(Seq(0), exerciseNode(lfAbs, children = List(1))),
         WithSuffixes,
         "DanglingNodeId: 1",
       ),
       (
         "Cycle",
-        factory.versionedTransactionWithSeeds(Seq(0), exerciseNode(lfAbs, child = 0)),
+        factory.versionedTransactionWithSeeds(Seq(0), exerciseNode(lfAbs, children = List(0))),
         WithSuffixes,
         "AliasedNode: 0",
       ),
@@ -264,7 +296,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
         description must {
           "be reported as malformed" in {
             WellFormedTransaction
-              .check(transaction, metadata, state, PathRollbackContextFactory)
+              .check(transaction, metadata, state)
               .left
               .value should fullyMatch regex expectedError
             an[IllegalArgumentException] must be thrownBy
@@ -272,7 +304,6 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
                 transaction,
                 metadata,
                 WithoutSuffixes,
-                PathRollbackContextFactory,
               )
           }
         }
@@ -282,7 +313,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
       description must {
         "be accepted as well-formed" in {
           WellFormedTransaction
-            .check(transaction, metadata, state, PathRollbackContextFactory)
+            .check(transaction, metadata, state)
             .value shouldBe a[WellFormedTransaction[?]]
         }
       }
@@ -294,7 +325,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
           SerializationVersion.V1,
           Map(
             NodeId(-3) -> createNode(unsuffixedId(0)),
-            NodeId(0) -> exerciseNode(unsuffixedId(0), 10),
+            NodeId(0) -> exerciseNode(unsuffixedId(0), List(10)),
             NodeId(10) -> fetchNode(lfAbs),
           ),
           ImmArray.from(Seq(NodeId(-3), NodeId(0))),
@@ -303,7 +334,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
           SerializationVersion.V1,
           Map(
             NodeId(0) -> createNode(unsuffixedId(0)),
-            NodeId(1) -> exerciseNode(unsuffixedId(0), 2),
+            NodeId(1) -> exerciseNode(unsuffixedId(0), List(2)),
             NodeId(2) -> fetchNode(lfAbs),
           ),
           ImmArray.from(Seq(NodeId(0), NodeId(1))),
@@ -314,11 +345,58 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
           factory.mkMetadata(Map(NodeId(0) -> lfHash(0), NodeId(1) -> lfHash(1)))
 
         val wfTx = WellFormedTransaction
-          .check(tx, metadata, WithoutSuffixes, PathRollbackContextFactory)
+          .check(tx, metadata, WithoutSuffixes)
           .value
         wfTx.unwrap shouldBe expectedTx
         wfTx.metadata shouldBe expectedMetadata
       }
     }
+
+    "validation packages are required" should {
+      "provide packages" in {
+
+        val idFactory = new TestIdFactory {}
+
+        def nextSuffixedCid(): LfContractId = idFactory.newCid.suffixCid(_.bytes, identity).value
+        def nextPackageId(): PackageId = idFactory.newPackageId
+
+        val create1 = createNode(nextSuffixedCid(), packageId = nextPackageId())
+        val exercise1 = exerciseNode(nextSuffixedCid(), packageId = nextPackageId())
+        val exercise2 = exerciseNode(exercise1.targetCoid, packageId = nextPackageId())
+        val exercise3 = exerciseNode(nextSuffixedCid(), packageId = nextPackageId())
+        val fetch1 = fetchNode(nextSuffixedCid(), packageId = nextPackageId())
+        val queryByKey1 =
+          queryByKeyNode(Seq(nextSuffixedCid(), nextSuffixedCid()), packageId = nextPackageId())
+
+        val tx = TreeTransactionBuilder.toVersionedTransaction(
+          create1,
+          exercise1,
+          exercise2.withChildren(exercise3, fetch1),
+          fetch1,
+          queryByKey1,
+        )
+
+        val metadata = factory.mkMetadata(inventSeeds(tx))
+
+        val wfTx = WellFormedTransaction
+          .check(tx, metadata, WithSuffixes)
+          .value
+
+        wfTx.validatedContractPackageIds shouldBe Map(
+          create1.coid -> Set(create1.templateId.packageId),
+          exercise1.targetCoid -> Set(
+            exercise1.templateId.packageId,
+            exercise2.templateId.packageId,
+          ),
+          exercise3.targetCoid -> Set(
+            exercise3.templateId.packageId
+          ),
+          fetch1.coid -> Set(
+            fetch1.templateId.packageId
+          ),
+        ) ++ queryByKey1.cids.map(_ -> Set(queryByKey1.templateId.packageId)).toMap
+      }
+    }
+
   }
 }

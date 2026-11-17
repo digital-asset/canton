@@ -64,7 +64,7 @@ private[validation] object Typing {
 
   private def kindOfBuiltin(bType: BuiltinType): Kind = bType match {
     case BTInt64 | BTText | BTTimestamp | BTParty | BTBool | BTDate | BTUnit | BTAny | BTTypeRep |
-        BTAnyException | BTRoundingMode | BTBigNumeric | BTFailureCategory =>
+        BTAnyException | BTRoundingMode | BTBigNumeric | BTFailureCategory | BTUint256 =>
       KStar
     case BTNumeric => KArrow(KNat, KStar)
     case BTList | BTUpdate | BTScenario | BTContractId | BTOptional | BTTextMap =>
@@ -80,6 +80,7 @@ private[validation] object Typing {
     case BLDate(_) => TDate
     case BLRoundingMode(_) => TRoundingMode
     case BLFailureCategory(_) => TFailureCategory
+    case BLUint256(_) => TBuiltin(BTUint256)
   }
 
   private def tBinop(typ: Type): Type = typ ->: typ ->: typ
@@ -252,6 +253,7 @@ private[validation] object Typing {
         alpha.name -> KNat,
         TNumeric(alpha) ->: TText ->: TOptional(TNumeric(alpha)),
       ),
+      BTextToContractId -> TForall(alpha.name -> KStar, TText ->: TOptional(TContractId(alpha))),
       BTextToCodePoints -> (TText ->: TList(TInt64)),
       BError -> TForall(alpha.name -> KStar, TText ->: alpha),
       // ComparisonsA
@@ -306,6 +308,39 @@ private[validation] object Typing {
       ),
       // External Call
       BExternalCall -> (TText ->: TText ->: TText ->: TText ->: TUpdate(TText)),
+      // Uint256 unsafe modular arithmetic
+      BAddUint256 -> tBinop(TBuiltin(BTUint256)),
+      BSubUint256 -> tBinop(TBuiltin(BTUint256)),
+      BMulUint256 -> tBinop(TBuiltin(BTUint256)),
+      BDivUint256 -> tBinop(TBuiltin(BTUint256)),
+      BModUint256 -> tBinop(TBuiltin(BTUint256)),
+      BExpUint256 -> tBinop(TBuiltin(BTUint256)),
+      // Uint256 bitwise operations
+      BAndUint256 -> tBinop(TBuiltin(BTUint256)),
+      BOrUint256 -> tBinop(TBuiltin(BTUint256)),
+      BXorUint256 -> tBinop(TBuiltin(BTUint256)),
+      BNotUint256 -> (TBuiltin(BTUint256) ->: TBuiltin(BTUint256)),
+      BShlUint256 -> tBinop(TBuiltin(BTUint256)),
+      BShrUint256 -> tBinop(TBuiltin(BTUint256)),
+      // Uint256 conversions
+      BUint256ToText -> (TBuiltin(BTUint256) ->: TText),
+      BTextToUint256 -> (TText ->: TOptional(TBuiltin(BTUint256))),
+      BInt64ToUint256 -> (TInt64 ->: TBuiltin(BTUint256)),
+      BUint256ToInt64 -> (TBuiltin(BTUint256) ->: TInt64),
+      // Uint256 EVM-specific operations
+      BAddModUint256 -> (TBuiltin(BTUint256) ->: TBuiltin(BTUint256) ->: TBuiltin(
+        BTUint256
+      ) ->: TBuiltin(BTUint256)),
+      BMulModUint256 -> (TBuiltin(BTUint256) ->: TBuiltin(BTUint256) ->: TBuiltin(
+        BTUint256
+      ) ->: TBuiltin(BTUint256)),
+      BSDivUint256 -> (TBuiltin(BTUint256) ->: TBuiltin(BTUint256) ->: TBuiltin(BTUint256)),
+      BSModUint256 -> (TBuiltin(BTUint256) ->: TBuiltin(BTUint256) ->: TBuiltin(BTUint256)),
+      BSltUint256 -> (TBuiltin(BTUint256) ->: TBuiltin(BTUint256) ->: TBool),
+      BSgtUint256 -> (TBuiltin(BTUint256) ->: TBuiltin(BTUint256) ->: TBool),
+      BSarUint256 -> (TBuiltin(BTUint256) ->: TBuiltin(BTUint256) ->: TBuiltin(BTUint256)),
+      BByteUint256 -> (TBuiltin(BTUint256) ->: TBuiltin(BTUint256) ->: TBuiltin(BTUint256)),
+      BSignExtendUint256 -> (TBuiltin(BTUint256) ->: TBuiltin(BTUint256) ->: TBuiltin(BTUint256)),
     )
   }
 

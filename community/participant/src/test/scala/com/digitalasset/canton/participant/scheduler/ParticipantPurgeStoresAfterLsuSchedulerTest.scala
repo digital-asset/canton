@@ -4,13 +4,13 @@
 package com.digitalasset.canton.participant.scheduler
 
 import cats.Eval
-import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset, SynchronizerPredecessor}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.networking.Endpoint
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   Checkpoint,
@@ -124,7 +124,7 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
         purgeableStoresComputation = purgeableStoresComputation,
         chunkSize = PositiveInt.tryCreate(2),
         recomputePurgeableStoresAfter = PositiveInt.one,
-        BatchingConfig(),
+        ParticipantBatchingConfig(),
         timeouts,
         loggerFactory,
       )
@@ -157,7 +157,7 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
       f.futureValueUS
     }
 
-    def purgeObsoleteStoresScheduling(acsDigestProcessorEnabled: Boolean): Unit = {
+    def purgeObsoleteStoresScheduling(): Unit = {
       val alias = SynchronizerAlias.tryCreate("da")
 
       val oldPsid = DefaultTestIdentities.physicalSynchronizerId
@@ -269,12 +269,11 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
           purgeableStoresComputation = new PostLsuPurgeableStoresComputation(
             configStore,
             stateManager,
-            acsDigestProcessorEnabled = acsDigestProcessorEnabled,
             loggerFactory,
           ),
           chunkSize = PositiveInt.two,
           recomputePurgeableStoresAfter = PositiveInt.one,
-          batchingConfig = BatchingConfig(),
+          batchingConfig = ParticipantBatchingConfig(),
           timeouts = timeouts,
           loggerFactory = loggerFactory,
         )
@@ -330,20 +329,18 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
       }
 
       // (old = LsuSource, new = Active): Now we can purge the old store. New store unaffected.
-      if (acsDigestProcessorEnabled) {
-        schedule.step { result =>
-          // Mocked latestCheckpointUpTo call #1: ACS Digest is at checkpoint None
-          result shouldBe Done
-          oldStore.size shouldBe 1
-          newStore.size shouldBe 1
-        }
+      schedule.step { result =>
+        // Mocked latestCheckpointUpTo call #1: ACS Digest is at checkpoint None
+        result shouldBe Done
+        oldStore.size shouldBe 1
+        newStore.size shouldBe 1
+      }
 
-        schedule.step { result =>
-          // Mocked latestCheckpointUpTo call #2: ACS Digest is at checkpoint before upgradeTime
-          result shouldBe Done
-          oldStore.size shouldBe 1
-          newStore.size shouldBe 1
-        }
+      schedule.step { result =>
+        // Mocked latestCheckpointUpTo call #2: ACS Digest is at checkpoint before upgradeTime
+        result shouldBe Done
+        oldStore.size shouldBe 1
+        newStore.size shouldBe 1
       }
 
       schedule.step { result =>
@@ -383,7 +380,6 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
       f.futureValueUS
     }
 
-    behave like purgeObsoleteStoresScheduling(acsDigestProcessorEnabled = true)
-    behave like purgeObsoleteStoresScheduling(acsDigestProcessorEnabled = false)
+    behave like purgeObsoleteStoresScheduling()
   }
 }

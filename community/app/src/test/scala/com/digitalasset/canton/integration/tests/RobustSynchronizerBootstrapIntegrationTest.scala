@@ -242,7 +242,7 @@ sealed trait RobustSynchronizerBootstrapIntegrationTest
 
         assertFailure(
           sss ++ proposals,
-          "muliple effective proposals with different serials",
+          "multiple effective proposals with different serials",
         )
         assertFailure(
           sss ++ proposals ++ proposals,

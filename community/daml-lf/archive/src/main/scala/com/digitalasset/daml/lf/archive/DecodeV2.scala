@@ -9,7 +9,7 @@ import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.archive.DamlLf2 as PLF
 import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
 import com.digitalasset.daml.lf.data.Ref.*
-import com.digitalasset.daml.lf.data.{ImmArray, Numeric, Struct, Time}
+import com.digitalasset.daml.lf.data.{ImmArray, Numeric, Struct, Time, Uint256}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion as LV
 import com.digitalasset.daml.lf.language.Util.*
@@ -1600,6 +1600,12 @@ private[archive] class DecodeV2(minor: LV.Minor) {
             case PLF.BuiltinLit.FailureCategory.UNRECOGNIZED =>
               throw Error.Parsing("BuiltinLitFailureCategory.UNRECOGNIZED")
           })
+        case PLF.BuiltinLit.SumCase.UINT256 =>
+          assertVersionSupports(LV.featureUint256, "Expr.uint256")
+          Uint256.fromByteString(lfBuiltinLit.getUint256) match {
+            case Right(value) => BLUint256(value)
+            case Left(err) => throw Error.Parsing(s"invalid uint256 literal: $err")
+          }
         case PLF.BuiltinLit.SumCase.SUM_NOT_SET =>
           throw Error.Parsing("BuiltinLit.SUM_NOT_SET")
       }
@@ -1721,6 +1727,12 @@ private[lf] object DecodeV2 {
       ),
       BuiltinTypeInfo(ANY_EXCEPTION, BTAnyException),
       BuiltinTypeInfo(FAILURE_CATEGORY, BTFailureCategory),
+      BuiltinTypeInfo(
+        UINT256,
+        BTUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
     )
   }
 
@@ -1786,6 +1798,11 @@ private[lf] object DecodeV2 {
       BuiltinFunctionInfo(TEXT_TO_PARTY, BTextToParty),
       BuiltinFunctionInfo(TEXT_TO_INT64, BTextToInt64),
       BuiltinFunctionInfo(TEXT_TO_NUMERIC, BTextToNumeric),
+      BuiltinFunctionInfo(
+        TEXT_TO_CONTRACT_ID,
+        BTextToContractId,
+        minVersion = LV.featureTextToContractId.versionRange.min,
+      ),
       BuiltinFunctionInfo(TEXT_TO_CODE_POINTS, BTextToCodePoints),
       BuiltinFunctionInfo(SHA256_TEXT, BSHA256Text),
       BuiltinFunctionInfo(SHA256_HEX, BSHA256Hex),
@@ -1896,6 +1913,160 @@ private[lf] object DecodeV2 {
         BExternalCall,
         minVersion = LV.v2_dev,
         versionRange = Some(VersionRange(LV.v2_dev, LV.v2_dev)),
+      ),
+      // Uint256 unsafe modular arithmetic
+      BuiltinFunctionInfo(
+        ADD_UINT256,
+        BAddUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        SUB_UINT256,
+        BSubUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        MUL_UINT256,
+        BMulUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        DIV_UINT256,
+        BDivUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        MOD_UINT256,
+        BModUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        EXP_UINT256,
+        BExpUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      // Uint256 bitwise operations
+      BuiltinFunctionInfo(
+        AND_UINT256,
+        BAndUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        OR_UINT256,
+        BOrUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        XOR_UINT256,
+        BXorUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        NOT_UINT256,
+        BNotUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        SHL_UINT256,
+        BShlUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        SHR_UINT256,
+        BShrUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      // Uint256 conversions
+      BuiltinFunctionInfo(
+        UINT256_TO_TEXT,
+        BUint256ToText,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        TEXT_TO_UINT256,
+        BTextToUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        INT64_TO_UINT256,
+        BInt64ToUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        UINT256_TO_INT64,
+        BUint256ToInt64,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      // Uint256 EVM-specific operations
+      BuiltinFunctionInfo(
+        ADDMOD_UINT256,
+        BAddModUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        MULMOD_UINT256,
+        BMulModUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        SDIV_UINT256,
+        BSDivUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        SMOD_UINT256,
+        BSModUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        SLT_UINT256,
+        BSltUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        SGT_UINT256,
+        BSgtUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        SAR_UINT256,
+        BSarUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        BYTE_UINT256,
+        BByteUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
+      ),
+      BuiltinFunctionInfo(
+        SIGNEXTEND_UINT256,
+        BSignExtendUint256,
+        minVersion = LV.featureUint256.versionRange.min,
+        versionRange = Some(LV.featureUint256.versionRange),
       ),
     )
   }

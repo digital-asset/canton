@@ -66,7 +66,8 @@ trait IdentityProviderConfigAuth extends KeyPairs {
         issuer = issuer.getOrElse("issuer-" + suffix),
         // token must be signed with one of the private keys corresponding to the jwks provided by this url
         jwksUrl = jwksUrlOverride.getOrElse(jwksUrl),
-        audience = audience.getOrElse(""),
+        // the tokens of SandboxRequiringAuthorizationFuns carry the fixture's audience
+        audience = audience.getOrElse(ExpectedAudience),
       )
     createConfig(context, config)
   }

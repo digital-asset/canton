@@ -3,7 +3,8 @@
 
 Reads the current week's row from the rota Google Sheet and prints the Slack user ID(s)
 of whoever is on the requested rotation, space-separated, on one line. Most rotations
-resolve to one person; ``flaky-canton`` spans three columns and prints three IDs.
+resolve to one person, ``flaky-canton`` spans three columns and ``flaky-sdk`` two, and they
+print one ID per filled slot.
 
 If the sheet cannot be read for any reason (missing/invalid credentials, network error,
 tab/row not found, unresolved name), it falls back to a deterministic pick from the
@@ -61,15 +62,23 @@ ROTATION_HEADERS: dict[str, list[str]] = {
 }
 
 # rotation cli name -> number of sheet columns (people) it should resolve to. Most
-# rotations are one person; flaky-canton is a three-person group. A sheet that yields a
-# different count (typo'd/duplicated/missing header) is treated as a lookup failure so
-# it degrades to the fallback pool rather than silently pinging the wrong set.
-ROTATION_COLUMNS: dict[str, int] = {"flaky-canton": 3}
+# rotations are one person, flaky-canton has three slots and flaky-sdk two (a slot may be
+# empty). A sheet that yields a different count (typo'd/duplicated/missing header) is
+# treated as a lookup failure so it degrades to the fallback pool rather than silently
+# pinging the wrong set. update_rota_topics and remind_upcoming_rota read their counts
+# from here too.
+ROTATION_COLUMNS: dict[str, int] = {"flaky-canton": 3, "flaky-sdk": 2}
 DEFAULT_ROTATION_COLUMNS = 1
+
+
+def expected_columns(rotation: str) -> int:
+    """Number of sheet columns ``rotation`` should resolve to (see ROTATION_COLUMNS)."""
+    return ROTATION_COLUMNS.get(rotation, DEFAULT_ROTATION_COLUMNS)
+
 
 # CircleCI job name -> rotation to ping when that job fails on main (the red-main ping).
 # Exact matches win, then TEST_JOB_PREFIXES, then everything else pings the CI rota. Keep in
-# sync with the jobs that invoke slack_red_main_with_volunteer.
+# sync with the jobs that invoke slack_notify_failure_with_volunteer.
 JOB_ROTATION: dict[str, str] = {
     "blackduck": "release-blackduck",
 }
@@ -81,8 +90,8 @@ JOB_ROTATION: dict[str, str] = {
 # test_docker_images and test_ping_*. A new test job family needs a new prefix here.
 # The GHA red-main action calls this too, with the failed infra job name, and the prefixes
 # also cover the GHA test job names (the flaky pipeline pings Flaky Canton for those anyway).
-# crash_recovery_test_36* are GHA infra jobs on purpose, they are tests, so they ping Flaky
-# Canton like the CircleCI crash_recovery_test_37.
+# The GHA per-commit crash_recovery_test_37* jobs are infra jobs on purpose, they are tests, so
+# they ping Flaky Canton like the CircleCI nightly job of the same name.
 TEST_JOB_PREFIXES: tuple[str, ...] = (
     "test_3",
     "test_dev",
@@ -247,6 +256,10 @@ def find_header_columns(
     raise LookupError(f"header(s) {headers} not found in sheet")
 
 
+class MissingWeekError(LookupError):
+    """The sheet has no row for the requested week (as opposed to a header/column problem)."""
+
+
 def names_for_week(
     values: list[list[Any]], header_row: int, cols: list[int], monday: dt.date
 ) -> list[str]:
@@ -262,7 +275,7 @@ def names_for_week(
         # dateTimeRenderOption=SERIAL_NUMBER on the fetch.
         if SHEETS_EPOCH + dt.timedelta(days=int(cell)) == monday:
             return [str(row[i]).strip() for i in cols if i < len(row) and str(row[i]).strip()]
-    raise LookupError(f"no row for week starting {monday.isoformat()}")
+    raise MissingWeekError(f"no row for week starting {monday.isoformat()}")
 
 
 def resolve_slack_ids(names: list[str], slack_id_by_name: dict[str, str]) -> list[str]:
@@ -338,8 +351,9 @@ def resolve_rotation_ids(
     unresolved: dict[str, Exception | None] = {}
     for rot in rotations:
         try:
-            expected_cols = ROTATION_COLUMNS.get(rot, DEFAULT_ROTATION_COLUMNS)
-            header_row, cols = find_header_columns(values, ROTATION_HEADERS[rot], expected_cols)
+            header_row, cols = find_header_columns(
+                values, ROTATION_HEADERS[rot], expected_columns(rot)
+            )
             names = names_for_week(values, header_row, cols, monday)
             found = resolve_slack_ids(names, slack_id_by_name)
         except Exception as exc:
@@ -389,7 +403,7 @@ def notify_tooling_failure(
                 header_row, cols = find_header_columns(
                     sheet_values,
                     ROTATION_HEADERS["ci"],
-                    ROTATION_COLUMNS.get("ci", DEFAULT_ROTATION_COLUMNS),
+                    expected_columns("ci"),
                 )
                 names = names_for_week(sheet_values, header_row, cols, week)
                 targets = resolve_slack_ids(names, roster["slack_id_by_name"])
@@ -545,16 +559,15 @@ def self_test() -> None:
     assert ids == [] and list(bad) == ["flaky-canton"]  # all unresolved, caller falls back
 
     # a comma-separated GHA failure list resolves each job, order-independent owners
-    assert rotations_for_jobs("build_docs, crash_recovery_test_36") == ["ci", "flaky-canton"]
-    assert rotations_for_jobs("crash_recovery_test_36, build_docs") == ["flaky-canton", "ci"]
+    assert rotations_for_jobs("build_docs, crash_recovery_test_37") == ["ci", "flaky-canton"]
+    assert rotations_for_jobs("crash_recovery_test_37, build_docs") == ["flaky-canton", "ci"]
     assert rotations_for_jobs("compile, build_docs") == ["ci"]
     assert rotations_for_jobs("blackduck") == ["release-blackduck"]
     assert rotation_for_job("test_docker_images") == "ci"  # infra job despite the test_ name
     assert rotation_for_job("test_ping_arm") == "ci"
-    assert rotation_for_job("crash_recovery_test_37") == "flaky-canton"
+    assert rotation_for_job("crash_recovery_test_37") == "flaky-canton"  # GHA infra job, a test
     assert rotation_for_job("stability_test") == "flaky-canton"
-    assert rotation_for_job("crash_recovery_test_36") == "flaky-canton"  # GHA infra job, a test
-    assert rotation_for_job("ledger_api_compatibility_tests_36") == "flaky-canton"
+    assert rotation_for_job("ledger_api_compatibility_tests_37") == "flaky-canton"
     assert rotation_for_job("test_data_continuity_dumps") == "flaky-canton"
     assert rotation_for_job("unit_test") == "ci"
     assert rotation_for_job("") == "ci"
@@ -603,8 +616,8 @@ def self_test() -> None:
     assert names_for_week(sheet, 0, [2, 3], dt.date(2025, 6, 30)) == ["Bjarne", "Carla"]
     try:
         names_for_week(sheet, 0, [2, 3], dt.date(2030, 1, 7))
-        raise AssertionError("expected LookupError for a missing week")
-    except LookupError:
+        raise AssertionError("expected MissingWeekError for a missing week")
+    except MissingWeekError:
         pass
 
     # resolve_slack_ids: accent/case-insensitive, order preserved, unknown names dropped

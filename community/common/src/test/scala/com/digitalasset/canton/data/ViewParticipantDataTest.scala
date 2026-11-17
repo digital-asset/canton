@@ -51,8 +51,7 @@ class ViewParticipantDataTest
     }
     "fail if a create contract serialization version is invalid for PV" onlyRunWith ProtocolVersion.v36 in {
       val modified = example.copy(
-        createdCore =
-          Seq(CreatedContract.tryCreate(devContract, consumedInCore = false, rolledBack = false))
+        createdCore = Seq(CreatedContract.tryCreate(devContract, consumedInCore = false))
       )
       inside(modified.validated(testedProtocolVersion)) { case Left(err) =>
         err should include(

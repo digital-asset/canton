@@ -310,7 +310,9 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
           case other =>
             sys.error(s"Unexpected node type $other")
         }
+        // user-manual-entry-begin: WaitForParticipantInitialization
         node.health.wait_for_initialized()
+      // user-manual-entry-end: WaitForParticipantInitialization
       }
   }
 

@@ -143,8 +143,8 @@ final case class MediatorNodeParameterConfig(
     override val alphaVersionSupport: Boolean = false,
     override val betaVersionSupport: Boolean = false,
     override val dontWarnOnDeprecatedPV: Boolean = false,
-    override val batching: BatchingConfig = BatchingConfig(),
-    override val caching: CachingConfigs = CachingConfigs(),
+    override val batching: MediatorBatchingConfig = MediatorBatchingConfig(),
+    override val caching: MediatorCachingConfigs = MediatorCachingConfigs(),
     override val watchdog: Option[WatchdogConfig] = None,
     delayedVerdictSender: DelayedVerdictSenderConfig = DelayedVerdictSenderConfig(),
 ) extends ProtocolConfig
@@ -154,6 +154,8 @@ final case class MediatorNodeParameters(
     general: CantonNodeParameters.General,
     protocol: CantonNodeParameters.Protocol,
     delayedVerdictSender: DelayedVerdictSenderConfig,
+    override val batchingConfig: MediatorBatchingConfig = MediatorBatchingConfig(),
+    override val cachingConfigs: MediatorCachingConfigs = MediatorCachingConfigs(),
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters {
@@ -163,7 +165,7 @@ final case class MediatorNodeParameters(
     immediateBeforeDeadline = delayedVerdictSender.immediateBeforeDeadline,
     initialDelay = delayedVerdictSender.initialDelay,
     delay = delayedVerdictSender.delay,
-    parallelism = general.batchingConfig.parallelism,
+    parallelism = batchingConfig.parallelism,
   )
 }
 
@@ -186,7 +188,7 @@ final case class MediatorNodeConfig(
     override val init: InitConfig = InitConfig(),
     timeTracker: SynchronizerTimeTrackerConfig = SynchronizerTimeTrackerConfig(),
     override val sequencerClient: SequencerClientConfig = SequencerClientConfig(),
-    caching: CachingConfigs = CachingConfigs(),
+    caching: MediatorCachingConfigs = MediatorCachingConfigs(),
     override val parameters: MediatorNodeParameterConfig = MediatorNodeParameterConfig(),
     mediator: MediatorConfig = MediatorConfig(),
     override val monitoring: NodeMonitoringConfig = NodeMonitoringConfig(),

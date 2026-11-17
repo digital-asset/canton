@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.topology.store.db
 
-import com.digitalasset.canton.config.{BatchAggregatorConfig, BatchingConfig, TopologyConfig}
+import com.digitalasset.canton.config.{BatchAggregatorConfig, TestBatchingConfig, TopologyConfig}
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.processing.{InitialTopologySnapshotValidator, SequencedTime}
@@ -23,7 +23,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest with DbTopologyStoreHelper {
         _ <- new InitialTopologySnapshotValidator(
           testData.factory.syncCryptoClient.crypto.pureCrypto,
           store,
-          BatchingConfig().copy(
+          TestBatchingConfig().copy(
             topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting
           ),
           TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
@@ -94,7 +94,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest with DbTopologyStoreHelper {
           _ <- new InitialTopologySnapshotValidator(
             pureCrypto = testData.factory.syncCryptoClient.crypto.pureCrypto,
             store = sourceStore,
-            BatchingConfig().copy(
+            TestBatchingConfig().copy(
               topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting
             ),
             topologyConfig = TopologyConfig.forTesting,

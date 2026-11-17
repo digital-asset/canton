@@ -35,7 +35,6 @@ import com.digitalasset.canton.integration.tests.jsonapi.{
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
   AuthInterceptorSuppressionRule,
   AuthServiceJWTSuppressionRule,
-  AuthStartupConfigSuppressionRule,
 }
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import com.digitalasset.canton.integration.tests.ledgerapi.services.TestCommands
@@ -65,22 +64,18 @@ import java.time.{Duration, Instant}
 import java.util.UUID
 import scala.concurrent.Future
 
+// the suite exercises the deprecated scope-only tokens next to the audience-based ones
+// TODO (i#33090): remove the scope-only tokens together with the scope-only token format
 class JsonApiAuthIT
     extends CantonFixture
     with SecurityTags
     with TestCommands
     with HttpTestFuns
     with HttpServiceUserFixture.UserToken
-    with ErrorsAssertions {
+    with ErrorsAssertions
+    with ScopeOnlyJwtEnabledSuite {
 
-  // TODO (i#33090): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
-  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
-  override def beforeAll(): Unit =
-    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
-      super.beforeAll()
-    }
-
-  registerPlugin(ExpectedScopeOverrideConfig(loggerFactory))
+  registerPlugin(AudienceAndScopeOverrideConfig(loggerFactory))
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
@@ -251,7 +246,7 @@ class JsonApiAuthIT
       toHeader(
         payload = payload,
         enforceFormat = Some(StandardJWTTokenFormat.Scope),
-        secret = jwtSecret.unwrap,
+        secret = scopeJwtSecret.unwrap,
       )
     )
   )
@@ -263,7 +258,7 @@ class JsonApiAuthIT
       toHeader(
         payload = payload,
         enforceFormat = Some(StandardJWTTokenFormat.Audience),
-        secret = audienceJwtSecret.unwrap,
+        secret = jwtSecret.unwrap,
       )
     )
   )
@@ -296,7 +291,7 @@ class JsonApiAuthIT
 
   private val privilegedScpJwtSecret = NonEmptyString.tryCreate(UUID.randomUUID().toString)
   private val privilegedAudJwtSecret = NonEmptyString.tryCreate(UUID.randomUUID().toString)
-  private val audienceJwtSecret = NonEmptyString.tryCreate(UUID.randomUUID().toString)
+  private val scopeJwtSecret = NonEmptyString.tryCreate(UUID.randomUUID().toString)
 
   override val defaultScope: String = ExpectedScope
   private val privilegedScope: String = "Privileged-Scope"
@@ -766,8 +761,8 @@ class JsonApiAuthIT
     }
   }
 
-  //  plugin to override the configuration and use authorization with scope
-  case class ExpectedScopeOverrideConfig(
+  //  plugin to override the configuration and use authorization with audience and with scope
+  case class AudienceAndScopeOverrideConfig(
       protected val loggerFactory: NamedLoggerFactory
   ) extends EnvironmentSetupPlugin {
     override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig =
@@ -778,14 +773,14 @@ class JsonApiAuthIT
               AuthServiceConfig
                 .UnsafeJwtHmac256(
                   secret = jwtSecret,
-                  targetAudience = None,
-                  targetScope = Some(ExpectedScope),
+                  targetAudience = Some(ExpectedAudience),
+                  targetScope = None,
                 ),
               AuthServiceConfig
                 .UnsafeJwtHmac256(
-                  secret = audienceJwtSecret,
-                  targetAudience = Some(ExpectedAudience),
-                  targetScope = None,
+                  secret = scopeJwtSecret,
+                  targetAudience = None,
+                  targetScope = Some(ExpectedScope),
                 ),
               AuthServiceConfig
                 .UnsafeJwtHmac256(

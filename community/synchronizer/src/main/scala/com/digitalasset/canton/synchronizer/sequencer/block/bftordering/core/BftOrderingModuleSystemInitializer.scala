@@ -89,7 +89,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.util.Random
@@ -220,6 +220,8 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
         p2pNetworkIn = (availabilityRef, consensusRef) =>
           new P2PNetworkInModule(
             metrics,
+            ProtocolVersionValidation(synchronizerProtocolVersion),
+            synchronizerLimits.bftOrdererLimits,
             availabilityRef,
             consensusRef,
             loggerFactory,

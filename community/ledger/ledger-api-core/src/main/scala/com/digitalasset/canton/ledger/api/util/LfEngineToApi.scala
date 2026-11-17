@@ -71,6 +71,7 @@ object LfEngineToApi {
       case Lf.ValueDate(d) => Right(api.Value(api.Value.Sum.Date(d.days)))
       case Lf.ValueTimestamp(t) => Right(api.Value(api.Value.Sum.Timestamp(t.micros)))
       case Lf.ValueInt64(i) => Right(api.Value(api.Value.Sum.Int64(i)))
+      case Lf.ValueUint256(_) => Left("Uint256 values are not supported by the Ledger API")
       case Lf.ValueParty(p) => Right(api.Value(api.Value.Sum.Party(p)))
       case Lf.ValueText(t) => Right(api.Value(api.Value.Sum.Text(t)))
       case Lf.ValueOptional(o) => // TODO(i12289) DEL-7054 add test coverage

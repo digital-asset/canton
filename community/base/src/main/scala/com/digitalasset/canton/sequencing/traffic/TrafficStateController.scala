@@ -191,6 +191,7 @@ class TrafficStateController(
         trafficControl.readVsWriteScalingFactor,
         groupToMembers,
         trafficControl.baseEventCost,
+        protocolVersion,
       )
       if (logCost) {
         logger.info(

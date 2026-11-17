@@ -224,7 +224,8 @@ class SubmitRequestValidatorTest
       actAs = Set(ApiMocks.party),
       readAs = Set.empty,
       submittedAt = Time.Timestamp.assertFromInstant(submittedAt),
-      deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration(deduplicationDuration),
+      deduplicationPeriod =
+        DeduplicationPeriod.DeduplicationDuration.create(deduplicationDuration).value,
       commands = LfCommands(
         ImmArray(
           LfCommand.Create(
@@ -633,11 +634,12 @@ class SubmitRequestValidatorTest
               .DeduplicationOffset(Some(Offset.tryFromLong(12345678L))),
             DeduplicationPeriodProto.DeduplicationDuration(
               deduplicationDuration
-            ) -> DeduplicationPeriod
-              .DeduplicationDuration(JDuration.ofSeconds(10)),
-            DeduplicationPeriodProto.Empty -> DeduplicationPeriod.DeduplicationDuration(
-              internal.maxDeduplicationDuration
-            ),
+            ) -> DeduplicationPeriod.DeduplicationDuration.create(JDuration.ofSeconds(10)).value,
+            DeduplicationPeriodProto.Empty -> DeduplicationPeriod.DeduplicationDuration
+              .create(
+                internal.maxDeduplicationDuration
+              )
+              .value,
           )
         ) {
           case (
@@ -699,7 +701,7 @@ class SubmitRequestValidatorTest
           ) shouldBe Right(
             internal.emptyCommands.copy(
               deduplicationPeriod =
-                DeduplicationPeriod.DeduplicationDuration(durationSecondsExceedingMax)
+                DeduplicationPeriod.DeduplicationDuration.create(durationSecondsExceedingMax).value
             )
           )
         }
@@ -713,8 +715,9 @@ class SubmitRequestValidatorTest
           internal.maxDeduplicationDuration,
         ) shouldEqual Right(
           internal.emptyCommands.copy(
-            deduplicationPeriod =
-              DeduplicationPeriod.DeduplicationDuration(internal.maxDeduplicationDuration)
+            deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration
+              .create(internal.maxDeduplicationDuration)
+              .value
           )
         )
       }

@@ -21,6 +21,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackage}
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.util.SetupPackageVetting
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, config}
 import monocle.Monocle.toAppliedFocusOps
 
@@ -59,9 +60,7 @@ trait AcsCommitmentProcessorPruningIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
-        // TODO(#35107) Disable the old processor and fix the test
         ConfigTransforms.enableOldAcsCommitmentProcessor,
-        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay)
@@ -207,6 +206,9 @@ trait AcsCommitmentProcessorPruningIntegrationTest
 
     for (_ <- 1 to intervalCount) {
       simClock.advance(interval)
+      // Make the synchronizer observe the new time first, so that the ping is not sequenced with a stale timestamp
+      // before the interval boundary
+      activeParticipants.foreach(_.testing.fetch_synchronizer_times())
       participant1.health.ping(participant1)
       activeParticipants.foreach(_.testing.fetch_synchronizer_times())
     }
@@ -261,26 +263,28 @@ trait AcsCommitmentProcessorPruningIntegrationTest
   }
 
   "commitment processor" when {
-    "should prune when time is advancing normally" in { implicit env =>
-      import env.*
+    "should prune when time is advancing normally" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+      implicit env =>
+        import env.*
 
-      deployAndCheckContract(participant1, owner.toLf, payer.toLf, List(observer1, observer2))
+        deployAndCheckContract(participant1, owner.toLf, payer.toLf, List(observer1, observer2))
 
-      incrementAndValidate(1, shouldPruningIncrease = true)
+        incrementAndValidate(1, shouldPruningIncrease = true)
     }
-    "should not prune when a counter-participant is down" in { implicit env =>
-      import env.*
-      participant4IdHolder = participant4.id
-      participant4.stop()
+    "should not prune when a counter-participant is down" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+      implicit env =>
+        import env.*
+        participant4IdHolder = participant4.id
+        participant4.stop()
 
-      eventually() {
-        participant4.health.is_running() shouldBe false
-      }
+        eventually() {
+          participant4.health.is_running() shouldBe false
+        }
 
-      incrementAndValidate(1, shouldPruningIncrease = false)
+        incrementAndValidate(1, shouldPruningIncrease = false)
     }
 
-    "should prune when the down participant is added to the no-wait configuration" in {
+    "should prune when the down participant is added to the no-wait configuration" onlyRunWithOrLessThan ProtocolVersion.v37 in {
       implicit env =>
         import env.*
         logger.info("participant 4 is still down")
@@ -290,36 +294,38 @@ trait AcsCommitmentProcessorPruningIntegrationTest
     }
 
     // this is a corner case, but still falls under the general case: cannot prune because participant4 is wait and down
-    "should not prune when participant4 is the only not on no wait" in { implicit env =>
-      import env.*
-      logger.info("participant 4 is still down")
-      participant1.commitments.set_wait_commitments_from(Seq(participant4IdHolder), Seq(daId))
+    "should not prune when participant4 is the only not on no wait" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+      implicit env =>
+        import env.*
+        logger.info("participant 4 is still down")
+        participant1.commitments.set_wait_commitments_from(Seq(participant4IdHolder), Seq(daId))
 
-      participant1.commitments.set_no_wait_commitments_from(
-        Seq(participant3, participant2),
-        Seq(daId),
-      )
+        participant1.commitments.set_no_wait_commitments_from(
+          Seq(participant3, participant2),
+          Seq(daId),
+        )
 
-      // our no wait list contains participant2 and participant3.
-      // since our wait list only contains participant4, but it is down, then we can not prune.
-      incrementAndValidate(1, shouldPruningIncrease = false)
+        // our no wait list contains participant2 and participant3.
+        // since our wait list only contains participant4, but it is down, then we can not prune.
+        incrementAndValidate(1, shouldPruningIncrease = false)
     }
 
-    "should prune when all counter-participants are in no-wait" in { implicit env =>
-      import env.*
+    "should prune when all counter-participants are in no-wait" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+      implicit env =>
+        import env.*
 
-      participant1.commitments.set_no_wait_commitments_from(
-        Seq(participant3, participant4IdHolder, participant2),
-        Seq(daId),
-      )
-      participant3.stop()
+        participant1.commitments.set_no_wait_commitments_from(
+          Seq(participant3, participant4IdHolder, participant2),
+          Seq(daId),
+        )
+        participant3.stop()
 
-      eventually() {
-        participant3.health.is_running() shouldBe false
-        participant4.health.is_running() shouldBe false
-      }
+        eventually() {
+          participant3.health.is_running() shouldBe false
+          participant4.health.is_running() shouldBe false
+        }
 
-      incrementAndValidate(1, shouldPruningIncrease = true)
+        incrementAndValidate(1, shouldPruningIncrease = true)
     }
 
   }

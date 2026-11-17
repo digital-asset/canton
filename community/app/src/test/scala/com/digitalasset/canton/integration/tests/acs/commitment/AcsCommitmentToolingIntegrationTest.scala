@@ -60,6 +60,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 }
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.Monocle.toAppliedFocusOps
 import org.slf4j.event.Level
 
@@ -101,9 +102,6 @@ trait AcsCommitmentToolingIntegrationTest
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxCommandDeduplicationDuration),
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
-        // TODO(#34818) Enable the new pipeline
-        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
-        // TODO(#35107) Disable the old processor, enable the new pipeline and fix the test
         ConfigTransforms.enableOldAcsCommitmentProcessor,
       )
       .updateTestingConfig(
@@ -157,7 +155,7 @@ trait AcsCommitmentToolingIntegrationTest
       }
 
   "Commitment retrieval inspection" should {
-    "participant can retrieve commitment it previously sent / received with correct matching states" in {
+    "participant can retrieve commitment it previously sent / received with correct matching states" onlyRunLessThan ProtocolVersion.v38 in {
       implicit env =>
         import env.*
 
@@ -174,7 +172,8 @@ trait AcsCommitmentToolingIntegrationTest
                 submissionRequest
               ) && submissionRequest.sender == participant2.id.member
             ) {
-              if (countCommitments.getAndIncrement() == 0) {
+              // Participant 2 is going to send two commitments, one for the old and one for the new processor.
+              if (countCommitments.getAndIncrement() <= 1) {
                 logger.debug(
                   s"Withholding first commitment from participant2 ${submissionRequest.batch.envelopes
                       .map(_.toOpenEnvelope(participant1.crypto.pureCrypto, testedSynchronizerLimits, testedProtocolVersion))}"
@@ -562,99 +561,104 @@ trait AcsCommitmentToolingIntegrationTest
   }
 
   "Commitment and mismatch inspection" should {
-    "participant can open a commitment it previously sent" in { implicit env =>
-      import env.*
-
-      val deployedIouContractsAndCommitment =
-        deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
-      val contractsAndReassignmentCounters = participant1.commitments.open_commitment(
-        deployedIouContractsAndCommitment.commitment,
-        daId,
-        deployedIouContractsAndCommitment.commitmentPeriod.toInclusive.forgetRefinement,
-        participant2,
-      )
-      val returnedCids = contractsAndReassignmentCounters.map(c => c.cid)
-      returnedCids should contain theSameElementsAs alreadyDeployedContracts
-        .get()
-        .map(c => c.id.toLf)
-    }
-
-    "participant can open a commitment spanning multiple intervals" in { implicit env =>
-      import env.*
-
-      val simClock = environment.simClock.value
-      TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
-
-      deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
-
-      logger.info(
-        "Advance time five reconciliation intervals, remembering the tick after three reconciliation intervals."
-      )
-      simClock.advance(interval.multipliedBy(3))
-      val midTick = tickAfter(simClock.uniqueTime())
-      simClock.advanceTo(midTick.forgetRefinement.immediateSuccessor)
-      simClock.advance(interval.multipliedBy(2))
-      val cmtTick = tickAfter(simClock.uniqueTime())
-      simClock.advanceTo(cmtTick.forgetRefinement.immediateSuccessor)
-
-      TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
-
-      logger.info("Send a commitment, which will cover the five intervals.")
-      participant1.testing.fetch_synchronizer_times()
-
-      val (_, _, cmtOverFiveIntervals) = eventually() {
-        val p1Computed = participant1.commitments
-          .computed(
-            daName,
-            cmtTick.toInstant.minusMillis(1),
-            cmtTick.toInstant,
-            Some(participant2),
-          )
-        p1Computed.size shouldBe 1
-        p1Computed
-      }.loneElement
-
-      val contractsAndTransferCounters = participant1.commitments.open_commitment(
-        cmtOverFiveIntervals,
-        daId,
-        midTick.forgetRefinement,
-        participant2,
-      )
-
-      val returnedCids = contractsAndTransferCounters.map(c => c.cid)
-      returnedCids should contain theSameElementsAs alreadyDeployedContracts
-        .get()
-        .map(c => c.id.toLf)
-    }
-
-    "opening a commitment fails when" should {
-      "the participant didn't send the given commitment" in { implicit env =>
+    "participant can open a commitment it previously sent" onlyRunLessThan ProtocolVersion.v38 in {
+      implicit env =>
         import env.*
 
         val deployedIouContractsAndCommitment =
           deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
-        val notSentCmt = LtHash16().getByteString()
-        val hashedNotSentCmd = Digest.hashDigest(notSentCmt)
-        // give wrong commitment but correct timestamp and counter-participant
-        loggerFactory.assertThrowsAndLogs[CommandFailure](
-          participant1.commitments.open_commitment(
-            hashedNotSentCmd,
-            daId,
-            deployedIouContractsAndCommitment.commitmentPeriod.toInclusive.forgetRefinement,
-            participant2,
-          ),
-          logEntry => {
-            logEntry.errorMessage should (include(
-              "The participant cannot open commitment"
-            ) and include(
-              "because the participant has not computed such a commitment at the given tick timestamp for the given counter participant"
-            ))
-            logEntry.shouldBeCantonErrorCode(ParticipantInspectionServiceError.IllegalArgumentError)
-          },
+        val contractsAndReassignmentCounters = participant1.commitments.open_commitment(
+          deployedIouContractsAndCommitment.commitment,
+          daId,
+          deployedIouContractsAndCommitment.commitmentPeriod.toInclusive.forgetRefinement,
+          participant2,
         )
+        val returnedCids = contractsAndReassignmentCounters.map(c => c.cid)
+        returnedCids should contain theSameElementsAs alreadyDeployedContracts
+          .get()
+          .map(c => c.id.toLf)
+    }
+
+    "participant can open a commitment spanning multiple intervals" onlyRunLessThan ProtocolVersion.v38 in {
+      implicit env =>
+        import env.*
+
+        val simClock = environment.simClock.value
+        TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
+
+        deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
+
+        logger.info(
+          "Advance time five reconciliation intervals, remembering the tick after three reconciliation intervals."
+        )
+        simClock.advance(interval.multipliedBy(3))
+        val midTick = tickAfter(simClock.uniqueTime())
+        simClock.advanceTo(midTick.forgetRefinement.immediateSuccessor)
+        simClock.advance(interval.multipliedBy(2))
+        val cmtTick = tickAfter(simClock.uniqueTime())
+        simClock.advanceTo(cmtTick.forgetRefinement.immediateSuccessor)
+
+        TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
+
+        logger.info("Send a commitment, which will cover the five intervals.")
+        participant1.testing.fetch_synchronizer_times()
+
+        val (_, _, cmtOverFiveIntervals) = eventually() {
+          val p1Computed = participant1.commitments
+            .computed(
+              daName,
+              cmtTick.toInstant.minusMillis(1),
+              cmtTick.toInstant,
+              Some(participant2),
+            )
+          p1Computed.size shouldBe 1
+          p1Computed
+        }.loneElement
+
+        val contractsAndTransferCounters = participant1.commitments.open_commitment(
+          cmtOverFiveIntervals,
+          daId,
+          midTick.forgetRefinement,
+          participant2,
+        )
+
+        val returnedCids = contractsAndTransferCounters.map(c => c.cid)
+        returnedCids should contain theSameElementsAs alreadyDeployedContracts
+          .get()
+          .map(c => c.id.toLf)
+    }
+
+    "opening a commitment fails when" should {
+      "the participant didn't send the given commitment" onlyRunLessThan ProtocolVersion.v38 in {
+        implicit env =>
+          import env.*
+
+          val deployedIouContractsAndCommitment =
+            deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
+          val notSentCmt = LtHash16().getByteString()
+          val hashedNotSentCmd = Digest.hashDigest(notSentCmt)
+          // give wrong commitment but correct timestamp and counter-participant
+          loggerFactory.assertThrowsAndLogs[CommandFailure](
+            participant1.commitments.open_commitment(
+              hashedNotSentCmd,
+              daId,
+              deployedIouContractsAndCommitment.commitmentPeriod.toInclusive.forgetRefinement,
+              participant2,
+            ),
+            logEntry => {
+              logEntry.errorMessage should (include(
+                "The participant cannot open commitment"
+              ) and include(
+                "because the participant has not computed such a commitment at the given tick timestamp for the given counter participant"
+              ))
+              logEntry.shouldBeCantonErrorCode(
+                ParticipantInspectionServiceError.IllegalArgumentError
+              )
+            },
+          )
       }
 
-      "the participant sent the commitment but not at the given tick in the past" in {
+      "the participant sent the commitment but not at the given tick in the past" onlyRunLessThan ProtocolVersion.v38 in {
         implicit env =>
           import env.*
 
@@ -684,121 +688,130 @@ trait AcsCommitmentToolingIntegrationTest
           )
       }
 
-      "the given counter-participant is incorrect" in { implicit env =>
-        import env.*
+      "the given counter-participant is incorrect" onlyRunLessThan ProtocolVersion.v38 in {
+        implicit env =>
+          import env.*
 
-        val IouCommitmentWithContracts(_, commitmentPeriod, commitment, _) =
-          deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
+          val IouCommitmentWithContracts(_, commitmentPeriod, commitment, _) =
+            deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
 
-        // give wrong counter-participant but a computed commitment and its correct timestamp
-        loggerFactory.assertThrowsAndLogs[CommandFailure](
-          participant1.commitments.open_commitment(
-            commitment,
-            daId,
-            commitmentPeriod.toInclusive.forgetRefinement,
-            participant1,
-          ),
-          logEntry => {
-            logEntry.errorMessage should (include(
-              "The participant cannot open commitment"
-            ) and include(
-              "because the participant has not computed such a commitment at the given tick timestamp for the given counter participant"
-            ))
-            logEntry.shouldBeCantonErrorCode(ParticipantInspectionServiceError.IllegalArgumentError)
-          },
-        )
-      }
-
-      "the given timestamp is not a reconciliation interval tick" in { implicit env =>
-        import env.*
-
-        val IouCommitmentWithContracts(_, commitmentPeriod, commitment, _) =
-          deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
-
-        // this test assumes that the reconciliation interval is not 1 second for the given opening commitment
-        // timestamp to not fall on a reconciliation interval boundary
-        assert(interval.getSeconds != 1)
-
-        // give timestamp that does not correspond to a reconciliation interval boundary
-        loggerFactory.assertThrowsAndLogs[CommandFailure](
-          participant1.commitments.open_commitment(
-            commitment,
-            daId,
-            // this test assumes that the reconciliation interval is not 1 second for the timestamp below to not fall
-            // on an interval reconciliation boundary
-            commitmentPeriod.toInclusive.forgetRefinement.minus(JDuration.ofSeconds(1)),
-            participant1,
-          ),
-          logEntry => {
-            logEntry.errorMessage should (include(
-              "The participant cannot open commitment"
-            ) and include(
-              "is not a valid reconciliation interval tick"
-            ))
-            logEntry.shouldBeCantonErrorCode(ParticipantInspectionServiceError.IllegalArgumentError)
-          },
-        )
-      }
-    }
-
-    "acs pruning beyond the timestamp prevents opening a commitment" in { implicit env =>
-      import cats.syntax.either.*
-      import env.*
-
-      val simClock = environment.simClock.value
-
-      val IouCommitmentWithContracts(_, commitmentPeriod, commitment, _) =
-        deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
-
-      logger.info(
-        "Participant1 waits to receive counter-commitment, so that it can prune past data"
-      )
-      eventually() {
-        participant1.commitments
-          .received(
-            synchronizerAlias = daName,
-            start = commitmentPeriod.toInclusive.toInstant.minusMillis(1),
-            end = commitmentPeriod.toInclusive.toInstant,
-            counterParticipant = Some(participant2),
-          )
-          .size shouldBe 1
-      }
-
-      simClock.advance(pruningTimeout)
-      logger.info(
-        "Participant1 deploy some more contracts to advance the clean replay, so that it can prune past data"
-      )
-      deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
-
-      logger.info("Wait that ACS background pruning advanced past the timestamp of the commitment")
-      eventually() {
-        val pruningTs = participant1.testing.state_inspection.acsPruningStatus(daId)
-        pruningTs.map(_.lastSuccess.forall(_ >= commitmentPeriod.toInclusive)) shouldBe Some(true)
-      }
-
-      loggerFactory.assertLoggedWarningsAndErrorsSeq(
-        Either
-          .catchOnly[CommandFailure] {
+          // give wrong counter-participant but a computed commitment and its correct timestamp
+          loggerFactory.assertThrowsAndLogs[CommandFailure](
             participant1.commitments.open_commitment(
               commitment,
               daId,
               commitmentPeriod.toInclusive.forgetRefinement,
-              participant2,
-            )
-          }
-          .left
-          .value
-          .getMessage should include("Command execution failed"),
-        logEntries => {
-          forExactly(1, logEntries)(logEntry =>
-            logEntry.message should (include(
-              s"Active contract store for synchronizer"
-            ) and include(
-              "which is after the requested time of change"
-            ))
+              participant1,
+            ),
+            logEntry => {
+              logEntry.errorMessage should (include(
+                "The participant cannot open commitment"
+              ) and include(
+                "because the participant has not computed such a commitment at the given tick timestamp for the given counter participant"
+              ))
+              logEntry.shouldBeCantonErrorCode(
+                ParticipantInspectionServiceError.IllegalArgumentError
+              )
+            },
           )
-        },
-      )
+      }
+
+      "the given timestamp is not a reconciliation interval tick" onlyRunLessThan ProtocolVersion.v38 in {
+        implicit env =>
+          import env.*
+
+          val IouCommitmentWithContracts(_, commitmentPeriod, commitment, _) =
+            deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
+
+          // this test assumes that the reconciliation interval is not 1 second for the given opening commitment
+          // timestamp to not fall on a reconciliation interval boundary
+          assert(interval.getSeconds != 1)
+
+          // give timestamp that does not correspond to a reconciliation interval boundary
+          loggerFactory.assertThrowsAndLogs[CommandFailure](
+            participant1.commitments.open_commitment(
+              commitment,
+              daId,
+              // this test assumes that the reconciliation interval is not 1 second for the timestamp below to not fall
+              // on an interval reconciliation boundary
+              commitmentPeriod.toInclusive.forgetRefinement.minus(JDuration.ofSeconds(1)),
+              participant1,
+            ),
+            logEntry => {
+              logEntry.errorMessage should (include(
+                "The participant cannot open commitment"
+              ) and include(
+                "is not a valid reconciliation interval tick"
+              ))
+              logEntry.shouldBeCantonErrorCode(
+                ParticipantInspectionServiceError.IllegalArgumentError
+              )
+            },
+          )
+      }
+    }
+
+    "acs pruning beyond the timestamp prevents opening a commitment" onlyRunLessThan ProtocolVersion.v38 in {
+      implicit env =>
+        import cats.syntax.either.*
+        import env.*
+
+        val simClock = environment.simClock.value
+
+        val IouCommitmentWithContracts(_, commitmentPeriod, commitment, _) =
+          deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
+
+        logger.info(
+          "Participant1 waits to receive counter-commitment, so that it can prune past data"
+        )
+        eventually() {
+          participant1.commitments
+            .received(
+              synchronizerAlias = daName,
+              start = commitmentPeriod.toInclusive.toInstant.minusMillis(1),
+              end = commitmentPeriod.toInclusive.toInstant,
+              counterParticipant = Some(participant2),
+            )
+            .size shouldBe 1
+        }
+
+        simClock.advance(pruningTimeout)
+        logger.info(
+          "Participant1 deploy some more contracts to advance the clean replay, so that it can prune past data"
+        )
+        deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
+
+        logger.info(
+          "Wait that ACS background pruning advanced past the timestamp of the commitment"
+        )
+        eventually() {
+          val pruningTs = participant1.testing.state_inspection.acsPruningStatus(daId)
+          pruningTs.map(_.lastSuccess.forall(_ >= commitmentPeriod.toInclusive)) shouldBe Some(true)
+        }
+
+        loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          Either
+            .catchOnly[CommandFailure] {
+              participant1.commitments.open_commitment(
+                commitment,
+                daId,
+                commitmentPeriod.toInclusive.forgetRefinement,
+                participant2,
+              )
+            }
+            .left
+            .value
+            .getMessage should include("Command execution failed"),
+          logEntries => {
+            forExactly(1, logEntries)(logEntry =>
+              logEntry.message should (include(
+                s"Active contract store for synchronizer"
+              ) and include(
+                "which is after the requested time of change"
+              ))
+            )
+          },
+        )
     }
 
     "inspect commitment contracts" should {
@@ -814,79 +827,80 @@ trait AcsCommitmentToolingIntegrationTest
         cleanReqTs
       }
 
-      "inspect created and archived contracts at the current timestamp" in { implicit env =>
-        import env.*
+      "inspect created and archived contracts at the current timestamp" onlyRunLessThan ProtocolVersion.v38 in {
+        implicit env =>
+          import env.*
 
-        logger.info("Create three contracts on synchronizer da")
-        val createdDaCids =
-          deployThreeContractsAndCheck(
-            daId,
-            alreadyDeployedContracts,
-            participant1,
-            participant2,
-          ).contracts
+          logger.info("Create three contracts on synchronizer da")
+          val createdDaCids =
+            deployThreeContractsAndCheck(
+              daId,
+              alreadyDeployedContracts,
+              participant1,
+              participant2,
+            ).contracts
 
-        // archive one of these created contracts
-        logger.info("Archive one of these contracts")
-        val archivedCid = createdDaCids.headOption.getOrElse(fail("No created contract found")).id
-        participant1.ledger_api.javaapi.commands.submit(
-          Seq(participant1.id.adminParty),
-          archivedCid.exerciseArchive().commands.asScala.toSeq,
-          Some(daId),
-        )
-
-        eventually() {
-          participants.all.foreach(p =>
-            p.ledger_api.state.acs.of_all().map(_.contractId) should not contain archivedCid
+          // archive one of these created contracts
+          logger.info("Archive one of these contracts")
+          val archivedCid = createdDaCids.headOption.getOrElse(fail("No created contract found")).id
+          participant1.ledger_api.javaapi.commands.submit(
+            Seq(participant1.id.adminParty),
+            archivedCid.exerciseArchive().commands.asScala.toSeq,
+            Some(daId),
           )
-        }
 
-        val tsAfterArchival =
-          getCleanReqTs(participant1, daId).getOrElse(fail("No clean request timestamp found"))
+          eventually() {
+            participants.all.foreach(p =>
+              p.ledger_api.state.acs.of_all().map(_.contractId) should not contain archivedCid
+            )
+          }
 
-        val queriedCids = createdDaCids.map(_.id.toLf)
-        val mismatchTimestamp = tsAfterArchival
-        val synchronizer1Id = daId
-        val inspectContracts = participant1.commitments.inspect_commitment_contracts(
-          contracts = queriedCids,
-          timestamp = mismatchTimestamp,
-          synchronizer1Id,
-          downloadPayload = true,
-        )
+          val tsAfterArchival =
+            getCleanReqTs(participant1, daId).getOrElse(fail("No clean request timestamp found"))
 
-        logger.info(
-          s"Inspect the contract state after archival timestamp $tsAfterArchival valid on synchronizer da"
-        )
+          val queriedCids = createdDaCids.map(_.id.toLf)
+          val mismatchTimestamp = tsAfterArchival
+          val synchronizer1Id = daId
+          val inspectContracts = participant1.commitments.inspect_commitment_contracts(
+            contracts = queriedCids,
+            timestamp = mismatchTimestamp,
+            synchronizer1Id,
+            downloadPayload = true,
+          )
 
-        logger.info(s"The result contains exactly one entry per contract")
-        inspectContracts.size shouldBe queriedCids.size
-        inspectContracts.map(_.cid) should contain theSameElementsAs queriedCids
+          logger.info(
+            s"Inspect the contract state after archival timestamp $tsAfterArchival valid on synchronizer da"
+          )
 
-        logger.info(s"The result contains a payload for all contracts")
-        inspectContracts.map(
-          _.contract.map(_.contractId)
-        ) should contain theSameElementsAs queriedCids.map(c => Some(c))
+          logger.info(s"The result contains exactly one entry per contract")
+          inspectContracts.size shouldBe queriedCids.size
+          inspectContracts.map(_.cid) should contain theSameElementsAs queriedCids
 
-        logger.info(s"Non-archived contracts have a single state (created) and are active on da")
-        inspectContracts.filter { e =>
-          e.activeOnExpectedSynchronizer &&
-          e.state.sizeIs == 1 && e.state.forall(_.contractState.isInstanceOf[ContractCreated])
-        } should have size (queriedCids.size - 1).toLong
+          logger.info(s"The result contains a payload for all contracts")
+          inspectContracts.map(
+            _.contract.map(_.contractId)
+          ) should contain theSameElementsAs queriedCids.map(c => Some(c))
 
-        logger.info(
-          s"The archived contract has two states (created and archived) and is not active on da"
-        )
-        inspectContracts.filter { e =>
-          e.cid == archivedCid.toLf && !e.activeOnExpectedSynchronizer &&
-          e.state.sizeIs == 2 && e.state.count(
-            _.contractState.isInstanceOf[ContractArchived]
-          ) == 1 && e.state.count(
-            _.contractState.isInstanceOf[ContractCreated]
-          ) == 1
-        } should have size 1
+          logger.info(s"Non-archived contracts have a single state (created) and are active on da")
+          inspectContracts.filter { e =>
+            e.activeOnExpectedSynchronizer &&
+            e.state.sizeIs == 1 && e.state.forall(_.contractState.isInstanceOf[ContractCreated])
+          } should have size (queriedCids.size - 1).toLong
+
+          logger.info(
+            s"The archived contract has two states (created and archived) and is not active on da"
+          )
+          inspectContracts.filter { e =>
+            e.cid == archivedCid.toLf && !e.activeOnExpectedSynchronizer &&
+            e.state.sizeIs == 2 && e.state.count(
+              _.contractState.isInstanceOf[ContractArchived]
+            ) == 1 && e.state.count(
+              _.contractState.isInstanceOf[ContractCreated]
+            ) == 1
+          } should have size 1
       }
 
-      "do not retrieve payloads works" in { implicit env =>
+      "do not retrieve payloads works" onlyRunLessThan ProtocolVersion.v38 in { implicit env =>
         import env.*
 
         logger.info("Create three contracts on synchronizer da")
@@ -920,7 +934,7 @@ trait AcsCommitmentToolingIntegrationTest
         forAll(inspectContracts)(inspectContract => inspectContract.contract shouldBe None)
       }
 
-      "inspect contract state for a past unpruned timestamp and more synchronizers" in {
+      "inspect contract state for a past unpruned timestamp and more synchronizers" onlyRunLessThan ProtocolVersion.v38 in {
         implicit env =>
           import env.*
 

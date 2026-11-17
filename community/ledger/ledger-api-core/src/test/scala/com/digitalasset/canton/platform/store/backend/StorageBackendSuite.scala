@@ -10,6 +10,7 @@ trait StorageBackendSuite
     with StorageBackendTestsInitializeIngestion
     with StorageBackendTestsConversions
     with StorageBackendTestsParties
+    with StorageBackendTestsHostedParties
     with StorageBackendTestsEvents
     with StorageBackendTestsCompletions
     with StorageBackendTestsContracts

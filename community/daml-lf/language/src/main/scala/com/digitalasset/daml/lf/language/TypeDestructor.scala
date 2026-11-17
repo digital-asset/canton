@@ -21,6 +21,8 @@ object TypeDestructor {
 
     case object Int64F extends SerializableTypeF[Nothing]
 
+    case object Uint256F extends SerializableTypeF[Nothing]
+
     case object DateF extends SerializableTypeF[Nothing]
 
     case object TimestampF extends SerializableTypeF[Nothing]
@@ -192,6 +194,8 @@ final class TypeDestructor(pkgInterface: PackageInterface) {
         bt match {
           case Ast.BTInt64 =>
             Either.cond(args.isEmpty, Int64F, wrongType)
+          case Ast.BTUint256 =>
+            Either.cond(args.isEmpty, Uint256F, wrongType)
           case Ast.BTNumeric =>
             args match {
               case Ast.TNat(s) :: Nil =>

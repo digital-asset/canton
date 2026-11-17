@@ -437,6 +437,7 @@ private[backend] trait StorageBackendTestsCompletions
 
   it should "correctly retrieve completions for post processing recovery" in {
     val messageUuid = UUID.randomUUID()
+    val reassignmentMessageUuid = UUID.randomUUID()
     val commandId = UUID.randomUUID().toString
     val publicationTime = Timestamp.now()
     val recordTime = Timestamp.now().addMicros(15)
@@ -464,7 +465,20 @@ private[backend] trait StorageBackendTestsCompletions
         userId = Ref.UserId.assertFromString("userid1"),
         submissionId = Some(submissionId),
         synchronizerId = synchronizerId,
-        messageUuid = Some(messageUuid.toString),
+        recordTime = recordTime,
+        messageUuid = None,
+        publicationTime = publicationTime,
+        isTransaction = false,
+      ),
+      dtoCompletion(
+        offset = offset(7),
+        submitters = Set(someParty),
+        commandId = commandId,
+        userId = Ref.UserId.assertFromString("userid1"),
+        submissionId = Some(submissionId),
+        synchronizerId = synchronizerId,
+        messageUuid = Some(reassignmentMessageUuid.toString),
+        updateId = None,
         publicationTime = publicationTime,
         isTransaction = false,
       ),
@@ -498,6 +512,35 @@ private[backend] trait StorageBackendTestsCompletions
         publicationTime = CantonTimestamp(publicationTime),
         submissionId = Some(Ref.SubmissionId.assertFromString(submissionId)),
         accepted = true,
+        isTransaction = true,
+        traceContext = testTraceContext,
+      ),
+      PostPublishData(
+        submissionSynchronizerId = SynchronizerId.tryFromString("x::synchronizer1"),
+        publishSource = PublishSource.Sequencer(
+          sequencerTimestamp = CantonTimestamp(recordTime)
+        ),
+        userId = Ref.UserId.assertFromString("userid1"),
+        commandId = Ref.CommandId.assertFromString(commandId),
+        actAs = Set(someParty),
+        offset = offset(5),
+        publicationTime = CantonTimestamp(publicationTime),
+        submissionId = Some(Ref.SubmissionId.assertFromString(submissionId)),
+        accepted = true,
+        isTransaction = false,
+        traceContext = testTraceContext,
+      ),
+      PostPublishData(
+        submissionSynchronizerId = SynchronizerId.tryFromString("x::synchronizer1"),
+        publishSource = PublishSource.Local(reassignmentMessageUuid),
+        userId = Ref.UserId.assertFromString("userid1"),
+        commandId = Ref.CommandId.assertFromString(commandId),
+        actAs = Set(someParty),
+        offset = offset(7),
+        publicationTime = CantonTimestamp(publicationTime),
+        submissionId = Some(Ref.SubmissionId.assertFromString(submissionId)),
+        accepted = false,
+        isTransaction = false,
         traceContext = testTraceContext,
       ),
       PostPublishData(
@@ -512,6 +555,7 @@ private[backend] trait StorageBackendTestsCompletions
         publicationTime = CantonTimestamp(publicationTime),
         submissionId = Some(Ref.SubmissionId.assertFromString(submissionId)),
         accepted = false,
+        isTransaction = true,
         traceContext = testTraceContext,
       ),
     )

@@ -140,7 +140,12 @@ final class AutomaticReassignmentCrashIntegrationTest
               )
             ),
             // the exclusivity timeout may have elapsed, in which case participant2 hits the blocked sequencer too
-            mayContain = Seq(_.warningMessage should include("Failed to submit submission")),
+            // untracked reassignments log the first message, tracked ones the second
+            mayContain = Seq(
+              _.warningMessage should (include("Failed to submit submission") or include(
+                "Failed to submit assignment"
+              ))
+            ),
           ),
         )
       eventually() {

@@ -102,6 +102,7 @@ private[platform] object InMemoryStateUpdaterFlow {
     UpdateBatch,
     NotUsed,
   ] =
+    // TODO(#37916): make sure no processing happens on Pekko executor (service threads)
     Flow.fromGraph(GraphDSL.create() { implicit builder =>
       import GraphDSL.Implicits.*
       // this flow emits the original stream as is while at the same time broadcasts its elements
@@ -144,6 +145,7 @@ private[platform] object InMemoryStateUpdaterFlow {
                   case _: Update.LsuTimeReached => None
                   case _: Update.CommitRepair => None
                   case u: Update.ReceivedAcsCommitment => Some((u.synchronizerId, u.recordTime))
+                  case u: Update.ParticipantEventUpdate => Some((u.synchronizerId, u.recordTime))
                 }
 
                 val lastSynchronizerTimes =
@@ -236,6 +238,8 @@ private[platform] object InMemoryStateUpdater {
           convertTopologyTransactionEffective(offset, u)
         case (offset, u: Update.ReceivedAcsCommitment) =>
           convertReceivedAcsCommitment(offset, u)
+        case (offset, u: Update.ParticipantEventUpdate) =>
+          convertParticipantEventUpdate(offset, u)
       },
       ledgerEndUpdate = batch.ledgerEnd,
       lastTraceContext = traceContext,
@@ -602,6 +606,12 @@ private[platform] object InMemoryStateUpdater {
       u: Update.ReceivedAcsCommitment,
   ) =
     TransactionLogUpdate.ReceivedAcsCommitment(
+      offset = offset,
+      update = u,
+    )
+
+  private def convertParticipantEventUpdate(offset: Offset, u: Update.ParticipantEventUpdate) =
+    TransactionLogUpdate.ParticipantEventUpdate(
       offset = offset,
       update = u,
     )

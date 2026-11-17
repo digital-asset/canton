@@ -22,6 +22,8 @@ trait SyncServiceCallAuthTests extends ServiceCallWithMainActorAuthTests {
   def successfulBehavior(f: Future[Any])(implicit ec: ExecutionContext): Assertion =
     expectSuccess(f)
 
+  def denyCallsWithParticipantAdmin: Boolean = true
+
   protected def serviceCallWithMainActorUser(
       userPrefix: String,
       right: proto.Right.Kind,
@@ -74,11 +76,13 @@ trait SyncServiceCallAuthTests extends ServiceCallWithMainActorAuthTests {
       import env.*
       expectPermissionDenied(serviceCall(canReadAsAnyParty))
     }
-    "deny calls with 'participant_admin' user token" taggedAs securityAsset.setAttack(
-      attackPermissionDenied(threat = "Present a 'participant_admin' user JWT")
-    ) in { implicit env =>
-      import env.*
-      expectPermissionDenied(serviceCall(canBeAnAdmin))
+    if (denyCallsWithParticipantAdmin) {
+      "deny calls with 'participant_admin' user token" taggedAs securityAsset.setAttack(
+        attackPermissionDenied(threat = "Present a 'participant_admin' user JWT")
+      ) in { implicit env =>
+        import env.*
+        expectPermissionDenied(serviceCall(canBeAnAdmin))
+      }
     }
     "deny calls with non-expired 'unknown_user' user token" taggedAs securityAsset
       .setAttack(

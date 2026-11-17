@@ -116,3 +116,31 @@ message SubmissionEntry {
     bytes archives = 2;
   }
 }
+
+// Describes a corpus directory: packages/<pkgId>.dalf holds each package used, and each suite's
+// transaction entries are in suites/<suite name>.bin, grouped by test in manifest order.
+message CorpusManifest {
+  int32 version = 1;
+  repeated Suite suites = 2;
+
+  message Suite {
+    // <source>/<recording directory>, e.g. cn-apps/utility-registry-tests-v0-0.0.1
+    string name = 1;
+    Source source = 2;
+    repeated Test tests = 3;
+  }
+
+  // where a suite's transactions were recorded from
+  message Source {
+    string name = 1;
+    string repo = 2;
+    string commit = 3;
+    string recorder = 4;
+  }
+
+  message Test {
+    // <package name>:<module>:<script>
+    string name = 1;
+    int32 units = 2;
+  }
+}

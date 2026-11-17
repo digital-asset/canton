@@ -1,0 +1,42 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- Two templates implementing Holding, and one using it.
+module Assets where
+
+import Holding
+
+template Cash
+  with
+    owner : Party
+    amount : Decimal
+  where
+    signatory owner
+    interface instance Holding for Cash where
+      view = HoldingView owner amount
+      setAmount a = toInterfaceContractId <$> create this with amount = a
+
+template Bond
+  with
+    owner : Party
+    face : Decimal
+    coupon : Decimal
+  where
+    signatory owner
+    interface instance Holding for Bond where
+      view = HoldingView owner (face + coupon)
+      setAmount a = toInterfaceContractId <$> create this with face = a - coupon
+
+template Portfolio
+  with
+    owner : Party
+  where
+    signatory owner
+
+    nonconsuming choice Total : Decimal
+      with
+        holdings : [ContractId Holding]
+      controller owner
+      do
+        amounts <- mapA (\h -> (view <$> fetch h) >>= \v -> pure v.amount) holdings
+        pure (sum amounts)

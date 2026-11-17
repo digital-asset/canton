@@ -384,22 +384,34 @@ object SequencedEventStore {
     def previousTimestamp: Option[CantonTimestamp]
 
     def timestamp: CantonTimestamp
-
-    def underlying: Option[SignedContent[SequencedEvent[B]]]
   }
 
-  /** A wrapper for not yet stored events (no counter) with an additional trace context.
+  /** A wrapper for an event received from a single sequencer connection, before the copies from
+    * several sequencers are aggregated, with an additional trace context.
     */
-  final case class SequencedEventWithTraceContext[+B <: GenBatch[?]](
+  final case class ConnectionSequencedEvent[+B <: GenBatch[?]](
       signedEvent: SignedContent[SequencedEvent[B]]
   )(
       override val traceContext: TraceContext
   ) extends ProcessingSequencedEvent[B] {
     override def previousTimestamp: Option[CantonTimestamp] = signedEvent.content.previousTimestamp
     override def timestamp: CantonTimestamp = signedEvent.content.timestamp
-    override def underlying: Option[SignedContent[SequencedEvent[B]]] = Some(
-      signedEvent
+    override protected def pretty: Pretty[ConnectionSequencedEvent.this.type] = prettyOfClass(
+      param("sequencedEvent", _.signedEvent),
+      param("traceContext", _.traceContext),
     )
+  }
+
+  /** A wrapper for not yet stored events (no counter) whose copies from the sequencers have been
+    * aggregated, with an additional trace context.
+    */
+  final case class SequencedEventWithTraceContext[+B <: GenBatch[?]](
+      signedEvent: AggregatedSignedContent[SequencedEvent[B]]
+  )(
+      override val traceContext: TraceContext
+  ) extends ProcessingSequencedEvent[B] {
+    override def previousTimestamp: Option[CantonTimestamp] = signedEvent.content.previousTimestamp
+    override def timestamp: CantonTimestamp = signedEvent.content.timestamp
     override protected def pretty: Pretty[SequencedEventWithTraceContext.this.type] = prettyOfClass(
       param("sequencedEvent", _.signedEvent),
       param("traceContext", _.traceContext),
@@ -427,7 +439,7 @@ object SequencedEventStore {
 
     def isIgnored: Boolean
 
-    def underlying: Option[SignedContent[SequencedEvent[B]]]
+    def underlying: Option[AggregatedSignedContent[SequencedEvent[B]]]
 
     def asIgnoredEvent: IgnoredSequencedEvent[B]
 
@@ -470,7 +482,7 @@ object SequencedEventStore {
   final case class IgnoredSequencedEvent[+B <: GenBatch[?]](
       override val timestamp: CantonTimestamp,
       override val counter: SequencerCounter,
-      override val underlying: Option[SignedContent[SequencedEvent[B]]],
+      override val underlying: Option[AggregatedSignedContent[SequencedEvent[B]]],
       override val previousTimestamp: Option[CantonTimestamp] = None,
   )(override val traceContext: TraceContext)
       extends PossiblyIgnoredSequencedEvent[B] {
@@ -510,7 +522,7 @@ object SequencedEventStore {
     ): WithOpeningErrors[IgnoredSequencedEvent[Batch[DefaultOpenEnvelope]]] =
       event.underlying match {
         case Some(signedEvent) =>
-          SignedContent
+          AggregatedSignedContent
             .openEnvelopes(signedEvent)(protocolVersion, hashOps, synchronizerLimits)
             .map(evt =>
               IgnoredSequencedEvent(
@@ -530,7 +542,7 @@ object SequencedEventStore {
     */
   final case class OrdinarySequencedEvent[+B <: GenBatch[?]](
       override val counter: SequencerCounter,
-      signedEvent: SignedContent[SequencedEvent[B]],
+      signedEvent: AggregatedSignedContent[SequencedEvent[B]],
   )(
       override val traceContext: TraceContext
   ) extends PossiblyIgnoredSequencedEvent[B] {
@@ -545,7 +557,7 @@ object SequencedEventStore {
 
     override def isIgnored: Boolean = false
 
-    override def underlying: Some[SignedContent[SequencedEvent[B]]] = Some(
+    override def underlying: Some[AggregatedSignedContent[SequencedEvent[B]]] = Some(
       signedEvent
     )
 
@@ -565,7 +577,7 @@ object SequencedEventStore {
         hashOps: HashOps,
         synchronizerLimits: SynchronizerLimits,
     ): WithOpeningErrors[OrdinarySequencedEvent[Batch[DefaultOpenEnvelope]]] =
-      SignedContent
+      AggregatedSignedContent
         .openEnvelopes(event.signedEvent)(protocolVersion, hashOps, synchronizerLimits)
         .map(evt => OrdinarySequencedEvent(event.counter, evt)(event.traceContext))
   }
@@ -598,7 +610,7 @@ object SequencedEventStore {
 
       for {
         underlyingO <- underlyingPO.traverse(
-          SignedContent
+          AggregatedSignedContent
             .fromByteString(protocolVersion, _)
             .flatMap(
               _.deserializeContent(

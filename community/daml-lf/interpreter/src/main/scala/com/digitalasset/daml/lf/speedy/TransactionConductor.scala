@@ -48,11 +48,6 @@ private[lf] final class TransactionConductor(
 
   private[lf] val metrics: Speedy.Metrics = new Speedy.Metrics(metricPlugins)
 
-  // The driver never interprets Daml-LF, so it has no notion of a "current" source location.
-  // Ledger nodes are therefore inserted without location info.
-  // TODO(https://github.com/digital-asset/daml/issues/23173) handle locations
-  private def getLastLocation: Option[Ref.Location] = None
-
   private def assignSerializationVersion(hasKey: Boolean): SerializationVersion =
     Speedy.Machine.assignSerializationVersion(hasKey)
 
@@ -118,79 +113,89 @@ private[lf] final class TransactionConductor(
   // -----------------------------------------------------------------  ----------
 
   @scala.annotation.nowarn
-  def handleCommands(cmds: Seq[Command], catchAll: Boolean = false): Upd.T[Unit] = for {
-    _ <- Upd.unit
-    _ = if (catchAll) ptx = ptx.beginTry
-    // we use foldM to carefully control the order of evaluation:
-    // each command is only handled once the previous one has actually run.
-    result <- cmds
-      .foldM[Upd.WithException, SValue](SValue.SUnit)((_, cmd) =>
-        setLastCommand(cmd) *> (cmd match {
-          case Command.Create(templateId, argument: SValue.SRecord) =>
-            handleCmd(Question.Cmd.Create(templateId, argument))
-          case Command.ExerciseTemplate(
-                templateId,
-                SValue.SContractId(contractId),
-                choiceId,
-                argument,
-              ) =>
-            handleCmd(Question.Cmd.ExerciseTemplate(templateId, contractId, choiceId, argument))
-          case Command.ExerciseInterface(
-                interfaceId,
-                SValue.SContractId(contractId),
-                choiceId,
-                argument,
-              ) =>
-            handleCmd(
-              Question.Cmd
-                .ExerciseInterface(interfaceId, contractId, choiceId, argument)
-            )
-          case Command.ExerciseByKey(templateId, contractKey, choiceId, argument) =>
-            handleCmd(Question.Cmd.ExerciseByKey(templateId, contractKey, choiceId, argument))
-          case Command.CreateAndExercise(
-                templateId,
-                createArgument: SValue.SRecord,
-                choiceId,
-                choiceArgument,
-              ) =>
-            handleCmd(Question.Cmd.Create(templateId, createArgument))
-              .flatMap {
-                case SValue.SContractId(cid) =>
-                  handleCmd(
-                    Question.Cmd.ExerciseTemplate(templateId, cid, choiceId, choiceArgument)
-                  )
-                case other =>
-                  throw SError.Crash(
-                    NameOf.qualifiedNameOfCurrentFunc,
-                    s"expected a contract id from create, got $other",
-                  )
-              }
-          case Command.FetchTemplate(templateId, SValue.SContractId(contractId)) =>
-            handleCmd(Question.Cmd.FetchTemplate(templateId, contractId))
-          case Command.FetchInterface(interfaceId, SValue.SContractId(contractId)) =>
-            handleCmd(Question.Cmd.FetchInterface(interfaceId, contractId))
-          case Command.FetchByKey(templateId, key) =>
-            handleCmd(Question.Cmd.FetchByKey(templateId, key))
-        })
-      )
-      .value
-    _ <- result match {
-      case Right(_) =>
-        if (catchAll) ptx = ptx.endTry
-        Upd.unit
-      case Left(excp) =>
-        if (catchAll)
-          ptx.rollbackTry match {
-            case Right(rolledBack) =>
-              ptx = rolledBack
-              Upd.unit
-            case Left(err) =>
-              Upd.raise(err)
-          }
-        else
-          raiseFailureWithStatus(excp)
-    }
-  } yield ()
+  def handleCommands(cmds: Seq[Command], catchAll: Boolean = false): Upd.T[Unit] = {
+    // Commands have no source level location
+    val noLocation = None
+    for {
+      _ <- Upd.unit
+      _ = if (catchAll) ptx = ptx.beginTry
+      // we use foldM to carefully control the order of evaluation:
+      // each command is only handled once the previous one has actually run.
+      result <- cmds
+        .foldM[Upd.WithException, SValue](SValue.SUnit)((_, cmd) =>
+          setLastCommand(cmd) *> (cmd match {
+            case Command.Create(templateId, argument: SValue.SRecord) =>
+              handleCmd(Question.Cmd.Create(templateId, argument, noLocation))
+            case Command.ExerciseTemplate(
+                  templateId,
+                  SValue.SContractId(contractId),
+                  choiceId,
+                  argument,
+                ) =>
+              handleCmd(
+                Question.Cmd
+                  .ExerciseTemplate(templateId, contractId, choiceId, argument, noLocation)
+              )
+            case Command.ExerciseInterface(
+                  interfaceId,
+                  SValue.SContractId(contractId),
+                  choiceId,
+                  argument,
+                ) =>
+              handleCmd(
+                Question.Cmd
+                  .ExerciseInterface(interfaceId, contractId, choiceId, argument, noLocation)
+              )
+            case Command.ExerciseByKey(templateId, contractKey, choiceId, argument) =>
+              handleCmd(
+                Question.Cmd.ExerciseByKey(templateId, contractKey, choiceId, argument, noLocation)
+              )
+            case Command.CreateAndExercise(
+                  templateId,
+                  createArgument: SValue.SRecord,
+                  choiceId,
+                  choiceArgument,
+                ) =>
+              handleCmd(Question.Cmd.Create(templateId, createArgument, noLocation))
+                .flatMap {
+                  case SValue.SContractId(cid) =>
+                    handleCmd(
+                      Question.Cmd
+                        .ExerciseTemplate(templateId, cid, choiceId, choiceArgument, noLocation)
+                    )
+                  case other =>
+                    throw SError.Crash(
+                      NameOf.qualifiedNameOfCurrentFunc,
+                      s"expected a contract id from create, got $other",
+                    )
+                }
+            case Command.FetchTemplate(templateId, SValue.SContractId(contractId)) =>
+              handleCmd(Question.Cmd.FetchTemplate(templateId, contractId, noLocation))
+            case Command.FetchInterface(interfaceId, SValue.SContractId(contractId)) =>
+              handleCmd(Question.Cmd.FetchInterface(interfaceId, contractId, noLocation))
+            case Command.FetchByKey(templateId, key) =>
+              handleCmd(Question.Cmd.FetchByKey(templateId, key, noLocation))
+          })
+        )
+        .value
+      _ <- result match {
+        case Right(_) =>
+          if (catchAll) ptx = ptx.endTry
+          Upd.unit
+        case Left(excp) =>
+          if (catchAll)
+            ptx.rollbackTry match {
+              case Right(rolledBack) =>
+                ptx = rolledBack
+                Upd.unit
+              case Left(err) =>
+                Upd.raise(err)
+            }
+          else
+            raiseFailureWithStatus(excp)
+      }
+    } yield ()
+  }
 
   private[this] var lastCommand: Option[Command] = None
 
@@ -895,6 +900,26 @@ private[lf] final class TransactionConductor(
     }
   }
 
+  // Crashes if the ledger returned a contract whose key does not match the requested key.
+  private def assertKeyMatches(
+      globalKey: GlobalKey,
+      result: Vector[(FatContractInstance, Hash.HashingMethod, Hash => Boolean)],
+  ): Unit =
+    result
+      .collectFirst {
+        case (contract, _, _)
+            if contract.contractKeyWithMaintainers.forall(_.globalKey != globalKey) =>
+          contract
+      }
+      .foreach { contract =>
+        throw SError.Crash(
+          NameOf.qualifiedNameOfCurrentFunc,
+          s"Contract key mismatch: the ledger returned a contract whose key does not " +
+            s"match the requested key. Requested key: $globalKey, returned " +
+            s"contract id: ${contract.contractId}",
+        )
+      }
+
   private def resolveContractKey(
       context: => String,
       tmplId: Ref.TypeConId,
@@ -917,6 +942,7 @@ private[lf] final class TransactionConductor(
         case Left(NeedKey(n, progression, resume)) =>
           needKeys(keyWithM.globalKey, n, progression)
             .flatMap { case (result, newProgression) =>
+              assertKeyMatches(keyWithM.globalKey, result)
               loop(keyWithM, resume(result.view.map(_._1.contractId), newProgression))
             }
         case Right(Right((mapping, next))) =>
@@ -948,12 +974,14 @@ private[lf] final class TransactionConductor(
   private def handleCreate(
       tmplId: Ref.TypeConId,
       createArg: SValue,
+      optLocation: Option[Ref.Location],
   ): Upd.WithException[SValue] =
-    computeContractInfo(tmplId, createArg).semiflatMap(handleCreate(_, createArg))
+    computeContractInfo(tmplId, createArg).semiflatMap(handleCreate(_, createArg, optLocation))
 
   private def handleCreate(
       contract: ContractInfo,
       createArg: SValue,
+      optLocation: Option[Ref.Location],
   ): Upd.T[SValue] =
     for {
       _ <- contract.keyOpt match {
@@ -970,7 +998,7 @@ private[lf] final class TransactionConductor(
       coid <- ptx.insertCreate(
         preparationTime = preparationTime,
         contract = contract,
-        optLocation = getLastLocation,
+        optLocation = optLocation,
         contractIdVersion = contractIdVersion,
       ) match {
         case Right((createNode, newPtx)) =>
@@ -991,11 +1019,12 @@ private[lf] final class TransactionConductor(
       contract: ContractInfo,
       byKey: Boolean,
       interfaceId: Option[Ref.TypeConId],
+      optLocation: Option[Ref.Location],
   ): Upd.T[Unit] =
     ptx.insertFetch(
       coid = coid,
       contract = contract,
-      optLocation = getLastLocation,
+      optLocation = optLocation,
       byKey = byKey,
       version = assignSerializationVersion(hasKey = contract.keyOpt.isDefined),
       interfaceId = interfaceId,
@@ -1013,42 +1042,61 @@ private[lf] final class TransactionConductor(
       dstTmplId: Ref.TypeConId,
       coid: V.ContractId,
       byKey: Boolean = false,
+      optLocation: Option[Ref.Location],
   ): Upd.T[SValue] =
     for {
       resolved <- fetchAndValidateContractByTemplate(dstTmplId, coid)
       (value, contract) = resolved
-      _ <- insertFetchNode(coid, contract, byKey = byKey, interfaceId = None)
+      _ <- insertFetchNode(
+        coid = coid,
+        contract = contract,
+        byKey = byKey,
+        interfaceId = None,
+        optLocation = optLocation,
+      )
     } yield value
 
   private def handleFetchInterface(
       interfaceId: Ref.TypeConId,
       coid: V.ContractId,
+      optLocation: Option[Ref.Location],
   ): Upd.T[SValue] =
     for {
       resolved <- fetchAndValidateContractByInterface(coid, interfaceId)
       (sAny, contract) = resolved
-      _ <- insertFetchNode(coid, contract, byKey = false, interfaceId = Some(interfaceId))
+      _ <- insertFetchNode(
+        coid = coid,
+        contract = contract,
+        byKey = false,
+        interfaceId = Some(interfaceId),
+        optLocation = optLocation,
+      )
     } yield sAny
 
   private def handleFetchByKey(
       tmplId: Ref.TypeConId,
       keyValue: SValue,
+      optLocation: Option[Ref.Location],
   ): Upd.T[SValue] =
     for {
       coid <- resolveContractKey("FetchByKey", tmplId, keyValue)
-      templateArg <- handleFetchTemplate(tmplId, coid, byKey = true)
+      templateArg <- handleFetchTemplate(tmplId, coid, byKey = true, optLocation = optLocation)
     } yield SValue.SPair(SValue.SContractId(coid), templateArg)
 
   private def handleQueryContractKey(
       tmplId: Ref.TypeConId,
       keyValue: SValue,
       n: Int,
+      optLocation: Option[Ref.Location],
   ): Upd.T[SValue] =
-    preventCatch(computeKeyWithMaintainers(tmplId, keyValue)).flatMap(handleQueryContractKey(_, n))
+    preventCatch(computeKeyWithMaintainers(tmplId, keyValue)).flatMap(
+      handleQueryContractKey(_, n, optLocation)
+    )
 
   private def handleQueryContractKey(
       keyWithM: GlobalKeyWithMaintainers,
       n: Int,
+      optLocation: Option[Ref.Location],
   ): Upd.T[SValue] = {
     def loop(
         keyWithM: GlobalKeyWithMaintainers,
@@ -1058,6 +1106,7 @@ private[lf] final class TransactionConductor(
         case Left(NeedKey(needN, progression, resume)) =>
           needKeys(keyWithM.globalKey, needN, progression)
             .flatMap { case (result, newProgression) =>
+              assertKeyMatches(keyWithM.globalKey, result)
               loop(keyWithM, resume(result.view.map(_._1.contractId), newProgression))
             }
         case Right(Right((mapping, next))) =>
@@ -1081,12 +1130,12 @@ private[lf] final class TransactionConductor(
           keyWithM.globalKey.packageName,
         )
       )
-      _ <- Upd.from(ptx.authorizeQueryByKey(getLastLocation, keyWithM))
+      _ <- Upd.from(ptx.authorizeQueryByKey(optLocation, keyWithM))
       resolved <- loop(keyWithM, ptx.csmJournal.queryNByKey(keyWithM.globalKey, n))
       (mapping, payloads) = resolved
       _ = {
         ptx = ptx.insertQueryByKey(
-          optLocation = getLastLocation,
+          optLocation = optLocation,
           key = keyWithM,
           result = mapping,
           keyVersion = assignSerializationVersion(hasKey = true),
@@ -1113,6 +1162,7 @@ private[lf] final class TransactionConductor(
       contract: ContractInfo,
       choiceArg: SValue,
       byKey: Boolean,
+      optLocation: Option[Ref.Location],
   ): Upd.T[Unit] = {
     val choice = compiledPackages.pkgInterface.lookupChoice(tmplId, ifaceId, choiceName) match {
       case Left(lookupError) =>
@@ -1152,7 +1202,7 @@ private[lf] final class TransactionConductor(
         contract = contract,
         interfaceId = ifaceId,
         choiceId = choiceName,
-        optLocation = getLastLocation,
+        optLocation = optLocation,
         consuming = choice.consuming,
         actingParties = controllers,
         choiceObservers = observers,
@@ -1181,10 +1231,21 @@ private[lf] final class TransactionConductor(
       choiceArg: SValue,
       byKey: Boolean,
       choiceBodyDefRef: SExpr.SDefinitionRef,
+      optLocation: Option[Ref.Location],
   ): Upd.WithException[SValue] =
     for {
       _ <- Upd.WithException.liftSuccess(
-        beginExercise(tmplId, interfaceId, choiceName, coid, thisValue, contract, choiceArg, byKey)
+        beginExercise(
+          tmplId = tmplId,
+          ifaceId = interfaceId,
+          choiceName = choiceName,
+          coid = coid,
+          thisValue = thisValue,
+          contract = contract,
+          choiceArg = choiceArg,
+          byKey = byKey,
+          optLocation = optLocation,
+        )
       )
       choiceResult <- Upd.WithException.liftEither(
         runNestedCmdMachine(
@@ -1211,6 +1272,7 @@ private[lf] final class TransactionConductor(
       coid: V.ContractId,
       choiceArg: SValue,
       byKey: Boolean = false,
+      optLocation: Option[Ref.Location],
   ): Upd.WithException[SValue] =
     for {
       entry <- Upd.WithException.liftSuccess(fetchAndValidateContractByTemplate(tmplId, coid))
@@ -1225,6 +1287,7 @@ private[lf] final class TransactionConductor(
         choiceArg = choiceArg,
         byKey = byKey,
         choiceBodyDefRef = SExpr.CmdChoiceBodyDefRef(tmplId, choiceName),
+        optLocation = optLocation,
       )
     } yield result
 
@@ -1233,10 +1296,18 @@ private[lf] final class TransactionConductor(
       choiceName: Ref.ChoiceName,
       keyValue: SValue,
       choiceArg: SValue,
+      optLocation: Option[Ref.Location],
   ): Upd.WithException[SValue] =
     for {
       coid <- Upd.WithException.liftSuccess(resolveContractKey("ExerciseByKey", tmplId, keyValue))
-      result <- handleExerciseTemplate(tmplId, choiceName, coid, choiceArg, byKey = true)
+      result <- handleExerciseTemplate(
+        tmplId,
+        choiceName,
+        coid,
+        choiceArg,
+        byKey = true,
+        optLocation = optLocation,
+      )
     } yield result
 
   private def handleExerciseInterface(
@@ -1244,6 +1315,7 @@ private[lf] final class TransactionConductor(
       choiceName: Ref.ChoiceName,
       coid: V.ContractId,
       choiceArg: SValue,
+      optLocation: Option[Ref.Location],
   ): Upd.WithException[SValue] =
     Upd.WithException.liftSuccess(fetchAndValidateContractByInterface(coid, ifaceId)).flatMap {
       case (sAny @ SValue.SAny(Ast.TTyCon(tmplId), _), contract) =>
@@ -1257,6 +1329,7 @@ private[lf] final class TransactionConductor(
           choiceArg = choiceArg,
           byKey = false,
           choiceBodyDefRef = SExpr.CmdInterfaceChoiceBodyDefRef(ifaceId, choiceName),
+          optLocation = optLocation,
         )
       case other =>
         throw SError.Crash(
@@ -1384,37 +1457,44 @@ private[lf] final class TransactionConductor(
 
   private def handleCmd(cmd: Question.Cmd): Upd.WithException[SValue] =
     cmd match {
-      case Question.Cmd.Create(tmplId, createArg) =>
-        handleCreate(tmplId, createArg)
-      case Question.Cmd.FetchTemplate(tmplId, coid) =>
-        Upd.WithException.liftSuccess(handleFetchTemplate(tmplId, coid))
-      case Question.Cmd.FetchInterface(interfaceId, coid) =>
-        Upd.WithException.liftSuccess(handleFetchInterface(interfaceId, coid))
-      case Question.Cmd.FetchByKey(tmplId, key) =>
-        Upd.WithException.liftSuccess(handleFetchByKey(tmplId, key))
-      case Question.Cmd.QueryContractKey(tmplId, key, n) =>
-        Upd.WithException.liftSuccess(handleQueryContractKey(tmplId, key, n))
+      case Question.Cmd.Create(tmplId, createArg, optLocation) =>
+        handleCreate(tmplId, createArg, optLocation)
+      case Question.Cmd.FetchTemplate(tmplId, coid, optLocation) =>
+        Upd.WithException.liftSuccess(handleFetchTemplate(tmplId, coid, optLocation = optLocation))
+      case Question.Cmd.FetchInterface(interfaceId, coid, optLocation) =>
+        Upd.WithException.liftSuccess(
+          handleFetchInterface(interfaceId, coid, optLocation = optLocation)
+        )
+      case Question.Cmd.FetchByKey(tmplId, key, optLocation) =>
+        Upd.WithException.liftSuccess(handleFetchByKey(tmplId, key, optLocation = optLocation))
+      case Question.Cmd.QueryContractKey(tmplId, key, n, optLocation) =>
+        Upd.WithException.liftSuccess(
+          handleQueryContractKey(tmplId, key, n, optLocation = optLocation)
+        )
       case Question.Cmd.ExerciseTemplate(
             tmplId,
             coid,
             choiceName,
             choiceArg,
+            optLocation,
           ) =>
-        handleExerciseTemplate(tmplId, choiceName, coid, choiceArg)
+        handleExerciseTemplate(tmplId, choiceName, coid, choiceArg, optLocation = optLocation)
       case Question.Cmd.ExerciseByKey(
             tmplId,
             key,
             choiceName,
             choiceArg,
+            optLocation,
           ) =>
-        handleExerciseByKey(tmplId, choiceName, key, choiceArg)
+        handleExerciseByKey(tmplId, choiceName, key, choiceArg, optLocation = optLocation)
       case Question.Cmd.ExerciseInterface(
             ifaceId,
             coid,
             choiceName,
             choiceArg,
+            optLocation,
           ) =>
-        handleExerciseInterface(ifaceId, choiceName, coid, choiceArg)
+        handleExerciseInterface(ifaceId, choiceName, coid, choiceArg, optLocation = optLocation)
       case Question.Cmd.GetTime =>
         Upd.WithException.liftSuccess(
           needTime.map { time =>

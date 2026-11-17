@@ -18,7 +18,6 @@ import com.digitalasset.canton.protocol.messages.{
 }
 import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, SynchronizerParameters}
 import com.digitalasset.canton.sequencing.TrafficControlParameters
-import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
@@ -100,7 +99,6 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         aggregationRuleCapture.capture(),
         callbackCapture.capture(),
-        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
@@ -182,7 +180,6 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         callbackCapture.capture(),
-        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
@@ -241,7 +238,6 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         any[SendCallback],
-        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
@@ -278,7 +274,6 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         callbackCapture.capture(),
-        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
@@ -342,7 +337,6 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         callbackCapture.capture(),
-        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
@@ -405,7 +399,6 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         callbackCapture.capture(),
-        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])

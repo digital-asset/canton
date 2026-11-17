@@ -18,11 +18,4 @@ object ProtocolVersionValidation {
   final case object AlwaysValidation extends ProtocolVersionValidation
 
   def apply(pv: ProtocolVersion): ProtocolVersionValidation = ProtocolVersionValidation.PV(pv)
-
-  def when(cond: Boolean)(pv: ProtocolVersion): ProtocolVersionValidation =
-    if (cond) ProtocolVersionValidation(pv) else ProtocolVersionValidation.NoValidation
-
-  def unless(cond: Boolean)(pv: ProtocolVersion): ProtocolVersionValidation =
-    when(!cond)(pv)
-
 }

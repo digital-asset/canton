@@ -134,12 +134,15 @@ its open questions, then push the branch and open a PR against the release line.
 
 First, announce the code freeze in #team-canton.
 
-To kick off the task that creates the two PRs, open the CircleCI page corresponding to the required release line.
-For 3.4, this
-is [https://app.circleci.com/pipelines/github/DACH-NY/canton?branch=release-line-3.4](https://app.circleci.com/pipelines/github/DACH-NY/canton?branch=release-line-3.4)
+To kick off the task that creates the two PRs, run the GHA workflow
+[Manual Start Release Process](https://github.com/DACH-NY/canton/actions/workflows/manual_start_release_process.yml)
+with "Use workflow from" set to the release line (e.g. `release-line-3.8`).
 
-Trigger pipeline with `manual_job` set to `start_release_process` which kicks off `manual_start_release_process`
-workflow. Once the workflow succeeds, a PR will be opened with several commits.
+Release lines before 3.8 still release from CircleCI. Open the CircleCI page of the release line, e.g.
+[release-line-3.7](https://app.circleci.com/pipelines/github/DACH-NY/canton?branch=release-line-3.7), and trigger a
+pipeline with `manual_job` set to `start-release-process`.
+
+Once the workflow succeeds, a PR will be opened with several commits.
 
 The PR opens the branch `release-3.4.4`, targeting to merge on `release-line-3.4`. Any further change to the release
 needs to happen
@@ -170,18 +173,15 @@ Merge strategy of the PR should be ***rebase and merge***, otherwise the release
 
 Once the PR is merged, the release commit (`release: 3.4.4`) will be tagged (`v3.4.4`) and the last part of the release
 process will kick off.
-You can follow the process on CircleCI:
-
-- Open the list of commits for the corresponding release-line:
-
-  [https://github.com/DACH-NY/canton/commits/release-line-3.4](https://github.com/DACH-NY/canton/commits/release-line-3.4)
-
-- Open the CircleCI workflow of the release-commit tag (`v3.4.4`)
+You can follow the process in the GHA
+[Canton Release](https://github.com/DACH-NY/canton/actions/workflows/canton_release.yml) run of the release-commit tag
+(`v3.4.4`). For release lines before 3.8, open the CircleCI workflow of the tag instead.
 
 - Code freeze can be lifted by sending another slack message to `#team-canton`
 
-- Once the artifacts have been published (i.e., the `publish_release` job of the `canton_build` workflow is green),
-post an update in the Slack channel dedicated to the release.
+- Once the artifacts have been published (i.e., the `Publish Release` job of the `Canton Release` workflow is green, or
+  `publish_release` on CircleCI for release lines before 3.8), post an update in the Slack channel dedicated to the
+  release.
 
 - If there are any failed job, you **must** understand the reason and take appropriate actions.
 
@@ -191,8 +191,10 @@ post an update in the Slack channel dedicated to the release.
 
 ### Creating a manual snapshot (Canton only)
 
-On any commit, you can trigger a manual snapshot that will be pushed to artifactory and S3.
-To do so, start the workflow `manual_snapshot_release` on your commit.
+On `main` or a release line, you can trigger a manual snapshot that will be pushed to S3, the OCI registry and Google Artifact Registry.
+To do so, run the GHA workflow
+[Manual Snapshot Release](https://github.com/DACH-NY/canton/actions/workflows/manual_snapshot_release.yml) on that
+branch. Other branches cannot publish, because the `release` environment only allows `main` and `release-line-*`.
 
 ### Creating a release candidate
 
@@ -251,8 +253,8 @@ This can be useful if you need to investigate a failure or do a small fix.
 # How-to recover from a failed release
 
 Most of the steps around releases can be retried if they fail.
-In that case, always prefer "Rerun workflow from failed" over "Rerun workflow from start" (otherwise, pushing some of
-the commits to the release branch will fail).
+In that case, always prefer "Re-run failed jobs" on GHA ("Rerun workflow from failed" on CircleCI) over re-running all
+jobs (otherwise, pushing some of the commits to the release branch will fail).
 
 If you need to restart from scratch, check the following before starting the process again:
 

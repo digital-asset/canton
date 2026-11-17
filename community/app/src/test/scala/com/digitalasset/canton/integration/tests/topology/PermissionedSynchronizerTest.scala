@@ -10,8 +10,8 @@ import com.digitalasset.canton.admin.api.client.data.OnboardingRestriction
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.util.SequencerPenaltyUtils.sequencerPenalty
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
-import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisconnect
 import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError.InitialOnboardingError
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import io.scalaland.chimney.dsl.*
@@ -138,9 +138,9 @@ sealed trait PermissionedSynchronizerTest
     )
     adminPartyBefore.loneElement.participants.exists(_.participant == participant1.id)
 
-    val subscriptionPermissionDenied =
-      "Permanently closing sequencer subscription due to permission denied"
-    // revoking the participant synchronizer permission results in the connection to the sequencer being closed.
+    val subscriptionPermissionDenied = "Closing sequencer subscription due to permission denied"
+    // revoking the participant synchronizer permission results in the sequencer denying the participant's subscriptions.
+    // The participant stays connected and keeps retrying, in case it is allowed back on the synchronizer.
     // this produces a bunch of warnings
     loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
       {
@@ -157,6 +157,28 @@ sealed trait PermissionedSynchronizerTest
         adminPartyAfter.loneElement.participants.map(
           _.participant
         ) should not contain participant1.id
+
+        eventually() {
+          sequencerPenalty(participant1, sequencer1.synchronizer_id, sequencer1.id) should be > 0.0
+        }
+
+        // the participant recovers without any operator action: its retries succeed once the renewed permission is
+        // effective. Until then, including while the permission is proposed, it may still be denied, and it may warn
+        // about the missing permission.
+        // In some specific case, where the sequencer terminates the connection before sending the
+        // revocation transaction, no warning will be emitted.
+        clue("allow the participant back on the synchronizer") {
+          sequencer1.topology.participant_synchronizer_permissions.propose(
+            sequencer1.synchronizer_id,
+            participant1.id,
+            ParticipantPermission.Submission,
+          )
+        }
+
+        // Increase retry time to exceed ping timeout and the backoff of the connection restarts
+        eventually(timeUntilSuccess = 45.seconds) {
+          participant1.health.maybe_ping(participant1) should not be empty
+        }
       },
       LogEntry.assertLogSeq(
         mustContainWithClue = Seq(
@@ -171,13 +193,6 @@ sealed trait PermissionedSynchronizerTest
             "all token expiry related errors",
           ),
           (
-            _.shouldBeCantonError(
-              SyncServiceSynchronizerDisconnect,
-              _ should include("Trust threshold of 1 is no longer reachable"),
-            ),
-            "participant disconnected from synchronizer",
-          ),
-          (
             _.warningMessage should include(subscriptionPermissionDenied),
             "subscription closed due to permission denied",
           ),
@@ -185,40 +200,6 @@ sealed trait PermissionedSynchronizerTest
         mayContain = Seq(
           _.warningMessage should include("PERMISSION_DENIED/Authentication token refresh error"),
           _.warningMessage should include("Token refresh aborted due to shutdown"),
-        ),
-      ),
-    )
-    participant1.synchronizers.active(daName) shouldBe false
-    participant1.synchronizers.disconnect_all()
-
-    clue("allow the participant back on the synchronizer") {
-      sequencer1.topology.participant_synchronizer_permissions.propose(
-        sequencer1.synchronizer_id,
-        participant1.id,
-        ParticipantPermission.Submission,
-      )
-    }
-
-    // when reconnecting, the participant hasn't yet received the renewed participant synchronizer permission.
-    // therefore it first warns about the missing permission, but will eventually find it and proceed with
-    // connecting to the synchronizer. In some specific case, where the sequencer terminates the connection before sending the
-    // revocation transaction, the participant will reconnect and no warning will be emitted.
-    loggerFactory.assertLoggedWarningsAndErrorsSeq(
-      {
-        participant1.synchronizers.reconnect(daName)
-
-        // The ping is done here to have more time to capture the warning in case there is one.
-        // Increase retry time to exceed ping timeout
-        eventually(timeUntilSuccess = 45.seconds) {
-          participant1.health.maybe_ping(participant1) should not be empty
-        }
-      },
-      LogEntry.assertLogSeq(
-        Nil,
-        mayContain = Seq(
-          _.warningMessage should include(
-            s"Unable to find ParticipantSynchronizerPermission for participant ${participant1.id} on synchronizer ${daId.logical}"
-          ),
           // a ping submitted while the participant is still replaying past the revocation is
           // rejected until the re-granted permission becomes effective
           _.warningMessage should include("UNKNOWN_SUBMITTERS"),

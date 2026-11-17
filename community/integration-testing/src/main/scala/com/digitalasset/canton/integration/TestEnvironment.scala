@@ -13,10 +13,10 @@ import com.digitalasset.canton.concurrent.{
   FutureSupervisor,
 }
 import com.digitalasset.canton.config.{
-  BatchingConfig,
   CachingConfigs,
   CryptoConfig,
   SessionEncryptionKeyCacheConfig,
+  TestBatchingConfig,
 }
 import com.digitalasset.canton.console.commands.GlobalSecretKeyAdministration
 import com.digitalasset.canton.console.{
@@ -73,7 +73,7 @@ trait TestEnvironment[+C]
       CommonMockMetrics.cryptoMetrics,
       executionContext,
       environmentTimeouts,
-      BatchingConfig(),
+      TestBatchingConfig(),
       loggerFactory,
       NoReportingTracerProvider,
       environment.executorServiceMetrics,

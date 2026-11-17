@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.protocol.party.PartyReplicationProces
 import com.digitalasset.canton.participant.store
 import com.digitalasset.canton.sequencing.client.channel.SequencerChannelProtocolProcessor
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{FutureUnlessShutdownUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{EitherTUtil, FutureUnlessShutdownUtil, SimpleExecutionQueue}
 import com.google.common.annotations.VisibleForTesting
 
 import scala.util.chaining.scalaUtilChainingOps
@@ -52,6 +52,20 @@ trait AcsReplicationProcessor extends SequencerChannelProtocolProcessor {
     */
   def progressAcsReplication()(implicit traceContext: TraceContext): Unit
 
+  /** Ends the processor's channel endpoint, so that the processor can be discarded and the ACS
+    * replication restarted with a new processor.
+    *
+    * The channel is ended with an error rather than a completion, so that the SP still reconnects
+    * even if it has sent all ACS.
+    */
+  def abort(reason: String)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    if (hasChannelEndpoint) {
+      logger.info(s"Aborting ACS replication processor: $reason")
+      sendError(s"aborted: $reason")
+    } else EitherTUtil.unitUS
+
   protected def notifyCounterParticipantAndAcsReplicatorOnError(
       code: => EitherT[FutureUnlessShutdown, String, Unit]
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
@@ -86,10 +100,15 @@ trait AcsReplicationProcessor extends SequencerChannelProtocolProcessor {
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, T] =
     executionQueue.executeEUS[String, T](code, operation)
 
+  /** Whether to notify about a disconnect even though the end of the ACS has already been reached.
+    */
+  protected def notifyOnDisconnectAfterEndOfAcs(status: Either[String, Unit]): Boolean = false
+
   /** Let the PartyReplication know that the processor has gotten disconnected from the sequencer
     * channel endpoint. Only notify if the disconnect has actually triggered a transition losing the
     * endpoint and unless ACS replication has already completed (in which case the disconnect
-    * happens precisely because OnPR has completed).
+    * happens precisely because OnPR has completed), or [[notifyOnDisconnectAfterEndOfAcs]] demands
+    * a notification anyway.
     * @return
     *   true iff the channel endpoint has been lost
     */
@@ -103,7 +122,11 @@ trait AcsReplicationProcessor extends SequencerChannelProtocolProcessor {
     super
       .onDisconnected(status)
       .tap(hasLostChannelEndpoint =>
-        if (hasLostChannelEndpoint && !hasEndOfACSBeenReached) {
+        if (
+          hasLostChannelEndpoint && (!hasEndOfACSBeenReached || notifyOnDisconnectAfterEndOfAcs(
+            status
+          ))
+        ) {
           logger.info("Channel endpoint has been disconnected before ACS replication completion")
           onDisconnect(
             status.swap.getOrElse("Channel endpoint has been disconnected"),

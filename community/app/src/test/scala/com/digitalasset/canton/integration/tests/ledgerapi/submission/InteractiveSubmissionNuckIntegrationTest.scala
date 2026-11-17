@@ -29,8 +29,7 @@ import scala.jdk.CollectionConverters.*
   */
 trait InteractiveSubmissionNuckSetupTest extends InteractiveSubmissionIntegrationTestSetup {
 
-  /** Contract that can be used to create / manipulate contracts with keys. Only usable in tests
-    * from PV35
+  /** Contract that can be used to create / manipulate contracts with keys.
     */
   protected var keyOpsContract: KeyOps.Contract = _
 

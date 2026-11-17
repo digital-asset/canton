@@ -41,14 +41,14 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{ByteString190, ByteString256, ByteString4096}
+import com.digitalasset.canton.util.{ByteString190, ByteString256, ByteString4096, MonadUtil}
 import com.digitalasset.canton.version.HasToByteString
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, BeforeAndAfterAll, FutureOutcome}
 
-import java.util.Calendar
+import java.time.LocalDate
 import scala.concurrent.ExecutionContext
 
 trait KmsTest extends BaseTest with BeforeAndAfterAll {
@@ -75,6 +75,9 @@ trait KmsTest extends BaseTest with BeforeAndAfterAll {
   protected lazy val defaultKms: KmsType = newKms(defaultKmsConfig)
 
   protected def newKms(config: KmsType#Config): KmsType
+
+  /** The schemes of the KMS, for each of which a key is created in the tests. */
+  protected def supportedSchemes: Kms.SupportedSchemes
 
   val parallelExecutionContext: ExecutionContext = executionContext
 
@@ -286,42 +289,54 @@ trait KmsTest extends BaseTest with BeforeAndAfterAll {
   def kms(): Unit = {
 
     "create and delete keys" in { fixture =>
-      /* we only run one of the key generations, based on the day of the week, to
-         prevent clogging our AWS instance with too many keys (each key takes effectively 7 days to be
+      /* Each run generates a few keys, rotating through all supported schemes by day, to prevent
+         clogging our KMS instances with too many keys (an AWS key takes effectively 7 days to be
          completely removed).
        */
-      val dT = Calendar.getInstance()
-      val dow = dT.get(Calendar.DAY_OF_WEEK)
-      val generateKeyList = List[Kms => FutureUnlessShutdown[KmsKeyId]](
-        kms =>
-          kms
-            // if AWS KMS this defaults to multiRegion = false
-            .generateSymmetricEncryptionKey()
-            .valueOrFail("create KMS symmetric encryption key"),
-        kms =>
-          kms
-            .generateAsymmetricEncryptionKeyPair(EncryptionKeySpec.Rsa2048)
-            .valueOrFail("create KMS asymmetric encryption key"),
-        kms =>
-          kms
-            .generateSigningKeyPair(SigningKeySpec.EcP256)
-            .valueOrFail("create KMS signing key"),
-      )
-      for {
-        keyId <- generateKeyList(dow % generateKeyList.size)(fixture.kms).failOnShutdown
-        _ <- fixture.kms
-          .keyExistsAndIsActive(keyId)
-          .valueOrFail("check key exists")
-          .thereafterF(_ =>
-            fixture.kms
-              .deleteKey(keyId)
-              .valueOrFailShutdown("delete key")
-          )
-          .failOnShutdown
-        keyExists <- fixture.kms.keyExistsAndIsActive(keyId).value.failOnShutdown
-      } yield keyExists.left.value should (be(a[KmsError.KmsKeyDisabledError]) or be(
-        a[KmsError.KmsCannotFindKeyError]
-      ))
+      val keysPerRun = 3
+      val generateKeys: Seq[(String, Kms => FutureUnlessShutdown[KmsKeyId])] =
+        (
+          "symmetric encryption key",
+          (kms: Kms) => kms.generateSymmetricEncryptionKey().valueOrFail("create symmetric key"),
+        ) +:
+          (supportedSchemes.supportedEncryptionKeySpecs.toSeq.map { keySpec =>
+            (
+              s"$keySpec encryption key",
+              (kms: Kms) =>
+                kms.generateAsymmetricEncryptionKeyPair(keySpec).valueOrFail(s"create $keySpec key"),
+            )
+          } ++ supportedSchemes.supportedSigningKeySpecs.toSeq.map { keySpec =>
+            (
+              s"$keySpec signing key",
+              (kms: Kms) => kms.generateSigningKeyPair(keySpec).valueOrFail(s"create $keySpec key"),
+            )
+          })
+      val firstKey = LocalDate.now().toEpochDay * keysPerRun
+      val keysToGenerate = (0 until math.min(keysPerRun, generateKeys.size)).map { i =>
+        generateKeys(((firstKey + i) % generateKeys.size).toInt)
+      }
+
+      MonadUtil
+        .sequentialTraverse(keysToGenerate) { case (description, generateKey) =>
+          for {
+            keyId <- generateKey(fixture.kms)
+            _ <- fixture.kms
+              .keyExistsAndIsActive(keyId)
+              .valueOrFail(s"check $description exists")
+              .thereafterF(_ =>
+                fixture.kms.deleteKey(keyId).valueOrFailShutdown(s"delete $description")
+              )
+            keyExists <- fixture.kms.keyExistsAndIsActive(keyId).value
+          } yield description -> keyExists
+        }
+        .failOnShutdown
+        .map(forAll(_) { case (description, keyExists) =>
+          withClue(description) {
+            keyExists.left.value should (be(a[KmsError.KmsKeyDisabledError]) or be(
+              a[KmsError.KmsCannotFindKeyError]
+            ))
+          }
+        })
     }
 
     "get public key from a KMS key identifier" in { fixture =>

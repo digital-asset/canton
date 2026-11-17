@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.store.backend.postgresql
 import anorm.SqlParser.get
 import anorm.SqlStringInterpolation
 import com.daml.resources.ProgramResource.StartupException
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.backend.DataSourceStorageBackend
@@ -85,7 +85,6 @@ class PostgresDataSourceStorageBackend(
       connectionInitHook: Option[Connection => Unit],
   ): DataSource = {
     import DataSourceStorageBackendImpl.exe
-    val directEc = DirectExecutionContext(noTracingLogger)
 
     val pgSimpleDataSource = new PGSimpleDataSource()
     pgSimpleDataSource.setUrl(dataSourceConfig.jdbcUrl)
@@ -104,7 +103,7 @@ class PostgresDataSourceStorageBackend(
       dataSourceConfig.postgresConfig.networkTimeout.toList.map {
         networkTimeout => (connection: Connection) =>
           connection.setNetworkTimeout(
-            directEc,
+            directExecutionContext,
             // avoid overflow by capping to Int.MaxValue
             networkTimeout.duration.toMillis.min(Int.MaxValue).toInt,
           )

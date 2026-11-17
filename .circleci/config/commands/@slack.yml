@@ -1,4 +1,4 @@
-slack_red_main_with_volunteer:
+slack_notify_failure_with_volunteer:
   parameters:
     webhook_url:
       type: string

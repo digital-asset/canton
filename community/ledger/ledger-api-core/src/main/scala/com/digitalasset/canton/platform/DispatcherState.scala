@@ -4,7 +4,8 @@
 package com.digitalasset.canton.platform
 
 import com.daml.ledger.resources.ResourceOwner
-import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.error.CommonErrors
@@ -37,7 +38,6 @@ class DispatcherState(
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var dispatcherStateRef: DispatcherState.State = DispatcherNotRunning
   private val lock = new Mutex()
-  private val directEc = DirectExecutionContext(noTracingLogger)
 
   def isRunning: Boolean = (lock.exclusive {
     dispatcherStateRef match {
@@ -94,7 +94,7 @@ class DispatcherState(
             case f @ Failure(failure) =>
               logger.warn(s"Failed stopping active $ServiceName", failure)
               f
-          }(directEc)
+          }(directExecutionContext)
     }
   }
 
@@ -129,7 +129,7 @@ class DispatcherState(
               case f @ Failure(failure) =>
                 logger.warn(s"Error during $ServiceName shutdown", failure)
                 f
-            }(directEc)
+            }(directExecutionContext)
         )
     }
   }

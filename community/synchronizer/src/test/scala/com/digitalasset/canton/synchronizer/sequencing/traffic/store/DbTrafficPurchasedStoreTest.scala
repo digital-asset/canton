@@ -5,17 +5,16 @@ package com.digitalasset.canton.synchronizer.sequencing.traffic.store
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.{
-  BatchAggregatorConfig,
-  BatchingConfig,
-  CachingConfigs,
-  DefaultProcessingTimeouts,
-}
+import com.digitalasset.canton.config.{BatchAggregatorConfig, DefaultProcessingTimeouts}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.DbTest
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SequencerWriterConfig
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerBatchingConfig,
+  SequencerCachingConfigs,
+}
 import com.digitalasset.canton.synchronizer.sequencer.store.DbSequencerStore
 import com.digitalasset.canton.synchronizer.sequencing.traffic.store.db.DbTrafficPurchasedStore
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SequencerId}
@@ -48,9 +47,8 @@ trait DbTrafficPurchasedStoreTest
         timeouts = DefaultProcessingTimeouts.testing,
         loggerFactory = loggerFactory,
         sequencerMember = SequencerId(DefaultTestIdentities.physicalSynchronizerId.uid),
-        blockSequencerMode = true,
-        cachingConfigs = CachingConfigs(),
-        batchingConfig = BatchingConfig(),
+        cachingConfigs = SequencerCachingConfigs(),
+        batchingConfig = SequencerBatchingConfig(),
         sequencerMetrics = SequencerMetrics.noop(getClass.getName),
       )
 

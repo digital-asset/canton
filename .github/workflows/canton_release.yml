@@ -1,10 +1,10 @@
 name: Canton Release
 on:
-  # TODO(i35487) During migration, keep this workflow manual and branch-scoped for safe rollout.
   workflow_dispatch: {}
   push:
     branches:
-      - 'gha-migration/*'
+      - main
+      - 'release-line-*'
     tags:
       - 'v*'
 
@@ -13,9 +13,21 @@ permissions:
   contents: read
 
 jobs:
+  # RELEASE_REPOSITORY holds the same value in DACH-NY/canton and digital-asset/canton:
+  # the repo that tags and publishes. Unset would silently skip every job below.
+  check_release_repository:
+    name: Check release repository
+    if: ${{ vars.RELEASE_REPOSITORY == '' && contains(fromJSON('["DACH-NY/canton", "digital-asset/canton"]'), github.repository) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if RELEASE_REPOSITORY is unset
+        run: |
+          echo "::error::Set the RELEASE_REPOSITORY repository variable to the repo that publishes releases, with the same value in DACH-NY/canton and digital-asset/canton."
+          exit 1
+
   pick_runner:
     name: Pick runner
-    if: ${{ github.repository == 'DACH-NY/canton' }}
+    if: ${{ github.repository == vars.RELEASE_REPOSITORY }}
     runs-on: ubuntu-latest
     outputs:
       runner: ${{ steps.pick_runner.outputs.runner }}
@@ -92,6 +104,7 @@ jobs:
     permissions:
       actions: write
       contents: read
+      id-token: write
       issues: write
     secrets: inherit
     with:
@@ -101,7 +114,7 @@ jobs:
 
   tag_new_releases:
     name: Tag New Releases
-    if: ${{ github.repository == 'DACH-NY/canton' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-line-')) }}
+    if: ${{ github.repository == vars.RELEASE_REPOSITORY && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-line-')) }}
     needs: pick_runner
     uses: ./.github/workflows/_tag_new_releases.yml
     permissions:
@@ -117,6 +130,7 @@ jobs:
     permissions:
       actions: write
       contents: read
+      id-token: write
       issues: write
     secrets: inherit
     with:
@@ -126,12 +140,13 @@ jobs:
 
   build_and_publish_docker:
     name: Build and Publish Docker
-    if: ${{ github.repository == 'DACH-NY/canton' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ github.repository == vars.RELEASE_REPOSITORY && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') }}
     needs: [pick_runner, package_community, release_test]
     uses: ./.github/workflows/_build_and_publish_docker.yml
     permissions:
       actions: read
       contents: read
+      id-token: write
     secrets: inherit
     with:
       is_nightly_workflow: false
@@ -145,10 +160,13 @@ jobs:
       always() &&
       !cancelled() &&
       needs.compile.result == 'success' &&
-      (needs.tag_new_releases.result == 'success' || needs.tag_new_releases.result == 'skipped')
+      (needs.tag_new_releases.result == 'success' || needs.tag_new_releases.result == 'skipped') &&
+      (github.ref == 'refs/heads/main' ||
+      startsWith(github.ref, 'refs/tags/v'))
     uses: ./.github/workflows/_publish_libraries.yml
     permissions:
       contents: read
+      id-token: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -177,6 +195,10 @@ jobs:
       (github.ref == 'refs/heads/main' ||
       startsWith(github.ref, 'refs/tags/v'))
     uses: ./.github/workflows/_publish_release.yml
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -187,7 +209,7 @@ jobs:
     name: Verify Publish Release
     needs: publish_release
     if: >-
-      github.repository == 'DACH-NY/canton' &&
+      github.repository == vars.RELEASE_REPOSITORY &&
       always() &&
       !cancelled() &&
       startsWith(github.ref, 'refs/tags/v')
@@ -204,7 +226,8 @@ jobs:
 
   run_propose_script:
     name: Update main after release
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Release candidates (v3.8.0-rc1) have no release notes to copy to main.
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     needs:
       - pick_runner
       - publish_libraries
@@ -221,6 +244,7 @@ jobs:
   notify:
     name: Notify on Failure
     needs:
+      - check_release_repository
       - pick_runner
       - compile
       - package_community
@@ -243,14 +267,3 @@ jobs:
     secrets: inherit
     with:
       needs_json: ${{ toJSON(needs) }}
-      # Keep required-notify runner selection independent from pick_runner output to avoid
-      # issues with notify if pick_runner fails before emitting outputs.
-      # Keep repo-to-runner labels in sync with .github/actions/utils/pick_runner/action.yml.
-      runner: >-
-        ${{
-          case(
-            github.repository == 'DACH-NY/canton', 'dach-ny-canton',
-            github.repository == 'digital-asset/canton', 'digital-asset-canton',
-            'ubuntu-latest'
-          )
-        }}

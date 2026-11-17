@@ -351,6 +351,7 @@ object SequentialWriteDaoSpec {
     source_synchronizer_id = None,
     reassignment_id = None,
     reassignment_counter = None,
+    participant_event_category = None,
     notPersistedContractId = hashCid("24"),
     notPersistedContractKey = None,
   )
@@ -388,6 +389,7 @@ object SequentialWriteDaoSpec {
     reassignment_id = None,
     reassignment_counter = None,
     assignment_exclusivity = None,
+    participant_event_category = None,
     target_synchronizer_id = None,
     notPersistedContractKey = None,
   )

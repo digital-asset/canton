@@ -86,8 +86,8 @@ class TypeSpec extends AnyWordSpec with Matchers {
           case Pkg.BTRoundingMode => sys.error("cannot use rounding mode in interface type")
           case Pkg.BTFailureCategory => sys.error("cannot use failure category in interface type")
           case Pkg.BTBigNumeric => sys.error("cannot use big numeric in interface type")
-          case Pkg.BTAnyException =>
-            sys.error("exception not supported")
+          case Pkg.BTAnyException | Pkg.BTUint256 =>
+            sys.error(s"${bltin.getClass.getSimpleName} not supported")
         }
       case Pkg.TTyCon(tycon) => TypeCon(TypeConId(tycon), args.toImmArray.toSeq)
       case Pkg.TNat(_) => sys.error("cannot use nat type in interface type")

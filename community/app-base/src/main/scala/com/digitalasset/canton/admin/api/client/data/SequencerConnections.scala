@@ -331,9 +331,14 @@ object SubmissionRequestAmplification
 /** Configures the various delays used by the sequencer connection pool.
   *
   * @param minRestartDelay
-  *   Minimum duration after which a failed sequencer connection is restarted.
+  *   Initial delay before a failed sequencer connection is restarted.
   * @param maxRestartDelay
-  *   Maximum duration after which a failed sequencer connection is restarted.
+  *   Maximum delay before a failed sequencer connection is restarted. The delay doubles at every
+  *   restart up to this value, and goes back to `min_restart_delay` once a connection has stayed
+  *   validated for at least `min_stable_duration`.
+  * @param minStableDuration
+  *   Minimum duration a sequencer connection must stay validated for its restart delay to go back
+  *   to `min_restart_delay` when it fails. A connection that fails sooner keeps backing off.
   * @param warnValidationDelay
   *   The duration after which a warning is issued if a started connection still fails validation.
   * @param subscriptionRequestDelay
@@ -343,6 +348,7 @@ object SubmissionRequestAmplification
 final case class SequencerConnectionPoolDelays(
     minRestartDelay: config.NonNegativeFiniteDuration,
     maxRestartDelay: config.NonNegativeFiniteDuration,
+    minStableDuration: config.NonNegativeFiniteDuration,
     warnValidationDelay: config.NonNegativeFiniteDuration,
     subscriptionRequestDelay: config.NonNegativeFiniteDuration,
 ) extends PrettyPrintingFromCompanion {
@@ -354,6 +360,11 @@ final case class SequencerConnectionPoolDelays(
   ): SequencerConnectionPoolDelays =
     copy(warnValidationDelay = delay)
 
+  def withMinStableDuration(
+      duration: config.NonNegativeFiniteDuration
+  ): SequencerConnectionPoolDelays =
+    copy(minStableDuration = duration)
+
   private[canton] def toInternal: SequencerConnectionPoolDelaysInternal =
     this.transformInto[SequencerConnectionPoolDelaysInternal]
 }
@@ -363,6 +374,7 @@ object SequencerConnectionPoolDelays
   override protected val pretty: Pretty[SequencerConnectionPoolDelays] = prettyOfClass(
     param("minRestartDelay", _.minRestartDelay),
     param("maxRestartDelay", _.maxRestartDelay),
+    param("minStableDuration", _.minStableDuration),
     param("warnValidationDelay", _.warnValidationDelay),
     param("subscriptionRequestDelay", _.subscriptionRequestDelay),
   )

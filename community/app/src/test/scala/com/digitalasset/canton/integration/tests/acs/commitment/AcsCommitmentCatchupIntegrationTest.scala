@@ -27,6 +27,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsHelpers
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.Monocle.toAppliedFocusOps
 import org.slf4j.event.Level
 
@@ -107,7 +108,7 @@ sealed trait AcsCommitmentCatchupIntegrationTest
       }
 
   "Commitment catch-up" should {
-    "not trigger when the participant shouldn't implicitly have sent a commitments" in {
+    "not trigger when the participant shouldn't implicitly have sent a commitments" onlyRunLessThan ProtocolVersion.v38 in {
       implicit env =>
         import env.*
 

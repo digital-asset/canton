@@ -86,6 +86,7 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
         BTFailureCategory -> k"*",
         BTBigNumeric -> k"*",
         BTAnyException -> k"*",
+        BTUint256 -> k"*",
       )
 
       forEvery(testCases) { (bType: BuiltinType, expectedKind: Kind) =>
@@ -177,6 +178,8 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
         E"(( 1879-03-14 ))" -> T"(( Date ))",
         // ExpLitTimestamp
         E"(( 1969-07-20T20:17:00.000000Z ))" -> T"(( Timestamp ))",
+        // ExpLitUint256
+        E"(( 0xFF ))" -> T"(( Uint256 ))",
         // TextMap
         E"Λ (τ : ⋆) . (( TEXTMAP_EMPTY @τ ))" -> T"∀ (τ : ⋆) . (( TextMap τ ))",
         // GenMap
@@ -258,6 +261,32 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
         // ExpRoundingMode,
         E"""ROUNDING_UP""" ->
           T"RoundingMode",
+        // Uint256 builtins
+        E"ADD_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"SUB_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"MUL_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"DIV_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"MOD_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"EXP_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"AND_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"OR_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"XOR_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"NOT_UINT256" -> T"Uint256 → Uint256",
+        E"SHL_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"SHR_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"UINT256_TO_TEXT" -> T"Uint256 → Text",
+        E"TEXT_TO_UINT256" -> T"Text → Option Uint256",
+        E"INT64_TO_UINT256" -> T"Int64 → Uint256",
+        E"UINT256_TO_INT64" -> T"Uint256 → Int64",
+        E"ADDMOD_UINT256" -> T"Uint256 → Uint256 → Uint256 → Uint256",
+        E"MULMOD_UINT256" -> T"Uint256 → Uint256 → Uint256 → Uint256",
+        E"SDIV_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"SMOD_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"SLT_UINT256" -> T"Uint256 → Uint256 → Bool",
+        E"SGT_UINT256" -> T"Uint256 → Uint256 → Bool",
+        E"SAR_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"BYTE_UINT256" -> T"Uint256 → Uint256 → Uint256",
+        E"SIGNEXTEND_UINT256" -> T"Uint256 → Uint256 → Uint256",
         // ExpThrow
         E"Λ (σ : ⋆). λ (e : Mod:E) →  (( throw @σ @Mod:E e ))" ->
           T"∀ (σ : ⋆). Mod:E → (( σ ))",

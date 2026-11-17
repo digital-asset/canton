@@ -34,7 +34,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Probability
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.DelayUtil
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 
 import java.io.File
 import java.util.concurrent.ThreadLocalRandom
@@ -190,9 +190,10 @@ class StandaloneOrderingTopologyProvider(
   private def readSigningPublicKey(signingPublicKeyProtoFile: File) =
     SigningPublicKey
       .fromProtoV30(
+        ProtocolVersionValidation(synchronizerProtocolVersion),
         v30.SigningPublicKey.parseFrom(
           BFile(signingPublicKeyProtoFile.getAbsolutePath).byteArray
-        )
+        ),
       )
       .getOrElse(
         throw new IllegalArgumentException("Failed to parse signing public key")

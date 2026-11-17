@@ -14,7 +14,9 @@ import com.digitalasset.canton.integration.{
   ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
+  TestConsoleEnvironment,
 }
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.performance.util.ParticipantSimulator
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.topology.PartyId
@@ -54,6 +56,18 @@ sealed trait ParticipantSimulatorIntegrationTest
       )
 
   "simulate many participants with parties and commitments" in { implicit env =>
+    loggerFactory.assertLogsUnorderedOptional(
+      runSimulation(),
+      // The DB lock health check may get no answer from a heavily loaded CI machine and then
+      // rebuilds the connection, which recovers within milliseconds.
+      (
+        LogEntryOptionality.OptionalMany,
+        _.warningMessage shouldBe "Locked connection was lost, trying to rebuild",
+      ),
+    )
+  }
+
+  private def runSimulation()(implicit env: TestConsoleEnvironment): Unit = {
     import env.*
 
     clue("participant1 connect") {
@@ -193,6 +207,7 @@ sealed trait ParticipantSimulatorIntegrationTest
     }
 
     // now check that we have matched commitment periods on participant1 for all lightweight participants
+    // TODO(#35265) Replace with new lookup functions
     val stringInterning = participant1.underlying.value.sync
       .connectedSynchronizerForAlias(daName)
       .value

@@ -3,12 +3,11 @@
 
 package com.digitalasset.canton.config
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.util.BytesUnit
 import com.github.blemale.scaffeine.Scaffeine
-import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.{Executor, RejectedExecutionException}
 import scala.concurrent.ExecutionContext
@@ -118,59 +117,43 @@ final case class SessionEncryptionKeyCacheConfig(
 )
 
 /** Configuration settings for various internal caches
-  *
-  * @param indexedStrings
-  *   cache size configuration for the static string index cache
-  * @param contractStore
-  *   cache size configuration for the contract store
-  * @param topologySnapshot
-  *   cache size configuration for topology snapshots
-  * @param keyCache
-  *   cache configuration for keys in the topology snapshots to avoid loading redundant keys from
-  *   the database.
-  * @param finalizedMediatorConfirmationRequests
-  *   cache size for the finalized mediator confirmation requests such the mediator does not have to
-  *   perform a db round-trip if we have slow responders.
-  * @param transparencyCheckCache
-  *   cache configuration for the transparency check cache, which stores the hashes of the encrypted
-  *   session key randomness that has already been checked for transparency, avoiding repeating
-  *   expensive encryption operations. This is a purely local, per-node performance optimization,
-  *   which is why it is configured here rather than as part of `StaticSynchronizerParameters`: each
-  *   node is free to size and tune its own cache as it sees fit. This is unlike
-  *   `enableTransparencyChecks` in `StaticSynchronizerParameters`, which dictates whether
-  *   transparency checks are performed at all and therefore must be agreed upon by every node on
-  *   the synchronizer.
   */
-final case class CachingConfigs(
-    indexedStrings: CacheConfig = CachingConfigs.defaultStaticStringCache,
-    contractStore: CacheConfig = CachingConfigs.defaultContractStoreCache,
-    topologySnapshot: CacheConfig = CachingConfigs.defaultTopologySnapshotCache,
-    synchronizerClientMaxTimestamp: CacheConfig =
-      CachingConfigs.defaultSynchronizerClientMaxTimestampCache,
-    partyCache: CacheConfig = CachingConfigs.defaultPartyCache,
-    participantCache: CacheConfig = CachingConfigs.defaultParticipantCache,
-    keyCache: CacheConfig = CachingConfigs.defaultKeyCache,
-    sessionEncryptionKeyCache: SessionEncryptionKeyCacheConfig = SessionEncryptionKeyCacheConfig(),
-    transparencyCheckCache: CacheConfigWithTimeout = CachingConfigs.defaultTransparencyCheckCache,
-    publicKeyConversionCache: CacheConfig = CachingConfigs.defaultPublicKeyConversionCache,
-    packageVettingCache: CacheConfig = CachingConfigs.defaultPackageVettingCache,
-    packageUpgradeCache: CacheConfigWithSizeOnly = CachingConfigs.defaultPackageUpgradeCache,
-    memberCache: CacheConfig = CachingConfigs.defaultMemberCache,
-    kmsMetadataCache: CacheConfig = CachingConfigs.defaultKmsMetadataCache,
-    finalizedMediatorConfirmationRequests: CacheConfig =
-      CachingConfigs.defaultFinalizedMediatorConfirmationRequestsCache,
-    sequencerPayloadCache: CacheConfigWithMemoryBounds =
-      CachingConfigs.defaultSequencerPayloadCache,
-    sequencerCatchupPayloadCache: CacheConfigWithMemoryBounds =
-      CachingConfigs.defaultSequencerPayloadCache,
-    bftOrderingBatchCache: CacheConfigWithMemoryBounds = CachingConfigs.defaultBftOrderingBatchCache,
-)
+trait CachingConfigs {
+
+  /** Cache size configuration for the static string index cache. */
+  def indexedStrings: CacheConfig
+
+  /** Cache size configuration for topology snapshots. */
+  def topologySnapshot: CacheConfig
+  def synchronizerClientMaxTimestamp: CacheConfig
+  def partyCache: CacheConfig
+  def participantCache: CacheConfig
+
+  /** Cache configuration for keys in the topology snapshots to avoid loading redundant keys from
+    * the database.
+    */
+  def keyCache: CacheConfig
+  def sessionEncryptionKeyCache: SessionEncryptionKeyCacheConfig
+
+  /** Cache configuration for the transparency check cache, which stores the hashes of the encrypted
+    * session key randomness that has already been checked for transparency, avoiding repeating
+    * expensive encryption operations. This is a purely local, per-node performance optimization,
+    * which is why it is configured here rather than as part of `StaticSynchronizerParameters`: each
+    * node is free to size and tune its own cache as it sees fit. This is unlike
+    * `enableTransparencyChecks` in `StaticSynchronizerParameters`, which dictates whether
+    * transparency checks are performed at all and therefore must be agreed upon by every node on
+    * the synchronizer.
+    */
+  def transparencyCheckCache: CacheConfigWithTimeout
+  def publicKeyConversionCache: CacheConfig
+  def packageVettingCache: CacheConfig
+  def memberCache: CacheConfig
+  def kmsMetadataCache: CacheConfig
+}
 
 object CachingConfigs {
 
   val defaultStaticStringCache: CacheConfig =
-    CacheConfig(maximumSize = PositiveNumeric.tryCreate(10000))
-  val defaultContractStoreCache: CacheConfig =
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(10000))
   val defaultSynchronizerClientMaxTimestampCache: CacheConfig =
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(100))
@@ -186,33 +169,14 @@ object CachingConfigs {
   )
   val defaultPackageVettingCache: CacheConfig =
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(10000))
-  val defaultPackageUpgradeCache: CacheConfigWithSizeOnly = CacheConfigWithSizeOnly(
-    maximumSize = PositiveNumeric.tryCreate(10000)
-  )
   val defaultMemberCache: CacheConfig =
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(1000))
   val defaultKmsMetadataCache: CacheConfig =
     CacheConfig.apply(maximumSize = PositiveNumeric.tryCreate(20))
-  val defaultFinalizedMediatorConfirmationRequestsCache =
-    CacheConfig(maximumSize = PositiveNumeric.tryCreate(1000))
   val defaultTransparencyCheckCache: CacheConfigWithTimeout = CacheConfigWithTimeout(
     maximumSize = PositiveNumeric.tryCreate(10000),
     expireAfterTimeout = PositiveFiniteDuration.ofMinutes(5),
   )
-  val defaultSequencerPayloadCache: CacheConfigWithMemoryBounds =
-    CacheConfigWithMemoryBounds(
-      maximumMemory = PositiveNumeric.tryCreate(BytesUnit.MB(64L)),
-      expireAfterAccess = NonNegativeFiniteDuration.ofMinutes(10),
-    )
-  val defaultBftOrderingBatchCache: CacheConfigWithMemoryBounds =
-    CacheConfigWithMemoryBounds(
-      maximumMemory = PositiveNumeric.tryCreate(BytesUnit.MB(64L)),
-      expireAfterAccess = NonNegativeFiniteDuration.ofMinutes(10),
-    )
-  @VisibleForTesting
-  val testing =
-    CachingConfigs(contractStore = CacheConfig(maximumSize = PositiveNumeric.tryCreate(100)))
-
 }
 
 /** A side effect of cache operations, including get, put, invalidate and cleanup is that tasks are
@@ -230,7 +194,7 @@ class FallbackExecutor(context: ExecutionContext, loggerFactory: NamedLoggerFact
     } catch {
       case _: RejectedExecutionException =>
         logger.info(s"Falling back to direct execution for $command")
-        DirectExecutionContext(logger).execute(command)
+        directExecutionContext.execute(command)
         logger.info(s"Execution complete for: $command")
     }
 }

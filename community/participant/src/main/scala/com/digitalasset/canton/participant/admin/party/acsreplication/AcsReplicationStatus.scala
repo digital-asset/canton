@@ -9,11 +9,9 @@ import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
-  PrettyPrinting,
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.{
   AcsReplicationError,
@@ -25,6 +23,7 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplica
   EphemeralSequencerChannelProgress,
   PartyToParticipantTopologyTransaction,
 }
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator.AcsReplicationRequestId
 import com.digitalasset.canton.participant.protocol.party.PartyReplicationFileImporter
 import com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationProcessor
 import com.digitalasset.canton.participant.protocol.v30
@@ -38,6 +37,8 @@ import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, RepairCounter}
 import com.google.protobuf.ByteString
 import io.scalaland.chimney.dsl.*
+
+import java.io.OutputStream as JOutputStream
 
 /** Internal state representation of the ACS replication process. Refer to acs_replication.proto
   * AcsReplicationStatus for the semantics.
@@ -116,6 +117,35 @@ final case class AcsReplicationStatus(
     case AcsReplicationFailed(_) => true
     case Disconnected(_) => false
   }
+
+  /** Checks whether the ACS needs to be replicated from beginning in case of restart, by resetting
+    * the replication progress and any error.
+    *
+    * ACS replication has to be restarted from beginning if the following conditions are met:
+    *   - replicated ACS contracts are not persisted (replication destination is OutputStream)
+    *   - ACS replication has not completed yet
+    *   - The sequencer channel agreement has not been archived yet
+    *
+    * If the sequencer channel agreement exists and the ACS contract transfer already started, it
+    * will start from the beginning. If the sequencer channel agreement hasn't been created yet, the
+    * replication will be picked up at a point where the previous attempt ended.
+    *
+    * @return
+    *   whether ACS replication restart requires replication from beginning
+    */
+  def restartRequiresReplicationFromBeginning: Boolean =
+    !hasCompleted && agreementStatus != AgreementStatus.Archived &&
+      params.acsReplicationDestination.restartNeedsReplicationFromBeginning
+
+  /** Resets the ACS replication progress, removes an existing error and sets a new output stream.
+    * Callers must check [[restartRequiresReplicationFromBeginning]].
+    */
+  def resetProgress(destination: AcsReplicationDestination.OutputStream): AcsReplicationStatus =
+    copy(
+      params = params.copy(acsReplicationDestination = destination),
+      replicationO = None,
+      errorO = None,
+    )(representativeProtocolVersion)
 
   def toProtoV30: v30.AcsReplicationStatus = v30.AcsReplicationStatus(
     Some(params.toProtoV30),
@@ -200,7 +230,7 @@ object AcsReplicationStatus
   )
 
   final case class AcsReplicationParameters(
-      requestId: AddPartyRequestId,
+      requestId: AcsReplicationRequestId,
       partyId: PartyId,
       synchronizerId: SynchronizerId,
       sourceParticipantId: ParticipantId,
@@ -296,7 +326,15 @@ object AcsReplicationStatus
       * operations store in
       * [[com.digitalasset.canton.participant.store.AcsReplicationStateManager]].
       */
-    sealed trait AcsReplicationDestination extends PrettyPrinting with Product with Serializable {
+    sealed trait AcsReplicationDestination
+        extends PrettyPrintingFromCompanion
+        with Product
+        with Serializable {
+
+      /** Whether the ACS must be replicated from zero in case of restart.
+        */
+      def restartNeedsReplicationFromBeginning: Boolean
+
       def toProtoV30: v30.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
     }
 
@@ -310,9 +348,17 @@ object AcsReplicationStatus
         * Contract handler is created by the ACS replication component.
         */
       case object Persistence extends AcsReplicationDestination {
+        override def restartNeedsReplicationFromBeginning: Boolean = false
+
         override def toProtoV30: ReplicationDestinationProto =
           ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_PERSISTENCE
 
+        override def prettyCompanion: PrettyPrintingCompanion[Persistence.this.type] =
+          PersistencePrettyPrintingCompanion
+      }
+
+      private object PersistencePrettyPrintingCompanion
+          extends PrettyPrintingCompanion[Persistence.type] {
         override protected val pretty: Pretty[Persistence.type] = prettyOfObject[Persistence.type]
       }
 
@@ -320,12 +366,24 @@ object AcsReplicationStatus
         * TP restart but has to be started from scratch.
         *
         * Contract handler is created by the ACS replication component.
+        *
+        * @param abort
+        *   unblocks and fails any write to `destination` that blocks on a slow consumer, so that a
+        *   superseded ACS replication processor can be shut down on restart. Must not block itself.
         */
-      case object OutputStream extends AcsReplicationDestination {
+      final case class OutputStream(destination: JOutputStream)(val abort: () => Unit)
+          extends AcsReplicationDestination {
+        override def restartNeedsReplicationFromBeginning: Boolean = true
+
         override def toProtoV30: ReplicationDestinationProto =
           ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_OUTPUT_STREAM
 
-        override protected val pretty: Pretty[OutputStream.type] = prettyOfObject[OutputStream.type]
+        override def prettyCompanion: PrettyPrintingCompanion[OutputStream.this.type] =
+          OutputStream
+      }
+
+      object OutputStream extends PrettyPrintingCompanion[OutputStream] {
+        override protected val pretty: Pretty[OutputStream] = prettyOfClass()
       }
 
       def fromProtoV30(
@@ -336,7 +394,12 @@ object AcsReplicationStatus
             case ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_PERSISTENCE =>
               Right(Some(Persistence))
             case ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_OUTPUT_STREAM =>
-              Right(Some(OutputStream))
+              Left(
+                ProtoDeserializationError.InvariantViolation(
+                  "acs_replication_destination",
+                  "output stream destination cannot be deserialized",
+                )
+              )
             case ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_UNSPECIFIED =>
               Left(ProtoDeserializationError.FieldNotSet("acs_replication_destination"))
             case ReplicationDestinationProto.Unrecognized(unknown) =>

@@ -66,7 +66,8 @@ private[reassignment] trait ReassignmentValidationResult {
       reassignmentContractAuthenticationResult.isRight &&
       commonValidationResult.submitterCheckResult.isEmpty &&
       commonValidationResult.reassignmentIdResult.isEmpty &&
-      commonValidationResult.multiSynchronizerFeatureFlagCheckResult.isEmpty
+      commonValidationResult.multiSynchronizerFeatureFlagCheckResult.isEmpty &&
+      commonValidationResult.replayCheckResult.isEmpty
 
 }
 
@@ -90,6 +91,10 @@ private[reassignment] object ReassignmentValidationResult {
     def submitterCheckResult: Option[ReassignmentValidationError]
     def reassignmentIdResult: Option[ReassignmentValidationError]
     def multiSynchronizerFeatureFlagCheckResult: Option[ReassignmentValidationError]
+
+    /** Only set on the submitting participant: a replay is detected with the submission tracker
+      */
+    def replayCheckResult: Option[ReassignmentValidationError]
   }
 
   private[reassignment] trait ReassigningParticipantValidationResult {

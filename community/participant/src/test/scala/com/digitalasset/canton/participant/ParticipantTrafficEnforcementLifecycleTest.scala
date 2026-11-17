@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.participant.ParticipantNodeBootstrap.ParticipantServices
+import com.digitalasset.canton.participant.commitment.AcsCommitmentProcessorManager
 import com.digitalasset.canton.participant.ledger.api.*
 import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
 import com.digitalasset.canton.participant.store.ParticipantNodePersistentState
@@ -47,7 +48,7 @@ class ParticipantTrafficEnforcementLifecycleTest extends BaseTestWordSpec with H
       startableStoppableLedgerApiDependentServices =
         mock[StartableStoppableLedgerApiDependentServices],
       participantTopologyDispatcher = mock[ParticipantTopologyDispatcher],
-      acsCommitmentProcessorManagerO = None,
+      acsCommitmentProcessorManager = mock[LifeCycleContainer[AcsCommitmentProcessorManager]],
     )
     Seq[LifeCycleContainer[?]](
       app,
@@ -56,6 +57,7 @@ class ParticipantTrafficEnforcementLifecycleTest extends BaseTestWordSpec with H
       services.ledgerApiIndexerContainer,
       services.ledgerApiIndexServiceContainer,
       services.ledgerApiServerContainer,
+      services.acsCommitmentProcessorManager,
     ).foreach { container =>
       when(container.initializeNext()).thenReturn(FutureUnlessShutdown.unit)
       when(container.currentAutoCloseable()).thenCallRealMethod()

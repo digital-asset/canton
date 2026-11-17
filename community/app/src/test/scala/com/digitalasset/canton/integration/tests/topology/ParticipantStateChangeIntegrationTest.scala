@@ -15,6 +15,7 @@ import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.NoSy
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.util.SequencerPenaltyUtils.sequencerPenalty
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
@@ -144,7 +145,7 @@ trait ParticipantStateChangeIntegrationTest
     assertPingSucceeds(participant2, participant1)
   }
 
-  "A disabled participant must get kicked out" taggedAs synchronizerAvailability.setAttack(
+  "A disabled participant must be denied access" taggedAs synchronizerAvailability.setAttack(
     Attack(
       actor = "A malicious participant or application",
       threat = "Overload the synchronizer",
@@ -154,15 +155,18 @@ trait ParticipantStateChangeIntegrationTest
     import env.*
 
     val subscriptionPermissionDenied =
-      "Permanently closing sequencer subscription due to permission denied"
+      "Closing sequencer subscription due to permission denied"
     loggerFactory.assertLoggedWarningsAndErrorsSeq(
       {
         // deactivate participant1 on the synchronizer.
-        // the sequencer should automatically disconnect participant1
+        // the sequencer should deny the subscriptions of participant1, which keeps retrying in case it is re-enabled
         changeParticipantPermission(participant1.id, ParticipantPermission.Submission, Some(300))
         eventually() {
-          participant1.synchronizers.is_connected(sequencer1.synchronizer_id) shouldBe false
+          sequencerPenalty(participant1, sequencer1.synchronizer_id, sequencer1.id) should be > 0.0
         }
+
+        // stop the retries of participant1 until it is re-enabled
+        participant1.synchronizers.disconnect_all()
       },
       forEvery(_) {
         _.message should (include(MemberAccessDisabled(participant1.id).reason) or

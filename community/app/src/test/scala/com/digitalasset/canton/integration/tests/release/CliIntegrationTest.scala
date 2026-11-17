@@ -123,7 +123,7 @@ class CliIntegrationTest extends ReleaseArtifactIntegrationTestUtils {
           | -C canton.sequencers.sequencer1.sequencer.config.storage.type=memory
           | -C canton.sequencers.sequencer1.admin-api.port=5002
           | -C canton.sequencers.sequencer1.public-api.port=5001
-          | -C canton.sequencers.sequencer1.sequencer.type=reference
+          | -C canton.sequencers.sequencer1.sequencer.type=BFT
           | -C canton.sequencers.sequencer1.storage.type=memory
           | -C canton.mediators.mediator1.admin-api.port=6002
           | $cantonShouldStartFlags""".stripMargin.!(processLogger)

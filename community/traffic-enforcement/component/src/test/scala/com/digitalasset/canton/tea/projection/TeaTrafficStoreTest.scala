@@ -558,6 +558,13 @@ trait TeaTrafficStoreTest
             .insertCorrelation(withAccount.copy(account = CorrelationAccount.Account(butternut)))
             .value
           unchanged <- store.correlation(keyA1)
+          wrongTime <- store.deleteCorrelation(keyA1, timestamp.immediateSuccessor).value
+          afterWrongTime <- store.correlation(keyA1)
+          deleted <- store.deleteCorrelation(keyA1, timestamp).value
+          afterDelete <- store.correlation(keyA1)
+          deletedAgain <- store.deleteCorrelation(keyA1, timestamp).value
+          deletedMissing <- store.deleteCorrelation(CorrelationKey(hashB, "s1"), timestamp).value
+          otherKey <- store.correlation(keyA2)
         } yield {
           foundWithAccount shouldBe Some(withAccount)
           foundWithoutAccount shouldBe Some(withoutAccount)
@@ -565,6 +572,13 @@ trait TeaTrafficStoreTest
           assertConflict(sameAccountConflict)
           assertConflict(otherAccountConflict)
           unchanged shouldBe Some(withAccount)
+          wrongTime shouldBe Right(())
+          afterWrongTime shouldBe Some(withAccount)
+          deleted shouldBe Right(())
+          afterDelete shouldBe None
+          deletedAgain shouldBe Right(())
+          deletedMissing shouldBe Right(())
+          otherKey shouldBe Some(withoutAccount)
         }
       }
 

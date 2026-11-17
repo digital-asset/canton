@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencing.traffic.store
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -13,6 +12,10 @@ import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.DbTest
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SequencerWriterConfig
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerBatchingConfig,
+  SequencerCachingConfigs,
+}
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
 import com.digitalasset.canton.synchronizer.sequencing.traffic.store.db.DbTrafficConsumedStore
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
@@ -29,10 +32,9 @@ trait DbTrafficConsumedStoreTest extends AsyncWordSpec with BaseTest with Traffi
     bufferedEventsPreloadBatchSize = SequencerWriterConfig.DefaultBufferedEventsPreloadBatchSize,
     timeouts,
     loggerFactory,
-    blockSequencerMode = true,
     sequencerMember = DefaultTestIdentities.sequencerId,
-    cachingConfigs = CachingConfigs(),
-    batchingConfig = BatchingConfig(),
+    cachingConfigs = SequencerCachingConfigs(),
+    batchingConfig = SequencerBatchingConfig(),
     sequencerMetrics = SequencerMetrics.noop("db-traffic-consumed-store-test"),
   )
   def registerMemberInSequencerStore(member: Member): FutureUnlessShutdown[Unit] =
@@ -54,7 +56,7 @@ trait DbTrafficConsumedStoreTest extends AsyncWordSpec with BaseTest with Traffi
         storage = storage,
         timeouts = timeouts,
         loggerFactory = loggerFactory,
-        batchingConfig = BatchingConfig(),
+        batchingConfig = SequencerBatchingConfig(),
         sequencerStore,
       )
     )

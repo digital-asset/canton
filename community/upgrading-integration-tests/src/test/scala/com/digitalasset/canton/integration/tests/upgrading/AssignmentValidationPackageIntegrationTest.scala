@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.integration.tests.upgrading
 
-import com.daml.ledger.api.v2.value as ApiValue
-import com.daml.ledger.api.v2.value.Value
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
+import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.damltests.upgrade.v1.java.upgrade.Quote as QuoteV1
 import com.digitalasset.canton.damltests.upgrade.v2.java.upgrade.Quote as QuoteV2
@@ -13,6 +13,7 @@ import com.digitalasset.canton.integration.util.{
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
   PartiesAllocator,
+  UpdateFormatHelpers,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -26,11 +27,9 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{LfPackageId, protocol}
+import com.digitalasset.canton.{LfPackageId, config, protocol}
 import com.digitalasset.daml.lf.data.Ref.IdString
-import monocle.Monocle.toAppliedFocusOps
 
-import scala.collection.immutable.Map
 import scala.jdk.CollectionConverters.{CollectionHasAsScala, SeqHasAsJava}
 
 class AssignmentValidationPackageIntegrationTest
@@ -297,7 +296,7 @@ class AssignmentValidationPackageIntegrationTest
       p2Event.getCreateArguments.getRecordId.packageId shouldBe QuoteV2.PACKAGE_ID
 
       // Other than type info the values are the same
-      stripRecord(p2Event.getCreateArguments) shouldBe stripRecord(p1Event.getCreateArguments)
+      p2Event.getCreateArguments.fields shouldBe p1Event.getCreateArguments.fields
   }
 
   "Assign the contract from a synchronizer that only has V2 of the package" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
@@ -440,15 +439,93 @@ class AssignmentValidationPackageIntegrationTest
 
   }
 
-  // Not general purpose
-  private def stripRecord(record: ApiValue.Record): Value = stripValue(
-    ApiValue.Value(ApiValue.Value.Sum.Record(record))
-  )
+  "Auto reassignment package selection" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+    implicit env =>
+      import env.*
 
-  private def stripValue(value: ApiValue.Value): ApiValue.Value =
-    ApiValue.Value(value.sum match {
-      case v: ApiValue.Value.Sum.Record => v.focus(_.value.recordId).replace(None)
-      case other => other
-    })
+      val (alice, quoteCid) = aliceQuote()
+
+      val updateFormat = UpdateFormatHelpers.getUpdateFormat(
+        Set(alice),
+        transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+        includeReassignments = true,
+      )
+
+      val command = new QuoteV2.ContractId(quoteCid.coid)
+        .exerciseQ_Fetch(alice.toProtoPrimitive)
+        .commands()
+        .loneElement
+
+      val offset1 = participant1.ledger_api.state.end()
+
+      // Exercise on acme (causes reassignment from da)
+      participant1.ledger_api.javaapi.commands
+        .submit(
+          actAs = Seq(alice),
+          commands = Seq(command),
+          userPackageSelectionPreference = Seq.empty,
+          synchronizerId = Some(acmeId),
+        )
+
+      inside(
+        participant1.ledger_api.updates.updates(
+          updateFormat,
+          completeAfter = 3,
+          beginOffsetExclusive = offset1,
+          timeout = config.NonNegativeDuration.ofSeconds(5),
+        )
+      ) {
+        case Seq(
+              _: UpdateService.UnassignedWrapper,
+              aw: UpdateService.AssignedWrapper,
+              tw: UpdateService.TransactionWrapper,
+            ) => {
+          // V2 is usd as only this is available on acme
+          tw.transaction.events.loneElement.getExercised.getTemplateId.packageId shouldBe QuoteV2.PACKAGE_ID
+
+          // Both V1 or V2 could be used for unassignment validation, V2 will be chosen due to the higher package version (see unit test)
+
+          // The package used in the TX is also used as the target validation package
+          aw.events.loneElement.getCreatedEvent.representativePackageId shouldBe QuoteV2.PACKAGE_ID
+
+        }
+      }
+
+      val offset2 = participant1.ledger_api.state.end()
+
+      // Exercise on da (causes reassignment from acme)
+      participant1.ledger_api.javaapi.commands
+        .submit(
+          actAs = Seq(alice),
+          commands = Seq(command),
+          // The target da with validate using V1 but V2 will be used for unassigning on the source synchronizer
+          userPackageSelectionPreference = Seq(v1PackageId),
+          synchronizerId = Some(daId),
+        )
+
+      inside(
+        participant1.ledger_api.updates.updates(
+          updateFormat,
+          completeAfter = 3,
+          beginOffsetExclusive = offset2,
+          timeout = config.NonNegativeDuration.ofSeconds(5),
+        )
+      ) {
+        case Seq(
+              _: UpdateService.UnassignedWrapper,
+              aw: UpdateService.AssignedWrapper,
+              tw: UpdateService.TransactionWrapper,
+            ) => {
+          // V1 is used in the transaction due to user package selection preference
+          tw.transaction.events.loneElement.getExercised.getTemplateId.packageId shouldBe QuoteV1.PACKAGE_ID
+
+          // Only V2 is available on acme so must have been used for the unassignment
+
+          // The package used in the TX is also used as the target validation package
+          aw.events.loneElement.getCreatedEvent.representativePackageId shouldBe QuoteV1.PACKAGE_ID
+        }
+      }
+
+  }
 
 }

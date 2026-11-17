@@ -24,7 +24,6 @@ class SequencerStoreTestInMemory extends AsyncWordSpec with BaseTest with Sequen
       new InMemorySequencerStore(
         protocolVersion = testedProtocolVersion,
         sequencerMember = sequencerMember,
-        blockSequencerMode = true,
         loggerFactory = loggerFactory,
         timeouts = timeouts,
         sequencerMetrics = sequencerMetrics(),
@@ -79,7 +78,6 @@ private class StaleRegistrationSequencerStore(
     extends InMemorySequencerStore(
       protocolVersion,
       sequencerMember,
-      blockSequencerMode = true,
       loggerFactory,
       timeouts,
       sequencerMetrics,

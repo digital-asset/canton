@@ -113,10 +113,8 @@ class ParticipantReplicaManager(
           _ <- participantServices.ledgerApiServerContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: Ledger API Server started")
 
-          _ <- participantServices.acsCommitmentProcessorManagerO.traverse(_.initializeNext())
-          _ = participantServices.acsCommitmentProcessorManagerO.foreach(_ =>
-            logger.info("Participant replica is becoming active: ACS digest processing started")
-          )
+          _ <- participantServices.acsCommitmentProcessorManager.initializeNext()
+          _ = logger.info("Participant replica is becoming active: ACS digest processing started")
 
           // Start up the Ledger API-dependent Canton services
           _ = participantServices.startableStoppableLedgerApiDependentServices.start()
@@ -191,7 +189,7 @@ class ParticipantReplicaManager(
           )
         }
 
-        participantServices.acsCommitmentProcessorManagerO.foreach(_.closeCurrent())
+        participantServices.acsCommitmentProcessorManager.closeCurrent()
         logger.info("Participant replica is becoming passive: ACS digest processing stopped")
 
         // Stop the Ledger API server

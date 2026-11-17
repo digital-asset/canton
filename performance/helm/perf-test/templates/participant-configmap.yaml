@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ $.Release.Name }}-participant-init"
+data:
+  init.sh: |
+
+    #!/bin/bash
+    set -e
+
+    # Log in as the root POSTGRES_USER and execute these commands
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+        -- Create the databases
+        create database participant1;
+        create database participant2;
+        create database participant3;
+    EOSQL

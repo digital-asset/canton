@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
@@ -19,6 +20,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.PbftBlockState.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.SegmentState.computeLeaderOfView
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.Block
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation.ViewChangeMessageValidator
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
@@ -34,17 +36,20 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
   CommitCertificate,
+  ConsensusCertificate,
   PrepareCertificate,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
   OrderingTopology,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.RetransmissionsMessage.RetransmissionResponse
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.BlockStatus
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 import org.slf4j.event.Level.{INFO, WARN}
@@ -61,6 +66,236 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
   private val metrics = SequencerMetrics.noop(getClass.getSimpleName).bftOrdering
 
   "SegmentState" should {
+
+    "process legacy and sender-cleared NewView nesting equivalently" in {
+      val nextView = ViewNumber(1)
+      val sender = otherId1
+
+      def legacyPrePrepare(pp: SignedMessage[PrePrepare]): SignedMessage[PrePrepare] = {
+        val message = pp.message
+        SignedMessage(
+          PrePrepare.create(
+            message.blockMetadata,
+            message.viewNumber,
+            message.block,
+            message.canonicalCommitSet,
+            message.from,
+            Some(sender),
+          ),
+          pp.signature,
+        )
+      }
+
+      val prepared = createPrepareCertificate(slotNumbers.head1, ViewNumber.First, myId)
+      val committed = createCommitCertificate(slotNumbers(1), ViewNumber.First, myId)
+      val legacyPrepared = PrepareCertificate(
+        legacyPrePrepare(prepared.prePrepare),
+        prepared.prepares.map { signed =>
+          val message = signed.message
+          SignedMessage(
+            Prepare.create(
+              message.blockMetadata,
+              message.viewNumber,
+              message.hash,
+              message.from,
+              Some(sender),
+            ),
+            signed.signature,
+          )
+        },
+      )
+      val legacyCommitted = CommitCertificate(
+        legacyPrePrepare(committed.prePrepare),
+        committed.commits.map { signed =>
+          val message = signed.message
+          SignedMessage(
+            Commit.create(
+              message.blockMetadata,
+              message.viewNumber,
+              message.hash,
+              message.localTimestamp,
+              message.from,
+              Some(sender),
+            ),
+            signed.signature,
+          )
+        },
+      )
+      // Reconstruct the old parser's result: every nested PBFT message inherited the outer sender.
+      val legacySignedNewView = createNewView(
+        nextView,
+        sender,
+        allIds.take(fullMembership.orderingTopology.strongQuorum).map { from =>
+          ViewChange
+            .create(
+              blockMetaData,
+              nextView,
+              Seq[ConsensusCertificate](legacyPrepared, legacyCommitted),
+              from,
+              Some(sender),
+            )
+            .fakeSign
+        },
+        Seq(
+          legacyPrepared.prePrepare,
+          legacyCommitted.prePrepare,
+          legacyPrePrepare(createBottomPrePrepare(slotNumbers(2), nextView, sender)),
+        ),
+        Some(sender),
+      )
+      val currentSignedPbftNetworkMessage =
+        IssConsensusModule
+          .parseNetworkMessage(
+            ProtocolVersionValidation.AlwaysValidation,
+            BftOrdererLimits.default,
+            legacySignedNewView.toProtoV1,
+            sender,
+          )
+          .value
+      val currentNewView = currentSignedPbftNetworkMessage.message match {
+        case nv: NewView => nv
+        case other => fail(s"Expected NewView, got $other")
+      }
+      currentNewView should not be legacySignedNewView.message
+      currentSignedPbftNetworkMessage.toProtoV1 shouldBe legacySignedNewView.toProtoV1
+      currentNewView.prePrepares.map(_.message.hash) shouldBe
+        legacySignedNewView.message.prePrepares.map(_.message.hash)
+      currentNewView.prePrepares.foreach(_.message.actualSender shouldBe None)
+      legacySignedNewView.message.prePrepares.foreach(_.message.actualSender shouldBe Some(sender))
+
+      val validator = new ViewChangeMessageValidator(fullMembership, slotNumbers)
+      validator.validateNewViewMessage(legacySignedNewView.message) shouldBe Right(())
+      validator.validateNewViewMessage(currentNewView) shouldBe Right(())
+      legacySignedNewView.message.viewChanges.foreach { legacyViewChange =>
+        val parsed =
+          IssConsensusModule
+            .parseNetworkMessage(
+              ProtocolVersionValidation.AlwaysValidation,
+              BftOrdererLimits.default,
+              legacyViewChange.toProtoV1,
+              sender,
+            )
+            .value
+        val currentViewChange = parsed.message match {
+          case vc: ViewChange => vc
+          case other => fail(s"Expected ViewChange, got $other")
+        }
+        currentViewChange should not be legacyViewChange.message
+        currentViewChange.actualSender shouldBe Some(sender)
+        parsed.toProtoV1 shouldBe legacyViewChange.toProtoV1
+        validator.validateViewChangeMessage(legacyViewChange.message) shouldBe Right(())
+        validator.validateViewChangeMessage(currentViewChange) shouldBe Right(())
+      }
+
+      def process(message: SignedMessage[NewView]): Seq[ProcessResult] = {
+        val segment = createSegmentState()
+        val results = assertLogs(
+          segment.processEvent(PbftSignedNetworkMessage(message)),
+          log => {
+            log.level shouldBe INFO
+            log.message should include("moving from view number 0 to 1")
+          },
+        )
+        segment.currentView shouldBe nextView
+        segment.isViewChangeInProgress shouldBe false
+        results.map {
+          case completed: ViewChangeCompleted =>
+            completed.store.value.viewChangeMessage.toProtoV1 shouldBe legacySignedNewView.toProtoV1
+            completed.copy(store = None)
+          case CompletedBlock(certificate, tc) =>
+            CompletedBlock(
+              CommitCertificate
+                .fromProto(
+                  ProtocolVersionValidation.AlwaysValidation,
+                  BftOrdererLimits.default,
+                  certificate.toProto,
+                )
+                .value,
+              tc,
+            )
+          case result => result
+        }
+      }
+
+      val legacyResults = process(legacySignedNewView)
+      val currentResults =
+        process(SignedMessage(currentNewView, currentSignedPbftNetworkMessage.signature))
+      currentResults shouldBe legacyResults
+      currentResults.collect { case SignPbftMessage(prepare: Prepare) => prepare.hash } shouldBe
+        Seq(
+          prepared.prePrepare.message.hash,
+          legacySignedNewView.message.prePrepares(2).message.hash,
+        )
+      currentResults.collect { case CompletedBlock(certificate, _) =>
+        certificate.toProto
+      } shouldBe Seq(committed.toProto)
+    }
+
+    "complete the same blocks from legacy and sender-cleared retransmission response certificates" in {
+      val sender = otherId1
+      val legacyCertificates = slotNumbers.map { blockNumber =>
+        val certificate = createCommitCertificate(blockNumber, ViewNumber.First, myId)
+        val pp = certificate.prePrepare.message
+        CommitCertificate(
+          PrePrepare
+            .create(
+              pp.blockMetadata,
+              pp.viewNumber,
+              pp.block,
+              pp.canonicalCommitSet,
+              pp.from,
+              Some(sender),
+            )
+            .fakeSign,
+          certificate.commits.map { signed =>
+            val commit = signed.message
+            Commit
+              .create(
+                commit.blockMetadata,
+                commit.viewNumber,
+                commit.hash,
+                commit.localTimestamp,
+                commit.from,
+                Some(sender),
+              )
+              .fakeSign
+          },
+        )
+      }
+      val legacyRetransmissionResponse = RetransmissionResponse(sender, legacyCertificates)
+      val parsedRetransmissionResponse = RetransmissionResponse
+        .fromProto(
+          ProtocolVersionValidation.AlwaysValidation,
+          BftOrdererLimits.default,
+          sender,
+          legacyRetransmissionResponse.toProto.message.retransmissionResponse.value,
+        )
+        .value
+      parsedRetransmissionResponse should not be legacyRetransmissionResponse
+      parsedRetransmissionResponse.from shouldBe sender
+      parsedRetransmissionResponse.toProto shouldBe legacyRetransmissionResponse.toProto
+      parsedRetransmissionResponse.commitCertificates.foreach { certificate =>
+        certificate.prePrepare.message.actualSender shouldBe None
+        certificate.commits.foreach(_.message.actualSender shouldBe None)
+      }
+
+      def process(response: RetransmissionResponse): Seq[Seq[v30.CommitCertificate]] = {
+        val segment = createSegmentState()
+        val completed = response.commitCertificates.map { certificate =>
+          val results = assertNoLogs(
+            segment.processEvent(RetransmittedCommitCertificate(response.from, certificate))
+          )
+          results shouldBe Seq(CompletedBlock(certificate, traceContext))
+          segment.confirmCompleteBlockStored(certificate.blockMetadata.blockNumber)
+          results.collect { case CompletedBlock(cert, _) => cert.toProto }
+        }
+        segment.isSegmentComplete shouldBe true
+        completed
+      }
+
+      process(parsedRetransmissionResponse) shouldBe process(legacyRetransmissionResponse)
+    }
+
     "complete once all blocks are committed" in {
       val segmentState = createSegmentState()
 
@@ -2010,6 +2245,22 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
       }
       retransmissionResult2.commitCerts shouldBe empty
       retransmissionResult2.messages should contain allOf (other2viewChange, viewChange2, viewChange3)
+    }
+
+    "retransmit with no view change messages" in {
+      val segmentState = createSegmentState()
+
+      segmentState.currentView shouldBe 0
+      segmentState.isViewChangeInProgress shouldBe false
+
+      val retransmissionResult = {
+        val view0ProgressSegmentStatus =
+          ConsensusStatus.SegmentStatus.InViewChange(ViewNumber(0), Seq.empty, Seq.empty)
+        segmentState.messagesToRetransmit(otherId1, view0ProgressSegmentStatus)
+      }
+
+      retransmissionResult.commitCerts shouldBe empty
+      retransmissionResult.messages shouldBe empty
     }
 
     "retransmit completed block to remote nodes that are in higher view" in {

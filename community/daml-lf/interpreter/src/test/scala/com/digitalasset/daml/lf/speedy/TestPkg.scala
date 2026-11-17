@@ -445,20 +445,21 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
               val upd = cmd match {
                 case Command.Create(templateId, argument) =>
                   conductor.handleCommand(
-                    Question.Cmd.Create(templateId, argument.asInstanceOf[SValue.SRecord])
+                    Question.Cmd.Create(templateId, argument.asInstanceOf[SValue.SRecord], None)
                   )
                 case Command.ExerciseTemplate(templateId, contractId, choiceId, argument) =>
                   conductor.handleCommand(
-                    Question.Cmd.ExerciseTemplate(templateId, contractId.value, choiceId, argument)
+                    Question.Cmd
+                      .ExerciseTemplate(templateId, contractId.value, choiceId, argument, None)
                   )
                 case Command.ExerciseInterface(interfaceId, contractId, choiceId, argument) =>
                   conductor.handleCommand(
                     Question.Cmd
-                      .ExerciseInterface(interfaceId, contractId.value, choiceId, argument)
+                      .ExerciseInterface(interfaceId, contractId.value, choiceId, argument, None)
                   )
                 case Command.ExerciseByKey(templateId, contractKey, choiceId, argument) =>
                   conductor.handleCommand(
-                    Question.Cmd.ExerciseByKey(templateId, contractKey, choiceId, argument)
+                    Question.Cmd.ExerciseByKey(templateId, contractKey, choiceId, argument, None)
                   )
                 case Command.CreateAndExercise(
                       templateId,
@@ -468,22 +469,31 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
                     ) =>
                   for {
                     cid <- conductor.handleCommand(
-                      Question.Cmd.Create(templateId, createArgument.asInstanceOf[SValue.SRecord])
+                      Question.Cmd
+                        .Create(templateId, createArgument.asInstanceOf[SValue.SRecord], None)
                     )
                     res <- conductor.handleCommand(
                       Question.Cmd
-                        .ExerciseTemplate(templateId, asSCid(cid).value, choiceId, choiceArgument)
+                        .ExerciseTemplate(
+                          templateId,
+                          asSCid(cid).value,
+                          choiceId,
+                          choiceArgument,
+                          None,
+                        )
                     )
                   } yield res
                 case Command.FetchTemplate(templateId, coid) =>
-                  conductor.handleCommand(Question.Cmd.FetchTemplate(templateId, coid.value))
+                  conductor.handleCommand(Question.Cmd.FetchTemplate(templateId, coid.value, None))
                 case Command.FetchInterface(interfaceId, coid) =>
-                  conductor.handleCommand(Question.Cmd.FetchInterface(interfaceId, coid.value))
+                  conductor.handleCommand(
+                    Question.Cmd.FetchInterface(interfaceId, coid.value, None)
+                  )
                 case Command.FetchByKey(templateId, key) =>
-                  conductor.handleCommand(Question.Cmd.FetchByKey(templateId, key))
+                  conductor.handleCommand(Question.Cmd.FetchByKey(templateId, key, None))
                 case Command.QueryNByKey(templateId, n, key) =>
                   conductor.handleCommand(
-                    Question.Cmd.QueryContractKey(templateId, key, n.value.toInt)
+                    Question.Cmd.QueryContractKey(templateId, key, n.value.toInt, None)
                   )
               }
               for {

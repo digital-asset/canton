@@ -249,15 +249,6 @@
             <maxLevel>INFO</maxLevel>
         </rewrite>
 
-        <!-- shutdown issues in ledger-api server TODO(#11534) -->
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>com.digitalasset.canton.platform.apiserver.error.ErrorInterceptor</logger>
-            <contains>LEDGER_API_INTERNAL_ERROR</contains>
-            <exceptionMessage>INTERNAL: Task com.codahale.metrics</exceptionMessage>
-            <maxLevel>INFO</maxLevel>
-            <testing>true</testing>
-        </rewrite>
-
         <!-- This may sometimes lead to subsequent errors (e.g. api server fails to startup), but quite often it can simply be ignored. Matches both lines here:
                Trying to gather entropy from the underlying operating system to initialized the contract ID seeding, but the entropy pool seems empty.
                In CI environments environment consider using the "testing-weak" mode, that may produce insecure contract IDs but does not block on startup. -->

@@ -8,21 +8,18 @@ inputs:
   gar_maven_repo_url:
     description: Target GAR Maven repository URL
     required: true
-  gac_json:
-    description: GCP service account key JSON for GAR
-    required: true
 
 runs:
   using: composite
   steps:
     - name: Setup GCP credentials for GAR
+      id: gcp
       uses: ./.github/actions/publish/setup_gcp_gar
-      with:
-        gac_json: ${{ inputs.gac_json }}
 
     - name: Publish API artifacts to Google Artifact Registry
       uses: ./.github/actions/nix/nix_run
       env:
+        GAR_ACCESS_TOKEN: ${{ steps.gcp.outputs.access_token }}
         GAR_MAVEN_REPO_URL: ${{ inputs.gar_maven_repo_url }}
         RELEASE_SUFFIX: ${{ inputs.release_suffix }}
       with:

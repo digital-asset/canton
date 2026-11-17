@@ -23,6 +23,8 @@ _Write summary of release_
 - Ledger API:
   - `SYNC_SERVICE_BECAME_PASSIVE` is no longer reported, and `SUBMISSION_DURING_SHUTDOWN` uses the status code
     `UNAVAILABLE` instead of `ABORTED`.
+  - Scope-only JWTs, i.e. tokens with a `scope` claim but no audience, are rejected by default. The feature flag
+    `canton.features.deprecated.enable-scope-only-jwt = true` re-enables them until their removal.
 - Admin API and console:
   - A participant that registers a synchronizer with explicit onboarding transactions does not push its authorized
     store to that synchronizer automatically.
@@ -30,6 +32,8 @@ _Write summary of release_
   - (*) Synchronizers on protocol version 37 are not affected. Protocol version 38 will be rolled out as a new protocol
     version.
 - Configuration:
+  - An `auth-services` entry with a `target-scope` but no `target-audience` is rejected unless scope-only JWTs are
+    re-enabled with the feature flag.
   - Sequencer drivers (such as CometBFT) are no longer supported.
   - The Docker images enable the HTTP readiness endpoint by default, and the `HEALTHCHECK` of the
     `canton-participant` image uses it.
@@ -96,6 +100,29 @@ cross-site websocket hijacking.
 
 ### All node operators
 
+#### Fault-tolerant sequencer subscriptions
+The sequencer subscription pool now manages subscription failures much more resiliently. While a failure on a single subscription
+used to disconnect the node from the synchronizer, the pool now instead makes use of the penalty mechanism (see "Sequencer connection penalty
+mechanism" below). Faulty sequencers get penalized, so that healthy ones are favored. The penalized sequencers are still available for
+use when they recover, increasing the chances of keeping connectivity and making progress.
+This behavior also applies to permission denied errors (e.g. after a node is off-boarded): the node stays connected and keeps retrying,
+which allows it to automatically resume if its permissions are restored. To stop the retries, the operator must disconnect the node explicitly.
+
+The sequencers that caused failures since the last successfully processed event are tracked:
+- when their number reaches the trust threshold, a `SEQUENCER_TRUST_ASSUMPTION_VIOLATED` security alarm is logged; if there are enough
+  remaining healthy sequencers, the node will continue processing events
+- when their number is such that the remaining healthy sequencers cannot reach the trust threshold (for example: 4 sequencers, a trust
+  threshold of 3, and 2 failures), a `SEQUENCER_UNREACHABLE_TRUST_THRESHOLD` error is logged and the sequencer client's health transitions
+  to `Failed`; as long as this situation persists, the node will be unable to make progress, so a prompt intervention by an operator is
+  required to restore operation
+
+These situations may be due to a local problem (such as a corrupted database), or to faulty or malicious sequencers. In either case,
+the node keeps retrying in the background and will automatically recover as soon as an event is successfully processed.
+
+Major failures, such as the node's inability to process events, remain fatal and disconnect the node from the synchronizer:
+- participants terminate if `exit-on-fatal-failures` is enabled (which is the default)
+- mediators report their liveness as `NOT_SERVING`, allowing an external liveness probe to restart them
+
 ### Participant node operators
 
 #### Sequencer connection penalty mechanism
@@ -123,8 +150,18 @@ its `sequencer` label holds the sequencer's unique identifier.
 
 Currently, the following events make use of this mechanism:
 - A penalty of 1 is given to a sequencer when it refuses a submission request with `SEQUENCER_OVERLOADED`.
+- A penalty is given to a sequencer when its subscription fails; the value depends on the actual type of failure.
+
+#### ACS commitment implementations
+
+The new ACS commitment processor is now enabled always.
+The config option `canton.participants.<participant>.parameters.acs-commitments.enable-new-acs-commitment-processor` is deprecated and ignored.
+The old ACS commitment processor can only be enabled for protocol versions up to 37 inclusive;
+for protocol versions 38 and above, the config option `canton.participants.<participant>.parameters.acs-commitments.disable-old-acs-commitment-processor` is ignored.
 
 ### Synchronizer operators
+
+- Added a partial database index to support lookups of onboarding sequencer members.
 
 ## Breaking changes
 
@@ -138,12 +175,63 @@ Currently, the following events make use of this mechanism:
 
 ### All node operators
 
+#### Scope-only JWTs disabled by default
+
+##### Background
+
+"Scope-only" access tokens, i.e. JWTs that carry a `scope` claim but no audience, were deprecated in Canton 3.5
+in favour of audience-based tokens, whose `aud` claim names the participant
+(`https://daml.com/jwt/aud/participant/<participantId>`) or the explicitly configured `target-audience`.
+Rather than removing them outright, this release disables them by default and puts them behind a feature flag,
+in the same way as the Ledger API endpoints deprecated in 3.4 and 3.5.
+
+##### Specific Changes
+
+Scope-only JWTs are **disabled by default**:
+- An `auth-services` entry with a `target-scope` but no `target-audience` is rejected when the configuration is
+  validated, on the participant's Ledger API as well as on the Admin API of participants, sequencers and mediators.
+- When neither `target-scope` nor `target-audience` is configured, a token without a participant audience that relied
+  on the `daml_ledger_api` scope is now rejected with `UNAUTHENTICATED`. The rejection reason logged by the node names
+  the feature flag that re-enables such tokens temporarily.
+- Scope-only JWTs issued by an identity provider configured without an audience (`identity_provider_config.audience`)
+  are also rejected.
+
+They can be re-enabled temporarily with the feature flag that the errors name:
+
+```
+canton.features.deprecated.enable-scope-only-jwt = true
+```
+
+The flag is global, i.e. it applies to every node in the process, because the same authentication services run
+on the Admin API of every node type. With the flag set, the previous behaviour is restored, and every authentication
+service that accepts scope-only tokens, i.e. one with a `target-scope` or one without any target, logs a deprecation
+warning at startup. The one-off warning that was logged when the first scope-only token was received has been removed.
+
+##### Impact and Migration
+
+Applications and identity providers that still issue scope-only tokens, and configurations that rely on a `target-scope`
+alone, stop working and should be migrated to audience-based tokens. Alternatively, the feature flag can be set to
+re-enable them, but be advised that doing so is only a temporary solution, as the tokens and the flag will be completely
+removed in a future release. Downstream projects that build scope-only tokens for their tests are affected in the same way.
+
+#### Superfluous Configuration Flags
+
+Some expert batching and caching parameters were shared across node types but had no effect on
+certain nodes. These unused settings are now deprecated and ignored on those nodes. For example,
+`canton.mediators.mediator1.parameters.caching.sequencer-catchup-payload-cache` is ignored on
+mediators. Remove deprecated settings from your configuration to avoid deprecation messages.
+The previously deprecated `caching.package-dependency-cache` setting remains accepted and ignored.
+
 #### Docker images use the HTTP readiness endpoint
 
 - The `canton-participant`, `canton-mediator`, and `canton-sequencer` Docker images now enable the HTTP readiness endpoint (`/health/ready` on port 5071) by default.
 - The `HEALTHCHECK` of the `canton-participant` Docker image now uses the HTTP readiness endpoint (`/health/ready` on port 5071) instead of the gRPC health service.
   Readiness is now only reported once database migrations and storage initialization have completed, so after an upgrade with long-running migrations the container stays unhealthy for longer.
   Tooling that waits for the container to become healthy (e.g., `docker compose up --wait` or `condition: service_healthy`) may need longer timeouts.
+- JWKS-based token verification (the `jwt-jwks` auth service and identity provider configs) now caches the whole JWKS document per JWKS URL instead of individual keys.
+  A token whose `kid` is not in the cached JWKS triggers a new fetch of the JWKS only if the last fetch attempt is older than the new `jwks-cache-config.min-refresh-interval` (default 30 seconds).
+  As a consequence, a new signing key published by the identity provider is accepted at most `min-refresh-interval` after its first use.
+  `jwks-cache-config.cache-max-size` now limits the number of cached JWKS URLs instead of the number of cached keys.
 
 #### Removal of support for Postgres 14
 
@@ -177,7 +265,11 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 
 - The `Request-Timeout` header of JSON Ledger API requests now also accepts a time unit, for example `15s`. Values without a time unit are still interpreted as milliseconds.
 - Indexer pipeline now breaks up heavy transaction to evenly sized batches, where the 'size' is determined by the number of database operations.
+- The interactive submission endpoints `ExecuteSubmissionAndWait` and `ExecuteSubmissionAndWaitForTransaction` (gRPC and JSON Ledger API) now enforce `maximum-number-of-signatures-per-party`, rejecting requests with too many signatures per party, as `ExecuteSubmission` already did.
 - Reads and writes from the active contract journal now use a batch aggregator for efficiency.
+- The restart delay for a sequencer connection now only resets back to `min_restart_delay` if it stayed validated for at least the new `min_stable_duration` (default 10 seconds).
+  This prevents a restarted connection that keeps failing shortly after validation from being restarted again too quickly.
+
 
 ### Ledger API
 
@@ -188,18 +280,38 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 - `PartyManagementService.ListKnownParties`: subsequent pages return the topology state seen when the first page was
   requested. Page tokens issued by another participant are rejected.
 
+### Multi-Sync
+- When contracts are automatically reassigned to allow command execution on a target synchronizer:
+  - The package used for contract validation on the target synchronizer will be a package-id bound to the contract in the transaction so is guaranteed to be valid and vetted.
+  - If a package bound to a contract in the transaction is vetted on the source synchronizer this will be used, otherwise the highest vetted version of the package will be used.
+
 ### All node operators
 
 - The console commands `keys.secret.download` and `keys.secret.download_to` no longer require the preview feature flag.
   Downloading a key pair from a node still requires `canton.parameters.enable-key-download = true` on that node.
+- The token generators shipped with Canton mint audience-based tokens: `ledger-api-auth generate-token` takes an
+  `--audience` or, mutually exclusively, a `--participantId` whose participant audience is used, and the Ledger API bench tool
+  takes `--user-based-authorization-audience` together with `--user-based-authorization-secret`.
 
 ### Participant node operators
 
 - Previously `canton.remote-participants.<remoteParticipant>.token` was used for both ledger API and admin API commands in the Canton Console.
   Now, an optional `canton.remote-participants.<remoteParticipant>.admin-api-token` can be specified to use a different token for admin API
   commands in case that admin API auth differs from ledger API auth.
+- The console now reads the user id for Ledger API commands from remote-participant tokens minted for a custom
+  `target-audience` or `target-scope` as well. Previously such tokens made the console fall back to the
+  `CantonConsole` user id.
 
 ### Synchronizer operators
+- Initializing sequencers with the onboarding state of the current synchronizer or the LSU predecessor state now requires less JVM memory, because the
+  initialization works in a streaming fashion instead of loading the entire topology state into memory first.
+- When initializing a sequencer, the initial topology state is checked for consistency (e.g. no multiple transactions effective for the same unique mapping key at the same time).
+  Some of the consistency checks potentially take a significant time to run for a large topology state (e.g. 10 million topology transactions),
+  therefore they can be disabled with `topology.check-initial-topology-snapshot-consistency = false`.
+
+- Sequencers reject submission requests and acknowledgements that carry more than one signature.
+  Such requests that are ordered anyway are discarded as invalid ledger events from protocol version 38 on.
+  On earlier protocol versions, only the last signature is kept after ordering, which is the one that was verified before.
 
 ## Security and Bug Fixes
 
@@ -237,7 +349,32 @@ fix is deployed on MainNet:
 - Minor bugfix to synchronization of `participants.parties.enable` which always timed out on a network
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
+- `enable-cert-revocation-checking` on a server TLS configuration (for example the Ledger API) now applies only to that server's TLS context.
+  It no longer sets the JVM-wide `com.sun.net.ssl.checkRevocation`, `com.ibm.jsse2.checkRevocation` and `ocsp.enable` properties, so other TLS connections in the same node are no longer affected.
+  Deployments that relied on this side effect to get revocation checking elsewhere must set these properties explicitly (for example with `-Dcom.sun.net.ssl.checkRevocation=true`).
+  The flag is now also honored by the JSON Ledger API (`http-ledger-api`) and the BFT orderer's peer-to-peer server endpoint.
 - Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
+- Fixed the JSON Ledger API failing every HTTPS connection when the Ledger API TLS configuration has no
+  `trust-collection-file`, which also affected plain server-side TLS with `client-auth` set to `none`.
+  If client authentication is enabled (`client-auth` set to `optional`, the default, or `require`) and no
+  `trust-collection-file` is configured, client certificates are now verified against the JVM default trust store,
+  consistent with the gRPC Ledger API and the documentation.
+  No configuration change is needed, and configurations with a `trust-collection-file` behave as before.
+- Fixed a bug in the BFT sequencer where a topology change could go unnoticed by participants and mediators when its
+  effective time coincided exactly with the end of an ordering epoch: the topology tick at that time was sent to
+  the sequencers only, so other members did not observe the change becoming effective until other traffic or a time
+  proof reached them.
+- Fixed spurious `Locked connection was lost, trying to rebuild` warnings and unnecessary reconnects of DB locked connections
+  on busy nodes: a read-only check that cannot run because the connection is in use no longer counts towards
+  `replication.connection-pool.connection.max-inconclusive-read-only-checks`.
+- `topology.transactions.generate_onboarding_transactions` now generates the transactions from the given `temporaryStore`.
+  Previously, a participant returned the identity transactions of its authorized store instead whenever they had the
+  requested protocol version, which ignored a delegation to an intermediate key provided in the temporary store when the
+  root namespace key is offline.
+
+### CantonBFT
+
+- Fixed race conditions identified in P2P connection teardown.
 
 ## Compatibility
 

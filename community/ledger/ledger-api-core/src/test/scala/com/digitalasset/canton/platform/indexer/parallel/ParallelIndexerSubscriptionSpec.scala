@@ -182,6 +182,7 @@ class ParallelIndexerSubscriptionSpec
     reassignment_counter = None,
     reassignment_id = None,
     representative_package_id = Ref.PackageId.assertFromString("p"),
+    participant_event_category = None,
     notPersistedContractId = hashCid("1"),
     internal_contract_id = 1,
     create_key_hash = None,
@@ -216,6 +217,7 @@ class ParallelIndexerSubscriptionSpec
     assignment_exclusivity = None,
     target_synchronizer_id = None,
     reassignment_counter = None,
+    participant_event_category = None,
     contract_id = hashCid("1"),
     internal_contract_id = None,
     template_id = Ref.NameTypeConRef.assertFromString("#p:m:t"),
@@ -541,64 +543,67 @@ class ParallelIndexerSubscriptionSpec
       first_per_sequential_id = false,
     )
     val ledgerEndCache = MutableLedgerEndCache()
-    val result = ParallelIndexerSubscription.seqMapper(
-      internize = _.zipWithIndex.map(x => x._2 -> x._2.toString).take(2),
-      metrics = metrics,
-      clock = simClock,
-      logger = logger,
-      ledgerEndCache = ledgerEndCache,
-      activeContracts = mutable.LinkedHashMap.empty,
-    )(
-      ParallelIndexerSubscription.seqMapperZero(Some(previousLedgerEnd)),
-      ProcessingBatch(
-        batch = Vector(
-          someEventPartyToParticipant,
-          someEventActivate,
-          filter.activateStakeholder,
-          filter.activateWitness,
-          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
-          someCompletion,
-          someEventPartyToParticipant,
-          someEventDeactivate,
-          filter.deactivateStakeholder,
-          filter.deactivateWitness,
-          someEventDeactivate,
-          filter.deactivateStakeholder,
-          filter.deactivateWitness,
-          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
-          someEventPartyToParticipant,
-          someEventWitnessed,
-          filter.variousWitness,
-          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
-          someEventPartyToParticipant,
-          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
-          someAcsCommitment,
-          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
-          someDynamicSynchronizerParameters,
-          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
-          someEventPartyToParticipant,
-        ),
-        updateBatch = UpdateBatch(
-          ledgerEnd = ZeroLedgerEnd.copy(
-            lastOffset = offset(2),
-            synchronizerIndices = Map(
-              someSynchronizerId -> SynchronizerIndex(
-                None,
-                None,
-                CantonTimestamp.assertFromLong(10L),
-              )
-            ),
+    val result = ParallelIndexerSubscription
+      .seqMapper(
+        internize = _.zipWithIndex.map(x => x._2 -> x._2.toString).take(2),
+        metrics = metrics,
+        clock = simClock,
+        logger = logger,
+        ledgerEndCache = ledgerEndCache,
+        activeContracts = mutable.LinkedHashMap.empty,
+        executionContext = executionContext,
+      )(
+        ParallelIndexerSubscription.seqMapperZero(Some(previousLedgerEnd)),
+        ProcessingBatch(
+          batch = Vector(
+            someEventPartyToParticipant,
+            someEventActivate,
+            filter.activateStakeholder,
+            filter.activateWitness,
+            DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
+            someCompletion,
+            someEventPartyToParticipant,
+            someEventDeactivate,
+            filter.deactivateStakeholder,
+            filter.deactivateWitness,
+            someEventDeactivate,
+            filter.deactivateStakeholder,
+            filter.deactivateWitness,
+            DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
+            someEventPartyToParticipant,
+            someEventWitnessed,
+            filter.variousWitness,
+            DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
+            someEventPartyToParticipant,
+            DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
+            someAcsCommitment,
+            DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
+            someDynamicSynchronizerParameters,
+            DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
+            someEventPartyToParticipant,
           ),
-          batchTraceContext = TraceContext.empty,
-          batchSize = 3,
-          offsetsUpdates = offsetsAndUpdates,
-          eventCount = 0L,
-          contractStateEvents = Vector.empty,
+          updateBatch = UpdateBatch(
+            ledgerEnd = ZeroLedgerEnd.copy(
+              lastOffset = offset(2),
+              synchronizerIndices = Map(
+                someSynchronizerId -> SynchronizerIndex(
+                  None,
+                  None,
+                  CantonTimestamp.assertFromLong(10L),
+                )
+              ),
+            ),
+            batchTraceContext = TraceContext.empty,
+            batchSize = 3,
+            offsetsUpdates = offsetsAndUpdates,
+            eventCount = 0L,
+            contractStateEvents = Vector.empty,
+          ),
+          missingDeactivatedActivations = Vector.empty,
+          distinctRawStrings = Vector("1", "2"),
         ),
-        missingDeactivatedActivations = Vector.empty,
-        distinctRawStrings = Vector("1", "2"),
-      ),
-    )
+      )
+      .futureValue
     import scala.util.chaining.*
 
     result.updateBatch.ledgerEnd.lastEventSeqId shouldBe 26
@@ -707,34 +712,37 @@ class ParallelIndexerSubscriptionSpec
         ),
       )
     val simClock = new SimClock(loggerFactory = loggerFactory)
-    val result = ParallelIndexerSubscription.seqMapper(
-      internize = _ => Nil,
-      metrics = metrics,
-      clock = simClock,
-      logger = logger,
-      ledgerEndCache = MutableLedgerEndCache(),
-      activeContracts = mutable.LinkedHashMap.empty,
-    )(
-      ParallelIndexerSubscription.seqMapperZero(Some(previousLedgerEnd)),
-      ProcessingBatch(
-        batch = Vector(
-          someEventPartyToParticipant,
-          someEventPartyToParticipant,
-          someEventPartyToParticipant,
-          someEventPartyToParticipant,
+    val result = ParallelIndexerSubscription
+      .seqMapper(
+        internize = _ => Nil,
+        metrics = metrics,
+        clock = simClock,
+        logger = logger,
+        ledgerEndCache = MutableLedgerEndCache(),
+        activeContracts = mutable.LinkedHashMap.empty,
+        executionContext = executionContext,
+      )(
+        ParallelIndexerSubscription.seqMapperZero(Some(previousLedgerEnd)),
+        ProcessingBatch(
+          batch = Vector(
+            someEventPartyToParticipant,
+            someEventPartyToParticipant,
+            someEventPartyToParticipant,
+            someEventPartyToParticipant,
+          ),
+          updateBatch = UpdateBatch(
+            ledgerEnd = ZeroLedgerEnd.copy(lastOffset = offset(2)),
+            batchTraceContext = TraceContext.empty,
+            batchSize = 3,
+            offsetsUpdates = offsetsAndUpdates,
+            eventCount = 0L,
+            contractStateEvents = Vector.empty,
+          ),
+          missingDeactivatedActivations = Vector.empty,
+          distinctRawStrings = Nil,
         ),
-        updateBatch = UpdateBatch(
-          ledgerEnd = ZeroLedgerEnd.copy(lastOffset = offset(2)),
-          batchTraceContext = TraceContext.empty,
-          batchSize = 3,
-          offsetsUpdates = offsetsAndUpdates,
-          eventCount = 0L,
-          contractStateEvents = Vector.empty,
-        ),
-        missingDeactivatedActivations = Vector.empty,
-        distinctRawStrings = Nil,
-      ),
-    )
+      )
+      .futureValue
     result.updateBatch.ledgerEnd.lastEventSeqId shouldBe 19
     result.updateBatch.ledgerEnd.lastStringInterningId shouldBe 25
     result.updateBatch.ledgerEnd.lastOffset shouldBe offset(2)
@@ -766,6 +774,7 @@ class ParallelIndexerSubscriptionSpec
           logger = logger,
           ledgerEndCache = MutableLedgerEndCache(),
           activeContracts = mutable.LinkedHashMap.empty,
+          executionContext = executionContext,
         )(
           ParallelIndexerSubscription.seqMapperZero(Some(previousLedgerEnd)),
           ProcessingBatch(
@@ -796,6 +805,7 @@ class ParallelIndexerSubscriptionSpec
             distinctRawStrings = Nil,
           ),
         )
+        .futureValue
         .updateBatch
         .ledgerEnd
         .lastPublicationTime shouldBe previous,
@@ -816,6 +826,7 @@ class ParallelIndexerSubscriptionSpec
         logger = logger,
         ledgerEndCache = ledgerEndCache,
         activeContracts = activeContracts,
+        executionContext = executionContext,
       )(
         zeroBatch,
         ProcessingBatch(
@@ -846,6 +857,7 @@ class ParallelIndexerSubscriptionSpec
           distinctRawStrings = Nil,
         ),
       )
+      .futureValue
     activeContracts shouldBe Map(
       SynCon(someSynchronizerId2, hashCid("C")) -> ActivationRef(16L, 1L)
     )
@@ -864,60 +876,63 @@ class ParallelIndexerSubscriptionSpec
         SynCon(someSynchronizerId2, hashCid("B")) -> ActivationRef(2L, 2L),
       )
     )
-    val result = loggerFactory.assertLogs(
-      LoggerNameContains("ParallelIndexerSubscription") && SuppressionRule.Level(Level.WARN)
-    )(
-      ParallelIndexerSubscription
-        .seqMapper(
-          internize = _ => Nil,
-          metrics = metrics,
-          clock = simClock,
-          logger = logger,
-          ledgerEndCache = ledgerEndCache,
-          activeContracts = activeContracts,
-        )(
-          zeroBatch,
-          ProcessingBatch(
-            batch = Vector(
-              someEventActivate.copy(
-                synchronizer_id = someSynchronizerId,
-                notPersistedContractId = hashCid("A"),
-                internal_contract_id = 10L,
-              ),
-              someEventActivate.copy(
-                synchronizer_id = someSynchronizerId2,
-                notPersistedContractId = hashCid("B"),
-                internal_contract_id = 20L,
-              ),
-            ),
-            updateBatch = UpdateBatch(
-              ledgerEnd = ZeroLedgerEnd.copy(
-                lastOffset = offset(2),
-                synchronizerIndices = Map(
-                  someSynchronizerId2 -> SynchronizerIndex(
-                    None,
-                    None,
-                    CantonTimestamp.assertFromLong(1L),
-                  )
+    val result = loggerFactory
+      .assertLogs(
+        LoggerNameContains("ParallelIndexerSubscription") && SuppressionRule.Level(Level.WARN)
+      )(
+        ParallelIndexerSubscription
+          .seqMapper(
+            internize = _ => Nil,
+            metrics = metrics,
+            clock = simClock,
+            logger = logger,
+            ledgerEndCache = ledgerEndCache,
+            activeContracts = activeContracts,
+            executionContext = executionContext,
+          )(
+            zeroBatch,
+            ProcessingBatch(
+              batch = Vector(
+                someEventActivate.copy(
+                  synchronizer_id = someSynchronizerId,
+                  notPersistedContractId = hashCid("A"),
+                  internal_contract_id = 10L,
+                ),
+                someEventActivate.copy(
+                  synchronizer_id = someSynchronizerId2,
+                  notPersistedContractId = hashCid("B"),
+                  internal_contract_id = 20L,
                 ),
               ),
-              batchTraceContext = TraceContext.empty,
-              batchSize = 10,
-              offsetsUpdates = offsetsAndUpdates,
-              eventCount = 0L,
-              contractStateEvents = Vector.empty,
+              updateBatch = UpdateBatch(
+                ledgerEnd = ZeroLedgerEnd.copy(
+                  lastOffset = offset(2),
+                  synchronizerIndices = Map(
+                    someSynchronizerId2 -> SynchronizerIndex(
+                      None,
+                      None,
+                      CantonTimestamp.assertFromLong(1L),
+                    )
+                  ),
+                ),
+                batchTraceContext = TraceContext.empty,
+                batchSize = 10,
+                offsetsUpdates = offsetsAndUpdates,
+                eventCount = 0L,
+                contractStateEvents = Vector.empty,
+              ),
+              missingDeactivatedActivations = Vector.empty,
+              distinctRawStrings = Nil,
             ),
-            missingDeactivatedActivations = Vector.empty,
-            distinctRawStrings = Nil,
           ),
+        _.warningMessage should include(
+          "Double activation at eventSeqId: 16. Previous at Some(1) This should not happen"
         ),
-      _.warningMessage should include(
-        "Double activation at eventSeqId: 16. Previous at Some(1) This should not happen"
-      ),
-      _.warningMessage should include(
-        "Double activation at eventSeqId: 17. Previous at Some(2) This should not happen"
-      ),
-    )
+        _.warningMessage should include(
+          "Double activation at eventSeqId: 17. Previous at Some(2) This should not happen"
+        ),
+      )
+      .futureValue
     activeContracts shouldBe Map(
       SynCon(someSynchronizerId, hashCid("A")) -> ActivationRef(16L, 10L),
       SynCon(someSynchronizerId2, hashCid("B")) -> ActivationRef(17L, 20L),
@@ -938,6 +953,7 @@ class ParallelIndexerSubscriptionSpec
         logger = logger,
         ledgerEndCache = ledgerEndCache,
         activeContracts = activeContracts,
+        executionContext = executionContext,
       )(
         zeroBatch,
         ProcessingBatch(
@@ -985,6 +1001,7 @@ class ParallelIndexerSubscriptionSpec
           distinctRawStrings = Nil,
         ),
       )
+      .futureValue
     activeContracts shouldBe Map.empty
     result.missingDeactivatedActivations shouldBe Vector(
       SynCon(someSynchronizerId, hashCid("A")),
@@ -1028,6 +1045,7 @@ class ParallelIndexerSubscriptionSpec
         logger = logger,
         ledgerEndCache = ledgerEndCache,
         activeContracts = activeContracts,
+        executionContext = executionContext,
       )(
         zeroBatch,
         ProcessingBatch(
@@ -1078,6 +1096,7 @@ class ParallelIndexerSubscriptionSpec
           distinctRawStrings = Nil,
         ),
       )
+      .futureValue
     activeContracts shouldBe Map(
       SynCon(someSynchronizerId3, hashCid("A")) -> ActivationRef(3L, 300L),
       SynCon(someSynchronizerId3, hashCid("B")) -> ActivationRef(4L, 400L),
@@ -1126,6 +1145,7 @@ class ParallelIndexerSubscriptionSpec
         logger = logger,
         ledgerEndCache = ledgerEndCache,
         activeContracts = activeContracts,
+        executionContext = executionContext,
       )(
         zeroBatch,
         ProcessingBatch(
@@ -1153,6 +1173,7 @@ class ParallelIndexerSubscriptionSpec
           distinctRawStrings = Nil,
         ),
       )
+      .futureValue
     activeContracts shouldBe Map(
       SynCon(someSynchronizerId, hashCid("A")) -> ActivationRef(100L, 1L),
       SynCon(someSynchronizerId2, hashCid("B")) -> ActivationRef(110L, 2L),
@@ -1992,44 +2013,68 @@ class ParallelIndexerSubscriptionSpec
     )
   }
 
-  behavior of "conflateCompletedBatches"
+  behavior of "ingestTail"
 
-  it should "derive the post-publish data of each completed batch with its own publication time" in {
-    def commandRejected(commandId: String): Update.SequencedCommandRejected =
-      Update.SequencedCommandRejected(
-        completionInfo = state.CompletionInfo(
-          actAs = List(Ref.Party.assertFromString("party")),
-          userId = Ref.UserId.assertFromString("user"),
-          commandId = Ref.CommandId.assertFromString(commandId),
-          optDeduplicationPeriod = None,
-          submissionId = None,
-          paidTrafficCost = NonNegativeLong.zero,
-        ),
-        reasonTemplate = Update.CommandRejected.FinalReason(new com.google.rpc.status.Status()),
-        synchronizerId = someSynchronizerId,
-        recordTime = someRecordTime1,
-        isTransaction = true,
-        transactionHash = None,
-        traceContext = implicitly,
+  def commandRejected(commandId: String): Update.SequencedCommandRejected =
+    Update.SequencedCommandRejected(
+      completionInfo = state.CompletionInfo(
+        actAs = List(Ref.Party.assertFromString("party")),
+        userId = Ref.UserId.assertFromString("user"),
+        commandId = Ref.CommandId.assertFromString(commandId),
+        optDeduplicationPeriod = None,
+        submissionId = None,
+        paidTrafficCost = NonNegativeLong.zero,
+      ),
+      reasonTemplate = Update.CommandRejected.FinalReason(new com.google.rpc.status.Status()),
+      synchronizerId = someSynchronizerId,
+      recordTime = someRecordTime1,
+      isTransaction = true,
+      transactionHash = None,
+      traceContext = implicitly,
+    )
+
+  it should "conflate the completed batches of the db batches and store the resulting ledger end" in {
+    def dbBatch(completedBatches: UpdateBatch*): DbBatch[Unit] =
+      DbBatch(
+        completedBatches = completedBatches.toVector,
+        content = (),
+        usedInternalContractIds = Set.empty,
+        batchSize = 0,
       )
+
+    val storedLedgerEnds = new AtomicReference[Vector[LedgerEnd]](Vector.empty)
+    val ingestTail = ParallelIndexerSubscription.ingestTail[Unit](
+      repairMode = false,
+      aggregatedLedgerEndForRepair = new AtomicReference[Option[LedgerEnd]](None),
+      storeLedgerEndF = ledgerEnd => {
+        storedLedgerEnds.updateAndGet(_ :+ ledgerEnd).discard
+        Future.unit
+      },
+      executionContext = executionContext,
+    )
+
+    // Nothing to store if no update batch completed
+    ingestTail(Vector.empty).futureValue shouldBe None
+    ingestTail(Vector(dbBatch(), dbBatch())).futureValue shouldBe None
+    storedLedgerEnds.get() shouldBe empty
+
     val firstBatch = someUpdateBatch.copy(
       offsetsUpdates = Vector(offset(10) -> commandRejected("first"))
     )
     val secondBatch = someOtherUpdateBatch.copy(
       offsetsUpdates = Vector(offset(20) -> commandRejected("second"))
     )
-
-    ParallelIndexerSubscription.conflateCompletedBatches(Vector.empty) shouldBe None
-
-    val tailBatch: TailBatch =
-      ParallelIndexerSubscription.conflateCompletedBatches(Vector(firstBatch, secondBatch)).value
-    tailBatch.updateBatch.ledgerEnd.lastOffset shouldBe offset(20)
-    tailBatch.updateBatch.ledgerEnd.lastPublicationTime shouldBe CantonTimestamp.ofEpochMicro(25)
-    tailBatch.updateBatch.offsetsUpdates.map(_._1) shouldBe Vector(offset(10), offset(20))
-    tailBatch.postPublishData.map(data => data.offset -> data.publicationTime) shouldBe Vector(
-      offset(10) -> CantonTimestamp.ofEpochMicro(15),
-      offset(20) -> CantonTimestamp.ofEpochMicro(25),
+    val tailBatch =
+      ingestTail(Vector(dbBatch(firstBatch), dbBatch(), dbBatch(secondBatch))).futureValue.value
+    tailBatch.ledgerEnd.lastOffset shouldBe offset(20)
+    tailBatch.ledgerEnd.lastPublicationTime shouldBe CantonTimestamp.ofEpochMicro(25)
+    tailBatch.batchTraceContext shouldBe secondBatch.batchTraceContext
+    tailBatch.completedBatches shouldBe Vector(firstBatch, secondBatch)
+    tailBatch.completedBatches.flatMap(_.offsetsUpdates).map(_._1) shouldBe Vector(
+      offset(10),
+      offset(20),
     )
+    storedLedgerEnds.get() shouldBe Vector(tailBatch.ledgerEnd)
   }
 
   behavior of "aggregateLedgerEndForRepair"
@@ -2134,6 +2179,28 @@ class ParallelIndexerSubscriptionSpec
     contractStateEvents = Vector.empty,
   )
 
+  it should "aggregate the ledger end instead of storing it in repair mode" in {
+    val aggregatedLedgerEndForRepair = new AtomicReference[Option[LedgerEnd]](None)
+    val ingestTail = ParallelIndexerSubscription.ingestTail[Unit](
+      repairMode = true,
+      aggregatedLedgerEndForRepair = aggregatedLedgerEndForRepair,
+      storeLedgerEndF = _ => fail("the ledger end must not be stored in repair mode"),
+      executionContext = executionContext,
+    )
+    val tailBatch: TailBatch = ingestTail(
+      Vector(
+        DbBatch(
+          completedBatches = Vector(someUpdateBatch, someOtherUpdateBatch),
+          content = (),
+          usedInternalContractIds = Set.empty,
+          batchSize = 0,
+        )
+      )
+    ).futureValue.value
+    tailBatch.ledgerEnd.lastOffset shouldBe offset(20)
+    aggregatedLedgerEndForRepair.get() shouldBe Some(tailBatch.ledgerEnd)
+  }
+
   it should "correctly aggregate if batch has no new synchronizer-indexes" in {
     val aggregateLedgerEndForRepairRef =
       new AtomicReference[Option[LedgerEnd]](
@@ -2141,16 +2208,7 @@ class ParallelIndexerSubscriptionSpec
       )
     ParallelIndexerSubscription
       .aggregateLedgerEndForRepair(aggregateLedgerEndForRepairRef)
-      .apply(
-        UpdateBatch(
-          ledgerEnd = someAggregatedLedgerEndForRepair.value,
-          batchTraceContext = TraceContext.empty,
-          batchSize = 0,
-          offsetsUpdates = Vector.empty,
-          eventCount = 0L,
-          contractStateEvents = Vector.empty,
-        )
-      )
+      .apply(someAggregatedLedgerEndForRepair.value)
     aggregateLedgerEndForRepairRef.get() shouldBe someAggregatedLedgerEndForRepair
   }
 
@@ -2159,10 +2217,10 @@ class ParallelIndexerSubscriptionSpec
       new AtomicReference[Option[LedgerEnd]](None)
     ParallelIndexerSubscription
       .aggregateLedgerEndForRepair(aggregateLedgerEndForRepairRef)
-      .apply(someUpdateBatch)
+      .apply(someUpdateBatch.ledgerEnd)
     ParallelIndexerSubscription
       .aggregateLedgerEndForRepair(aggregateLedgerEndForRepairRef)
-      .apply(someOtherUpdateBatch)
+      .apply(someOtherUpdateBatch.ledgerEnd)
     aggregateLedgerEndForRepairRef.get() shouldBe
       Some(
         LedgerEnd(
@@ -2193,10 +2251,10 @@ class ParallelIndexerSubscriptionSpec
       )
     ParallelIndexerSubscription
       .aggregateLedgerEndForRepair(aggregateLedgerEndForRepairRef)
-      .apply(someUpdateBatch)
+      .apply(someUpdateBatch.ledgerEnd)
     ParallelIndexerSubscription
       .aggregateLedgerEndForRepair(aggregateLedgerEndForRepairRef)
-      .apply(someOtherUpdateBatch)
+      .apply(someOtherUpdateBatch.ledgerEnd)
     aggregateLedgerEndForRepairRef.get() shouldBe
       Some(
         LedgerEnd(
@@ -2218,6 +2276,42 @@ class ParallelIndexerSubscriptionSpec
           ),
         )
       )
+  }
+
+  behavior of "postProcess"
+
+  it should "derive the post-publish data of each completed batch with its own publication time" in {
+    val firstBatch = someUpdateBatch.copy(
+      offsetsUpdates = Vector(offset(10) -> commandRejected("first"))
+    )
+    val secondBatch = someOtherUpdateBatch.copy(
+      offsetsUpdates = Vector(offset(20) -> commandRejected("second"))
+    )
+    val tailBatch = TailBatch(
+      ledgerEnd = LedgerEnd.combineUpdates(firstBatch.ledgerEnd, secondBatch.ledgerEnd),
+      batchTraceContext = secondBatch.batchTraceContext,
+      completedBatches = Vector(firstBatch, secondBatch),
+    )
+    val processed =
+      new AtomicReference[Vector[(Vector[PostPublishData], TraceContext)]](Vector.empty)
+
+    val updateBatch = ParallelIndexerSubscription
+      .postProcess(
+        processor = (postPublishData, traceContext) => {
+          processed.updateAndGet(_ :+ (postPublishData -> traceContext)).discard
+          Future.unit
+        },
+        executionContext = executionContext,
+      )(tailBatch)
+      .futureValue
+
+    processed.get().map(_._2) shouldBe Vector(secondBatch.batchTraceContext)
+    processed.get().flatMap(_._1).map(data => data.offset -> data.publicationTime) shouldBe Vector(
+      offset(10) -> CantonTimestamp.ofEpochMicro(15),
+      offset(20) -> CantonTimestamp.ofEpochMicro(25),
+    )
+    updateBatch.ledgerEnd shouldBe tailBatch.ledgerEnd
+    updateBatch.offsetsUpdates.map(_._1) shouldBe Vector(offset(10), offset(20))
   }
 
   behavior of "commitRepair"

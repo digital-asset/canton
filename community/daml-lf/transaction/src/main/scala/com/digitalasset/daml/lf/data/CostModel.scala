@@ -224,6 +224,8 @@ private[lf] object CostModel {
         1 + costOfFrontStack(value)(costOfValue)
       case Value.ValueNumeric(value) =>
         1 + costOfString(value.toUnscaledString) + costOfInt(value.scale)
+      case Value.ValueUint256(_) =>
+        33 // 32 bytes + 1 for tag
       case Value.ValueOptional(opt) =>
         1 + costOfOption(opt)(costOfValue)
       case Value.ValueParty(p) =>

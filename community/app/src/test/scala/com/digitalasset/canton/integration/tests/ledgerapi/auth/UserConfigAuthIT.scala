@@ -31,14 +31,14 @@ class UserConfigAuthIT
     with ErrorsAssertions
     with SubmitAndWaitDummyCommandHelpers {
 
-  registerPlugin(ExpectedScopeOverrideConfig(loggerFactory))
+  registerPlugin(ExpectedAudienceOverrideConfig(loggerFactory))
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def prerequisiteParties: List[String] = List(randomParty)
 
   override def serviceCallName: String =
-    "Any service call with target scope based token authorization"
+    "Any service call with user-config based token authorization"
 
   protected def serviceCall(
       context: ServiceCallContext
@@ -64,7 +64,7 @@ class UserConfigAuthIT
     token = Some(
       toHeader(
         payload = payload,
-        enforceFormat = Some(StandardJWTTokenFormat.Scope),
+        enforceFormat = Some(StandardJWTTokenFormat.Audience),
         secret = secretOverwrite.getOrElse(privilegedJwtSecret.unwrap),
       )
     )
@@ -75,54 +75,34 @@ class UserConfigAuthIT
   private val configuredUser = randomUserId()
   private val otherUser = randomUserId()
 
-  override val defaultScope: String = ExpectedScope
-
   private val privilegedJwtSecret = NonEmptyString.tryCreate(UUID.randomUUID().toString)
-  private val privilegedScope: String = "Privileged-Scope"
-
-  val adminTokenStandardJWT: StandardJWTPayload = StandardJWTPayload(
-    issuer = None,
-    participantId = None,
-    userId = participantAdmin,
-    exp = Some(Instant.now().plusNanos(Duration.ofMinutes(5).toNanos)),
-    format = StandardJWTTokenFormat.Scope,
-    audiences = List.empty,
-    scope = Some(defaultScope),
-  )
+  private val privilegedAudience: String = "Privileged-Audience"
 
   val configuredUserToken: StandardJWTPayload = StandardJWTPayload(
     issuer = None,
     participantId = None,
     userId = configuredUser,
     exp = Some(Instant.now().plusNanos(Duration.ofMinutes(5).toNanos)),
-    format = StandardJWTTokenFormat.Scope,
-    audiences = List.empty,
-    scope = Some(privilegedScope),
+    format = StandardJWTTokenFormat.Audience,
+    audiences = List(privilegedAudience),
+    scope = None,
   )
 
-  val otherUserToken: StandardJWTPayload = StandardJWTPayload(
-    issuer = None,
-    participantId = None,
-    userId = otherUser,
-    exp = Some(Instant.now().plusNanos(Duration.ofMinutes(5).toNanos)),
-    format = StandardJWTTokenFormat.Scope,
-    audiences = List.empty,
-    scope = Some(privilegedScope),
-  )
+  val otherUserToken: StandardJWTPayload = configuredUserToken.copy(userId = otherUser)
 
-  val multipleScopesWithExpectedToken: StandardJWTPayload =
-    configuredUserToken.copy(scope = Some(s"$privilegedScope additionalScope"))
+  val multipleAudiencesWithExpectedToken: StandardJWTPayload =
+    configuredUserToken.copy(audiences = List(privilegedAudience, "additionalAud"))
 
-  val noScopeToken: StandardJWTPayload =
-    configuredUserToken.copy(scope = None)
+  val noAudienceToken: StandardJWTPayload =
+    configuredUserToken.copy(audiences = List.empty)
 
-  val wrongScopeToken: StandardJWTPayload =
-    configuredUserToken.copy(scope = Some("scope1 scope2"))
+  val wrongAudienceToken: StandardJWTPayload =
+    configuredUserToken.copy(audiences = List("aud1", "aud2"))
 
   val expiredToken: StandardJWTPayload =
     configuredUserToken.copy(exp = Some(Instant.now().plusNanos(Duration.ofDays(-1).toNanos)))
 
-  val audienceToken: StandardJWTPayload = configuredUserToken.copy(audiences = List("aud1", "aud2"))
+  val scopeToken: StandardJWTPayload = configuredUserToken.copy(scope = Some("scope1 scope2"))
 
   serviceCallName should {
     "allow access to a configured endpoint requiring admin rights with canton admin token" taggedAs securityAsset
@@ -161,47 +141,47 @@ class UserConfigAuthIT
       )
     }
 
-    "allow access to an endpoint with the token with multiple scopes which is matching expected scope" taggedAs securityAsset
+    "allow access to an endpoint with the token with multiple audiences which is matching expected audience" taggedAs securityAsset
       .setHappyCase(
-        "Ledger API client can make a call with a privileged token with intended scope"
+        "Ledger API client can make a call with a privileged token with intended audience"
       ) in { implicit env =>
       import env.*
       loggerFactory.suppress(AuthServiceJWTSuppressionRule)(
         expectSuccess {
-          serviceCall(toContext(multipleScopesWithExpectedToken))
+          serviceCall(toContext(multipleAudiencesWithExpectedToken))
         }
       )
     }
 
-    "allow access to an endpoint with the token which is matching intended scope and audiences defined" taggedAs securityAsset
+    "allow access to an endpoint with the token which is matching intended audience and scopes defined" taggedAs securityAsset
       .setHappyCase(
-        "Ledger API client can make a call with a privileged token with intended scope"
+        "Ledger API client can make a call with a privileged token with intended audience"
       ) in { implicit env =>
       import env.*
       loggerFactory.suppress(AuthServiceJWTSuppressionRule)(
-        expectSuccess(serviceCall(toContext(audienceToken)))
+        expectSuccess(serviceCall(toContext(scopeToken)))
       )
     }
 
-    "deny access with no intended scope" taggedAs securityAsset.setAttack(
+    "deny access with no intended audience" taggedAs securityAsset.setAttack(
       attackUnauthenticated(threat =
-        "Ledger API client cannot make a call with a privileged token with no intended scope"
+        "Ledger API client cannot make a call with a privileged token with no intended audience"
       )
     ) in { implicit env =>
       import env.*
       loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
-        expectUnauthenticated(serviceCall(toContext(noScopeToken)))
+        expectUnauthenticated(serviceCall(toContext(noAudienceToken)))
       }
     }
 
-    "deny access with wrong intended scope" taggedAs securityAsset.setAttack(
+    "deny access with wrong intended audience" taggedAs securityAsset.setAttack(
       attackUnauthenticated(threat =
-        "Ledger API client cannot make a call with a privileged token with wrong intended scope"
+        "Ledger API client cannot make a call with a privileged token with wrong intended audience"
       )
     ) in { implicit env =>
       import env.*
       loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
-        expectUnauthenticated(serviceCall(toContext(wrongScopeToken)))
+        expectUnauthenticated(serviceCall(toContext(wrongAudienceToken)))
       }
     }
 
@@ -229,8 +209,8 @@ class UserConfigAuthIT
     ),
   )
 
-  //  plugin to override the configuration and use authorization with scope
-  case class ExpectedScopeOverrideConfig(
+  //  plugin to override the configuration and use authorization with audience
+  case class ExpectedAudienceOverrideConfig(
       protected val loggerFactory: NamedLoggerFactory
   ) extends EnvironmentSetupPlugin {
     override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig =
@@ -243,14 +223,14 @@ class UserConfigAuthIT
               AuthServiceConfig
                 .UnsafeJwtHmac256(
                   secret = jwtSecret,
-                  targetAudience = None,
-                  targetScope = Some(defaultScope),
+                  targetAudience = Some(ExpectedAudience),
+                  targetScope = None,
                 ),
               AuthServiceConfig
                 .UnsafeJwtHmac256(
                   secret = privilegedJwtSecret,
-                  targetAudience = None,
-                  targetScope = Some(privilegedScope),
+                  targetAudience = Some(privilegedAudience),
+                  targetScope = None,
                   users = List(authorizedUser),
                 ),
             )

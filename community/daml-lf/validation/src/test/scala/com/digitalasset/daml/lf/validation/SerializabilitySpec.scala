@@ -36,6 +36,7 @@ class SerializabilitySpec extends AnyWordSpec with TableDrivenPropertyChecks wit
         t"Party",
         t"Bool",
         t"Unit",
+        t"Uint256",
       )
 
       forEvery(testCases) { typ =>

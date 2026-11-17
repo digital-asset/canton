@@ -12,6 +12,9 @@ if [[ "$IS_GHA" == "true" ]]; then
   fi
   export CIRCLE_PULL_REQUEST="$CIRCLE_PR_URL"
   export CIRCLE_BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+  if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+    export CIRCLE_TAG="$GITHUB_REF_NAME"
+  fi
   export CI="true"
 fi
 

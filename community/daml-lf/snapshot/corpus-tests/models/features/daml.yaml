@@ -1,0 +1,17 @@
+name: corpus-features-model
+version: 1.0.0
+source: .
+dependencies:
+  - daml-prim
+  - daml-stdlib
+build-options:
+  - --target=2.4
+  # exceptions are deprecated, but are still the only way to get rollback nodes
+  - -Wno-upgrade-exceptions
+  - -Wno-deprecated-exceptions
+  - --output=${TARGET_ROOT}/models/features.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION

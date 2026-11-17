@@ -228,6 +228,52 @@ private[store] object StorageBackendTestValues extends OptionValues {
     )
     .toSeq
 
+  def dtosAdd(
+      // update related columns
+      event_offset: Long = 10L,
+      update_id: Array[Byte] = TestUpdateId("update").toProtoPrimitive.toByteArray,
+      workflow_id: Option[String] = Some("workflow-id"),
+      record_time: Long = 100L,
+      synchronizer_id: SynchronizerId = someSynchronizerId,
+      trace_context: Array[Byte] = serializableTraceContext,
+
+      // event related columns
+      event_sequential_id: Long = 500L,
+      node_id: Int = 15,
+      reassignment_counter: Long = 345,
+      representative_package_id: PackageId = PackageId.assertFromString("representativepackage"),
+
+      // contract related columns
+      notPersistedContractId: ContractId = hashCid("c1"),
+      internal_contract_id: Long = 10,
+      create_key_hash: Option[String] = Some(someContractKey.hash.toHexString),
+      notPersistedContractKey: Option[GlobalKey] = Some(someContractKey),
+  )(
+      party_ids: Set[Party] = Set("stakeholder1", "stakeholder2").map(Party.assertFromString),
+      template_id: NameTypeConRef = NameTypeConRef.assertFromString("#tem:pl:ate"),
+  ): Seq[DbDto] =
+    DbDto
+      .addedEventDbDtos(
+        event_sequential_id = event_sequential_id,
+        node_id = node_id,
+        reassignment_counter = reassignment_counter,
+        representative_package_id = representative_package_id,
+        notPersistedContractId = notPersistedContractId,
+        internal_contract_id = internal_contract_id,
+        create_key_hash = create_key_hash,
+        notPersistedContractKey = notPersistedContractKey,
+        event_offset = event_offset,
+        update_id = update_id,
+        workflow_id = workflow_id,
+        record_time = record_time,
+        synchronizer_id = synchronizer_id,
+        trace_context = trace_context,
+        participant_event_category =
+          if (reassignment_counter > 0) PersistentParticipantEventUpdateCategory.AcsImport.asInt
+          else PersistentParticipantEventUpdateCategory.AcsImportTxStyle.asInt,
+      )(party_ids = party_ids, template_id = template_id)
+      .toSeq
+
   def dtosConsumingExercise(
       // update related columns
       event_offset: Long = 10L,
@@ -355,6 +401,58 @@ private[store] object StorageBackendTestValues extends OptionValues {
       notPersistedContractKey = notPersistedContractKey,
     )
     .toSeq
+
+  /** A Remove event as the write path is expected to produce it: like an unassign, but without the
+    * reassignment-only columns.
+    */
+  def dtosRemove(
+      // update related columns
+      event_offset: Long = 10L,
+      update_id: Array[Byte] = TestUpdateId("update").toProtoPrimitive.toByteArray,
+      workflow_id: Option[String] = Some("workflow-id"),
+      record_time: Long = 100L,
+      synchronizer_id: SynchronizerId = someSynchronizerId,
+      trace_context: Array[Byte] = serializableTraceContext,
+
+      // event related columns
+      event_sequential_id: Long = 500L,
+      node_id: Int = 15,
+      deactivated_event_sequential_id: Option[Long] = Some(67),
+      reassignment_counter: Long = 345,
+
+      // contract related columns
+      contract_id: ContractId = hashCid("c1"),
+      internal_contract_id: Option[Long] = Some(10),
+      template_id: NameTypeConRef = NameTypeConRef.assertFromString("#tem:pl:ate"),
+      package_id: PackageId = PackageId.assertFromString("package"),
+      stakeholders: Set[Party] = Set("stakeholder1", "stakeholder2").map(Party.assertFromString),
+      notPersistedContractKey: Option[GlobalKey] = Some(someContractKey),
+      exercise_actors: Option[Set[Party]] = None,
+  ): Seq[DbDto] =
+    DbDto
+      .removedEventDbDtos(
+        event_sequential_id = event_sequential_id,
+        deactivated_event_sequential_id = deactivated_event_sequential_id,
+        internal_contract_id = internal_contract_id,
+        node_id = node_id,
+        reassignment_counter = reassignment_counter,
+        contract_id = contract_id,
+        template_id = template_id,
+        package_id = package_id,
+        stakeholders = stakeholders,
+        notPersistedContractKey = notPersistedContractKey,
+        exercise_actors = exercise_actors,
+        event_offset = event_offset,
+        update_id = update_id,
+        workflow_id = workflow_id,
+        record_time = record_time,
+        synchronizer_id = synchronizer_id,
+        trace_context = trace_context,
+        participant_event_category =
+          if (reassignment_counter > 0) PersistentParticipantEventUpdateCategory.Purge.asInt
+          else PersistentParticipantEventUpdateCategory.PurgeTxStyle.asInt,
+      )
+      .toSeq
 
   def dtosWitnessedCreate(
       // update related columns

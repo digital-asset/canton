@@ -55,6 +55,26 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
       )
     }
 
+    "error when view number is impossible" in {
+      forAll(
+        Table(
+          ("segment status", "condition"),
+          SegmentStatus.InViewChange(ViewNumber(-1), Seq.empty, Seq.empty) -> "> 0",
+          SegmentStatus.InViewChange(ViewNumber(0), Seq.empty, Seq.empty) -> "> 0",
+          SegmentStatus.InProgress(ViewNumber(-1), Seq.empty) -> ">= 0",
+        )
+      ) { case (segmentStatus, condition) =>
+        val validator = new RetransmissionMessageValidator(epoch)
+        val request = retransmissionRequest(segments = NonEmpty.mk(Seq, segmentStatus))
+
+        val result =
+          validator.validateRetransmissionRequest(request)
+        result shouldBe Left(
+          s"Got a malformed retransmission request from node0 at segment 0, remoteViewNumber must be $condition, got ${segmentStatus.viewNumber}, ignoring"
+        )
+      }
+    }
+
     "error when all segments are complete" in {
       val validator = new RetransmissionMessageValidator(epoch)
       val request = retransmissionRequest(segments = NonEmpty.mk(Seq, SegmentStatus.Complete))
@@ -71,7 +91,7 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
       val request =
         retransmissionRequest(
           segments =
-            NonEmpty.mk(Seq, SegmentStatus.InViewChange(ViewNumber.First, Seq.empty, Seq.empty))
+            NonEmpty.mk(Seq, SegmentStatus.InViewChange(ViewNumber(1L), Seq.empty, Seq.empty))
         )
 
       val result =
@@ -86,7 +106,7 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
       val request =
         retransmissionRequest(
           segments =
-            NonEmpty.mk(Seq, SegmentStatus.InViewChange(ViewNumber.First, Seq(false), Seq.empty))
+            NonEmpty.mk(Seq, SegmentStatus.InViewChange(ViewNumber(1L), Seq(false), Seq.empty))
         )
 
       val result =
@@ -102,7 +122,7 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
         segments = NonEmpty.mk(
           Seq,
           SegmentStatus.InViewChange(
-            ViewNumber.First,
+            ViewNumber(1L),
             Seq(false),
             Seq.fill(epochLength.toInt)(false),
           ),

@@ -52,7 +52,12 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, OptionUtil}
+import com.digitalasset.canton.util.{
+  EitherTUtil,
+  FutureUnlessShutdownUtil,
+  GrpcStreamingUtils,
+  OptionUtil,
+}
 import com.digitalasset.canton.{
   LfPartyId,
   ProtoDeserializationError,
@@ -74,7 +79,7 @@ import scala.util.{Success, Try}
 
 final class GrpcParticipantRepairService(
     sync: CantonSyncService,
-    evalAcsCommitmentProcessorManagerO: Option[Eval[AcsCommitmentProcessorManager]],
+    evalAcsCommitmentProcessorManager: Eval[AcsCommitmentProcessorManager],
     internalIndexService: Eval[InternalIndexService],
     parameters: ParticipantNodeParameters,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -360,7 +365,7 @@ final class GrpcParticipantRepairService(
               force = request.force,
               forceRepairWhenTopologyTransactionAtLedgerEnd =
                 request.forceRepairWhenTopologyTransactionAtLedgerEnd,
-              evalAcsCommitmentProcessorManagerO.map(_.value),
+              evalAcsCommitmentProcessorManager.value,
             )
             .leftMap(_.asGrpcError.getStatus.getDescription)
             .value
@@ -760,15 +765,6 @@ final class GrpcParticipantRepairService(
 
     val result =
       for {
-        evalAcsCommitmentProcessorManager <- EitherT.fromOption[FutureUnlessShutdown](
-          evalAcsCommitmentProcessorManagerO,
-          RepairServiceError.InvalidState
-            .Error(
-              "ACS digest processor is disabled. Enable 'enable-new-acs-commitment-processor' in configuration."
-            )
-            .toCantonRpcError,
-        )
-
         synchronizerId <- wrapErrUS(
           SynchronizerId.fromProtoPrimitive(request.synchronizerId, "synchronizer_id")
         )
@@ -823,31 +819,19 @@ final class GrpcParticipantRepairService(
 
     val result =
       for {
-        evalAcsCommitmentProcessorManager <- EitherT.fromOption[FutureUnlessShutdown](
-          evalAcsCommitmentProcessorManagerO,
-          RepairServiceError.InvalidState
-            .Error(
-              "ACS digest processor is disabled. Enable 'enable-new-acs-commitment-processor' in configuration."
-            )
-            .toCantonRpcError,
-        )
-
         synchronizerId <- wrapErrUS(
           SynchronizerId.fromProtoPrimitive(request.synchronizerId, "synchronizer_id")
         )
-
-        response <- EitherT.right[RpcError] {
-          val digestProcessorManager = evalAcsCommitmentProcessorManager.value
-            .getOrCreate(synchronizerId)
-            .digestProcessorManager
-
-          val _ = digestProcessorManager
-            .startConsistencyCheckProcessor()
-
-          FutureUnlessShutdown.pure(RunDigestConsistencyCheckResponse())
-        }
-      } yield response
-
+      } yield {
+        val digestProcessorManager = evalAcsCommitmentProcessorManager.value
+          .getOrCreate(synchronizerId)
+          .digestProcessorManager
+        FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+          digestProcessorManager.startConsistencyCheckProcessor(),
+          "consistency check processor failed to start",
+        )
+        RunDigestConsistencyCheckResponse()
+      }
     CantonGrpcUtil.mapErrNewEUS(result)
   }
 
@@ -858,35 +842,19 @@ final class GrpcParticipantRepairService(
 
     val result =
       for {
-        evalAcsCommitmentProcessorManager <- EitherT.fromOption[FutureUnlessShutdown](
-          evalAcsCommitmentProcessorManagerO,
-          RepairServiceError.InvalidState
-            .Error(
-              "ACS digest processor is disabled. Enable 'enable-new-acs-commitment-processor' in configuration."
-            )
-            .toCantonRpcError,
-        )
-
         synchronizerId <- wrapErrUS(
           SynchronizerId.fromProtoPrimitive(request.synchronizerId, "synchronizer_id")
         )
-
-        response <- EitherT.right[RpcError] {
-          val digestProcessorManager = evalAcsCommitmentProcessorManager.value
-            .getOrCreate(synchronizerId)
-            .digestProcessorManager
-
-          val status = digestProcessorManager.getConsistencyCheckProcessorStatus()
-
-          FutureUnlessShutdown.pure(
-            DigestConsistencyCheckStatusResponse(
-              isRunning = status.isRunning,
-              lastStartedCheckTime = status.startTimestamp.map(_.toProtoTimestamp),
-            )
-          )
-        }
-      } yield response
-
+      } yield {
+        val digestProcessorManager = evalAcsCommitmentProcessorManager.value
+          .getOrCreate(synchronizerId)
+          .digestProcessorManager
+        val status = digestProcessorManager.getConsistencyCheckProcessorStatus()
+        DigestConsistencyCheckStatusResponse(
+          isRunning = status.isRunning,
+          lastStartedCheckTime = status.startTimestamp.map(_.toProtoTimestamp),
+        )
+      }
     CantonGrpcUtil.mapErrNewEUS(result)
   }
 }

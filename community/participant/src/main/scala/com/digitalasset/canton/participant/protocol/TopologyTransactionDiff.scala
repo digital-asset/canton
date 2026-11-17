@@ -20,7 +20,6 @@ import com.digitalasset.canton.protocol.UpdateId
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactions.PositiveSignedTopologyTransactions
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId}
 
 private[protocol] object TopologyTransactionDiff {
@@ -82,20 +81,14 @@ private[protocol] object TopologyTransactionDiff {
         }
     }
 
-    val abortingOnboardingLocalParty = before.exists {
-      case ((partyId, participantId), (_, onboardingBefore)) =>
-        onboardingBefore &&
-        participantId == localParticipantId.toLf &&
-        !after.contains(partyId -> participantId)
+    val revokingLocalParty = before.exists { case ((partyId, participantId), _) =>
+      participantId == localParticipantId.toLf && !after.contains(partyId -> participantId)
     }
 
-    val changedSynchronizerParam =
-      if (psid.protocolVersion >= ProtocolVersion.v36) {
-        extractSynchronizerParameterStateChanges(
-          oldRelevantState = oldRelevantState,
-          currentRelevantState = currentRelevantState,
-        )
-      } else None
+    val changedSynchronizerParam = extractSynchronizerParameterStateChanges(
+      oldRelevantState = oldRelevantState,
+      currentRelevantState = currentRelevantState,
+    )
 
     Option.when(allEvents.nonEmpty || changedSynchronizerParam.nonEmpty) {
       TopologyTransactionDiff(
@@ -103,7 +96,7 @@ private[protocol] object TopologyTransactionDiff {
         updateId(psid, oldRelevantState, currentRelevantState),
         onboardingLocalParty = onboarding.exists(_.participant == localParticipantId.toLf),
         clearingOnboardingLocalParty = clearingOnboardingLocalParty,
-        abortingOnboardingLocalParty = abortingOnboardingLocalParty,
+        revokingLocalParty = revokingLocalParty,
         genericTopologyEvents = changedSynchronizerParam.toList,
       )
     }
@@ -209,6 +202,6 @@ private[protocol] final case class TopologyTransactionDiff(
     updateId: UpdateId,
     onboardingLocalParty: Boolean,
     clearingOnboardingLocalParty: Boolean,
-    abortingOnboardingLocalParty: Boolean,
+    revokingLocalParty: Boolean,
     genericTopologyEvents: Seq[GenericTopologyEvent],
 )

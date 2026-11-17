@@ -100,6 +100,7 @@ object ContractValidator {
         }
       } yield contractIdVersionV1
 
+    @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
     private def authenticateHashInternal(
         contract: FatContractInstance,
         contractHash: LfHash,

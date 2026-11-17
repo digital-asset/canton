@@ -28,6 +28,7 @@ import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   TopologyChangeOp,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
 /** Test that the system still works properly after parties are left dangling
@@ -182,7 +183,7 @@ class DanglingPartiesIntegrationTest
     awaitAndTouchCycleContract(participant1, alice)
   }
 
-  "commitments are still being updated" in { implicit env =>
+  "commitments are still being updated" onlyRunLessThan ProtocolVersion.v38 in { implicit env =>
     import env.*
 
     val t1 = env.environment.clock.now

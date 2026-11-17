@@ -14,7 +14,6 @@ import com.digitalasset.canton.config.{AdminServerConfig, ApiLoggingConfig, Cant
 import com.digitalasset.canton.integration.{EnvironmentSetupPlugin, TestConsoleEnvironment}
 import com.digitalasset.canton.lifecycle.LifeCycle.{CloseableServer, toCloseableServer}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.ActiveRequestsMetrics
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.tracing.TracingConfig.{BatchSpanProcessor, Exporter}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
@@ -145,9 +144,8 @@ class UseOtlp(
         loggerFactory = loggerFactory,
         apiLoggingConfig = ApiLoggingConfig(messagePayloads = false),
         tracing = TracingConfig(),
-        grpcMetrics = (
-          new DamlGrpcServerMetrics(NoOpMetricsFactory, "test"),
-          new ActiveRequestsMetrics(NoOpMetricsFactory, "test")(MetricsContext.Empty),
+        grpcMetrics = new DamlGrpcServerMetrics(NoOpMetricsFactory, "test")(
+          MetricsContext.Empty
         ),
         additionalInterceptors = Seq(new HeaderPrinter(loggerFactory)),
       )

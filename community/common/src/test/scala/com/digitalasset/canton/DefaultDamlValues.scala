@@ -13,6 +13,7 @@ import com.digitalasset.canton.protocol.{
   LfVersionedTransaction,
 }
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import org.scalatest.EitherValues.*
 
 /** Default values for objects from the Daml repo for unit testing */
 object DefaultDamlValues {
@@ -27,9 +28,8 @@ object DefaultDamlValues {
   def submissionId(index: Int = 0): LedgerSubmissionId =
     LedgerSubmissionId.assertFromString(s"submission-id-$index")
 
-  lazy val deduplicationDuration: DeduplicationDuration = DeduplicationDuration(
-    java.time.Duration.ofSeconds(100)
-  )
+  lazy val deduplicationDuration: DeduplicationDuration =
+    DeduplicationDuration.create(java.time.Duration.ofSeconds(100)).value
 
   def lfTransactionId(index: Int): Ref.TransactionId =
     Ref.TransactionId.assertFromString(s"lf-transaction-id-$index")

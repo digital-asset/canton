@@ -13,7 +13,6 @@ import com.digitalasset.canton.data.LightTransactionViewTree.{
   ToFullViewTreesResult,
 }
 import com.digitalasset.canton.data.MerkleTree.{BlindSubtree, RevealIfNeedBe, RevealSubtree}
-import com.digitalasset.canton.data.TransactionView.ValidateKeys
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.*
@@ -37,15 +36,13 @@ import monocle.{PIso, PLens}
 import scala.annotation.nowarn
 
 @nowarn("msg=match may not be exhaustive")
-class GenTransactionTreeTest
+final class GenTransactionTreeTest
     extends BaseTestWordSpec
     with HasExecutionContext
     with ProtocolVersionChecksAnyWordSpec
     with FailOnShutdown {
 
   val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()
-
-  private val validateKeys = ValidateKeys(testedProtocolVersion)
 
   // Generates dummy subview references (ByViewHash or ByCiphertextId based on protocol version)
   // paired with a key (i.e. secure randomness) for each element.
@@ -443,13 +440,13 @@ class GenTransactionTreeTest
         val childViewCommonData =
           singleExerciseView.viewCommonData.tryUnwrap.copy(salt = factory.commonDataSalt(1))
         val childView = singleExerciseView.tryCopy(
-          validateKeys = validateKeys,
+          validateKeys = true,
           viewCommonData = childViewCommonData,
         )
         val subviews =
           TransactionSubviews(Seq(childView))(testedProtocolVersion, factory.cryptoOps)
         val parentView =
-          singleExerciseView.tryCopy(validateKeys = validateKeys, subviews = subviews)
+          singleExerciseView.tryCopy(validateKeys = true, subviews = subviews)
 
         GenTransactionTree.create(factory.cryptoOps)(
           factory.submitterMetadata,
@@ -585,10 +582,10 @@ class GenTransactionTreeTest
 
     forEvery(example.transactionViewTrees.zipWithIndex) { case (tvt, index) =>
       val viewWithBlindedSubviews =
-        tvt.view.tryCopy(validateKeys = validateKeys, subviews = tvt.view.subviews.blindFully)
+        tvt.view.tryCopy(validateKeys = true, subviews = tvt.view.subviews.blindFully)
       val genTransactionTree =
         tvt.tree.mapUnblindedRootViews(
-          _.replace(tvt.viewHash, viewWithBlindedSubviews, validateKeys)
+          _.replace(tvt.viewHash, viewWithBlindedSubviews, validateKeys = true)
         )
 
       val dummyViewHash = ViewHash(
@@ -677,7 +674,7 @@ class GenTransactionTreeTest
 
         val view1WithParticipantDataUnblinded =
           view1.tryCopy(
-            validateKeys = validateKeys,
+            validateKeys = true,
             viewParticipantData = view1Unblinded.viewParticipantData,
           )
         val rootViews = MerkleSeq.fromSeq(factory.cryptoOps, testedProtocolVersion)(
@@ -735,7 +732,7 @@ class GenTransactionTreeTest
         val rootViewsWithCommonDataBlinded =
           rootViews.map(view =>
             view.tryCopy(
-              validateKeys = validateKeys,
+              validateKeys = true,
               viewCommonData = ExampleTransactionFactory.blinded(view.viewCommonData),
             )
           )

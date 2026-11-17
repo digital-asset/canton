@@ -51,10 +51,9 @@ class InteractiveSubmissionVersioningIntegrationTest extends InteractiveSubmissi
 
     /*
      * This is the intended behavior because:
-     * - Even from PV35, where LFS V2 is supported, a transaction / node will be assigned
-     * LFS V2 only if it contains keys, otherwise LFSV1
+     * - A transaction / node will be assigned LFS V2 only if it contains keys, otherwise LFS V1
      *
-     * This means that HashingSchemeV2 keeps working on PV35 even for new transactions as long
+     * This means that HashingSchemeV2 keeps working even for new transactions as long
      * as they don't contain keys (as tested above).
      */
     "fail to prepare a transaction on LF serialization V2 and hashing scheme V2" in {

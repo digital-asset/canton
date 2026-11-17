@@ -22,10 +22,9 @@ object DepthCounter {
   /** Limits the depth from PV36 on; `NoValidation` does not limit it. */
   def withLimit(protocolVersionValidation: ProtocolVersionValidation, limit: Int): DepthCounter =
     protocolVersionValidation match {
-      case ProtocolVersionValidation.PV(pv) =>
-        if (pv >= ProtocolVersion.v36) Impl(0, limit) else NoLimit
+      case _: ProtocolVersionValidation.PV | ProtocolVersionValidation.AlwaysValidation =>
+        Impl(0, limit)
       case ProtocolVersionValidation.NoValidation => NoLimit
-      case ProtocolVersionValidation.AlwaysValidation => Impl(0, limit)
     }
 
   def withLimit(protocolVersion: ProtocolVersion, limit: Int): DepthCounter =

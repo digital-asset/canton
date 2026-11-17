@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability
 
-import cats.syntax.traverse.*
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.ProofOfAvailability as ProtoProofOfAvailability
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 
 final case class ProofOfAvailability(
     batchId: BatchId,
@@ -17,12 +19,23 @@ final case class ProofOfAvailability(
 
 object ProofOfAvailability {
   def fromProto(
-      value: ProtoProofOfAvailability
+      pvv: ProtocolVersionValidation,
+      limits: BftOrdererLimits,
+      value: ProtoProofOfAvailability,
   ): ParsingResult[ProofOfAvailability] =
     for {
       id <- BatchId.fromProto(value.batchId)
-      acks <- value.acks.traverse { ack =>
-        ProtoConverter.parseRequired(AvailabilityAck.fromProto(ack, _), "signature", ack.signature)
+      acks <- ProtoValidation.validateLengthThen(
+        value.acks,
+        "acks",
+        pvv,
+        ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxAcks),
+      ) { (ack, _) =>
+        ProtoConverter.parseRequired(
+          AvailabilityAck.fromProto(pvv, ack, _),
+          "signature",
+          ack.signature,
+        )
       }
       epochNumber = EpochNumber(value.epochNumber)
     } yield ProofOfAvailability(id, acks, epochNumber)

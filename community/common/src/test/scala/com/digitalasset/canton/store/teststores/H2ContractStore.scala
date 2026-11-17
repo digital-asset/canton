@@ -4,7 +4,8 @@
 package com.digitalasset.canton.store.teststores
 
 import com.digitalasset.canton.TestEssentials
-import com.digitalasset.canton.config.{BatchAggregatorConfig, CachingConfigs}
+import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig}
 import com.digitalasset.canton.participant.store.db.DbContractStore
 import org.scalatest.Suite
 
@@ -13,7 +14,7 @@ trait H2ContractStore extends H2StoresTest {
 
   def createContractStore(): DbContractStore = new DbContractStore(
     storage = inMemoryH2Storage,
-    cacheConfig = CachingConfigs.testing.contractStore,
+    cacheConfig = CacheConfig(maximumSize = PositiveNumeric.tryCreate(100)),
     dbQueryBatcherConfig = BatchAggregatorConfig.defaultsForTesting,
     insertBatchAggregatorConfig = BatchAggregatorConfig.defaultsForTesting,
     timeouts = timeouts,

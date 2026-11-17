@@ -239,6 +239,7 @@ class GrpcSequencerAdministrationService(
             None,
             Some(staticSynchronizerParameters),
             Some(sequencerSnapshot),
+            Some(sequencerClient.psid.logical),
             staticSynchronizerParameters.protocolVersion,
           )
           _ <- writeState(nonTopologyOnboardingState)
@@ -250,6 +251,7 @@ class GrpcSequencerAdministrationService(
                     writeState(
                       OnboardingStateForSequencerV2(
                         Some(stored),
+                        None,
                         None,
                         None,
                         staticSynchronizerParameters.protocolVersion,

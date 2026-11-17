@@ -4,7 +4,7 @@
 package com.digitalasset.canton.ledger.localstore
 
 import com.daml.metrics.DatabaseMetrics
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
@@ -54,8 +54,6 @@ class PersistentPartyRecordStore(
 
   private implicit val ec: ExecutionContext = executionContext
 
-  private val directEc = DirectExecutionContext(noTracingLogger)
-
   private val backend = dbSupport.storageBackendFactory.createPartyRecordStorageBackend
   private val dbDispatcher = dbSupport.dbDispatcher
 
@@ -73,7 +71,7 @@ class PersistentPartyRecordStore(
       logger.info(
         s"Created new party record in participant local store: $partyRecord"
       )
-    })(directEc)
+    })(directExecutionContext)
 
   override def updatePartyRecord(
       partyRecordUpdate: PartyRecordUpdate,
@@ -322,7 +320,7 @@ class PersistentPartyRecordStore(
         case ConcurrentPartyRecordUpdateDetectedRuntimeException(userId) =>
           Left(ConcurrentPartyUpdate(userId))
         case MaxAnnotationsSizeExceededException(userId) => Left(MaxAnnotationsSizeExceeded(userId))
-      }(directEc)
+      }(directExecutionContext)
 
   private def tapSuccess[T](f: T => Unit)(r: Result[T]): Result[T] = {
     r.foreach(f)

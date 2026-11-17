@@ -783,7 +783,7 @@ object NamespaceDelegation
         .validateThen(value.namespace, "namespace", pvv)(Fingerprint.fromProtoPrimitive)
         .map(Namespace(_))
       target <- ProtoConverter.parseRequired(
-        SigningPublicKey.fromProtoV30,
+        SigningPublicKey.fromProtoV30(pvv, _),
         "target_key",
         value.targetKey,
       )
@@ -1125,7 +1125,7 @@ object OwnerToKeyMapping
           KeyMapping.maxKeys(topologyLimits.maxSigningKeysPerEntity),
         )
       keys <- ProtoConverter
-        .parseRequiredNonEmpty(PublicKey.fromProtoPublicKeyV30, "public_keys", keysSeqP)
+        .parseRequiredNonEmpty(PublicKey.fromProtoPublicKeyV30(pvv, _), "public_keys", keysSeqP)
       otk <- create(member, keys).leftMap(ProtoDeserializationError.InvariantViolation(None, _))
     } yield otk
   }
@@ -1284,7 +1284,7 @@ object PartyToKeyMapping
         )
       signingKeysNE <-
         ProtoConverter.parseRequiredNonEmpty(
-          SigningPublicKey.fromProtoV30,
+          SigningPublicKey.fromProtoV30(pvv, _),
           "signing_keys",
           signingKeysSeqP,
         )
@@ -1388,8 +1388,10 @@ object SynchronizerTrustCertificate
         v30.Enums.ParticipantFeatureFlag.PARTICIPANT_FEATURE_FLAG_PV33_EXTERNAL_SIGNING_LOCAL_CONTRACT_IN_SUBVIEW.value
       )(Some("ExternalSigningLocalContractsInSubview"))
 
+    // TODO(#37616): Remove when removing support for PV=36
     /** When this feature flag is enabled, the participant will allow to reassign contracts between
-      * synchronizers. This feature is in alpha and should not be used in production.
+      * synchronizers. This feature is in alpha and should not be used in production. Used only in
+      * PV < 37.
       */
     val EnableMultiSynchronizer: ParticipantTopologyFeatureFlag =
       ParticipantTopologyFeatureFlag(

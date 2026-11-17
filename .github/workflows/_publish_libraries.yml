@@ -19,8 +19,6 @@ on:
     secrets:
       DATADOG_API_KEY:
         required: true
-      GAC_JSON:
-        required: false
       GPG_CODE_SIGNING:
         required: false
       MAVEN_USERNAME:
@@ -63,7 +61,6 @@ jobs:
       - name: Publish to Google Artifact Registry
         uses: ./.github/actions/publish/publish_libs_to_gar
         with:
-          gac_json: ${{ secrets.GAC_JSON }}
           release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}
 
       - name: Publish to Maven Central

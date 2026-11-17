@@ -21,10 +21,16 @@ import io.circe.parser
 
 import scala.concurrent.{ExecutionContext, Future}
 
+/** @param enableScopeOnlyJwt
+  *   whether scope-only tokens (a scope but no audience) are accepted from an identity provider
+  *   configured without an audience, see
+  *   [[com.digitalasset.canton.config.DeprecatedFeaturesConfig.enableScopeOnlyJwt]]
+  */
 class IdentityProviderAwareAuthService(
     identityProviderConfigLoader: IdentityProviderConfigLoader,
     jwtVerifierLoader: JwtVerifierLoader,
     val loggerFactory: NamedLoggerFactory,
+    enableScopeOnlyJwt: Boolean,
 )(implicit
     executionContext: ExecutionContext
 ) extends AuthService
@@ -79,6 +85,8 @@ class IdentityProviderAwareAuthService(
           payload <- Future(
             parse(decodedJwt.payload, targetAudience = identityProviderConfig.audience)
           )
+          // TODO (i#33090): remove together with the scope-only token format
+          _ <- toFuture(AuthServiceJWT.rejectScopeOnlyJwtUnlessEnabled(payload, enableScopeOnlyJwt))
           _ <- checkAudience(payload, identityProviderConfig.audience)
           jwtPayload <- parsePayload(payload)
         } yield toAuthenticatedUser(jwtPayload, identityProviderConfig.identityProviderId)
