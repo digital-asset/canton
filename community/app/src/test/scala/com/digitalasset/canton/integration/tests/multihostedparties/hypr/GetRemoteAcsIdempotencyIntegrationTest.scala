@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.multihostedparties.hypr
 
 import com.digitalasset.canton.BaseTest.CantonLfV21
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
@@ -47,7 +48,7 @@ import monocle.macros.syntax.lens.*
 import org.scalatest.{Assertion, Succeeded}
 import org.slf4j.event.Level
 
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
@@ -101,6 +102,8 @@ trait GetRemoteAcsIdempotencyIntegrationTest
   // Lets the test stall the TP at some point during ACS replication
   protected val stallTargetParticipant = new AtomicBoolean(false)
   protected val hasTargetParticipantStalled = new AtomicBoolean(false)
+  // Counts how often the TP processor attempts to progress ACS replication
+  protected val targetParticipantProgressAttempts = new AtomicInteger(0)
 
   // Lets the test have the TP ignore the end of the ACS sent by the SP
   protected val ignoreEndOfAcs = new AtomicBoolean(false)
@@ -110,11 +113,13 @@ trait GetRemoteAcsIdempotencyIntegrationTest
     new AcsReplicationTestInterceptor {
       override def onTargetParticipantProgress(
           progress: AcsReplicationStatus.AcsReplicationProgress
-      )(implicit traceContext: TraceContext): ProceedOrWait =
+      )(implicit traceContext: TraceContext): ProceedOrWait = {
+        targetParticipantProgressAttempts.incrementAndGet().discard
         if (stallTargetParticipant.get() && progress.processedContractCount.unwrap > 0) {
           hasTargetParticipantStalled.set(true)
           Wait
         } else Proceed
+      }
 
       override def onTargetParticipantReceivedEndOfAcs()(implicit
           traceContext: TraceContext
@@ -494,13 +499,14 @@ trait GetRemoteAcsRestartAfterEndOfAcsIntegrationTest
 }
 
 /** Stalls the target participant mid-transfer, so that the interrupted remote read times out on the
-  * console. The resulting gRPC cancellation must be detected by the target participant before the
-  * remote read is restarted.
+  * console. The resulting gRPC cancellation must be detected by the target participant and stop the
+  * ACS replication before the remote read is restarted.
   */
 trait GetRemoteAcsRestartAfterTimeoutIntegrationTest
     extends GetRemoteAcsIdempotencyIntegrationTest {
   private val grpcCancelledMessage =
     "gRPC request is cancelled, not waiting for remote read result anymore"
+  private val replicationStoppedMessage = "is cancelled by the get_remote_acs caller"
 
   override protected def interruptedRemoteReadTimeout: Option[NonNegativeDuration] =
     Some(NonNegativeDuration.ofSeconds(10))
@@ -517,6 +523,9 @@ trait GetRemoteAcsRestartAfterTimeoutIntegrationTest
 
   override protected def checkInterruptionInfoLogs: Seq[LogEntry] => Assertion = entries => {
     entries.map(_.message) should contain(grpcCancelledMessage)
+    exactly(1, entries.map(_.message)) should (include("Stopping ACS replication") and include(
+      replicationStoppedMessage
+    ))
     forAll(entries)(_.message should not include "has been restarted by another request")
   }
 
@@ -537,6 +546,14 @@ trait GetRemoteAcsRestartAfterTimeoutIntegrationTest
       eventually(timeUntilSuccess = 1.minute)(interrupted.isCompleted shouldBe true)
       eventually() {
         loggerFactory.fetchRecordedLogEntries.map(_.message) should contain(grpcCancelledMessage)
+      }
+    }
+
+    clue("P2 stops the cancelled ACS replication even though it is still stalled") {
+      eventually() {
+        val attemptsBefore = targetParticipantProgressAttempts.get()
+        Threading.sleep(2.seconds.toMillis)
+        targetParticipantProgressAttempts.get() shouldBe attemptsBefore
       }
     }
 

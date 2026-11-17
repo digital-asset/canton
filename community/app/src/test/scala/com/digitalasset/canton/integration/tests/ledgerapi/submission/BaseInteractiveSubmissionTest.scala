@@ -241,6 +241,7 @@ trait BaseInteractiveSubmissionTest extends BaseTest {
                     ),
                     filtersForAnyParty = None,
                     verbose = verbose,
+                    filtersByContractId = Seq.empty,
                   )
                 ),
                 transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,

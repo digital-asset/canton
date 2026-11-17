@@ -103,6 +103,21 @@ jobs:
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
 
+  unstable_test_slow_36:
+    name: Unstable Test Slow 36
+    needs: [pick_runner, compile, toxiproxy_test_slow_36]
+    uses: ./.github/workflows/_unstable_test_slow.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+      job_name: unstable_test_slow_36
+
   test_36_with_java17:
     name: Test 36 With Java 17
     needs: [pick_runner, compile]
@@ -141,6 +156,16 @@ jobs:
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+
+  toxiproxy_test_slow_36:
+    name: Toxiproxy Test Slow 36
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_toxiproxy_test_slow.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+      job_name: toxiproxy_test_slow_36
 
   stability_crash_recovery_test_36:
     name: Stability Crash Recovery Test
@@ -206,6 +231,52 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
+
+  # One version at a time, as on CircleCI, to cap the leg at 12 runners.
+  postgres_conformance_test_15:
+    name: Postgres Conformance Test 15
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_postgres_conformance_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      postgres_version: '15'
+      job_name: postgres_conformance_test_15
+
+  postgres_conformance_test_16:
+    name: Postgres Conformance Test 16
+    needs: [pick_runner, postgres_conformance_test_15]
+    uses: ./.github/workflows/_postgres_conformance_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      postgres_version: '16'
+      job_name: postgres_conformance_test_16
+
+  postgres_conformance_test_17:
+    name: Postgres Conformance Test 17
+    needs: [pick_runner, postgres_conformance_test_16]
+    uses: ./.github/workflows/_postgres_conformance_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      postgres_version: '17'
+      job_name: postgres_conformance_test_17
 
   model_based_test_36:
     name: Model Based Test 36
@@ -275,15 +346,20 @@ jobs:
       - build_docs_snippets
       - build_docs
       - unstable_test_36
+      - unstable_test_slow_36
       - test_36_with_java17
       - ledger_api_compatibility_tests_37
       - protocol_continuity_test_all
+      - toxiproxy_test_slow_36
       - stability_crash_recovery_test_36
       - package_jsonapi
       - assembly_ledger_api_test_tool
       - external_parties_test_36
       - nightly_integration_test_36
       - model_based_test_36
+      - postgres_conformance_test_15
+      - postgres_conformance_test_16
+      - postgres_conformance_test_17
       - build_and_publish_docker
       - publish_libraries
       - publish_release

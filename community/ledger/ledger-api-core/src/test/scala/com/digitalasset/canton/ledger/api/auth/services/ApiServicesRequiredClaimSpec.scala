@@ -25,9 +25,13 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
 import com.daml.ledger.api.v2.state_service.{
   GetActiveContractsRequest,
   GetConnectedSynchronizersRequest,
+  GetHostedPartiesPageRequest,
+  GetHostedPartiesRequest,
+  HostedPartiesFilter,
 }
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.transaction_filter.{
+  ContractIdFilter,
   EventFormat,
   Filters,
   ParticipantAuthorizationTopologyFormat,
@@ -44,8 +48,11 @@ import com.digitalasset.canton.ledger.api.auth.services.ApiServicesRequiredClaim
   submitAndWaitForTransactionRequest,
 }
 import com.digitalasset.canton.ledger.api.auth.{RequiredClaims, TrafficAccountAuthorization}
+import com.digitalasset.canton.platform.apiserver.services.RequestWithReadAsParty
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.{BaseTest, LfPartyId}
+import com.google.protobuf.ByteString
+import org.scalatest.Assertion
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 import scalapb.lenses.Lens
@@ -165,6 +172,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             ),
             filtersForAnyParty = Some(Filters(Nil)),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         ),
         streamContinuationToken = None,
@@ -191,6 +199,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             ),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         ),
         streamContinuationToken = None,
@@ -212,6 +221,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             filtersByParty = Map.empty,
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         ),
         streamContinuationToken = None,
@@ -229,6 +239,149 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         includeIncompleteReassignments = false,
       )
     ) shouldBe Nil
+  }
+
+  behavior of "StateServiceAuthorization.getHostedPartiesClaims"
+
+  it should "require public access and fill the filter with readable parties when it is absent" in {
+    val request = GetHostedPartiesRequest(
+      hostedAtOffset = Some(42L),
+      filter = None,
+      streamContinuationToken = Some(ByteString.copyFromUtf8("continuation")),
+    )
+    val partiesL = StateServiceAuthorization.partiesForGetHostedPartiesL
+    StateServiceAuthorization.getHostedPartiesClaims(request) shouldBe List(
+      RequiredClaim.Public[GetHostedPartiesRequest](),
+      RequiredClaim.MatchReadAsParties(partiesL),
+    )
+    partiesL.set(Set("b", "a"))(request) shouldBe GetHostedPartiesRequest(
+      hostedAtOffset = Some(42L),
+      filter = Some(
+        HostedPartiesFilter(
+          partyFilter = Seq("a", "b"),
+          allParticipants = false,
+          synchronizerIdFilter = Seq.empty,
+        )
+      ),
+      streamContinuationToken = Some(ByteString.copyFromUtf8("continuation")),
+    )
+    partiesL.set(Set.empty)(request) shouldBe GetHostedPartiesRequest(
+      hostedAtOffset = Some(42L),
+      filter = Some(
+        HostedPartiesFilter(
+          partyFilter = Seq.empty,
+          allParticipants = false,
+          synchronizerIdFilter = Seq.empty,
+        )
+      ),
+      streamContinuationToken = Some(ByteString.copyFromUtf8("continuation")),
+    )
+  }
+
+  it should "require only public access for a supplied empty filter" in {
+    val request = GetHostedPartiesRequest(
+      hostedAtOffset = None,
+      filter = Some(
+        HostedPartiesFilter(
+          partyFilter = Seq.empty,
+          allParticipants = false,
+          synchronizerIdFilter = Seq.empty,
+        )
+      ),
+      streamContinuationToken = None,
+    )
+    StateServiceAuthorization.getHostedPartiesClaims(request) shouldBe
+      List(RequiredClaim.Public[GetHostedPartiesRequest]())
+  }
+
+  it should "require only public access for a supplied full filter" in {
+    val request = GetHostedPartiesRequest(
+      hostedAtOffset = None,
+      filter = Some(
+        HostedPartiesFilter(
+          partyFilter = Seq("a", "b"),
+          allParticipants = true,
+          synchronizerIdFilter = Seq("synchronizer::namespace"),
+        )
+      ),
+      streamContinuationToken = None,
+    )
+    StateServiceAuthorization.getHostedPartiesClaims(request) shouldBe
+      List(RequiredClaim.Public[GetHostedPartiesRequest]())
+  }
+
+  behavior of "StateServiceAuthorization.getHostedPartiesPageClaims"
+
+  it should "require public access and fill the filter with readable parties when it is absent" in {
+    val request = GetHostedPartiesPageRequest(
+      hostedAtOffset = Some(42L),
+      filter = None,
+      pageToken = Some(ByteString.copyFromUtf8("page")),
+      maxPageSize = Some(1),
+    )
+    val partiesL = StateServiceAuthorization.partiesForGetHostedPartiesPageL
+    StateServiceAuthorization.getHostedPartiesPageClaims(request) shouldBe List(
+      RequiredClaim.Public[GetHostedPartiesPageRequest](),
+      RequiredClaim.MatchReadAsParties(partiesL),
+    )
+    partiesL.set(Set("b", "a"))(request) shouldBe GetHostedPartiesPageRequest(
+      hostedAtOffset = Some(42L),
+      filter = Some(
+        HostedPartiesFilter(
+          partyFilter = Seq("a", "b"),
+          allParticipants = false,
+          synchronizerIdFilter = Seq.empty,
+        )
+      ),
+      pageToken = Some(ByteString.copyFromUtf8("page")),
+      maxPageSize = Some(1),
+    )
+    partiesL.set(Set.empty)(request) shouldBe GetHostedPartiesPageRequest(
+      hostedAtOffset = Some(42L),
+      filter = Some(
+        HostedPartiesFilter(
+          partyFilter = Seq.empty,
+          allParticipants = false,
+          synchronizerIdFilter = Seq.empty,
+        )
+      ),
+      pageToken = Some(ByteString.copyFromUtf8("page")),
+      maxPageSize = Some(1),
+    )
+  }
+
+  it should "require only public access for a supplied empty filter" in {
+    val request = GetHostedPartiesPageRequest(
+      hostedAtOffset = None,
+      filter = Some(
+        HostedPartiesFilter(
+          partyFilter = Seq.empty,
+          allParticipants = false,
+          synchronizerIdFilter = Seq.empty,
+        )
+      ),
+      pageToken = None,
+      maxPageSize = None,
+    )
+    StateServiceAuthorization.getHostedPartiesPageClaims(request) shouldBe
+      List(RequiredClaim.Public[GetHostedPartiesPageRequest]())
+  }
+
+  it should "require only public access for a supplied full filter" in {
+    val request = GetHostedPartiesPageRequest(
+      hostedAtOffset = None,
+      filter = Some(
+        HostedPartiesFilter(
+          partyFilter = Seq("a", "b"),
+          allParticipants = true,
+          synchronizerIdFilter = Seq("synchronizer::namespace"),
+        )
+      ),
+      pageToken = None,
+      maxPageSize = None,
+    )
+    StateServiceAuthorization.getHostedPartiesPageClaims(request) shouldBe
+      List(RequiredClaim.Public[GetHostedPartiesPageRequest]())
   }
 
   behavior of "StateServiceAuthorization.getConnectedSynchronizersClaims"
@@ -437,10 +590,10 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
     }
   }
 
-  behavior of "UpdateServiceAuthorization.getUpdatesClaims"
+  behavior of "UpdateServiceAuthorization.getUpdateFormatClaimsAndFillReadAsParties"
 
   it should "compute the correct claims in the happy path" in {
-    UpdateServiceAuthorization.getUpdatesClaims(
+    getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
         endInclusive = Some(15),
@@ -456,6 +609,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
                     ),
                     filtersForAnyParty = Some(Filters(Nil)),
                     verbose = true,
+                    filtersByContractId = Seq.empty,
                   )
                 ),
                 transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
@@ -469,6 +623,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
                 ),
                 filtersForAnyParty = Some(Filters(Nil)),
                 verbose = true,
+                filtersByContractId = Seq.empty,
               )
             ),
             includeTopologyEvents = Some(
@@ -479,7 +634,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         ),
         descendingOrder = false,
       )
-    ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
+    ) should contain theSameElementsAs RequiredClaims[RequestWithReadAsParty[GetUpdatesRequest]](
       RequiredClaim.ReadAs("a"),
       RequiredClaim.ReadAs("b"),
       RequiredClaim.ReadAs("c"),
@@ -489,7 +644,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
   }
 
   it should "compute the correct claims if no party wildcards exist" in {
-    UpdateServiceAuthorization.getUpdatesClaims(
+    getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
         endInclusive = Some(15),
@@ -505,6 +660,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
                     ),
                     filtersForAnyParty = None,
                     verbose = true,
+                    filtersByContractId = Seq.empty,
                   )
                 ),
                 transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
@@ -518,6 +674,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
                 ),
                 filtersForAnyParty = None,
                 verbose = true,
+                filtersByContractId = Seq.empty,
               )
             ),
             includeTopologyEvents = Some(
@@ -528,7 +685,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         ),
         descendingOrder = false,
       )
-    ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
+    ) should contain theSameElementsAs RequiredClaims[RequestWithReadAsParty[GetUpdatesRequest]](
       RequiredClaim.ReadAs("a"),
       RequiredClaim.ReadAs("b"),
       RequiredClaim.ReadAs("c"),
@@ -542,9 +699,10 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         filtersByParty = Map.empty,
         filtersForAnyParty = None,
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
     )
-    UpdateServiceAuthorization.getUpdatesClaims(
+    getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
         endInclusive = Some(15),
@@ -565,7 +723,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         ),
         descendingOrder = false,
       )
-    ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
+    ) should contain theSameElementsAs RequiredClaims[RequestWithReadAsParty[GetUpdatesRequest]](
       RequiredClaim.Public()
     )
   }
@@ -576,9 +734,10 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         filtersByParty = Map.empty,
         filtersForAnyParty = None,
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
     )
-    UpdateServiceAuthorization.getUpdatesClaims(
+    getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
         endInclusive = Some(15),
@@ -599,13 +758,13 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         ),
         descendingOrder = false,
       )
-    ) should contain theSameElementsAs RequiredClaims[GetUpdatesRequest](
+    ) should contain theSameElementsAs RequiredClaims[RequestWithReadAsParty[GetUpdatesRequest]](
       RequiredClaim.Public()
     )
   }
 
   it should "compute the correct claims if no updateFormat exists" in {
-    UpdateServiceAuthorization.getUpdatesClaims(
+    getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
         endInclusive = Some(15),
@@ -616,7 +775,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
   }
 
   it should "require only a public claim for topology format with parties" in {
-    UpdateServiceAuthorization.getUpdatesClaims(
+    getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
         endInclusive = Some(15),
@@ -632,13 +791,13 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         ),
         descendingOrder = false,
       )
-    ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
+    ) should contain theSameElementsAs RequiredClaims[RequestWithReadAsParty[GetUpdatesRequest]](
       RequiredClaim.Public()
     )
   }
 
   it should "compute the correct claims for transactions format with wildcard" in {
-    UpdateServiceAuthorization.getUpdatesClaims(
+    getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
         endInclusive = Some(15),
@@ -651,6 +810,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
                     filtersByParty = Map.empty,
                     filtersForAnyParty = Some(Filters(Nil)),
                     verbose = false,
+                    filtersByContractId = Seq.empty,
                   )
                 ),
                 transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
@@ -663,13 +823,13 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         ),
         descendingOrder = false,
       )
-    ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
+    ) should contain theSameElementsAs RequiredClaims[RequestWithReadAsParty[GetUpdatesRequest]](
       RequiredClaim.ReadAsAnyParty()
     )
   }
 
   it should "compute the correct claims for reassignments with wildcard" in {
-    UpdateServiceAuthorization.getUpdatesClaims(
+    getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
         endInclusive = Some(15),
@@ -680,6 +840,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
                 filtersByParty = Map.empty,
                 filtersForAnyParty = Some(Filters(Nil)),
                 verbose = false,
+                filtersByContractId = Seq.empty,
               )
             ),
             includeTransactions = None,
@@ -689,13 +850,13 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         ),
         descendingOrder = false,
       )
-    ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
+    ) should contain theSameElementsAs RequiredClaims[RequestWithReadAsParty[GetUpdatesRequest]](
       RequiredClaim.ReadAsAnyParty()
     )
   }
 
   it should "require only a public claim for topology format with wildcard" in {
-    UpdateServiceAuthorization.getUpdatesClaims(
+    getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
         endInclusive = Some(15),
@@ -711,9 +872,210 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         ),
         descendingOrder = false,
       )
-    ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
+    ) should contain theSameElementsAs RequiredClaims[RequestWithReadAsParty[GetUpdatesRequest]](
       RequiredClaim.Public()
     )
+  }
+
+  it should "require a MatchReadAsParties claim if transactions format filters by contract id" in {
+    val result = getUpdatesClaims(
+      GetUpdatesRequest(
+        beginExclusive = 10,
+        endInclusive = Some(15),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(
+              TransactionFormat(
+                eventFormat = Some(
+                  EventFormat(
+                    filtersByParty = Map("a" -> Filters(Nil)),
+                    filtersForAnyParty = None,
+                    verbose = false,
+                    filtersByContractId = Seq(contractIdFilter),
+                  )
+                ),
+                transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+              )
+            ),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
+          )
+        ),
+        descendingOrder = false,
+      )
+    )
+    assertSingleMatchReadAsParties(result)
+    result.filterNot(isMatchReadAsParties) should contain theSameElementsAs RequiredClaims[
+      RequestWithReadAsParty[GetUpdatesRequest]
+    ](
+      RequiredClaim.ReadAs("a")
+    )
+  }
+
+  it should "require a MatchReadAsParties claim if reassignments format filters by contract id" in {
+    val result = getUpdatesClaims(
+      GetUpdatesRequest(
+        beginExclusive = 10,
+        endInclusive = Some(15),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = None,
+            includeReassignments = Some(
+              EventFormat(
+                filtersByParty = Map.empty,
+                filtersForAnyParty = Some(Filters(Nil)),
+                verbose = false,
+                filtersByContractId = Seq(contractIdFilter),
+              )
+            ),
+            includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
+          )
+        ),
+        descendingOrder = false,
+      )
+    )
+    assertSingleMatchReadAsParties(result)
+    result.filterNot(isMatchReadAsParties) should contain theSameElementsAs RequiredClaims[
+      RequestWithReadAsParty[GetUpdatesRequest]
+    ](
+      RequiredClaim.ReadAsAnyParty()
+    )
+  }
+
+  it should "require a MatchReadAsParties claim if transactions and reassignments format filters by contract id" in {
+    val result = getUpdatesClaims(
+      GetUpdatesRequest(
+        beginExclusive = 10,
+        endInclusive = Some(15),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = None,
+            includeReassignments = None,
+            includeTopologyEvents = None,
+            includeTransactionsAndReassignments = Some(
+              TransactionFormat(
+                eventFormat = Some(
+                  EventFormat(
+                    filtersByParty = Map("a" -> Filters(Nil)),
+                    filtersForAnyParty = None,
+                    verbose = false,
+                    filtersByContractId = Seq(contractIdFilter),
+                  )
+                ),
+                transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+              )
+            ),
+          )
+        ),
+        descendingOrder = false,
+      )
+    )
+    assertSingleMatchReadAsParties(result)
+    result.filterNot(isMatchReadAsParties) should contain theSameElementsAs RequiredClaims[
+      RequestWithReadAsParty[GetUpdatesRequest]
+    ](
+      RequiredClaim.ReadAs("a")
+    )
+  }
+
+  it should "require a single MatchReadAsParties claim if both transactions and reassignments formats filter by contract id" in {
+    val eventFormatO = Some(
+      EventFormat(
+        filtersByParty = Map.empty,
+        filtersForAnyParty = None,
+        verbose = false,
+        filtersByContractId = Seq(contractIdFilter),
+      )
+    )
+    val result = getUpdatesClaims(
+      GetUpdatesRequest(
+        beginExclusive = 10,
+        endInclusive = Some(15),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(
+              TransactionFormat(
+                eventFormat = eventFormatO,
+                transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+              )
+            ),
+            includeReassignments = eventFormatO,
+            includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
+          )
+        ),
+        descendingOrder = false,
+      )
+    )
+    assertSingleMatchReadAsParties(result)
+    result.filterNot(isMatchReadAsParties) should contain theSameElementsAs RequiredClaims[
+      RequestWithReadAsParty[GetUpdatesRequest]
+    ](
+      RequiredClaim.Public()
+    )
+  }
+
+  it should "not require a MatchReadAsParties claim if no contract id filters are given" in {
+    getUpdatesClaims(
+      GetUpdatesRequest(
+        beginExclusive = 10,
+        endInclusive = Some(15),
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(
+              TransactionFormat(
+                eventFormat = Some(
+                  EventFormat(
+                    filtersByParty = Map("a" -> Filters(Nil)),
+                    filtersForAnyParty = None,
+                    verbose = false,
+                    filtersByContractId = Seq.empty,
+                  )
+                ),
+                transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+              )
+            ),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
+          )
+        ),
+        descendingOrder = false,
+      )
+    ).exists(isMatchReadAsParties) shouldBe false
+  }
+
+  private val contractIdFilter: ContractIdFilter =
+    ContractIdFilter(
+      contractId = "00abcd",
+      includeCreatedEventBlob = false,
+      includeInterfaceViews = Seq.empty,
+    )
+
+  private def getUpdatesClaims(
+      request: GetUpdatesRequest
+  ): Seq[RequiredClaim[RequestWithReadAsParty[GetUpdatesRequest]]] =
+    UpdateServiceAuthorization.getUpdateFormatClaimsAndFillReadAsParties(request)(
+      Lens.unit[GetUpdatesRequest].optionalUpdateFormat
+    )
+
+  private def isMatchReadAsParties[Req](claim: RequiredClaim[Req]): Boolean = claim match {
+    case _: RequiredClaim.MatchReadAsParties[Req] => true
+    case _ => false
+  }
+
+  private def assertSingleMatchReadAsParties(
+      claims: Seq[RequiredClaim[RequestWithReadAsParty[GetUpdatesRequest]]]
+  ): Assertion = {
+    val lenses = claims.collect { case RequiredClaim.MatchReadAsParties(partiesL) => partiesL }
+    lenses should have size 1
+    // the lens must fill in the readAsParty field of the wrapped request
+    val wrapped = RequestWithReadAsParty(GetUpdatesRequest.defaultInstance, None)
+    val filled = lenses.head.set(Set("alice"))(wrapped)
+    filled.readAsParty shouldBe Some(Seq(LfPartyId.assertFromString("alice")))
+    lenses.head.get(filled) shouldBe Set("alice")
   }
 
   behavior of "UserManagementServiceAuthorization.userReaderClaims"
@@ -762,6 +1124,7 @@ object ApiServicesRequiredClaimSpec {
         ),
         filtersForAnyParty = Some(Filters(Nil)),
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
     ),
     transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

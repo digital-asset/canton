@@ -104,6 +104,7 @@ object ConfigValidations extends NamedLogging {
       gcpKmsDestroyScheduledDurationRangeValidation,
       defaultUpdatesPageSizeMustBeLeqMaximalPageSize,
       defaultAcsPageSizeMustBeLeqMaxPageSize,
+      defaultHostedPartiesPageSizeMustBeLeqMaxPageSize,
       validateLegacyContractsV11Enabled,
       serverConfigOnlyOneGrpcControlFlowMode,
       jwksCacheMinRefreshInterval,
@@ -972,6 +973,17 @@ object ConfigValidations extends NamedLogging {
       nodeConfig.ledgerApi.stateService.pipe(ssc =>
         Option.when(ssc.defaultAcsPageSize > ssc.maxAcsPageSize)(
           s"Default ACS page size is larger than max page size ${ssc.maxAcsPageSize} in config for participant ${name.unwrap}"
+        )
+      )
+    }.toSeq)
+
+  private def defaultHostedPartiesPageSizeMustBeLeqMaxPageSize(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] =
+    toValidated(config.participants.flatMap { case (name, nodeConfig) =>
+      nodeConfig.ledgerApi.stateService.pipe(ssc =>
+        Option.when(ssc.defaultHostedPartiesPageSize > ssc.maxHostedPartiesPageSize)(
+          s"Default hosted parties page size is larger than max page size ${ssc.maxHostedPartiesPageSize} in config for participant ${name.unwrap}"
         )
       )
     }.toSeq)

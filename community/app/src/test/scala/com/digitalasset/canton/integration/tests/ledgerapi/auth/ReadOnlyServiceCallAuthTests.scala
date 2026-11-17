@@ -131,7 +131,7 @@ trait ReadOnlyServiceCallAuthTests extends ServiceCallWithMainActorAuthTests {
       ) in { implicit env =>
       import env.*
       loggerFactory.suppress(AuthInterceptorSuppressionRule) {
-        expectPermissionDenied(
+        expectUnauthenticated(
           serviceCall(canReadAsUnknownUserStandardJWT.copy())
         )
       }

@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.acs.commitment
 
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeProportion}
@@ -903,6 +904,8 @@ sealed trait AcsCommitmentProcessorIntegrationTest
   }
 }
 
+// TODO(#37720): remove this test when removing the old AcsCommitmentProcessor together with PV37
+@UnstableTest
 class AcsCommitmentProcessorIntegrationTestPostgres extends AcsCommitmentProcessorIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(

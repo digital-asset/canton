@@ -12,6 +12,8 @@ import com.digitalasset.canton.ledger.api.auth.services.StateServiceAuthorizatio
   getActiveContractsClaims,
   getActiveContractsPageClaims,
   getConnectedSynchronizersClaims,
+  getHostedPartiesClaims,
+  getHostedPartiesPageClaims,
 }
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import io.grpc.ServerServiceDefinition
@@ -67,9 +69,56 @@ final class StateServiceAuthorization(
       request: ConvertRecordTimeToOffsetRequest
   ): Future[ConvertRecordTimeToOffsetResponse] =
     authorizer.rpc(service.convertRecordTimeToOffset)(RequiredClaim.Public())(request)
+
+  override def getHostedParties(
+      request: GetHostedPartiesRequest,
+      responseObserver: StreamObserver[GetHostedPartiesResponse],
+  ): Unit =
+    authorizer.stream(service.getHostedParties)(
+      getHostedPartiesClaims(request)*
+    )(request, responseObserver)
+
+  override def getHostedPartiesPage(
+      request: GetHostedPartiesPageRequest
+  ): Future[GetHostedPartiesPageResponse] =
+    authorizer.rpc(service.getHostedPartiesPage)(
+      getHostedPartiesPageClaims(request)*
+    )(request)
 }
 
 object StateServiceAuthorization {
+
+  private val partyFilterL: Lens[HostedPartiesFilter, Set[String]] =
+    Lens[HostedPartiesFilter, Set[String]](_.partyFilter.toSet)((filter, parties) =>
+      filter.copy(partyFilter = parties.toSeq.sorted)
+    )
+
+  val partiesForGetHostedPartiesL: Lens[GetHostedPartiesRequest, Set[String]] =
+    Lens.unit[GetHostedPartiesRequest].filter.compose(partyFilterL)
+
+  val partiesForGetHostedPartiesPageL: Lens[GetHostedPartiesPageRequest, Set[String]] =
+    Lens.unit[GetHostedPartiesPageRequest].filter.compose(partyFilterL)
+
+  // TODO(#38113): Do not fail with PERMISSION_DENIED for callers without readable parties
+  def getHostedPartiesClaims(
+      request: GetHostedPartiesRequest
+  ): List[RequiredClaim[GetHostedPartiesRequest]] =
+    RequiredClaim.Public[GetHostedPartiesRequest]() ::
+      Option
+        .when(request.filter.isEmpty)(RequiredClaim.MatchReadAsParties(partiesForGetHostedPartiesL))
+        .toList
+
+  // TODO(#38113): Do not fail with PERMISSION_DENIED for callers without readable parties
+  def getHostedPartiesPageClaims(
+      request: GetHostedPartiesPageRequest
+  ): List[RequiredClaim[GetHostedPartiesPageRequest]] =
+    RequiredClaim.Public[GetHostedPartiesPageRequest]() ::
+      Option
+        .when(request.filter.isEmpty)(
+          RequiredClaim.MatchReadAsParties(partiesForGetHostedPartiesPageL)
+        )
+        .toList
+
   def getActiveContractsClaims(
       request: GetActiveContractsRequest
   ): List[RequiredClaim[GetActiveContractsRequest]] =

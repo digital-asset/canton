@@ -159,6 +159,30 @@ The config option `canton.participants.<participant>.parameters.acs-commitments.
 The old ACS commitment processor can only be enabled for protocol versions up to 37 inclusive;
 for protocol versions 38 and above, the config option `canton.participants.<participant>.parameters.acs-commitments.disable-old-acs-commitment-processor` is ignored.
 
+### Traffic enforcement
+
+These changes apply to participants with traffic accounting enabled. The options named below are in `canton.participants.<participant>.traffic-accounting`.
+
+#### Choosing the traffic account
+
+- Command submissions, interactive submissions, and reassignment commands have a new optional `account_id` field that selects the traffic account to charge instead of the acting party.
+  The console commands take a matching `accountId` parameter, and the Java bindings a `withAccountId` method.
+- Setting `account_id` requires the new user right `CanDebitTrafficFrom(account_id)` or `CanDebitTrafficFromAnyAccount`, or an act-as or execute-as right for the party with that id.
+  Only participant admins can grant the new rights.
+- Account ids now have a fixed format (segments separated by `/`, at most 255 characters), which every party id meets. Requests for other ids are rejected.
+
+#### Charging submissions
+
+- The participant now registers every transaction and reassignment with the traffic enforcement app before sending it, and charges its completion to the registered account.
+  If the app can't be reached, the submission is rejected unless `allow-submissions-on-degradation` is on.
+- Without an `account_id`, a submission is charged to its acting party, as before. Transactions with several acting parties aren't charged (or are rejected with `reject-multi-party-submissions`), and automatic assignments are charged to the participant's admin party.
+- New option `debit-rejected-completions` (default `true`) controls whether rejected completions are charged.
+
+#### Balance checks against cost estimates
+
+- With `enforce-cost-on-submissions` on, interactive preparation and transactions that need reassignments are checked against the estimated total cost, including reassignments, scaled by the new option `estimate-multiplier` (default `1.0`).
+  The balance can become negative if the actual cost is higher.
+
 ### Synchronizer operators
 
 - Added a partial database index to support lookups of onboarding sequencer members.
@@ -253,6 +277,15 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 - Sequencer drivers (such as CometBFT) are no longer supported.
 - Reference sequencer is also no longer supported.
 
+### Removal of deprecated features
+
+<!-- Features deprecated in an earlier release that this release removes: the feature, the release that deprecated
+it, and its replacement. -->
+
+### Removal of protocol versions
+
+<!-- Protocol versions no longer supported: the versions, and how to upgrade synchronizers still on them. -->
+
 ## Deprecations
 
 <!-- The deprecated item, its replacement, and when it will be removed. -->
@@ -269,6 +302,7 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 - Reads and writes from the active contract journal now use a batch aggregator for efficiency.
 - The restart delay for a sequencer connection now only resets back to `min_restart_delay` if it stayed validated for at least the new `min_stable_duration` (default 10 seconds).
   This prevents a restarted connection that keeps failing shortly after validation from being restarted again too quickly.
+- Upgrade to bouncy castle 1.87 to address security vulnerabilities in 1.86 (e.g. BDSA-2026-40175)
 
 
 ### Ledger API
@@ -279,6 +313,7 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 - When reassigning if no validation package override is provided pick the highest commonly vetted package version.
 - `PartyManagementService.ListKnownParties`: subsequent pages return the topology state seen when the first page was
   requested. Page tokens issued by another participant are rejected.
+- JSON API endpoints now consistently return HTTP 401 (Unauthorized) rather than 403 (Forbidden) when a valid JWT token is not present.
 
 ### Multi-Sync
 - When contracts are automatically reassigned to allow command execution on a target synchronizer:
@@ -313,11 +348,12 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
   Such requests that are ordered anyway are discarded as invalid ledger events from protocol version 38 on.
   On earlier protocol versions, only the last signature is kept after ordering, which is the one that was verified before.
 
-## Security and Bug Fixes
+## Security Fixes
 
 <!--
-Advisories first, then the other fixes as a bullet list, including dependency updates for security vulnerabilities
-(e.g. "Dependency updates to address security vulnerabilities: jackson 2.22.4, gRPC 1.85").
+Advisories first, then the other security fixes as a bullet list, including dependency updates for security
+vulnerabilities (e.g. "Dependency updates to address security vulnerabilities: jackson 2.22.4, gRPC 1.85").
+Remove this section if there are no security fixes.
 -->
 
 <!--
@@ -342,6 +378,10 @@ fix is deployed on MainNet:
 
 #### Recommendation
 -->
+
+## Bug Fixes
+
+<!-- The other bug fixes as a bullet list, not split by audience. -->
 
 - The JSON Ledger API HTTPS server now uses the `PKIX` trust manager and key manager instead of the legacy `SunX509` ones.
   `PKIX` performs full RFC 5280 certification path validation, so certificate chains that were previously accepted
@@ -371,6 +411,15 @@ fix is deployed on MainNet:
   Previously, a participant returned the identity transactions of its authorized store instead whenever they had the
   requested protocol version, which ignored a delegation to an intermediate key provided in the temporary store when the
   root namespace key is offline.
+- Fixed a bug where a submission that explicitly requests a mediator group (as interactive submissions do, always
+  requesting group `0`) interpreted the group index as a position in the list of active mediator groups. When group `0`
+  was not active and only a higher-numbered group was, the submission was routed to the wrong group, and requesting that
+  higher group failed with a `NoMediatorError`. The group is now looked up by its index, and the submission fails with
+  a `NoMediatorError` if that group is not active.
+- Early reassignment rejections now report the request's submission id in their completion instead of an empty one.
+- Java bindings: `User.Right` now reads `CanActAsAnyParty`, which used to throw. `CommandsSubmission.toProto` now
+  includes the prefetch contract keys, which it used to drop. `UpdateSubmission.withSynchronizerId` now sets the
+  synchronizer id, which it used to ignore.
 
 ### CantonBFT
 

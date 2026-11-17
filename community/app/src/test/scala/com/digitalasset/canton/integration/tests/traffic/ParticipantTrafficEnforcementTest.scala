@@ -1002,6 +1002,7 @@ final class ParticipantTrafficEnforcementWithAuthTest extends ParticipantTraffic
             filtersByParty = Map(alice -> Filters(Nil)),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
           val transaction = client.ledger_api.javaapi.commands.submit(
             Seq(aliceE),

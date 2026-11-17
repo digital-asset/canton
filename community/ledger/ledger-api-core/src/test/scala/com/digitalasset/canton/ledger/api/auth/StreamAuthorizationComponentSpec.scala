@@ -12,22 +12,29 @@ import com.daml.ledger.api.v2.transaction_filter.{
   UpdateFormat,
 }
 import com.daml.ledger.api.v2.update_service.*
-import com.daml.ledger.api.v2.update_service.UpdateServiceGrpc.{UpdateService, UpdateServiceStub}
+import com.daml.ledger.api.v2.update_service.UpdateServiceGrpc.UpdateServiceStub
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.auth.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.ServerConfig
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.auth.services.UpdateServiceAuthorization
-import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
+import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
+import com.digitalasset.canton.ledger.api.{messages, UpdateFormat as ApiUpdateFormat}
 import com.digitalasset.canton.ledger.localstore.{
   InMemoryIdentityProviderConfigStore,
   InMemoryUserManagementStore,
 }
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.logging.SuppressionRule.{FullSuppression, LoggerNameContains}
-import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.apiserver.services.ApiUpdateService
 import com.digitalasset.canton.platform.apiserver.{ApiServiceOwner, GrpcServerOwner}
+import com.digitalasset.canton.platform.config.UpdateServiceConfig
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.user.UserRight.CanReadAs
 import com.digitalasset.canton.user.store.UserManagementStore
 import com.digitalasset.canton.user.{IdentityProviderId, User}
@@ -35,7 +42,6 @@ import com.digitalasset.canton.{BaseTest, UniquePortGenerator}
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.*
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
-import io.grpc.stub.StreamObserver
 import org.apache.pekko.stream.scaladsl.Source
 import org.apache.pekko.{Done, NotUsed}
 import org.scalatest.Assertion
@@ -245,15 +251,27 @@ class StreamAuthorizationComponentSpec
       jwtTimestampLeeway = None,
       loggerFactory = loggerFactory,
     )
-    val outerLoggerFactory = loggerFactory
     val transactionStreamTerminationPromise = Promise[Done]()
-    val apiTransactionServiceFixture = new UpdateService with StreamingServiceLifecycleManagement {
-      override def getUpdates(
-          request: GetUpdatesRequest,
-          responseObserver: StreamObserver[GetUpdatesResponse],
-      ): Unit = registerStream(responseObserver) {
+    def notSupported = throw new UnsupportedOperationException()
+    val indexUpdateServiceFixture = new IndexUpdateService {
+      override def currentLedgerEnd(): Option[LedgerEnd] = None
+
+      override def updates(
+          begin: Option[Offset],
+          endAt: Option[Offset],
+          updateFormat: ApiUpdateFormat,
+          descendingOrder: Boolean,
+          skipPruningChecks: Boolean,
+      )(implicit
+          loggingContext: LoggingContextWithTrace
+      ): Source[IndexUpdateService.UpdatesResponse, NotUsed] =
         Source
-          .fromIterator(() => Iterator.continually(GetUpdatesResponse.defaultInstance))
+          .fromIterator(() =>
+            Iterator.continually(
+              IndexUpdateService.UpdatesResponse
+                .ProtoUpdates(Some(GetUpdatesResponse.defaultInstance), None)
+            )
+          )
           .map { elem =>
             Threading.sleep(200)
             logger.debug("sent")
@@ -263,26 +281,26 @@ class StreamAuthorizationComponentSpec
             doneF.onComplete(transactionStreamTerminationPromise.complete)
             mat
           }
-      }
 
-      override protected def loggerFactory: NamedLoggerFactory = outerLoggerFactory
-
-      def notSupported = throw new UnsupportedOperationException()
-
-      override def getUpdateByOffset(
-          request: GetUpdateByOffsetRequest
-      ): Future[GetUpdateResponse] = notSupported
-
-      override def getUpdateById(
-          request: GetUpdateByIdRequest
-      ): Future[GetUpdateResponse] = notSupported
-
-      override def getUpdateByHash(request: GetUpdateByHashRequest): Future[GetUpdateResponse] =
+      override def getUpdateBy(
+          lookupKey: LookupKey,
+          updateFormat: ApiUpdateFormat,
+      )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetUpdateResponse]] =
         notSupported
 
-      def getUpdatesPage(request: GetUpdatesPageRequest): Future[GetUpdatesPageResponse] =
+      override def updatesPage(
+          getUpdatesPageRequest: messages.update.GetUpdatesPageRequest
+      )(implicit loggingContext: LoggingContextWithTrace): Future[GetUpdatesPageResponse] =
         notSupported
     }
+    implicit val sizeLimitsConfig: LedgerApiSizeLimitsConfig = LedgerApiSizeLimitsConfig()
+    val apiTransactionServiceFixture = new ApiUpdateService(
+      updateService = indexUpdateServiceFixture,
+      metrics = LedgerApiServerMetrics.ForTesting,
+      loggerFactory = loggerFactory,
+      participantId = Ref.ParticipantId.assertFromString("participant"),
+      updateServiceConfig = UpdateServiceConfig(),
+    )
     val grpcServerPort = UniquePortGenerator.next
     val authorizedTransactionServiceOwner =
       ResourceOwner.forCloseable(() =>
@@ -342,6 +360,7 @@ class StreamAuthorizationComponentSpec
                       ),
                       filtersForAnyParty = None,
                       verbose = false,
+                      filtersByContractId = Seq.empty,
                     )
                   ),
                   transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

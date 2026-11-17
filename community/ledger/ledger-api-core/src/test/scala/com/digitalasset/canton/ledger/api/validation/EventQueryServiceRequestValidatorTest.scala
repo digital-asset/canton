@@ -34,6 +34,7 @@ class EventQueryServiceRequestValidatorTest
       ),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
     "validating event by contract id requests" should {
@@ -50,6 +51,7 @@ class EventQueryServiceRequestValidatorTest
           ),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         ),
       )
 
@@ -89,6 +91,17 @@ class EventQueryServiceRequestValidatorTest
         mustFailWithoutFilters(
           EventQueryServiceRequestValidator.validateEventsByContractId(
             req.update(_.eventFormat.filtersByParty := Map.empty)
+          )
+        )
+      }
+
+      "reject event format with contract id filters" in {
+        mustRejectContractIdFilters(
+          EventQueryServiceRequestValidator.validateEventsByContractId(
+            req.update(
+              _.eventFormat.filtersByParty := Map.empty,
+              _.eventFormat.filtersByContractId := protoContractIdFilters,
+            )
           )
         )
       }

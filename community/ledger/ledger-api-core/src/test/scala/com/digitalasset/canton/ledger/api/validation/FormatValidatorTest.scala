@@ -5,6 +5,7 @@ package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.ledger.api.v2.transaction_filter.CumulativeFilter.IdentifierFilter
 import com.daml.ledger.api.v2.transaction_filter.{
+  ContractIdFilter,
   EventFormat,
   Filters,
   ParticipantAuthorizationTopologyFormat,
@@ -23,7 +24,14 @@ import com.digitalasset.canton.ledger.api.sizeconfig.v2.{
   FiltersSizeConfig,
   ParticipantAuthorizationTopologyFormatSizeConfig,
 }
+import com.digitalasset.canton.ledger.api.validation.FormatValidator.{
+  AllowContractIdFilters,
+  RejectContractIdFilters,
+}
 import com.digitalasset.canton.logging.NoLogging
+import com.digitalasset.daml.lf.crypto.Hash
+import com.digitalasset.daml.lf.value.Value.ContractId
+import io.grpc.Status.Code
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -59,7 +67,7 @@ class FormatValidatorTest
       filtersByParty: Map[String, Filters],
       filtersForAnyParty: Option[Filters],
   ): EventFormat =
-    EventFormat(filtersByParty, filtersForAnyParty, verbose = false)
+    EventFormat(filtersByParty, filtersForAnyParty, verbose = false, Seq.empty)
 
   private def transactionFormat(eventFormat: EventFormat): TransactionFormat =
     TransactionFormat(Some(eventFormat), TransactionShape.TRANSACTION_SHAPE_ACS_DELTA)
@@ -80,10 +88,12 @@ class FormatValidatorTest
     val maxFiltersByParty = 2
     val maxCumulativeFilters = 3
     val maxParticipantAuthorizationParties = 2
+    val maxContractIdFilters = 4
     val limits = sizeLimitsConfig.copy(
       publicLapiSizeConfig = sizeLimitsConfig.publicLapiSizeConfig.copy(
         eventFormat = EventFormatSizeConfig(
-          filtersByPartySizeLimit = PositiveInt.tryCreate(maxFiltersByParty)
+          filtersByPartySizeLimit = PositiveInt.tryCreate(maxFiltersByParty),
+          filtersByContractIdSizeLimit = PositiveInt.tryCreate(maxContractIdFilters),
         ),
         filters = FiltersSizeConfig(
           cumulativeSizeLimit = PositiveInt.tryCreate(maxCumulativeFilters)
@@ -95,7 +105,7 @@ class FormatValidatorTest
     )
 
     def validate(eventFormat: EventFormat) =
-      FormatValidator.validate(eventFormat)(NoLogging, limits)
+      FormatValidator.validate(eventFormat, AllowContractIdFilters(None))(NoLogging, limits)
 
     cardinalityLimit("filters_by_party", maxFiltersByParty) { numberOfParties =>
       validate(eventFormat(parties(numberOfParties).map(_ -> Filters(Nil)).toMap, None))
@@ -117,6 +127,16 @@ class FormatValidatorTest
       FormatValidator.validate(
         ParticipantAuthorizationTopologyFormat(parties(numberOfParties))
       )(NoLogging, limits)
+    }
+
+    cardinalityLimit("filters_by_contract_id", maxContractIdFilters) { numberOfContractIdFilters =>
+      validate(
+        EventFormat.defaultInstance.addFiltersByContractId(
+          Seq.tabulate(numberOfContractIdFilters)(id =>
+            ContractIdFilter(ContractId.V1(Hash.hashPrivateKey(id.toString)).coid, false, Seq())
+          )*
+        )
+      )
     }
   }
 
@@ -177,6 +197,196 @@ class FormatValidatorTest
           filtersForAnyParty = None,
         )
       ) shouldBe 3
+    }
+  }
+
+  "validating contract id filters" should {
+    val allowContractIdFilters = AllowContractIdFilters(None)
+
+    val contractIdEventFormat: EventFormat =
+      EventFormat.defaultInstance.withFiltersByContractId(protoContractIdFilters)
+    val partyEventFormat: EventFormat =
+      eventFormat(Map(party -> Filters(Seq(templateFilter))), filtersForAnyParty = None)
+    val anyPartyEventFormat: EventFormat =
+      eventFormat(Map.empty, filtersForAnyParty = Some(Filters(Seq(wildcardFilter))))
+
+    def invalidArgumentDescription(message: String): String =
+      s"INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: $message"
+
+    def validateEventFormat(eventFormat: EventFormat) =
+      FormatValidator.validate(eventFormat, allowContractIdFilters)(NoLogging, sizeLimitsConfig)
+
+    def validateTransactionFormat(transactionFormat: TransactionFormat) =
+      FormatValidator.validate(transactionFormat, allowContractIdFilters)(
+        NoLogging,
+        sizeLimitsConfig,
+      )
+
+    def validateUpdateFormat(updateFormat: UpdateFormat) =
+      FormatValidator.validate(updateFormat, allowContractIdFilters)(NoLogging, sizeLimitsConfig)
+
+    "accept an event format with only contract id filters" in {
+      validateEventFormat(contractIdEventFormat).value.filtersByContractId should have size 1
+    }
+
+    "reject an event format mixing contract id filters with party filters" in {
+      forEvery(
+        Table[String, EventFormat](
+          ("description", "eventFormat"),
+          (
+            "filters_by_party",
+            contractIdEventFormat.withFiltersByParty(partyEventFormat.filtersByParty),
+          ),
+          (
+            "filters_for_any_party",
+            contractIdEventFormat.withFiltersForAnyParty(Filters(Seq(wildcardFilter))),
+          ),
+          (
+            "filters_by_party and filters_for_any_party",
+            contractIdEventFormat
+              .withFiltersByParty(partyEventFormat.filtersByParty)
+              .withFiltersForAnyParty(Filters(Seq(wildcardFilter))),
+          ),
+        )
+      ) { (_, eventFormat) =>
+        requestMustFailWith(
+          request = validateEventFormat(eventFormat),
+          code = Code.INVALID_ARGUMENT,
+          description = invalidArgumentDescription(
+            "filtersByContractId cannot be used together with filtersByParty"
+          ),
+        )
+      }
+    }
+
+    "reject contract id filters when they are not allowed" in {
+      mustRejectContractIdFilters(
+        FormatValidator.validate(contractIdEventFormat, RejectContractIdFilters)(
+          NoLogging,
+          sizeLimitsConfig,
+        )
+      )
+    }
+
+    "accept contract id filters with the ACS_DELTA transaction shape" in {
+      validateTransactionFormat(
+        TransactionFormat(Some(contractIdEventFormat), TransactionShape.TRANSACTION_SHAPE_ACS_DELTA)
+      ).value.eventFormat.filtersByContractId should have size 1
+    }
+
+    "reject contract id filters with the LEDGER_EFFECTS transaction shape" in {
+      requestMustFailWith(
+        request = validateTransactionFormat(
+          TransactionFormat(
+            Some(contractIdEventFormat),
+            TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS,
+          )
+        ),
+        code = Code.INVALID_ARGUMENT,
+        description = invalidArgumentDescription(
+          "Contract id filter is supported only for ACS_DELTA transaction shape"
+        ),
+      )
+    }
+
+    "accept party filters with the LEDGER_EFFECTS transaction shape" in {
+      validateTransactionFormat(
+        TransactionFormat(Some(partyEventFormat), TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS)
+      ) shouldBe a[Right[?, ?]]
+    }
+
+    "reject contract id filters with the LEDGER_EFFECTS shape in an update format" in {
+      forEvery(
+        Table[String, UpdateFormat](
+          ("description", "updateFormat"),
+          (
+            "include_transactions",
+            UpdateFormat.defaultInstance.withIncludeTransactions(
+              TransactionFormat(
+                Some(contractIdEventFormat),
+                TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS,
+              )
+            ),
+          ),
+          (
+            "include_transactions_and_reassignments",
+            UpdateFormat.defaultInstance.withIncludeTransactionsAndReassignments(
+              TransactionFormat(
+                Some(contractIdEventFormat),
+                TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS,
+              )
+            ),
+          ),
+        )
+      ) { (_, updateFormat) =>
+        requestMustFailWith(
+          request = validateUpdateFormat(updateFormat),
+          code = Code.INVALID_ARGUMENT,
+          description = invalidArgumentDescription(
+            "Contract id filter is supported only for ACS_DELTA transaction shape"
+          ),
+        )
+      }
+    }
+
+    "accept update formats using the same filter type for transactions and reassignments" in {
+      forEvery(
+        Table[String, UpdateFormat](
+          ("description", "updateFormat"),
+          (
+            "contract id filters in both",
+            updateFormat(Some(contractIdEventFormat), Some(contractIdEventFormat)),
+          ),
+          (
+            "party filters in both",
+            updateFormat(Some(partyEventFormat), Some(anyPartyEventFormat)),
+          ),
+          (
+            "contract id filters in transactions only",
+            updateFormat(Some(contractIdEventFormat), None),
+          ),
+          (
+            "contract id filters in reassignments only",
+            updateFormat(None, Some(contractIdEventFormat)),
+          ),
+          (
+            "contract id filters in include_transactions_and_reassignments",
+            updateFormat(None, None, transactionsAndReassignments = Some(contractIdEventFormat)),
+          ),
+        )
+      ) { (_, updateFormat) =>
+        validateUpdateFormat(updateFormat) shouldBe a[Right[?, ?]]
+      }
+    }
+
+    "reject contract id filters for transactions with party filters for reassignments" in {
+      forEvery(
+        Table[EventFormat]("reassignments", partyEventFormat, anyPartyEventFormat)
+      ) { reassignments =>
+        requestMustFailWith(
+          request =
+            validateUpdateFormat(updateFormat(Some(contractIdEventFormat), Some(reassignments))),
+          code = Code.INVALID_ARGUMENT,
+          description = invalidArgumentDescription(
+            "If contract id filter is used in include_transaction, no other filter types are allowed in include_reassignments"
+          ),
+        )
+      }
+    }
+
+    "reject party filters for transactions with contract id filters for reassignments" in {
+      forEvery(
+        Table[EventFormat]("transactions", partyEventFormat, anyPartyEventFormat)
+      ) { transactions =>
+        requestMustFailWith(
+          request =
+            validateUpdateFormat(updateFormat(Some(transactions), Some(contractIdEventFormat))),
+          code = Code.INVALID_ARGUMENT,
+          description = invalidArgumentDescription(
+            "If contract id filter is used in include_reassignments, no other filter types are allowed in include_transactions"
+          ),
+        )
+      }
     }
   }
 

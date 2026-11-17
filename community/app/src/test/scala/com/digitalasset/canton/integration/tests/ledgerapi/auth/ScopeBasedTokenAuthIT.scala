@@ -138,7 +138,7 @@ class ScopeBasedTokenAuthIT
       ) in { implicit env =>
       import env.*
       loggerFactory.suppress(AuthInterceptorSuppressionRule) {
-        expectPermissionDenied(serviceCall(toContext(unknownUserToken)))
+        expectUnauthenticated(serviceCall(toContext(unknownUserToken)))
       }
     }
 

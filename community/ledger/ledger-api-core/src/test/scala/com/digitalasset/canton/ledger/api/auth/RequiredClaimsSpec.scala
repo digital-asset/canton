@@ -28,6 +28,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
     ),
     filtersForAnyParty = Some(Filters(Nil)),
     verbose = true,
+    filtersByContractId = Seq.empty,
   )
 
   private val eventFormat123 = EventFormat(
@@ -38,6 +39,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
     ),
     filtersForAnyParty = Some(Filters(Nil)),
     verbose = true,
+    filtersByContractId = Seq.empty,
   )
 
   behavior of "submissionClaims"
@@ -195,6 +197,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(Filters(Nil)),
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) should contain theSameElementsAs RequiredClaims[String](
       RequiredClaim.ReadAsAnyParty()
@@ -207,6 +210,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         filtersByParty = Map.empty,
         filtersForAnyParty = None,
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe Nil
   }
@@ -511,6 +515,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
                 ),
                 filtersForAnyParty = Some(Filters(Nil)),
                 verbose = true,
+                filtersByContractId = Seq.empty,
               )
             ),
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

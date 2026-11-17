@@ -4554,6 +4554,104 @@ fileComments:
           comments: null
           fieldComments:
             connected_synchronizers: 'Optional: can be empty'
+      GetHostedPartiesPageRequest:
+        message:
+          comments: null
+          fieldComments:
+            hosted_at_offset: |-
+              The inclusive offset at which the snapshot of the hosted parties will be computed.
+              Must be no greater than the current ledger end offset.
+              Must be greater than or equal to the last pruning offset.
+              Optional, if defined, it must be a valid absolute offset (positive integer) or ledger begin offset (zero).
+              If zero, the empty set will be returned.
+              If not defined and no ``page_token`` is set, the current ledger end will be used and it will be populated in the response.
+              If not defined and a ``page_token`` is set, the ``hosted_at_offset`` used by the request from which
+              the ``page_token`` originates will be used.
+
+              Optional
+            filter: |-
+              If not set, the result is restricted to the parties the caller can read as (all parties if the
+              caller can read as any party), hosted on any synchronizer on the local participant.
+
+              Optional
+            page_token: |-
+              To get the next page of the hosted parties snapshot, the ``page_token`` should be set to the
+              ``next_page_token`` of the last ``GetHostedPartiesPageResponse``.
+              The page token only works if subsequent requests:
+
+              - are executed on the same participant,
+              - use the same ``hosted_at_offset`` and ``filter``
+              - and the participant's store was not pruned to after the ``hosted_at_offset``.
+
+              If not specified, the first page of the hosted parties snapshot will be returned.
+
+              Optional: can be empty
+            max_page_size: |-
+              The result page will contain at most max_page_size hosted parties of the respective hosted parties snapshot.
+              The server might reject max_page_size breaching the server-specified limit.
+              Optional, if not defined, the default will be determined by the server.
+
+              Optional
+      GetHostedPartiesPageResponse:
+        message:
+          comments: null
+          fieldComments:
+            hosted_parties: 'Optional: can be empty'
+            hosted_at_offset: |-
+              The ``hosted_at_offset`` which was specified in the request or calculated by the service.
+
+              Required
+            next_page_token: |-
+              If not present this is the last page. If present, this token must be used to get the next page.
+
+              Optional: can be empty
+      GetHostedPartiesRequest:
+        message:
+          comments: null
+          fieldComments:
+            hosted_at_offset: |-
+              The inclusive offset at which the snapshot of the hosted parties will be computed.
+              Must be no greater than the current ledger end offset.
+              Must be greater than or equal to the last pruning offset.
+              Optional, if defined, it must be a valid absolute offset (positive integer) or ledger begin offset (zero).
+              If zero, the empty set will be returned.
+              If not defined and no ``stream_continuation_token`` is set, the current ledger end will be used and it will be populated in the responses.
+              If not defined and a ``stream_continuation_token`` is set, the ``hosted_at_offset`` used by the request from which
+              the ``stream_continuation_token`` originates will be used.
+
+              Optional
+            filter: |-
+              If not set, the result is restricted to the parties the caller can read as (all parties if the
+              caller can read as any party), hosted on any synchronizer on the local participant.
+
+              Optional
+            stream_continuation_token: |-
+              Opaque representation of a continuation token defining a position in the hosted parties snapshot.
+              The prefix of the hosted parties snapshot will be omitted up to and including the element from which
+              the continuation token was read.
+              To reuse the continuation token from a `GetHostedPartiesResponse`:
+
+              - subsequent request must be executed on the same participant with the same version of canton,
+              - subsequent request must have the same ``hosted_at_offset`` and ``filter``,
+              - and the participant must not have been pruned after the ``hosted_at_offset``.
+
+              If not specified, the whole hosted parties snapshot will be returned.
+
+              Optional: can be empty
+      GetHostedPartiesResponse:
+        message:
+          comments: null
+          fieldComments:
+            hosted_party: Required
+            hosted_at_offset: |-
+              The ``hosted_at_offset`` which was specified in the request or calculated by the service.
+
+              Required
+            stream_continuation_token: |-
+              Opaque representation of a continuation token which can be used in the request to bypass the already processed part
+              of the hosted parties snapshot.
+
+              Required: must be non-empty
       GetLatestPrunedOffsetsRequest:
         message:
           comments: null
@@ -4604,6 +4702,59 @@ fileComments:
               If there is no connection to a sequencer, corresponding record time can be arbitrarily far back in the past.
 
               Optional: can be empty
+      HostedPartiesFilter:
+        message:
+          comments: null
+          fieldComments:
+            party_filter: |-
+              The responses will be related to these parties only. If some parties cannot be found or no hosting information
+              is available, they will be omitted from the result.
+              If left empty: responses will be related to all parties.
+
+              Optional: can be empty
+            all_participants: |-
+              By default the responses will be related to the local participant only.
+              If set: the responses will be related to all participants.
+              Please note: the party hosting information is only exhaustive for the local participant,
+              for non-local participants the topology information might be partial.
+
+              Optional
+            synchronizer_id_filter: |-
+              The responses will be related to these synchronizers only. If some synchronizers cannot be found
+              or no hosting information is available, they will be omitted from the result.
+              If left empty: responses will be related to all synchronizers.
+
+              Optional: can be empty
+      HostedParty:
+        message:
+          comments: null
+          fieldComments:
+            party: Required
+            hosting_participants: |-
+              Includes one entry per participant and synchronizer where the party is hosted at the offset
+              of ``hosted_at_offset`` in the request.
+
+              Required: must be non-empty
+      HostingParticipant:
+        message:
+          comments: null
+          fieldComments:
+            hosting_state: Required
+            synchronizer_id: |-
+              A valid synchronizer id.
+              Identifies the synchronizer where the party is hosted.
+
+              Required
+            participant_permission: Required
+            offset: |-
+              The offset at which the respective topology transaction became effective.
+
+              Required
+            participant_id: Required
+            record_time: |-
+              The time at which the respective topology transaction became effective.
+
+              Required
       IncompleteAssigned:
         message:
           comments: null
@@ -4658,10 +4809,17 @@ fileComments:
                 unassigned event before or at the active_at_offset.
       GetConnectedSynchronizersRequest: {}
       GetConnectedSynchronizersResponse: {}
+      GetHostedPartiesPageRequest: {}
+      GetHostedPartiesPageResponse: {}
+      GetHostedPartiesRequest: {}
+      GetHostedPartiesResponse: {}
       GetLatestPrunedOffsetsRequest: {}
       GetLatestPrunedOffsetsResponse: {}
       GetLedgerEndRequest: {}
       GetLedgerEndResponse: {}
+      HostedPartiesFilter: {}
+      HostedParty: {}
+      HostingParticipant: {}
       IncompleteAssigned: {}
       IncompleteUnassigned: {}
     services:
@@ -4690,6 +4848,22 @@ fileComments:
         comments: Get the latest successfully pruned ledger offsets
       - name: ConvertRecordTimeToOffset
         comments: Translate syncrhonizer record time to an offset
+      - name: GetHostedParties
+        comments: |-
+          Returns a stream of the snapshot of the hosted parties at a ledger offset, which are  satisfying the
+          request's query parameters.
+          Once the stream of GetHostedParties completes,
+          the client SHOULD begin streaming topology updates from the update service,
+          starting at the ``GetHostedPartiesResponse``.``hosted_at_offset``.
+          Clients SHOULD NOT assume that the set of hosted parties they receive reflects the state at the ledger end.
+      - name: GetHostedPartiesPage
+        comments: |-
+          Returns a page of the snapshot of the hosted parties at a ledger offset, which are satisfying the request's
+          query parameters.
+          Once all pages are fetched by repeated calls to ``GetHostedPartiesPage``,
+          the client SHOULD begin retrieving topology updates from the update service,
+          starting at the ``GetHostedPartiesPageResponse``.``hosted_at_offset``.
+          Clients SHOULD NOT assume that the set of hosted parties they receive reflects the state at the ledger end.
   testing/time_service.proto:
     messages:
       GetTimeRequest:

@@ -3,20 +3,26 @@
 
 package com.digitalasset.canton.ledger.api.auth.services
 
+import com.daml.ledger.api.v2.transaction_filter.UpdateFormat
 import com.daml.ledger.api.v2.update_service.*
 import com.daml.ledger.api.v2.update_service.UpdateServiceGrpc.UpdateService
 import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.RequiredClaims
-import com.digitalasset.canton.ledger.api.auth.services.UpdateServiceAuthorization.getUpdatesClaims
+import com.digitalasset.canton.ledger.api.auth.services.UpdateServiceAuthorization.getUpdateFormatClaimsAndFillReadAsParties
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
+import com.digitalasset.canton.platform.apiserver.services.{
+  ApiUpdateService,
+  RequestWithReadAsParty,
+}
 import io.grpc.ServerServiceDefinition
 import io.grpc.stub.StreamObserver
+import scalapb.lenses.Lens
 
 import scala.concurrent.{ExecutionContext, Future}
 
 final class UpdateServiceAuthorization(
-    protected val service: UpdateService with AutoCloseable,
+    protected val service: ApiUpdateService,
     private val authorizer: Authorizer,
 )(implicit executionContext: ExecutionContext)
     extends UpdateService
@@ -30,9 +36,13 @@ final class UpdateServiceAuthorization(
       request: GetUpdatesRequest,
       responseObserver: StreamObserver[GetUpdatesResponse],
   ): Unit =
-    authorizer.stream(service.getUpdates)(
-      getUpdatesClaims(request)*
-    )(request, responseObserver)
+    authorizer.stream[RequestWithReadAsParty[GetUpdatesRequest], GetUpdatesResponse](
+      service.getUpdates
+    )(
+      getUpdateFormatClaimsAndFillReadAsParties(request)(
+        Lens.unit[GetUpdatesRequest].optionalUpdateFormat
+      )*
+    )(RequestWithReadAsParty(request, None), responseObserver)
 
   override def getUpdateByOffset(
       request: GetUpdateByOffsetRequest
@@ -59,16 +69,41 @@ final class UpdateServiceAuthorization(
       )*
     )(request)
 
-  def getUpdatesPage(request: GetUpdatesPageRequest): Future[GetUpdatesPageResponse] =
+  override def getUpdatesPage(request: GetUpdatesPageRequest): Future[GetUpdatesPageResponse] =
     authorizer.rpc(service.getUpdatesPage)(
-      request.updateFormat.toList.flatMap(RequiredClaims.updateFormatClaims[GetUpdatesPageRequest])*
-    )(request)
+      getUpdateFormatClaimsAndFillReadAsParties(request)(
+        Lens.unit[GetUpdatesPageRequest].optionalUpdateFormat
+      )*
+    )(RequestWithReadAsParty(request, None))
 }
 
 object UpdateServiceAuthorization {
-
-  def getUpdatesClaims(request: GetUpdatesRequest): List[RequiredClaim[GetUpdatesRequest]] =
-    request.updateFormat.toList.flatMap(
-      RequiredClaims.updateFormatClaims[GetUpdatesRequest]
+  def getUpdateFormatClaimsAndFillReadAsParties[R](request: R)(
+      updateFormatGetter: scalapb.lenses.Lens[R, Option[UpdateFormat]]
+  ): Seq[RequiredClaim[RequestWithReadAsParty[R]]] =
+    (if (needsReadAsParties(updateFormatGetter.get(request)))
+       List(
+         RequiredClaim.MatchReadAsParties(
+           RequestWithReadAsParty.readAsPartyLens[R]
+         )
+       )
+     else List()) ++ getUpdateFormatClaims[RequestWithReadAsParty[R]](
+      updateFormatGetter
+        .get(request)
     )
+
+  def getUpdateFormatClaims[R](updateFormat: Option[UpdateFormat]): List[RequiredClaim[R]] =
+    updateFormat.toList
+      .flatMap(RequiredClaims.updateFormatClaims[R])
+
+  private def needsReadAsParties(updateFormat: Option[UpdateFormat]) = updateFormat
+    .map(uf =>
+      uf.includeTransactions
+        .flatMap(_.eventFormat)
+        .exists(_.filtersByContractId.nonEmpty) || uf.includeReassignments
+        .exists(_.filtersByContractId.nonEmpty) || uf.includeTransactionsAndReassignments
+        .flatMap(_.eventFormat)
+        .exists(_.filtersByContractId.nonEmpty)
+    )
+    .getOrElse(false)
 }

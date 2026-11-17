@@ -99,6 +99,7 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
       ),
       filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter(true)),
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
     val testee = EventProjectionProperties(
       eventFormat = transactionFilter,
@@ -141,6 +142,7 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
           filtersByParty = Map(party -> templateFilters),
           filtersForAnyParty = Some(interfaceFilters),
           verbose = true,
+          filtersByContractId = Seq.empty,
         )
 
       private val eventProjectionProperties = EventProjectionProperties(
@@ -193,6 +195,7 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
           filtersByParty = Map(party -> interfaceFilters),
           filtersForAnyParty = Some(templateFilters),
           verbose = true,
+          filtersByContractId = Seq.empty,
         )
 
       private val eventProjectionProperties = EventProjectionProperties(
@@ -244,12 +247,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
         filtersByParty = Map(party -> templateFilters),
         filtersForAnyParty = Some(interfaceFilters),
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
     private val transactionFilterSwapped =
       EventFormat(
         filtersByParty = Map(party -> interfaceFilters),
         filtersForAnyParty = Some(templateFilters),
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
 
     private val eventProjectionProperties = EventProjectionProperties(
@@ -296,12 +301,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -339,12 +346,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -382,12 +391,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       EventProjectionProperties(
@@ -420,12 +431,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       EventProjectionProperties(
@@ -458,12 +471,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       EventProjectionProperties(
@@ -501,12 +516,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
 
@@ -552,7 +569,7 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             templateWildcardFilter = None,
           )
         private val transactionFilter =
-          EventFormat(Map(party -> filter1), Some(filter2), verbose = true)
+          EventFormat(Map(party -> filter1), Some(filter2), verbose = true, Seq.empty)
         private val eventProjectionProperties = EventProjectionProperties(
           eventFormat = transactionFilter,
           interfaceImplementedBy = interfaceImpl,
@@ -613,6 +630,7 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             ),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
@@ -621,6 +639,7 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             ),
             filtersForAnyParty = Some(filter1),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
 
@@ -660,12 +679,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -709,12 +730,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -761,12 +784,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -804,12 +829,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -859,12 +886,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
 
@@ -902,12 +931,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
               filtersByParty = Map(party -> filters),
               filtersForAnyParty = None,
               verbose = true,
+              filtersByContractId = Seq.empty,
             )
           case true =>
             EventFormat(
               filtersByParty = Map.empty,
               filtersForAnyParty = Some(filters),
               verbose = true,
+              filtersByContractId = Seq.empty,
             )
         }
 
@@ -962,12 +993,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       EventProjectionProperties(
@@ -1009,12 +1042,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
 
@@ -1050,12 +1085,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -1146,6 +1183,7 @@ object EventProjectionPropertiesSpec {
       filtersByParty = Map(),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
     def templateWildcardFilter(includeCreatedEventBlob: Boolean = false) = EventFormat(
       filtersByParty = Map(
@@ -1158,6 +1196,7 @@ object EventProjectionPropertiesSpec {
       ),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
     def templateWildcardPartyWildcardFilter(includeCreatedEventBlob: Boolean = false) =
       EventFormat(
@@ -1171,6 +1210,7 @@ object EventProjectionPropertiesSpec {
           )
         ),
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
     val emptyCumulativeFilters = EventFormat(
       filtersByParty = Map(
@@ -1183,6 +1223,7 @@ object EventProjectionPropertiesSpec {
       ),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
     val emptyCumulativePartyWildcardFilters = EventFormat(
       filtersByParty = Map.empty,
@@ -1194,6 +1235,7 @@ object EventProjectionPropertiesSpec {
         )
       ),
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
   }
 }

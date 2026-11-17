@@ -37,14 +37,14 @@ trait GrantPermissionTest {
       rights: Vector[ums.Right],
       identityProviderId: String,
       tokenIssuer: Option[String],
-      secret: Option[String] = None,
   )(implicit ec: ExecutionContext): Future[Any] =
-    createUserByAdmin(
+    createUserByAdminRSA(
       userId = UUID.randomUUID().toString,
       identityProviderId = identityProviderId,
       tokenIssuer = tokenIssuer,
       rights = rights,
-      secret = secret,
+      privateKey = key1.privateKey,
+      keyId = key1.id,
     ).flatMap { case (_, context) =>
       serviceCallWithGrantPermission(context, adminPermission)
     }

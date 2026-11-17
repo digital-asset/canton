@@ -69,8 +69,8 @@ class TransactionRoutingProcessor(
 
   import com.digitalasset.canton.util.ShowUtil.*
 
-  /** Reassigns the necessary transaction input contracts to the target synchronizer based on the
-    * provided synchronizer rank, and then submits the transaction to the specified synchronizer.
+  /** Submits the transaction to the synchronizer of the provided synchronizer rank, and reassigns
+    * the necessary transaction input contracts to that synchronizer.
     */
   final def submitTransaction(
       submitterInfo: SubmitterInfo,
@@ -95,15 +95,6 @@ class TransactionRoutingProcessor(
           explicitlyDisclosedContracts.toList
             .parTraverse(ContractInstance.create[CreationTime.CreatedAt])
             .leftMap(MalformedInputErrors.InvalidDisclosedContract.Error.apply)
-        )
-
-      _ <- contractsReassigner
-        .reassign(
-          synchronizerRankTarget,
-          submitterInfo,
-          synchronizerState,
-          accounting,
-          wfTransaction.validatedContractPackageIds,
         )
 
       topologySnapshot <- EitherT
@@ -135,6 +126,14 @@ class TransactionRoutingProcessor(
             wfTransaction,
             inputDisclosedContracts.view.map(sc => sc.contractId -> sc).toMap,
             topologySnapshot,
+            () =>
+              contractsReassigner.reassign(
+                synchronizerRankTarget,
+                submitterInfo,
+                synchronizerState,
+                accounting,
+                wfTransaction.validatedContractPackageIds,
+              ),
           )(traceContext)
           .mapK(FutureUnlessShutdown.outcomeK)
       )

@@ -90,6 +90,7 @@ final class GetEventsByContractIdRequestAuthIT extends ReadOnlyServiceCallAuthTe
                         filtersByParty = Map.empty,
                         filtersForAnyParty = Some(Filters(Nil)),
                         verbose = false,
+                        filtersByContractId = Seq.empty,
                       )
                     ),
                     transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
@@ -124,6 +125,7 @@ final class GetEventsByContractIdRequestAuthIT extends ReadOnlyServiceCallAuthTe
                         filtersByParty = Map.empty,
                         filtersForAnyParty = Some(Filters(Nil)),
                         verbose = false,
+                        filtersByContractId = Seq.empty,
                       )
                     ),
                     transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,

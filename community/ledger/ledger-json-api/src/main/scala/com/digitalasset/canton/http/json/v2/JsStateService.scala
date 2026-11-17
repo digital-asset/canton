@@ -23,8 +23,8 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
-import io.circe.Codec
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
+import io.circe.{Codec, Decoder, Encoder}
 import io.grpc.stub.StreamObserver
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
@@ -82,7 +82,41 @@ class JsStateService(
       JsStateService.convertRecordTimeToOffset,
       convertRecordTimeToOffset,
     ),
+    websocket(hostedPartiesEndpoint, getHostedPartiesStream),
+    asList(hostedPartiesListEndpoint, getHostedPartiesStream),
+    withServerLogic(JsStateService.hostedPartiesPageEndpoint, getHostedPartiesPage),
   )
+
+  private def getHostedPartiesStream(
+      caller: CallerContext
+  ): TracedInput[Unit] => Flow[
+    state_service.GetHostedPartiesRequest,
+    state_service.GetHostedPartiesResponse,
+    NotUsed,
+  ] =
+    _ => {
+      implicit val tc: TraceContext = caller.traceContext()
+      prepareSingleWsStream(
+        (
+            req: state_service.GetHostedPartiesRequest,
+            obs: StreamObserver[state_service.GetHostedPartiesResponse],
+        ) => stateServiceClient(caller.token()).getHostedParties(req, obs),
+        Future.successful(_: state_service.GetHostedPartiesResponse),
+      )
+    }
+
+  private def getHostedPartiesPage(
+      callerContext: CallerContext
+  ): TracedInput[state_service.GetHostedPartiesPageRequest] => Future[
+    Either[JsCantonError, state_service.GetHostedPartiesPageResponse]
+  ] = {
+    implicit val traceContext: TraceContext = callerContext.traceContext()
+
+    req =>
+      stateServiceClient(callerContext.token())
+        .getHostedPartiesPage(req.in)
+        .resultToRight
+  }
 
   private def getConnectedSynchronizers(
       callerContext: CallerContext
@@ -263,6 +297,39 @@ object JsStateService extends DocumentationEndpoints {
     .out(jsonBody[state_service.ConvertRecordTimeToOffsetResponse])
     .protoRef(state_service.StateServiceGrpc.METHOD_CONVERT_RECORD_TIME_TO_OFFSET)
 
+  val hostedPartiesPageEndpoint = state.post
+    .in(sttp.tapir.stringToPath("hosted-parties-page"))
+    .in(jsonBody[state_service.GetHostedPartiesPageRequest])
+    .out(jsonBody[state_service.GetHostedPartiesPageResponse])
+    .protoRef(state_service.StateServiceGrpc.METHOD_GET_HOSTED_PARTIES_PAGE)
+
+  val hostedPartiesEndpoint = stateWebsocket.get
+    .in(sttp.tapir.stringToPath("hosted-parties"))
+    .out(
+      webSocketBody[
+        state_service.GetHostedPartiesRequest,
+        CodecFormat.Json,
+        Either[JsCantonError, state_service.GetHostedPartiesResponse],
+        CodecFormat.Json,
+      ](PekkoStreams)
+    )
+    .protoRef(state_service.StateServiceGrpc.METHOD_GET_HOSTED_PARTIES)
+
+  val hostedPartiesListEndpoint = state.post
+    .in(sttp.tapir.stringToPath("hosted-parties"))
+    .in(jsonBody[state_service.GetHostedPartiesRequest])
+    .out(jsonBody[Seq[state_service.GetHostedPartiesResponse]])
+    .description(
+      s"""Query a hosted parties snapshot (blocking call).
+         |Use the paged endpoint or websockets for large snapshots.
+         |After the snapshot, stream topology updates from `/v2/updates`
+         |starting at the `hostedAtOffset` of the responses.
+         |
+         |${createProtoRef(state_service.StateServiceGrpc.METHOD_GET_HOSTED_PARTIES)}
+         |""".stripMargin
+    )
+    .inStreamListParamsAndDescription()
+
   override def documentation: Seq[AnyEndpoint] = Seq(
     activeContractsEndpoint,
     activeContractsListEndpoint,
@@ -272,6 +339,9 @@ object JsStateService extends DocumentationEndpoints {
     getLedgerEndEndpoint,
     getLastPrunedOffsetsEndpoint,
     convertRecordTimeToOffset,
+    hostedPartiesEndpoint,
+    hostedPartiesListEndpoint,
+    hostedPartiesPageEndpoint,
   )
 }
 
@@ -359,6 +429,37 @@ object JsStateServiceCodecs {
   implicit val convertRecordTimeToOffsetResponseRW
       : Codec[state_service.ConvertRecordTimeToOffsetResponse] =
     deriveRelaxedCodec
+
+  implicit val hostedPartiesFilterRW: Codec[state_service.HostedPartiesFilter] =
+    deriveRelaxedCodec
+  implicit val getHostedPartiesRequestRW: Codec[state_service.GetHostedPartiesRequest] =
+    deriveRelaxedCodec
+  implicit val getHostedPartiesPageRequestRW: Codec[state_service.GetHostedPartiesPageRequest] =
+    deriveRelaxedCodec
+  implicit val hostingParticipantRW: Codec[state_service.HostingParticipant] =
+    deriveRelaxedCodec
+  implicit val hostedPartyRW: Codec[state_service.HostedParty] =
+    deriveRelaxedCodec
+  implicit val getHostedPartiesResponseRW: Codec[state_service.GetHostedPartiesResponse] =
+    deriveRelaxedCodec
+  implicit val getHostedPartiesPageResponseRW: Codec[state_service.GetHostedPartiesPageResponse] =
+    deriveRelaxedCodec
+
+  // Normally tapir first decodes right value if that fails then left
+  // As long as we do not use strict decoding it can happen that JsCantonError is
+  // interpreted as an empty GetHostedPartiesResponse
+  // to prevent that we switch decoding logic for that case
+  // It is possible that same trick should be applied for other WS endpoints
+  // TODO (i30190) generalize or remove this fix when possible
+  implicit val hostedPartiesStreamWSFrameCodec
+      : Codec[Either[JsCantonError, state_service.GetHostedPartiesResponse]] =
+    Codec.from(
+      Decoder[JsCantonError].either(Decoder[state_service.GetHostedPartiesResponse]),
+      Encoder.instance {
+        case Left(error) => Encoder[JsCantonError].apply(error)
+        case Right(response) => Encoder[state_service.GetHostedPartiesResponse].apply(response)
+      },
+    )
   // Schema mappings are added to align generated tapir docs with a circe mapping of ADTs
 
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
@@ -371,4 +472,7 @@ object JsStateServiceCodecs {
 
   implicit val getConnectedSynchronizersRequestSchema
       : Schema[state_service.GetConnectedSynchronizersRequest] = Schema.derived
+
+  implicit val hostingParticipantSchema: Schema[state_service.HostingParticipant] =
+    Schema.derived
 }

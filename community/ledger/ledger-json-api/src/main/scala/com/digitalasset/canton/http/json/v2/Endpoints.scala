@@ -262,6 +262,26 @@ trait Endpoints extends NamedLogging {
         }
       )
 
+  /** Like [[withServerLogic]], but for endpoints that must be reachable without a token, such as
+    * health checks. The token, if any, is passed on to the service logic unverified.
+    */
+  def withPublicServerLogic[Input, Output, R](
+      endpoint: Endpoint[CallerContext, Input, CustomError, Output, R],
+      service: CallerContext => TracedInput[Input] => Future[Either[JsCantonError, Output]],
+  ): Full[CallerContext, CallerContext, TracedInput[Input], CustomError, Output, R, Future] =
+    endpoint
+      .mapIn(traceHeadersMapping[Input]())
+      .serverSecurityLogic(caller =>
+        Future.successful[Either[CustomError, CallerContext]](Right(caller))
+      )
+      .serverLogic(caller =>
+        tracedInput => {
+          Future
+            .delegate(service(caller)(tracedInput))
+            .transform(handleErrorResponse(caller.traceContext()))
+        }
+      )
+
   /** Security logic of websocket endpoints. Websockets additionally accept the JWT from the
     * [[Endpoints.jwtCookieName]] cookie, which browsers attach to handshakes started by any web
     * site. To prevent cross-site websocket hijacking, a cookie-authenticated handshake is only
@@ -276,7 +296,8 @@ trait Endpoints extends NamedLogging {
       case None => validateJwtToken(endpointInfo)(caller)
       case Some(cookieAuth) =>
         checkCookieAuthOrigin(wsConfig.cookieAuthAllowedOrigins, cookieAuth.origin) match {
-          case CookieAuthDecision.Allowed => validateJwtToken(endpointInfo)(caller)
+          case CookieAuthDecision.Allowed =>
+            validateJwtToken(endpointInfo)(caller)
           case CookieAuthDecision.Disabled =>
             validateJwtToken(endpointInfo)(caller.copy(jwt = None, cookieAuth = None))
           case CookieAuthDecision.Rejected(reason) =>
@@ -295,7 +316,7 @@ trait Endpoints extends NamedLogging {
     implicit val traceContext = caller.traceContext()
     implicit val lc = LoggingContextWithTrace(loggerFactory)
     authInterceptor
-      .extractClaims(
+      .extractAuthenticatedClaims(
         caller.token().map(token => s"Bearer $token"),
         endpointInfo.showShort,
       )

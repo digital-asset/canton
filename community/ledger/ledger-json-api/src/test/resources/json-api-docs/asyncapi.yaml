@@ -55,6 +55,25 @@ channels:
     bindings:
       ws:
         method: GET
+  /v2/state/hosted-parties:
+    description: |-
+      Returns a stream of the snapshot of the hosted parties at a ledger offset, which are  satisfying the
+      request's query parameters.
+      Once the stream of GetHostedParties completes,
+      the client SHOULD begin streaming topology updates from the update service,
+      starting at the ``GetHostedPartiesResponse``.``hosted_at_offset``.
+      Clients SHOULD NOT assume that the set of hosted parties they receive reflects the state at the ledger end.
+    subscribe:
+      operationId: onV2StateHosted-parties
+      message:
+        $ref: '#/components/messages/Either_JsCantonError_GetHostedPartiesResponse'
+    publish:
+      operationId: sendV2StateHosted-parties
+      message:
+        $ref: '#/components/messages/GetHostedPartiesRequest'
+    bindings:
+      ws:
+        method: GET
   /v2/updates:
     description: |-
       Read the ledger's filtered update stream for the specified contents and filters.
@@ -656,6 +675,17 @@ components:
 
             Optional
           type: boolean
+        filtersByContractId:
+          description: |-
+            This filter matches events of specific contract IDs.
+            This filter cannot be used in combination with other filters.
+            This filter can be used only with some endpoints. If the endpoint
+            documentation does not explicitly mention supporting it, it must not be set in such request.
+
+            Optional: can be empty
+          type: array
+          items:
+            $ref: '#/components/schemas/ContractIdFilter'
     Map_Filters:
       title: Map_Filters
       type: object
@@ -818,6 +848,44 @@ components:
 
             Optional
           type: boolean
+    ContractIdFilter:
+      title: ContractIdFilter
+      description: This filter matches contracts of a specific contract ID.
+      type: object
+      required:
+      - contractId
+      properties:
+        contractId:
+          description: |-
+            The ID of the contract.
+            The events related to this contract will be included in the result.
+            Only contract ids known to the participant node at the time of query will be served
+            (in case of streaming queries it must be known when the streaming starts), contract ids that
+            are created later won't be visible even with tailing streams.
+            Must be a valid LedgerString (as described in ``value.proto``).
+
+            Required
+          type: string
+        includeCreatedEventBlob:
+          description: |-
+            Whether to include a ``created_event_blob`` in the returned ``CreatedEvent``.
+            Use this to access the contract event payload in your API client
+            for submitting it as a disclosed contract with future commands.
+
+            Optional
+          type: boolean
+        includeInterfaceViews:
+          description: |-
+            Whether to include interface views on the contract in the returned ``CreatedEvent``.
+            Use this to access contract data in a uniform manner in your API client.
+            The ``include_interface_views`` instances MUST each use a unique Interface Identifier.
+            The ``include_interface_views`` need to be valid: corresponding interface should be defined in
+            one of the available packages at the time of the query.
+
+            Optional: can be empty
+          type: array
+          items:
+            type: string
     Either_JsCantonError_JsGetActiveContractsResponse:
       title: Either_JsCantonError_JsGetActiveContractsResponse
       oneOf:
@@ -1324,6 +1392,177 @@ components:
             Required
           type: integer
           format: int32
+    GetHostedPartiesRequest:
+      title: GetHostedPartiesRequest
+      type: object
+      properties:
+        hostedAtOffset:
+          description: |-
+            The inclusive offset at which the snapshot of the hosted parties will be computed.
+            Must be no greater than the current ledger end offset.
+            Must be greater than or equal to the last pruning offset.
+            Optional, if defined, it must be a valid absolute offset (positive integer) or ledger begin offset (zero).
+            If zero, the empty set will be returned.
+            If not defined and no ``stream_continuation_token`` is set, the current ledger end will be used and it will be populated in the responses.
+            If not defined and a ``stream_continuation_token`` is set, the ``hosted_at_offset`` used by the request from which
+            the ``stream_continuation_token`` originates will be used.
+
+            Optional
+          type: integer
+          format: int64
+        filter:
+          $ref: '#/components/schemas/HostedPartiesFilter'
+          description: |-
+            If not set, the result is restricted to the parties the caller can read as (all parties if the
+            caller can read as any party), hosted on any synchronizer on the local participant.
+
+            Optional
+        streamContinuationToken:
+          description: |-
+            Opaque representation of a continuation token defining a position in the hosted parties snapshot.
+            The prefix of the hosted parties snapshot will be omitted up to and including the element from which
+            the continuation token was read.
+            To reuse the continuation token from a `GetHostedPartiesResponse`:
+
+            - subsequent request must be executed on the same participant with the same version of canton,
+            - subsequent request must have the same ``hosted_at_offset`` and ``filter``,
+            - and the participant must not have been pruned after the ``hosted_at_offset``.
+
+            If not specified, the whole hosted parties snapshot will be returned.
+
+            Optional: can be empty
+          type: string
+    HostedPartiesFilter:
+      title: HostedPartiesFilter
+      type: object
+      properties:
+        partyFilter:
+          description: |-
+            The responses will be related to these parties only. If some parties cannot be found or no hosting information
+            is available, they will be omitted from the result.
+            If left empty: responses will be related to all parties.
+
+            Optional: can be empty
+          type: array
+          items:
+            type: string
+        allParticipants:
+          description: |-
+            By default the responses will be related to the local participant only.
+            If set: the responses will be related to all participants.
+            Please note: the party hosting information is only exhaustive for the local participant,
+            for non-local participants the topology information might be partial.
+
+            Optional
+          type: boolean
+        synchronizerIdFilter:
+          description: |-
+            The responses will be related to these synchronizers only. If some synchronizers cannot be found
+            or no hosting information is available, they will be omitted from the result.
+            If left empty: responses will be related to all synchronizers.
+
+            Optional: can be empty
+          type: array
+          items:
+            type: string
+    Either_JsCantonError_GetHostedPartiesResponse:
+      title: Either_JsCantonError_GetHostedPartiesResponse
+      oneOf:
+      - $ref: '#/components/schemas/GetHostedPartiesResponse'
+      - $ref: '#/components/schemas/JsCantonError'
+    GetHostedPartiesResponse:
+      title: GetHostedPartiesResponse
+      type: object
+      required:
+      - hostedAtOffset
+      - streamContinuationToken
+      - hostedParty
+      properties:
+        hostedParty:
+          $ref: '#/components/schemas/HostedParty'
+          description: Required
+        hostedAtOffset:
+          description: |-
+            The ``hosted_at_offset`` which was specified in the request or calculated by the service.
+
+            Required
+          type: integer
+          format: int64
+        streamContinuationToken:
+          description: |-
+            Opaque representation of a continuation token which can be used in the request to bypass the already processed part
+            of the hosted parties snapshot.
+
+            Required: must be non-empty
+          type: string
+    HostedParty:
+      title: HostedParty
+      type: object
+      required:
+      - party
+      - hostingParticipants
+      properties:
+        party:
+          description: Required
+          type: string
+        hostingParticipants:
+          description: |-
+            Includes one entry per participant and synchronizer where the party is hosted at the offset
+            of ``hosted_at_offset`` in the request.
+
+            Required: must be non-empty
+          type: array
+          items:
+            $ref: '#/components/schemas/HostingParticipant'
+    HostingParticipant:
+      title: HostingParticipant
+      type: object
+      required:
+      - participantId
+      - synchronizerId
+      - offset
+      - participantPermission
+      - hostingState
+      - recordTime
+      properties:
+        participantId:
+          description: Required
+          type: string
+        synchronizerId:
+          description: |-
+            A valid synchronizer id.
+            Identifies the synchronizer where the party is hosted.
+
+            Required
+          type: string
+        recordTime:
+          description: |-
+            The time at which the respective topology transaction became effective.
+
+            Required
+          type: string
+        offset:
+          description: |-
+            The offset at which the respective topology transaction became effective.
+
+            Required
+          type: integer
+          format: int64
+        participantPermission:
+          description: Required
+          type: string
+          enum:
+          - PARTICIPANT_PERMISSION_UNSPECIFIED
+          - PARTICIPANT_PERMISSION_SUBMISSION
+          - PARTICIPANT_PERMISSION_CONFIRMATION
+          - PARTICIPANT_PERMISSION_OBSERVATION
+        hostingState:
+          description: Required
+          type: string
+          enum:
+          - HOSTING_STATE_UNSPECIFIED
+          - HOSTING_STATE_ONBOARDING
+          - HOSTING_STATE_ACTIVE
     GetUpdatesRequest:
       title: GetUpdatesRequest
       type: object
@@ -2295,6 +2534,14 @@ components:
     Either_JsCantonError_JsGetActiveContractsResponse:
       payload:
         $ref: '#/components/schemas/Either_JsCantonError_JsGetActiveContractsResponse'
+      contentType: application/json
+    GetHostedPartiesRequest:
+      payload:
+        $ref: '#/components/schemas/GetHostedPartiesRequest'
+      contentType: application/json
+    Either_JsCantonError_GetHostedPartiesResponse:
+      payload:
+        $ref: '#/components/schemas/Either_JsCantonError_GetHostedPartiesResponse'
       contentType: application/json
     GetUpdatesRequest:
       payload:

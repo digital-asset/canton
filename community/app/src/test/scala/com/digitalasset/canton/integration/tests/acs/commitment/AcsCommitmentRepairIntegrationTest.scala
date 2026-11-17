@@ -7,6 +7,7 @@ import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommand
   SynchronizerTimeRange,
   TimeRange,
 }
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
 import com.digitalasset.canton.config.{CommitmentSendDelay, NonNegativeDuration}
@@ -485,6 +486,8 @@ trait AcsCommitmentRepairIntegrationTest
   }
 }
 
+// TODO(#37720): Fix this test before removing the old commitment processor with the removal of PV37
+@UnstableTest
 class AcsCommitmentRepairIntegrationTestPostgres extends AcsCommitmentRepairIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
@@ -500,6 +503,8 @@ class AcsCommitmentRepairIntegrationTestPostgres extends AcsCommitmentRepairInte
   )
 }
 
+// TODO(#37720): Fix this test before removing the old commitment processor with the removal of PV37
+@UnstableTest
 class AcsCommitmentRepairIntegrationTestH2 extends AcsCommitmentRepairIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(

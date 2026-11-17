@@ -24,12 +24,11 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.admin.AdminWorkflowServices.isAcsReplicationWorkflowLoaded
 import com.digitalasset.canton.participant.admin.party.acsreplication.{
   AcsReplicationAdminWorkflow,
   AcsReplicator,
 }
-import com.digitalasset.canton.participant.config.{AlphaAcsReplicationConfig, ParticipantNodeConfig}
+import com.digitalasset.canton.participant.config.ParticipantNodeConfig
 import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.tea.daml.java.canton.api.traffic.creditv1.TrafficCreditReporter
@@ -131,30 +130,30 @@ class AdminWorkflowServices(
     )
   }
 
-  val acsReplicationManagementO: Option[
-    (FutureUnlessShutdown[ResilientLedgerSubscription[?, ?]], AcsReplicationAdminWorkflow)
-  ] =
-    acsReplicatorO
-      .collect {
-        case acsReplicator
-            if isAcsReplicationWorkflowLoaded(parameters.alphaAcsReplicationSupport) =>
-          createService(
-            "acs-replication-management",
-            // TODO(#20637): Don't resubscribe if the ledger api has been pruned as that would mean missing updates that
-            //  the AcsReplicationAdminWorkflow cares about. Instead let the ledger subscription fail after logging an error.
-            resubscribeIfPruned = false,
-          ) { connection =>
-            new AcsReplicationAdminWorkflow(
-              connection,
-              participantId,
-              syncService,
-              clock,
-              futureSupervisor,
-              timeouts,
-              loggerFactory,
-            ).tap(acsReplicator.initializeDamlAdminWorkflow)
-          }
+  val (acsReplicationManagementSubscription, acsReplicationAdminWorkflow)
+      : (FutureUnlessShutdown[ResilientLedgerSubscription[?, ?]], AcsReplicationAdminWorkflow) =
+    createService(
+      "acs-replication-management",
+      // TODO(#20637): Don't resubscribe if the ledger api has been pruned as that would mean missing updates that
+      //  the AcsReplicationAdminWorkflow cares about. Instead let the ledger subscription fail after logging an error.
+      resubscribeIfPruned = false,
+    ) { connection =>
+      new AcsReplicationAdminWorkflow(
+        connection,
+        participantId,
+        syncService,
+        clock,
+        futureSupervisor,
+        timeouts,
+        loggerFactory,
+      ).tap { workflow =>
+        // AcsReplicationAdminWorkflow is created even if ACS replication is not enabled
+        // so that it can observe and reject proposals
+        acsReplicatorO.collect { case acsReplicator =>
+          acsReplicator.initializeDamlAdminWorkflow(workflow)
+        }
       }
+    }
 
   protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import TraceContext.Implicits.Empty.*
@@ -180,15 +179,12 @@ class AdminWorkflowServices(
         SyncCloseable(s"$name-service", LifeCycle.close(service)(logger)),
       )
 
-    adminServiceCloseables("ping", pingSubscription, ping) ++ acsReplicationManagementO
-      .fold(Seq.empty[AsyncOrSyncCloseable]) {
-        case (acsReplicationManagementSubscription, acsReplicationAdminWorkflow) =>
-          adminServiceCloseables(
-            "acs-replication-management",
-            acsReplicationManagementSubscription,
-            acsReplicationAdminWorkflow,
-          )
-      }
+    adminServiceCloseables("ping", pingSubscription, ping) ++
+      adminServiceCloseables(
+        "acs-replication-management",
+        acsReplicationManagementSubscription,
+        acsReplicationAdminWorkflow,
+      )
   }
 
   private def checkPackagesStatus(
@@ -212,15 +208,10 @@ class AdminWorkflowServices(
 
         for {
           adminWorkflowLoaded <- isLoaded(AdminWorkflowServices.PingDarResourceFileName)
-          partReplicationWorkflowLoaded <-
-            if (
-              AdminWorkflowServices.isAcsReplicationWorkflowLoaded(
-                config.parameters.alphaAcsReplicationSupport
-              )
-            ) {
-              isLoaded(AdminWorkflowServices.AcsReplicationDarResourceFileName)
-            } else FutureUnlessShutdown.pure(true)
-        } yield adminWorkflowLoaded && partReplicationWorkflowLoaded
+          acsReplicationWorkflowLoaded <- isLoaded(
+            AdminWorkflowServices.AcsReplicationDarResourceFileName
+          )
+        } yield adminWorkflowLoaded && acsReplicationWorkflowLoaded
       }
     }
 
@@ -246,14 +237,7 @@ class AdminWorkflowServices(
 
         val resultUS = for {
           _ <- load(AdminWorkflowServices.PingDarResourceFileName)
-          _ <-
-            if (
-              AdminWorkflowServices.isAcsReplicationWorkflowLoaded(
-                config.parameters.alphaAcsReplicationSupport
-              )
-            ) {
-              load(AdminWorkflowServices.AcsReplicationDarResourceFileName)
-            } else FutureUnlessShutdown.unit
+          _ <- load(AdminWorkflowServices.AcsReplicationDarResourceFileName)
         } yield ()
 
         resultUS.transform[Unit](
@@ -463,11 +447,6 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
         case err =>
           Left(new IllegalStateException(CantonError.stringFromContext(err)))
       }
-
-  // The ACS replication admin workflow is only loaded when ACS replication is enabled.
-  private[participant] def isAcsReplicationWorkflowLoaded(
-      config: Option[AlphaAcsReplicationConfig]
-  ): Boolean = config.nonEmpty
 
   lazy val PingPackages: Map[PackageId, Ast.Package] = getDarPackages(PingDarResourceFileName)
   lazy val AcsReplicationPackages: Map[PackageId, Ast.Package] = getDarPackages(

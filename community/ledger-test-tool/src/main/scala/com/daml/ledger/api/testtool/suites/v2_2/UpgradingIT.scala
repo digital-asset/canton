@@ -1055,6 +1055,7 @@ object UpgradingIT {
       ),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
 
   // SubscriptionFilterWithExpectations

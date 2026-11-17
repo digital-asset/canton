@@ -39,6 +39,7 @@ import com.digitalasset.canton.ledger.api.sizeconfig.v2.interactive.{
 import com.digitalasset.canton.ledger.api.sizeconfig.v2.{
   CommandsSizeConfig,
   CompletionStreamRequestSizeConfig,
+  ContractIdFilterSizeConfig,
   CreateAndExerciseCommandSizeConfig,
   CreateCommandSizeConfig,
   DisclosedContractSizeConfig,
@@ -51,9 +52,12 @@ import com.digitalasset.canton.ledger.api.sizeconfig.v2.{
   GetCompletionByHashRequestSizeConfig,
   GetCompletionsRequestSizeConfig,
   GetContractRequestSizeConfig,
+  GetHostedPartiesPageRequestSizeConfig,
+  GetHostedPartiesRequestSizeConfig,
   GetLedgerEndRequestSizeConfig,
   GetUpdateByHashRequestSizeConfig,
   GetUpdatesPageRequestSizeConfig,
+  HostedPartiesFilterSizeConfig,
   PackageMetadataFilterSizeConfig,
   ParticipantAuthorizationTopologyFormatSizeConfig,
   PrefetchContractKeySizeConfig,
@@ -102,9 +106,11 @@ final case class LedgerApiSizeLimitsConfig(
   * @param transactionHashBytesSizeLimit
   *   shared limit of max transaction hash size of all by-hash requests
   * @param continuationTokenBytesSizeLimit
-  *   shared limit of the continuation token and page tokens of the active contracts and updates
+  *   shared limit of the continuation token and page tokens of the active contracts, updates and
+  *   hosted parties
   * @param synchronizerIdsSizeLimit
-  *   shared limit of synchronizer ids of `GetLedgerEndRequest` and `TopologyStateFilter`
+  *   shared limit of synchronizer ids of `GetLedgerEndRequest`, `TopologyStateFilter` and
+  *   `HostedPartiesFilter`
   * @param submissionCommandsSizeLimit
   *   max number of the commands of `Commands` and `PrepareSubmissionRequest`
   * @param submissionActAsSizeLimit
@@ -203,6 +209,8 @@ object LedgerApiSizeLimitsConfig {
           shared.submissionPackageIdSelectionPreferenceSizeLimit,
         prefetchContractKeysSizeLimit = shared.submissionPrefetchContractKeysSizeLimit,
       ),
+      contractIdFilter =
+        ContractIdFilterSizeConfig(includeInterfaceViewsSizeLimit = PositiveInt.MaxValue),
       createAndExerciseCommand = CreateAndExerciseCommandSizeConfig(
         createArgumentsSizeLimit = shared.argumentsBytesSizeLimit,
         choiceArgumentSizeLimit = shared.argumentsBytesSizeLimit,
@@ -229,10 +237,23 @@ object LedgerApiSizeLimitsConfig {
       getActiveContractsRequest = GetActiveContractsRequestSizeConfig(
         streamContinuationTokenSizeLimit = shared.continuationTokenBytesSizeLimit
       ),
+      getHostedPartiesPageRequest = GetHostedPartiesPageRequestSizeConfig(
+        pageTokenSizeLimit = shared.continuationTokenBytesSizeLimit
+      ),
+      getHostedPartiesRequest = GetHostedPartiesRequestSizeConfig(
+        streamContinuationTokenSizeLimit = shared.continuationTokenBytesSizeLimit
+      ),
+      hostedPartiesFilter = HostedPartiesFilterSizeConfig(
+        partyFilterSizeLimit = PositiveInt.MaxValue,
+        synchronizerIdFilterSizeLimit = shared.synchronizerIdsSizeLimit,
+      ),
       getLedgerEndRequest = GetLedgerEndRequestSizeConfig(
         synchronizerIdSizeLimit = shared.synchronizerIdsSizeLimit
       ),
-      eventFormat = EventFormatSizeConfig(filtersByPartySizeLimit = PositiveInt.MaxValue),
+      eventFormat = EventFormatSizeConfig(
+        filtersByPartySizeLimit = PositiveInt.MaxValue,
+        filtersByContractIdSizeLimit = PositiveInt.MaxValue,
+      ),
       filters = FiltersSizeConfig(cumulativeSizeLimit = PositiveInt.MaxValue),
       participantAuthorizationTopologyFormat = ParticipantAuthorizationTopologyFormatSizeConfig(
         partiesSizeLimit = PositiveInt.MaxValue

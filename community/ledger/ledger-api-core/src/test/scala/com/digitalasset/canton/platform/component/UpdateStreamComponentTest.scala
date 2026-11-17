@@ -27,6 +27,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
           filtersByParty = Map(dsoParty.value -> CumulativeFilter.templateWildcardFilter(true)),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         ),
         transactionShape = transactionShape,
       )
@@ -192,6 +193,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
               filtersByParty = Map(),
               filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter(false)),
               verbose = false,
+              filtersByContractId = Seq.empty,
             )
           )
         ),
@@ -265,6 +267,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
                 filtersByParty = Map(),
                 filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter(false)),
                 verbose = false,
+                filtersByContractId = Seq.empty,
               )
             ),
             includeTopologyEvents = Some(
@@ -340,6 +343,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
             filtersByParty = Map(dsoParty.value -> ProtoFilters(Nil)),
             filtersForAnyParty = None,
             verbose = false,
+            filtersByContractId = Seq.empty,
           )
         ),
         transactionShape = ProtoTransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
@@ -353,7 +357,12 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
     }
 
     def validated(protoFormat: ProtoUpdateFormat): UpdateFormat =
-      FormatValidator.validate(protoFormat)(NoLogging, LedgerApiSizeLimitsConfig()).value
+      FormatValidator
+        .validate(protoFormat, FormatValidator.RejectContractIdFilters)(
+          NoLogging,
+          LedgerApiSizeLimitsConfig(),
+        )
+        .value
 
     "include reassignments with the event format of the transactions if set and omit them otherwise" in {
       val rangeStart = index.currentLedgerEnd().map(_.lastOffset)

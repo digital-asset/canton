@@ -90,7 +90,7 @@ trait SyncServiceCallAuthTests extends ServiceCallWithMainActorAuthTests {
       ) in { implicit env =>
       import env.*
       loggerFactory.suppress(AuthInterceptorSuppressionRule) {
-        expectPermissionDenied(serviceCall(canReadAsUnknownUserStandardJWT))
+        expectUnauthenticated(serviceCall(canReadAsUnknownUserStandardJWT))
       }
     }
     "deny calls with explicitly non-expired read-only token" taggedAs securityAsset

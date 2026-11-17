@@ -137,6 +137,7 @@ class CommandServiceClient(
                 .toMap,
               filtersForAnyParty = None,
               verbose = true,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = transactionShape,

@@ -49,8 +49,8 @@ class UserBasedClaimResolver(
           claimsSet <- userRightsResult match {
             case Left(msg) =>
               Future.failed(
-                AuthorizationChecksErrors.PermissionDenied
-                  .Reject(
+                AuthorizationChecksErrors.Unauthenticated
+                  .UserBasedAuthenticationFailed(
                     s"Could not resolve rights for user '$userId' due to '$msg'"
                   )
                   .asGrpcError
@@ -100,8 +100,8 @@ class UserBasedClaimResolver(
       value <- userResult match {
         case Left(msg) =>
           Future.failed(
-            AuthorizationChecksErrors.PermissionDenied
-              .Reject(
+            AuthorizationChecksErrors.Unauthenticated
+              .UserBasedAuthenticationFailed(
                 s"Could not resolve is_deactivated status for user '$userId' and identity_provider_id '$identityProviderId' due to '$msg'"
               )
               .asGrpcError
@@ -109,8 +109,8 @@ class UserBasedClaimResolver(
         case Right(user: User) =>
           if (user.isDeactivated) {
             Future.failed(
-              AuthorizationChecksErrors.PermissionDenied
-                .Reject(
+              AuthorizationChecksErrors.Unauthenticated
+                .UserBasedAuthenticationFailed(
                   s"User $userId is deactivated"
                 )
                 .asGrpcError
