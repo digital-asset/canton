@@ -336,7 +336,7 @@ object BuildCommon {
 
   lazy val bundleTask: Def.Initialize[Task[String]] = Def
     .task {
-      import CommunityProjects.`community-common`
+      import CommunityProjects.{`community-common`, `traffic-enforcement-component`}
 
       val log = streams.value.log
       dumpLicenseReport.value
@@ -358,6 +358,11 @@ object BuildCommon {
         val darOutput = (`community-common` / Compile / damlDarOutput).value
         packDars(darOutput, "dars")
       }
+      // include the pinned traffic credit DAR, for applications that credit traffic to TEA accounts
+      val trafficCreditDars = packDars(
+        (`traffic-enforcement-component` / Compile / resourceDirectory).value / "dar",
+        "dars",
+      )
       if (bundlePack.value.contains(enterpriseGeneratedPack)) {
         log.info("Adding version info to demo files")
         runCommand(f"bash ./release/add-release-version.sh ${version.value}", log)
@@ -448,7 +453,7 @@ object BuildCommon {
       log.info("Invoking bundle generator")
       // add license to package
       val renames =
-        releaseNotes ++ licenseFiles ++ damlSampleSource ++ damlSampleDars ++ apiFiles
+        releaseNotes ++ licenseFiles ++ damlSampleSource ++ damlSampleDars ++ trafficCreditDars ++ apiFiles
       val args =
         bundlePack.value ++ renames.flatMap(x => Seq("-r", x._1.toString, x._2))
       // build the canton fat-jar
@@ -881,8 +886,10 @@ object BuildCommon {
         assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
         // add the test DARs generated in daml-lf-encoder by DamlLfPlugin
         Test / managedResources ++= (DamlProjects.`daml-lf-encoder` / Test / resources).value,
-        // Explicit set the Daml project dependency to common
-        Test / damlDependencies := (`community-common` / Compile / damlBuild).value,
+        // Include external DARs in the cache inputs for dependent test packages.
+        Test / damlDependencies := (`community-common` / Compile / damlBuild).value :+
+          ((`traffic-enforcement-component` / Compile / resourceDirectory).value /
+            "dar" / "canton-api-traffic-credit-v1-1.0.0.dar"),
         Test / damlBuildOrder := Seq(
           "daml/JsonApiTest/Upgrades/Iface",
           "daml/JsonApiTest/Upgrades/V1",
@@ -957,6 +964,11 @@ object BuildCommon {
             (Test / sourceDirectory).value / "daml" / "VettingMain",
             (Test / damlDarOutput).value / "VettingMain-1.0.0.dar",
             "com.digitalasset.canton.tests.vettingmain.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "TeaTrafficPurchase",
+            (Test / damlDarOutput).value / "TeaTrafficPurchase-1.0.0.dar",
+            "com.digitalasset.canton.tea.tests",
           ),
         ),
         Test / damlTsCodegen := {
@@ -2667,6 +2679,7 @@ object BuildCommon {
       )
         .dependsOn(
           `traffic-enforcement-api`,
+          DamlProjects.`bindings-java`,
           DamlProjects.`ledger-api-scala`,
           `ledger-api-core`,
           DamlProjects.`ledger-api-proto`,
@@ -2686,6 +2699,19 @@ object BuildCommon {
               DamlProjects.`google-common-protos-scala` / PB.unpackDependencies
             )
             .value,
+          Compile / damlDarOutput := (Compile / target).value / "dar-output",
+          damlPinnedProjects := Seq(
+            (Compile / sourceDirectory).value / "daml" / "canton-api-traffic-credit-v1"
+          ),
+          Compile / useVersionedDarName := true,
+          Compile / damlJavaCodegen := Seq(
+            (
+              (Compile / sourceDirectory).value / "daml" / "canton-api-traffic-credit-v1",
+              (Compile / resourceDirectory).value / "dar" / "canton-api-traffic-credit-v1-1.0.0.dar",
+              "com.digitalasset.canton.tea.daml",
+            )
+          ),
+          addFilesToHeaderCheck("*.daml", "daml", Compile),
           libraryDependencies ++= Seq(
             commons_io,
             pekko_actor_typed,

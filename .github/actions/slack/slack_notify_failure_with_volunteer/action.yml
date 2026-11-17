@@ -1,5 +1,5 @@
 name: Slack Failure Notification
-description: slack_red_main_with_volunteer
+description: slack_notify_failure_with_volunteer
 
 inputs:
   webhook_url:

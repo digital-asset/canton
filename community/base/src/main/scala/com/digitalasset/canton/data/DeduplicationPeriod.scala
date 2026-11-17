@@ -7,7 +7,7 @@ import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
 import com.digitalasset.daml.lf.data.Time.Timestamp
 
 import java.time.Duration
-import scala.util.{Failure, Success, Try}
+import scala.util.{Failure, Try}
 
 /** Specifies the deduplication period for a command submission. Note that we would like to keep
   * this easily extensible to support offsets and absolute timestamps, hence the usage of a trait
@@ -30,7 +30,7 @@ object DeduplicationPeriod {
       period: DeduplicationPeriod,
   ): Try[Timestamp] = period match {
     case DeduplicationDuration(duration) =>
-      Success(time.addMicros(duration.toNanos / 1000))
+      Try(time.addMicros(duration.toNanos / 1000))
     case DeduplicationOffset(_) =>
       Failure(
         new NotImplementedError("Offset deduplication is not supported")
@@ -45,16 +45,19 @@ object DeduplicationPeriod {
     * measured on some unspecified clock on the participant or the Daml ledger. When used in
     * [[com.digitalasset.canton.ledger.participant.state.CompletionInfo]], the window is measured in
     * record time.
-    *
-    * @throws java.lang.IllegalArgumentException
-    *   if the `duration` is negative or uses finer than microsecond precision
     */
-  final case class DeduplicationDuration(duration: Duration) extends DeduplicationPeriod {
-    require(!duration.isNegative, s"The deduplication window must not be negative: $duration")
-    require(
-      duration.getNano % 1000 == 0,
-      s"The deduplication window must not use nanosecond precision: $duration",
-    )
+  final case class DeduplicationDuration private (duration: Duration) extends DeduplicationPeriod
+
+  object DeduplicationDuration {
+    def create(duration: Duration): Either[String, DeduplicationDuration] =
+      if (duration.isNegative)
+        Left(s"The deduplication window must not be negative: $duration")
+      else if (duration.getNano % 1000 != 0)
+        Left(s"The deduplication window must not use nanosecond precision: $duration")
+      else Right(new DeduplicationDuration(duration))
+
+    val Zero: DeduplicationDuration =
+      new DeduplicationDuration(Duration.ZERO)
   }
 
   /** The `offset` defines the start of the deduplication period (exclusive). */

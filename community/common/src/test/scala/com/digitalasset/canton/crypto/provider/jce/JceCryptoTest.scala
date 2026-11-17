@@ -26,8 +26,29 @@ import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.tracing.NoReportingTracerProvider
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
+import org.bouncycastle.crypto.DefaultBufferedBlockCipher
+import org.bouncycastle.crypto.agreement.ECDHBasicAgreement
+import org.bouncycastle.crypto.digests.SHA256Digest
+import org.bouncycastle.crypto.engines.{AESEngine, IESEngine}
+import org.bouncycastle.crypto.generators.{
+  ECKeyPairGenerator,
+  EphemeralKeyPairGenerator,
+  KDF2BytesGenerator,
+}
+import org.bouncycastle.crypto.macs.HMac
+import org.bouncycastle.crypto.modes.SICBlockCipher
+import org.bouncycastle.crypto.params.{
+  AsymmetricKeyParameter,
+  ECKeyGenerationParameters,
+  ECPublicKeyParameters,
+  IESWithCipherParameters,
+  ParametersWithIV,
+}
+import org.bouncycastle.jcajce.provider.asymmetric.util.ECUtil
 import org.scalatest.wordspec.AsyncWordSpec
 
+import java.security.spec.X509EncodedKeySpec
+import java.security.{KeyFactory, SecureRandom}
 import java.util.Base64
 
 class JceCryptoTest
@@ -73,6 +94,8 @@ class JceCryptoTest
           new ExecutorServiceMetrics(NoOpMetricsFactory),
         )
         .valueOrFail("failed to create crypto")
+
+    lazy val jceCryptoF: FutureUnlessShutdown[Crypto] = jceCrypto()
 
     behave like migrationTest(
       // No legacy keys for secp256k1
@@ -220,6 +243,127 @@ class JceCryptoTest
             }
           }
       }
+    }
+
+    "fail to decrypt an ECIES ciphertext with a valid MAC and a body that is not block aligned" in {
+      for {
+        crypto <- jceCryptoF
+        publicKey <- getEncryptionPublicKey(crypto, EncryptionKeySpec.EcP256)
+        ecPublicKey = ECUtil.generatePublicKeyParameter(
+          KeyFactory
+            .getInstance("EC", JceSecurityProvider.bouncyCastleProvider)
+            .generatePublic(new X509EncodedKeySpec(publicKey.key.toByteArray))
+        ) match {
+          case params: ECPublicKeyParameters => params
+          case other => fail(s"Unexpected public key parameters $other")
+        }
+        // ECIES as in `ECIESwithSHA256andAES-CBC`, but with AES-CTR, so that the body can be
+        // 17 bytes long while the key derivation and the MAC stay the same
+        engine = new IESEngine(
+          new ECDHBasicAgreement(),
+          new KDF2BytesGenerator(new SHA256Digest()),
+          new HMac(new SHA256Digest()),
+          new DefaultBufferedBlockCipher(SICBlockCipher.newInstance(AESEngine.newInstance())),
+        )
+        keyPairGenerator = new ECKeyPairGenerator()
+        _ = keyPairGenerator.init(
+          new ECKeyGenerationParameters(ecPublicKey.getParameters, new SecureRandom())
+        )
+        jcePureCrypto = crypto.pureCrypto match {
+          case jcePureCrypto: JcePureCrypto => jcePureCrypto
+          case other => fail(s"Unexpected pure crypto $other")
+        }
+        iv = new Array[Byte](jcePureCrypto.EciesHmacSha256Aes128CbcParams.ivSizeForAesCbcInBytes)
+        parameterSpec = jcePureCrypto.EciesHmacSha256Aes128CbcParams.parameterSpec(iv)
+        _ = engine.init(
+          ecPublicKey,
+          new ParametersWithIV(
+            new IESWithCipherParameters(
+              parameterSpec.getDerivationV,
+              parameterSpec.getEncodingV,
+              parameterSpec.getMacKeySize,
+              parameterSpec.getCipherKeySize,
+            ),
+            iv,
+          ),
+          new EphemeralKeyPairGenerator(
+            keyPairGenerator,
+            (ephemeralKey: AsymmetricKeyParameter) =>
+              ephemeralKey match {
+                case ecKey: ECPublicKeyParameters => ecKey.getQ.getEncoded(false)
+                case other => fail(s"Unexpected ephemeral public key $other")
+              },
+          ),
+        )
+        // one byte longer than an AES block, so not block aligned
+        body = new Array[Byte](AESEngine.newInstance().getBlockSize + 1)
+        ciphertext = engine.processBlock(body, 0, body.length)
+        encrypted = new AsymmetricEncrypted[ByteString](
+          ByteString.copyFrom(iv ++ ciphertext),
+          EncryptionAlgorithmSpec.EciesHkdfHmacSha256Aes128Cbc,
+          publicKey.id,
+        )
+        result <- crypto.privateCrypto
+          .decrypt(encrypted)(bytes => Right(bytes))
+          .value
+      } yield inside(result.left.value) { case DecryptionError.FailedToDecrypt(error) =>
+        // the MAC is valid, so the decryption fails on the length of the body
+        error should include("DataLengthException")
+      }
+    }.failOnShutdown
+
+    forAll(Jce.signingAlgorithms.supported.forgetNE) { algorithmSpec =>
+      forAll(algorithmSpec.supportedSigningKeySpecs.forgetNE) { keySpec =>
+        s"fail to verify an empty signature with $algorithmSpec and a $keySpec key" in {
+          val message = ByteString.copyFromUtf8("test")
+          for {
+            crypto <- jceCryptoF
+            publicKey <- getSigningPublicKey(crypto, SigningKeyUsage.ProtocolOnly, keySpec)
+            signature <- crypto.privateCrypto
+              .signBytes(message, publicKey.id, SigningKeyUsage.ProtocolOnly, algorithmSpec)
+              .valueOrFail("sign message")
+            emptySignature = Signature.create(
+              signature.format,
+              ByteString.EMPTY,
+              signature.signedBy,
+              signature.signingAlgorithmSpec,
+            )
+          } yield forAll(Seq(message, ByteString.EMPTY)) { bytes =>
+            crypto.pureCrypto
+              .verifySignature(bytes, publicKey, emptySignature, SigningKeyUsage.ProtocolOnly)
+              .left
+              .value shouldBe a[SignatureCheckError]
+          }
+        }.failOnShutdown
+      }
+    }
+
+    forAll(Jce.encryptionAlgorithms.supported.forgetNE) { algorithmSpec =>
+      forAll(algorithmSpec.supportedEncryptionKeySpecs.forgetNE) { keySpec =>
+        s"fail to decrypt an empty ciphertext with $algorithmSpec and a $keySpec key" in {
+          for {
+            crypto <- jceCryptoF
+            publicKey <- getEncryptionPublicKey(crypto, keySpec)
+            result <- crypto.privateCrypto
+              .decrypt(
+                new AsymmetricEncrypted[ByteString](ByteString.EMPTY, algorithmSpec, publicKey.id)
+              )(bytes => Right(bytes))
+              .value
+          } yield result.left.value shouldBe a[DecryptionError]
+        }.failOnShutdown
+      }
+    }
+
+    forAll(Jce.symmetric.supported.forgetNE) { scheme =>
+      s"fail to decrypt an empty symmetric ciphertext with ${scheme.name}" in {
+        for {
+          crypto <- jceCryptoF
+          key = crypto.pureCrypto.generateSymmetricKey(scheme).valueOrFail("generate key")
+        } yield crypto.pureCrypto
+          .decryptWith(Encrypted[ByteString](ByteString.EMPTY), key)(bytes => Right(bytes))
+          .left
+          .value shouldBe a[DecryptionError]
+      }.failOnShutdown
     }
 
     behave like privateKeySerializerProvider(

@@ -29,7 +29,7 @@ sealed trait MediatorVerdict extends Product with Serializable with PrettyPrinti
 object MediatorVerdict {
   case object MediatorApprove extends MediatorVerdict {
     override def toVerdict(protocolVersion: ProtocolVersion): Verdict =
-      Verdict.Approve(protocolVersion)
+      Verdict.Approve.create(protocolVersion)
 
     override def prettyCompanion: PrettyPrintingCompanion[MediatorApprove.this.type] =
       MediatorApprovePrettyPrintingCompanion
@@ -45,7 +45,7 @@ object MediatorVerdict {
       reasons: NonEmpty[List[(Set[LfPartyId], ParticipantId, NonPositiveLocalVerdict)]]
   ) extends MediatorVerdict {
     override def toVerdict(protocolVersion: ProtocolVersion): Verdict =
-      Verdict.ParticipantReject(reasons, protocolVersion)
+      Verdict.ParticipantReject.create(reasons, protocolVersion)
 
     override def prettyCompanion: PrettyPrintingCompanion[ParticipantReject] = ParticipantReject
   }
@@ -73,11 +73,7 @@ object MediatorVerdict {
         case duplicate: DuplicateConfirmationRequest.Reject => duplicate
       }
 
-      Verdict.MediatorReject.tryCreate(
-        error.rpcStatusWithoutLoggingContext(),
-        reason.isMalformed,
-        protocolVersion,
-      )
+      Verdict.MediatorReject.fromMediatorError(error, protocolVersion)
     }
 
     override def prettyCompanion: PrettyPrintingCompanion[MediatorReject] = MediatorReject

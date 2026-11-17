@@ -84,9 +84,9 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
     LocalRejectError.ConsistencyRejections.LockedContracts.Reject(Seq.empty)
 
   // mediator verdicts
-  lazy val mediatorApprove: Verdict.Approve = Verdict.Approve(testedProtocolVersion)
+  lazy val mediatorApprove: Verdict.Approve = Verdict.Approve.create(testedProtocolVersion)
   def participantReject(participantId: ParticipantId): Verdict.ParticipantReject =
-    Verdict.ParticipantReject(
+    Verdict.ParticipantReject.create(
       NonEmpty(
         List,
         (Set.empty[LfPartyId], participantId, localReject.toLocalReject(testedProtocolVersion)),

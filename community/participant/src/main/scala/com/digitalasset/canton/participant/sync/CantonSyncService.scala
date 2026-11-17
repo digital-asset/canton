@@ -340,7 +340,7 @@ class CantonSyncService(
       // vet any packages that have not yet been vetted
       EitherTUtil.toFutureUnlessShutdown(
         AdminWorkflowServices.handleDamlErrorDuringPackageLoading(
-          s"${AdminWorkflowServices.PingDarResourceName}__${AdminWorkflowServices.AcsReplicationDarResourceName}"
+          AdminWorkflowServices.AdminWorkflowNames.mkString("__")
         )(
           packageService
             .vetPackages(
@@ -354,16 +354,13 @@ class CantonSyncService(
     val topologyClientO = connectedSynchronizersLookup.get(lsid).map(_.topologyClient)
     val vettingF = topologyClientO match {
       case Some(topologyClient) =>
-        val acsReplicationPackagesIfShouldVet =
-          if (
-            AdminWorkflowServices.isAcsReplicationWorkflowLoaded(
-              parameters.alphaOnlinePartyReplicationSupport
-            )
-          ) {
-            AdminWorkflowServices.AcsReplicationPackages.keySet
-          } else Set.empty
-        val packagesToVet = AdminWorkflowServices.PingPackages.keySet ++
-          acsReplicationPackagesIfShouldVet
+        val trafficCreditPackagesIfShouldVet =
+          if (parameters.damlTopUpEnabled) AdminWorkflowServices.TrafficCreditPackages.keySet
+          else Set.empty
+        val packagesToVet =
+          AdminWorkflowServices.PingPackages.keySet ++
+            AdminWorkflowServices.AcsReplicationPackages.keySet ++
+            trafficCreditPackagesIfShouldVet
         logger.debug("Checking whether admin workflows need to be vetted still.")
 
         topologyClient.headSnapshot

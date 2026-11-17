@@ -117,10 +117,14 @@ class ProgrammableSequencer(
   override val rateLimitManager: Option[SequencerRateLimitManager] =
     baseSequencer.rateLimitManager
 
-  override def trafficStatus(members: Seq[Member], selector: TimestampSelector)(implicit
+  override def trafficStatus(
+      members: Seq[Member],
+      selector: TimestampSelector,
+      includeOnboardingMembers: Boolean,
+  )(implicit
       traceContext: com.digitalasset.canton.tracing.TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficControlError, SequencerTrafficStatus] =
-    baseSequencer.trafficStatus(members, selector)
+    baseSequencer.trafficStatus(members, selector, includeOnboardingMembers)
 
   override def sequencingTime(implicit
       traceContext: TraceContext

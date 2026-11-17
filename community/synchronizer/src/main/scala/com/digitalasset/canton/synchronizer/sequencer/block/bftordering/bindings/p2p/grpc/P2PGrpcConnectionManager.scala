@@ -59,6 +59,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ModuleRef,
   P2PAddress,
   P2PConnectionEventListener,
+  P2PNetworkRef,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.{
   ResultWithLogs,
@@ -79,7 +80,13 @@ import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.collection.BoundedQueue
 import com.digitalasset.canton.util.collection.BoundedQueue.DropStrategy
-import com.digitalasset.canton.util.{AtomicUtil, DelayUtil, GrpcStreamingUtils, Mutex}
+import com.digitalasset.canton.util.{
+  AtomicUtil,
+  DelayUtil,
+  FutureUnlessShutdownUtil,
+  GrpcStreamingUtils,
+  Mutex,
+}
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.stub.{
   AbstractStub,
@@ -93,6 +100,7 @@ import org.slf4j.event.Level
 
 import java.net.SocketAddress
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ExecutorService, ThreadLocalRandom}
 import scala.concurrent.duration.Duration
@@ -131,7 +139,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
 
   private val longRunningExecutionContext = ExecutionContext.fromExecutor(longRunningExecutor)
 
-  private val stateRef = new AtomicReference[State](State())
+  private[grpc] val stateRef = new AtomicReference[State](State())
 
   private val clientChannelBuilder = ClientChannelBuilder(loggerFactory)
 
@@ -156,37 +164,41 @@ private[bftordering] final class P2PGrpcConnectionManager(
 
   // Called by the connection-managing actor when establishing a connection to an endpoint
   def getPeerSenderOrStartConnection(
-      p2pAddress: P2PAddress
+      p2pAddress: P2PAddress,
+      owningNetworkRef: P2PNetworkRef[BftOrderingMessage],
   )(implicit traceContext: TraceContext): Option[PeerSender] =
     if (!isClosing) {
-      p2pGrpcConnectionState.associateP2PEndpointIdToBftNodeId(p2pAddress).toOption.flatMap { _ =>
-        val maybeP2PEndpoint = p2pAddress.maybeP2PEndpoint
-        p2pGrpcConnectionState.getSender(p2pAddress.id) match {
-          case found @ Some(_) =>
-            // A sender may be present due to an incoming connection, so we need to stop trying to connect
-            maybeP2PEndpoint
-              .map(_.id)
-              .foreach { p2pEndpointId =>
-                logger.debug(
-                  s"Found existing sender for $p2pEndpointId " +
-                    "(from either fully connected incoming or outgoing connection), " +
-                    "checking and shutting down any in-progress outgoing connection potentially started earlier"
-                )
-                shutdownOutgoingConnectionIfNeeded(
-                  p2pEndpointId,
-                  onlyIfNotFullyConnected = true,
-                ).discard
-              }
-            found
-          case _ =>
-            logger.debug(
-              s"Requested a send but no sender found for $p2pAddress; if the endpoint is known, " +
-                "ensuring an outgoing connection is established or being established asynchronously"
-            )
-            maybeP2PEndpoint.foreach(connectIfNeeded(_).discard)
-            None
+      p2pGrpcConnectionState
+        .associateP2PEndpointIdToBftNodeId(p2pAddress, owningNetworkRef)
+        .flatMap(_.toOption)
+        .flatMap { _ =>
+          val maybeP2PEndpoint = p2pAddress.maybeP2PEndpoint
+          p2pGrpcConnectionState.getSender(p2pAddress.id) match {
+            case found @ Some(_) =>
+              // A sender may be present due to an incoming connection, so we need to stop trying to connect
+              maybeP2PEndpoint
+                .map(_.id)
+                .foreach { p2pEndpointId =>
+                  logger.debug(
+                    s"Found existing sender for $p2pEndpointId " +
+                      "(from either fully connected incoming or outgoing connection), " +
+                      "checking and shutting down any in-progress outgoing connection potentially started earlier"
+                  )
+                  shutdownOutgoingConnectionIfNeeded(
+                    p2pEndpointId,
+                    onlyIfNotFullyConnected = true,
+                  ).discard
+                }
+              found
+            case _ =>
+              logger.debug(
+                s"Requested a send but no sender found for $p2pAddress; if the endpoint is known, " +
+                  "ensuring an outgoing connection is established or being established asynchronously"
+              )
+              maybeP2PEndpoint.foreach(connectIfNeeded(_, owningNetworkRef).discard)
+              None
+          }
         }
-      }
     } else {
       logger.debug(
         s"P2P gRPC connection manager not providing a sender for $p2pAddress due to shutdown"
@@ -216,25 +228,29 @@ private[bftordering] final class P2PGrpcConnectionManager(
   //   connection-managing actor closed.
   // - The connection-managing actor, whenever it fails to send a message to a node;
   //   in this case nothing is modified nor closed, as the connection will be re-established.
+  // `expectedNetworkRefO` restricts actor teardown to state still owned by that actor.
   def shutdownConnection(
       p2pAddressId: P2PAddress.Id,
       clearNetworkRefAssociations: Boolean,
       closeNetworkRefs: Boolean,
+      expectedNetworkRefO: Option[P2PNetworkRef[BftOrderingMessage]] = None,
   )(implicit traceContext: TraceContext): Unit = {
     logger.info(
       s"Shutting down asynchronously any incoming or outgoing connection to $p2pAddressId"
     )
-    val maybeP2PEndpointId = p2pAddressId.left.toOption
-    maybeP2PEndpointId.foreach(
-      shutdownOutgoingConnectionIfNeeded(_, onlyIfNotFullyConnected = false).discard
-    )
+    // Ref cleanup closes the old ref, which can allow a replacement ref and outgoing connection
+    //  attempt to be installed before shutdown continues. Read outgoing connections before cleanup
+    //  so we can stop only the saved outgoing connection attempt IDs, preserving replacements.
+    val outgoingConnections = stateRef.get().p2pOutgoingConnectionsStatus
     val (peerSenderO, affectedP2PEndpointIds) =
       p2pGrpcConnectionState
         .shutdownConnectionAndReturnPeerSender(
           p2pAddressId,
           clearNetworkRefAssociations,
           closeNetworkRefs,
+          expectedNetworkRefO,
         )
+    stopOutgoingConnectionAttemptsAfterRefCleanup(affectedP2PEndpointIds, outgoingConnections)
     peerSenderO.foreach { peerSender =>
       completeGrpcStreamObserver(peerSender, logger)
       unregisterServerPeerTransportMetrics(peerSender)
@@ -276,17 +292,14 @@ private[bftordering] final class P2PGrpcConnectionManager(
   //  the network ref, which for incoming connections is associated to the BFT node ID but
   //  typically also to the endpoint, must also be closed, so that it neither re-asserts
   //  the ID <-> endpoint association nor re-establishes the connection.
-  private def shutdownIncomingConnectionDueToRemoteCompletion(
+  private[grpc] def shutdownIncomingConnectionDueToRemoteCompletion(
       peerSender: PeerSender
   )(implicit traceContext: TraceContext): Unit = {
     logger.info(
       s"Shutting down (active or duplicate) incoming connection with peer sender $peerSender"
     )
     completeGrpcStreamObserver(peerSender, logger)
-    unregisterServerPeerTransportMetrics(peerSender)
-    p2pGrpcConnectionState
-      .shutdownAndCleanupActiveConnectionAndReturnEndpointIds(peerSender)
-      .foreach(notifyEndpointDisconnection)
+    cleanupIncomingConnection(peerSender)
   }
 
   // Incoming connections are registered for transport metrics in a server registry keyed by the
@@ -417,23 +430,32 @@ private[bftordering] final class P2PGrpcConnectionManager(
       .orElse(maybeP2PEndpointId.map(Left(_)))
 
   private def connectIfNeeded(
-      p2pEndpoint: P2PEndpoint
+      p2pEndpoint: P2PEndpoint,
+      owningNetworkRef: P2PNetworkRef[BftOrderingMessage],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val p2pEndpointId = p2pEndpoint.id
+    val outgoingConnectionAttemptId =
+      OutgoingConnectionAttemptId(owningNetworkRefO = Some(owningNetworkRef))
     logger.debug(s"Ensuring connection to $p2pEndpointId")
     val startConnection =
       AtomicUtil
         .updateAndGetComputed(stateRef)(
-          _.attemptTransitionToConnecting(p2pEndpointId)
+          _.attemptTransitionToConnecting(p2pEndpointId, outgoingConnectionAttemptId)
         )
         .logAndExtract(
           logger,
           prefix =
             s"State transition for $p2pEndpointId when attempting to start outgoing connection: ",
         )
-    if (startConnection) {
+    // Registration and ref removal update different atomic states. If teardown removed the ref
+    //  before registration, this check stops the newly registered attempt. Otherwise teardown's
+    //  post-removal scan sees it, even if it was absent from the pre-removal snapshot.
+    if (!p2pGrpcConnectionState.ownsNetworkRef(Left(p2pEndpointId), owningNetworkRef)) {
+      stopOutgoingConnectionAttemptsWithoutOwningRefs(Seq(p2pEndpointId))
+      FutureUnlessShutdown.unit
+    } else if (startConnection) {
       logger.debug(s"Starting connection for $p2pEndpointId")
-      connect(p2pEndpoint)
+      connect(p2pEndpoint, outgoingConnectionAttemptId)
     } else {
       logger.debug(s"Connection for $p2pEndpointId is already in progress or established")
       FutureUnlessShutdown.unit
@@ -444,11 +466,12 @@ private[bftordering] final class P2PGrpcConnectionManager(
   //  with orphaned warnings (leaks) from gRPC itself.
 
   private def connect(
-      p2pEndpoint: P2PEndpoint
+      p2pEndpoint: P2PEndpoint,
+      outgoingConnectionAttemptId: OutgoingConnectionAttemptId,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val p2pEndpointId = p2pEndpoint.id
     if (!isClosing) {
-      openGrpcChannel(p2pEndpoint)
+      openGrpcChannel(p2pEndpoint, outgoingConnectionAttemptId)
         .flatMap {
           case Some(
                 OpenChannel(
@@ -714,7 +737,8 @@ private[bftordering] final class P2PGrpcConnectionManager(
   }
 
   private def openGrpcChannel(
-      p2pEndpoint: P2PEndpoint
+      p2pEndpoint: P2PEndpoint,
+      outgoingConnectionAttemptId: OutgoingConnectionAttemptId,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[OpenChannel]] = {
     val p2pEndpointId = p2pEndpoint.id
 
@@ -755,6 +779,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
             p2pEndpointId,
             channel,
             authenticationContextO,
+            expectedOutgoingConnectionAttemptIdO = Some(outgoingConnectionAttemptId),
           )
         )
         .logAndExtract(
@@ -1428,13 +1453,85 @@ private[bftordering] final class P2PGrpcConnectionManager(
     // Failing the stream in case of an actual onNext exception
     //  is required by the gRPC streaming API
     failGrpcStreamObserver(peerSender, exception, logger)
-    // gRPC requires onError to be the last event, so the connection must be invalidated even though
-    //  the send operation will be retried.
-    shutdownConnection(
-      p2pAddressId,
-      clearNetworkRefAssociations = false,
-      closeNetworkRefs = false,
+    if (peerSender.isOutgoingConnection) {
+      // Outgoing connections are managed locally and can be re-established for the retry.
+      shutdownConnection(
+        p2pAddressId,
+        clearNetworkRefAssociations = false,
+        closeNetworkRefs = false,
+      )
+    } else {
+      // Remove the incoming sender and its ref atomically. Removing just the sender would prevent
+      //  concurrent remote-completion cleanup from finding and closing the ref.
+      cleanupIncomingConnection(peerSender)
+    }
+  }
+
+  private def cleanupIncomingConnection(
+      peerSender: PeerSender
+  )(implicit traceContext: TraceContext): Unit = {
+    unregisterServerPeerTransportMetrics(peerSender)
+    // Capture outgoing connection attempt ownership before removing the sender/ref:
+    //  closing the ref can already start a replacement, which must not be cancelled by this cleanup.
+    val outgoingConnections = stateRef.get().p2pOutgoingConnectionsStatus
+    val affectedP2PEndpointIds =
+      p2pGrpcConnectionState.shutdownAndCleanupActiveConnectionAndReturnEndpointIds(peerSender)
+    stopOutgoingConnectionAttemptsAfterRefCleanup(affectedP2PEndpointIds, outgoingConnections)
+    affectedP2PEndpointIds.foreach(notifyEndpointDisconnection)
+  }
+
+  // Stop outgoing connection attempts observed before ref cleanup, then check for outgoing
+  //  connection attempts registered during cleanup whose owning refs have since been removed.
+  //  Both steps preserve genuine replacements and must finish before notifying disconnection.
+  private def stopOutgoingConnectionAttemptsAfterRefCleanup(
+      affectedP2PEndpointIds: Seq[P2PEndpoint.Id],
+      outgoingConnectionSnapshot: UnlessShutdown[Map[P2PEndpoint.Id, P2POutgoingConnectionStatus]],
+  )(implicit traceContext: TraceContext): Unit = {
+    stopOutgoingConnectionAttemptsMatchingSnapshot(
+      affectedP2PEndpointIds,
+      outgoingConnectionSnapshot,
     )
+    stopOutgoingConnectionAttemptsWithoutOwningRefs(affectedP2PEndpointIds)
+  }
+
+  // Stop outgoing connection attempts for the affected endpoints only if their IDs still match
+  //  the supplied snapshot. The ID check preserves replacements installed after the snapshot.
+  //  Teardown must stop these outgoing connection attempts before notifying disconnection:
+  //  PostStop no longer owns the removed ref, and admin removal may already see isDefined=false.
+  private def stopOutgoingConnectionAttemptsMatchingSnapshot(
+      affectedP2PEndpointIds: Seq[P2PEndpoint.Id],
+      outgoingConnectionSnapshot: UnlessShutdown[Map[P2PEndpoint.Id, P2POutgoingConnectionStatus]],
+  )(implicit traceContext: TraceContext): Unit =
+    affectedP2PEndpointIds.foreach { endpointId =>
+      outgoingConnectionSnapshot.toOption.flatMap(_.get(endpointId)).foreach { outgoingConnection =>
+        FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+          shutdownOutgoingConnectionIfNeeded(
+            endpointId,
+            onlyIfNotFullyConnected = false,
+            expectedOutgoingConnectionAttemptIdO = Some(outgoingConnection.attemptId),
+          ),
+          "shutdownOutgoingConnectionIfNeeded",
+        )
+      }
+    }
+
+  // Re-read outgoing connection attempts to catch registration after teardown's initial snapshot.
+  //  Stop only those whose network ref no longer owns the endpoint, preserving genuine replacements.
+  //  Registration also calls this after its post-CAS ownership check fails, covering registrations
+  //  that happen after teardown's final scan. Matching snapshot IDs keeps stopping safe if another
+  //  outgoing connection attempt replaces one between the ownership check and the shutdown CAS.
+  private def stopOutgoingConnectionAttemptsWithoutOwningRefs(
+      affectedP2PEndpointIds: Seq[P2PEndpoint.Id]
+  )(implicit traceContext: TraceContext): Unit = {
+    val outgoingConnections = stateRef.get().p2pOutgoingConnectionsStatus
+    val orphanedEndpointIds = affectedP2PEndpointIds.filter { endpointId =>
+      outgoingConnections.toOption.flatMap(_.get(endpointId)).exists { outgoingConnection =>
+        outgoingConnection.attemptId.owningNetworkRefO.exists { owningNetworkRef =>
+          !p2pGrpcConnectionState.ownsNetworkRef(Left(endpointId), owningNetworkRef)
+        }
+      }
+    }
+    stopOutgoingConnectionAttemptsMatchingSnapshot(orphanedEndpointIds, outgoingConnections)
   }
 
   private def emitBusyDuration(
@@ -1464,13 +1561,19 @@ private[bftordering] final class P2PGrpcConnectionManager(
   private def shutdownOutgoingConnectionIfNeeded(
       p2pEndpointId: P2PEndpoint.Id,
       onlyIfNotFullyConnected: Boolean,
+      expectedOutgoingConnectionAttemptIdO: Option[OutgoingConnectionAttemptId] = None,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    transitionToDisconnected(p2pEndpointId, onlyIfNotFullyConnected).logAndExtract(
-      logger,
-      prefix =
-        s"State transition when potentially shutting down outgoing connection for $p2pEndpointId " +
-          s"(onlyIfNotFullyConnected: $onlyIfNotFullyConnected): ",
-    ) match {
+    transitionToDisconnected(
+      p2pEndpointId,
+      onlyIfNotFullyConnected,
+      expectedOutgoingConnectionAttemptIdO,
+    )
+      .logAndExtract(
+        logger,
+        prefix =
+          s"State transition when potentially shutting down outgoing connection for $p2pEndpointId " +
+            s"(onlyIfNotFullyConnected: $onlyIfNotFullyConnected): ",
+      ) match {
       case Left(fus) => fus
       case Right(channel -> authenticationContextO) =>
         val channelId = channel.toString
@@ -1504,11 +1607,16 @@ private[bftordering] final class P2PGrpcConnectionManager(
   private def transitionToDisconnected(
       p2pEndpointId: P2PEndpoint.Id,
       onlyIfNotConnected: Boolean,
+      expectedOutgoingConnectionAttemptIdO: Option[OutgoingConnectionAttemptId] = None,
   ): ResultWithLogs[
     Either[FutureUnlessShutdown[Unit], (ManagedChannel, Option[GrpcSequencerClientAuth])]
   ] =
     AtomicUtil.updateAndGetComputed(stateRef)(
-      _.transitionToDisconnected(p2pEndpointId, onlyIfNotConnected)
+      _.transitionToDisconnected(
+        p2pEndpointId,
+        onlyIfNotConnected,
+        expectedOutgoingConnectionAttemptIdO,
+      )
     )
 }
 
@@ -1660,21 +1768,22 @@ private[bftordering] object P2PGrpcConnectionManager {
         with scala.util.control.NoStackTrace
   }
 
-  private final case class State(
+  private[grpc] final case class State(
       p2pOutgoingConnectionsStatus: UnlessShutdown[
         Map[P2PEndpoint.Id, P2POutgoingConnectionStatus]
       ] = UnlessShutdown.Outcome(Map.empty)
   ) {
 
     def attemptTransitionToConnecting(
-        p2pEndpointId: P2PEndpoint.Id
+        p2pEndpointId: P2PEndpoint.Id,
+        outgoingConnectionAttemptId: OutgoingConnectionAttemptId = OutgoingConnectionAttemptId(),
     ): (State, ResultWithLogs[Boolean]) =
       p2pOutgoingConnectionsStatus match {
         case UnlessShutdown.Outcome(p2pConnectionsStatus) =>
           p2pConnectionsStatus.get(p2pEndpointId) match {
             case None =>
               // No connection [attempt], create gRPC channel and connect
-              val newState = P2POutgoingConnectionStatus.Connecting
+              val newState = P2POutgoingConnectionStatus.Connecting(outgoingConnectionAttemptId)
               State(
                 UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
               ) -> ResultWithLogs(
@@ -1682,17 +1791,37 @@ private[bftordering] object P2PGrpcConnectionManager {
                 Level.INFO -> (() => s"Disconnected (not in state) -> $newState"),
               )
 
+            case Some(status)
+                if status.attemptId.owningNetworkRefO != outgoingConnectionAttemptId.owningNetworkRefO =>
+              this -> ResultWithLogs(
+                false,
+                Level.DEBUG -> (() =>
+                  "Outgoing connection belongs to another network ref (unchanged)"
+                ),
+              )
+
             case Some(status) =>
               status match {
 
-                case oldState @ P2POutgoingConnectionStatus.DisconnectingFromChannel(ch, acO, cw) =>
+                case oldState @ P2POutgoingConnectionStatus.DisconnectingFromChannel(
+                      ch,
+                      acO,
+                      cw,
+                      _,
+                    ) =>
                   // Connect worker still active on a gRPC channel and asked to disconnect, cancel disconnect request
-                  val newState = P2POutgoingConnectionStatus.ConnectingOnChannel(ch, acO, Some(cw))
+                  val newState =
+                    P2POutgoingConnectionStatus.ConnectingOnChannel(
+                      ch,
+                      acO,
+                      Some(cw),
+                      oldState.attemptId,
+                    )
                   State(
                     UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
                   ) -> ResultWithLogs(false, Level.INFO -> (() => s"$oldState -> $newState"))
 
-                case oldState @ P2POutgoingConnectionStatus.Connecting =>
+                case oldState: P2POutgoingConnectionStatus.Connecting =>
                   // Already connecting
                   this -> ResultWithLogs(false, Level.DEBUG -> (() => s"$oldState (unchanged)"))
 
@@ -1717,20 +1846,29 @@ private[bftordering] object P2PGrpcConnectionManager {
         p2pEndpointId: P2PEndpoint.Id,
         channel: ManagedChannel,
         authenticationContextO: Option[GrpcSequencerClientAuth],
+        expectedOutgoingConnectionAttemptIdO: Option[OutgoingConnectionAttemptId] = None,
     ): (State, ResultWithLogs[Boolean]) =
       p2pOutgoingConnectionsStatus match {
         case UnlessShutdown.Outcome(p2pConnectionsStatus) =>
           p2pConnectionsStatus.get(p2pEndpointId) match {
 
+            case Some(status)
+                if expectedOutgoingConnectionAttemptIdO.exists(_ != status.attemptId) =>
+              this -> ResultWithLogs(
+                false,
+                Level.DEBUG -> (() => "Outgoing connection attempt replaced (unchanged)"),
+              )
+
             case Some(status) =>
               status match {
 
-                case oldState @ P2POutgoingConnectionStatus.Connecting =>
+                case oldState: P2POutgoingConnectionStatus.Connecting =>
                   val newState =
                     P2POutgoingConnectionStatus.ConnectingOnChannel(
                       channel,
                       authenticationContextO,
                       connectWorkerO = None,
+                      attemptId = oldState.attemptId,
                     )
                   State(
                     UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
@@ -1773,7 +1911,7 @@ private[bftordering] object P2PGrpcConnectionManager {
             case Some(status) =>
               status match {
 
-                case oldState @ P2POutgoingConnectionStatus.ConnectingOnChannel(ch, acO, cwO) =>
+                case oldState @ P2POutgoingConnectionStatus.ConnectingOnChannel(ch, acO, cwO, _) =>
                   if (ch == channel && cwO.isEmpty) {
                     // Record the connect worker {
                     val newState =
@@ -1781,6 +1919,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                         channel,
                         acO,
                         Some(connectWorker),
+                        oldState.attemptId,
                       )
                     State(
                       UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
@@ -1792,7 +1931,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                     this -> ResultWithLogs((), Level.DEBUG -> (() => s"$oldState (unchanged)"))
                   }
 
-                case oldState @ P2POutgoingConnectionStatus.Connecting =>
+                case oldState: P2POutgoingConnectionStatus.Connecting =>
                   this -> ResultWithLogs((), Level.INFO -> (() => s"$oldState (unchanged)"))
 
                 case oldState: P2POutgoingConnectionStatus.DisconnectingFromChannel =>
@@ -1828,7 +1967,7 @@ private[bftordering] object P2PGrpcConnectionManager {
             case Some(status) =>
               status match {
 
-                case oldState @ P2POutgoingConnectionStatus.ConnectingOnChannel(ch, _, _) =>
+                case oldState @ P2POutgoingConnectionStatus.ConnectingOnChannel(ch, _, _, _) =>
                   val msg = s"$oldState (unchanged)"
                   if (ch == channel)
                     // This connect worker is still valid
@@ -1836,7 +1975,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                   else
                     this -> ResultWithLogs(false, Level.WARN -> (() => msg))
 
-                case oldState @ P2POutgoingConnectionStatus.DisconnectingFromChannel(ch, _, _) =>
+                case oldState @ P2POutgoingConnectionStatus.DisconnectingFromChannel(ch, _, _, _) =>
                   if (ch == channel)
                     // Requested to disconnect
                     State(
@@ -1848,7 +1987,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                   else
                     this -> ResultWithLogs(false, Level.WARN -> (() => s"$oldState (unchanged)"))
 
-                case oldState @ P2POutgoingConnectionStatus.ConnectedOnChannel(ch, _) =>
+                case oldState @ P2POutgoingConnectionStatus.ConnectedOnChannel(ch, _, _) =>
                   this -> ResultWithLogs(
                     false,
                     Level.WARN -> (() =>
@@ -1859,7 +1998,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                     ),
                   )
 
-                case oldState @ P2POutgoingConnectionStatus.Connecting =>
+                case oldState: P2POutgoingConnectionStatus.Connecting =>
                   this -> ResultWithLogs(false, Level.WARN -> (() => s"$oldState (unchanged)"))
               }
 
@@ -1889,10 +2028,15 @@ private[bftordering] object P2PGrpcConnectionManager {
             case Some(status) =>
               status match {
 
-                case oldState @ P2POutgoingConnectionStatus.ConnectingOnChannel(ch, acO, _) =>
+                case oldState @ P2POutgoingConnectionStatus.ConnectingOnChannel(ch, acO, _, _) =>
                   if (ch == channel) {
                     // Mark connection as complete
-                    val newState = P2POutgoingConnectionStatus.ConnectedOnChannel(channel, acO)
+                    val newState =
+                      P2POutgoingConnectionStatus.ConnectedOnChannel(
+                        channel,
+                        acO,
+                        oldState.attemptId,
+                      )
                     State(
                       UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
                     ) -> ResultWithLogs(None, Level.INFO -> (() => s"$oldState -> $newState"))
@@ -1903,7 +2047,12 @@ private[bftordering] object P2PGrpcConnectionManager {
                     )
                   }
 
-                case oldState @ P2POutgoingConnectionStatus.DisconnectingFromChannel(ch, acO, cw) =>
+                case oldState @ P2POutgoingConnectionStatus.DisconnectingFromChannel(
+                      ch,
+                      acO,
+                      cw,
+                      _,
+                    ) =>
                   if (ch == channel)
                     // Complete disconnection request
                     State(
@@ -1918,7 +2067,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                       Level.WARN -> (() => s"$oldState (unchanged)"),
                     )
 
-                case oldState @ P2POutgoingConnectionStatus.ConnectedOnChannel(ch, acO) =>
+                case oldState @ P2POutgoingConnectionStatus.ConnectedOnChannel(ch, acO, _) =>
                   this -> ResultWithLogs(
                     None,
                     Level.WARN -> (() =>
@@ -1929,7 +2078,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                     ),
                   )
 
-                case oldState @ P2POutgoingConnectionStatus.Connecting =>
+                case oldState: P2POutgoingConnectionStatus.Connecting =>
                   this -> ResultWithLogs(
                     Some(channel -> authenticationContextO),
                     Level.WARN -> (() => s"$oldState (unchanged)"),
@@ -1965,7 +2114,7 @@ private[bftordering] object P2PGrpcConnectionManager {
 
               status match {
 
-                case oldState @ P2POutgoingConnectionStatus.ConnectedOnChannel(ch, _) =>
+                case oldState @ P2POutgoingConnectionStatus.ConnectedOnChannel(ch, _, _) =>
                   if (ch == channel)
                     State(
                       UnlessShutdown.Outcome(p2pConnectionsStatus.removed(p2pEndpointId))
@@ -1981,7 +2130,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                       Level.DEBUG -> (() => s"$oldState (another worker's channel, unchanged)"),
                     )
 
-                case oldState @ P2POutgoingConnectionStatus.ConnectingOnChannel(ch, _, _) =>
+                case oldState @ P2POutgoingConnectionStatus.ConnectingOnChannel(ch, _, _, _) =>
                   if (ch == channel)
                     State(
                       UnlessShutdown.Outcome(p2pConnectionsStatus.removed(p2pEndpointId))
@@ -1997,7 +2146,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                       Level.DEBUG -> (() => s"$oldState (another worker's channel, unchanged)"),
                     )
 
-                case oldState @ P2POutgoingConnectionStatus.DisconnectingFromChannel(ch, _, _) =>
+                case oldState @ P2POutgoingConnectionStatus.DisconnectingFromChannel(ch, _, _, _) =>
                   if (ch == channel)
                     State(
                       UnlessShutdown.Outcome(
@@ -2018,7 +2167,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                         Level.DEBUG -> (() => s"$oldState (another worker's channel, unchanged)"),
                       )
 
-                case oldState @ P2POutgoingConnectionStatus.Connecting =>
+                case oldState: P2POutgoingConnectionStatus.Connecting =>
                   this -> ResultWithLogs(false, Level.DEBUG -> (() => s"$oldState (unchanged)"))
               }
 
@@ -2037,7 +2186,11 @@ private[bftordering] object P2PGrpcConnectionManager {
             )
       }
 
-    def transitionToDisconnected(p2pEndpointId: P2PEndpoint.Id, onlyIfNotConnected: Boolean): (
+    def transitionToDisconnected(
+        p2pEndpointId: P2PEndpoint.Id,
+        onlyIfNotConnected: Boolean,
+        expectedOutgoingConnectionAttemptIdO: Option[OutgoingConnectionAttemptId] = None,
+    ): (
         State,
         ResultWithLogs[
           Either[FutureUnlessShutdown[Unit], (ManagedChannel, Option[GrpcSequencerClientAuth])]
@@ -2047,10 +2200,19 @@ private[bftordering] object P2PGrpcConnectionManager {
         case UnlessShutdown.Outcome(p2pConnectionsStatus) =>
           p2pConnectionsStatus.get(p2pEndpointId) match {
 
+            case Some(status)
+                if expectedOutgoingConnectionAttemptIdO.exists(_ != status.attemptId) =>
+              this -> ResultWithLogs(
+                Left(FutureUnlessShutdown.unit),
+                Level.DEBUG -> (() =>
+                  s"Not disconnecting $p2pEndpointId because its outgoing attempt has been replaced"
+                ),
+              )
+
             case Some(p2pConnectionStatus) =>
               p2pConnectionStatus match {
 
-                case oldState @ P2POutgoingConnectionStatus.ConnectedOnChannel(ch, acO) =>
+                case oldState @ P2POutgoingConnectionStatus.ConnectedOnChannel(ch, acO, _) =>
                   if (onlyIfNotConnected) {
                     this ->
                       ResultWithLogs(
@@ -2067,7 +2229,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                     )
                   }
 
-                case oldState @ P2POutgoingConnectionStatus.Connecting =>
+                case oldState: P2POutgoingConnectionStatus.Connecting =>
                   // Let the gRPC channel setup logic orderly abort the connection attempt
                   State(UnlessShutdown.Outcome(p2pConnectionsStatus.removed(p2pEndpointId)))
                     -> ResultWithLogs(
@@ -2079,9 +2241,16 @@ private[bftordering] object P2PGrpcConnectionManager {
                       ch,
                       acO,
                       Some(cw),
+                      _,
                     ) =>
                   // Let the connect worker orderly abort the connection attempt
-                  val newState = P2POutgoingConnectionStatus.DisconnectingFromChannel(ch, acO, cw)
+                  val newState =
+                    P2POutgoingConnectionStatus.DisconnectingFromChannel(
+                      ch,
+                      acO,
+                      cw,
+                      oldState.attemptId,
+                    )
                   State(
                     UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
                   ) -> ResultWithLogs(
@@ -2089,7 +2258,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                     Level.INFO -> (() => s"$oldState -> $newState"),
                   )
 
-                case oldState @ P2POutgoingConnectionStatus.ConnectingOnChannel(ch, acO, None) =>
+                case oldState @ P2POutgoingConnectionStatus.ConnectingOnChannel(ch, acO, None, _) =>
                   // Let the connect worker orderly abort the connection attempt
                   State(UnlessShutdown.Outcome(p2pConnectionsStatus.removed(p2pEndpointId)))
                     -> ResultWithLogs(
@@ -2097,7 +2266,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                       Level.INFO -> (() => s"$oldState -> Disconnected (not in state)"),
                     )
 
-                case oldState @ P2POutgoingConnectionStatus.DisconnectingFromChannel(_, _, cw) =>
+                case oldState @ P2POutgoingConnectionStatus.DisconnectingFromChannel(_, _, cw, _) =>
                   // Let the connect worker finish aborting the connection attempt
                   this -> ResultWithLogs(Left(cw), Level.DEBUG -> (() => s"$oldState (unchanged)"))
               }
@@ -2118,30 +2287,38 @@ private[bftordering] object P2PGrpcConnectionManager {
       }
   }
 
+  final case class OutgoingConnectionAttemptId(
+      id: UUID = UUID.randomUUID(),
+      owningNetworkRefO: Option[P2PNetworkRef[BftOrderingMessage]] = None,
+  )
+
   sealed trait P2POutgoingConnectionStatus
       extends Product
       with Serializable
       with PrettyPrintingFromCompanion {
+    // Stable across state transitions, including channel creation, but distinct for replacements.
+    def attemptId: OutgoingConnectionAttemptId
     val channelO: Option[(ManagedChannel, Option[GrpcSequencerClientAuth])] = None
     val connectWorkerO: Option[FutureUnlessShutdown[Unit]] = None
   }
 
   object P2POutgoingConnectionStatus {
 
-    final case object Connecting extends P2POutgoingConnectionStatus {
-      override def prettyCompanion: PrettyPrintingCompanion[Connecting.this.type] =
-        ConnectingPrettyPrintingCompanion
+    final case class Connecting(
+        attemptId: OutgoingConnectionAttemptId = OutgoingConnectionAttemptId()
+    ) extends P2POutgoingConnectionStatus {
+      override def prettyCompanion: PrettyPrintingCompanion[Connecting] = Connecting
     }
 
-    private object ConnectingPrettyPrintingCompanion
-        extends PrettyPrintingCompanion[Connecting.type] {
-      override protected val pretty: Pretty[Connecting.type] = prettyOfObject[Connecting.type]
+    object Connecting extends PrettyPrintingCompanion[Connecting] {
+      override protected val pretty: Pretty[Connecting] = prettyOfClass()
     }
 
     final case class ConnectingOnChannel(
         channel: ManagedChannel,
         authenticationContextO: Option[GrpcSequencerClientAuth],
         override val connectWorkerO: Option[FutureUnlessShutdown[Unit]],
+        attemptId: OutgoingConnectionAttemptId = OutgoingConnectionAttemptId(),
     ) extends P2POutgoingConnectionStatus {
 
       override val channelO: Option[(ManagedChannel, Option[GrpcSequencerClientAuth])] =
@@ -2164,6 +2341,7 @@ private[bftordering] object P2PGrpcConnectionManager {
     final case class ConnectedOnChannel(
         channel: ManagedChannel,
         authenticationContextO: Option[GrpcSequencerClientAuth],
+        attemptId: OutgoingConnectionAttemptId = OutgoingConnectionAttemptId(),
     ) extends P2POutgoingConnectionStatus {
 
       override val channelO: Option[(ManagedChannel, Option[GrpcSequencerClientAuth])] =
@@ -2186,6 +2364,7 @@ private[bftordering] object P2PGrpcConnectionManager {
         channel: ManagedChannel,
         authenticationContextO: Option[GrpcSequencerClientAuth],
         connectWorker: FutureUnlessShutdown[Unit],
+        attemptId: OutgoingConnectionAttemptId = OutgoingConnectionAttemptId(),
     ) extends P2POutgoingConnectionStatus {
 
       override val channelO: Option[(ManagedChannel, Option[GrpcSequencerClientAuth])] =

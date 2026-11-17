@@ -15,7 +15,6 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
-import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -957,7 +956,7 @@ class ExampleTransactionFactory(
       submittingParticipant,
       Salt.tryDeriveSalt(transactionSeed, 0, cryptoOps),
       DefaultDamlValues.submissionId().some,
-      DeduplicationDuration(JDuration.ofSeconds(100)),
+      DeduplicationPeriod.DeduplicationDuration.create(JDuration.ofSeconds(100)).value,
       ledgerTime.plusSeconds(100),
       None,
       cryptoOps,

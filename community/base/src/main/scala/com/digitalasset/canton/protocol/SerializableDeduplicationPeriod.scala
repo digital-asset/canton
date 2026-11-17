@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.protocol
 
+import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.serialization.ProtoConverter.{DurationConverter, ParsingResult}
@@ -33,7 +34,16 @@ object SerializableDeduplicationPeriod {
       case dedupP.Duration(duration) =>
         DurationConverter
           .fromProtoPrimitive(duration)
-          .map(DeduplicationPeriod.DeduplicationDuration.apply)
+          .flatMap { parsedDuration =>
+            DeduplicationPeriod.DeduplicationDuration
+              .create(parsedDuration)
+              .leftMap(error =>
+                ProtoDeserializationError.ValueConversionError(
+                  "deduplication_period",
+                  s"Invalid deduplication duration: $error",
+                )
+              )
+          }
       case dedupP.Offset(offset) =>
         if (offset == 0)
           Right(DeduplicationPeriod.DeduplicationOffset(None))

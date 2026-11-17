@@ -327,7 +327,7 @@ class RetransmissionsManager[E <: Env[E]](
       msg: RetransmissionsNetworkMessage
   )(implicit traceContext: TraceContext): Either[String, Unit] =
     msg match {
-      case req @ Consensus.RetransmissionsMessage.RetransmissionRequest(status) =>
+      case _ @Consensus.RetransmissionsMessage.RetransmissionRequest(status) =>
         incomingRetransmissionsRequestCount += 1
         if (requestRateLimiter.checkAndUpdateRate(status.from)) {
           currentEpoch.zip(validator) match {

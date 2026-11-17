@@ -1308,13 +1308,13 @@ trait TopologyStoreTest
               atTs2ResultWithMappingFilter <- store.findEffectiveStateChanges(
                 fromEffectiveInclusive = ts2,
                 onlyAtEffective = true,
-                filterTypes = Some(Seq(TopologyMapping.Code.PartyToParticipant)),
+                filterTypes = Some(NonEmpty(Seq, TopologyMapping.Code.PartyToParticipant)),
               )
               // no OTK
               atTs2ResultWithMappingEmptyFilter <- store.findEffectiveStateChanges(
                 fromEffectiveInclusive = ts2,
                 onlyAtEffective = true,
-                filterTypes = Some(Seq(TopologyMapping.Code.OwnerToKeyMapping)),
+                filterTypes = Some(NonEmpty(Seq, TopologyMapping.Code.OwnerToKeyMapping)),
               )
               atTs3Result <- store.findEffectiveStateChanges(
                 fromEffectiveInclusive = ts3,
@@ -2002,6 +2002,117 @@ trait TopologyStoreTest
 
         }
 
+      }
+
+      "findEffectiveStateChangesAtTopologyInit" should {
+        def streamed(
+            store: TopologyStore[TopologyStoreId.SynchronizerStore],
+            onboardingEffectiveTime: CantonTimestamp,
+            fromExclusive: CantonTimestamp = CantonTimestamp.MinValue,
+            filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]] = None,
+        ): FutureUnlessShutdown[Seq[StoredTopologyTransaction.GenericStoredTopologyTransaction]] =
+          FutureUnlessShutdown.outcomeF(
+            store
+              .findEffectiveStateChangesAtTopologyInit(
+                fromExclusive = EffectiveTime(fromExclusive),
+                toInclusive = EffectiveTime(onboardingEffectiveTime),
+                filterTypes,
+              )
+              .runWith(Sink.seq)
+          )
+
+        def hashes(txs: Seq[StoredTopologyTransaction.GenericStoredTopologyTransaction]) =
+          txs.map(_.hash)
+
+        "return nothing for an empty store" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "atInitEmpty")
+          streamed(store, ts3).map(_ shouldBe empty)
+        }
+
+        "return the state effective at the onboarding time, honoring bounds and filters" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "atInitState")
+          for {
+            _ <- update(store, ts1, add = Seq(nsd_p1, otk_p1))
+            // nsd_p3 and a proposal for otk_p2 are added
+            _ <- update(store, ts2, add = Seq(nsd_p3, otk_p2_proposal))
+            // p2 onboards at ts3: its namespace delegation and owner-to-key mapping are sequenced
+            // together with the trust certificate. nsd_p3 is deactivated at exactly ts3.
+            _ <- update(
+              store,
+              ts3,
+              add = Seq(nsd_p2, otk_p2, dtc_p2_synchronizer1),
+              removals = Map(nsd_p3.mapping.uniqueKey -> (None, Set(nsd_p3.hash))),
+            )
+            // nsd_p1 is deactivated only after the onboarding, so it is still part of the state at ts3
+            _ <- update(
+              store,
+              ts4,
+              add = Seq(),
+              removals = Map(nsd_p1.mapping.uniqueKey -> (None, Set(nsd_p1.hash))),
+            )
+
+            content <- store.dumpStoreContent()
+            atTs3 <- streamed(store, onboardingEffectiveTime = ts3)
+            atTs2 <- streamed(store, onboardingEffectiveTime = ts2)
+            atTs3FromTs1 <- streamed(store, onboardingEffectiveTime = ts3, fromExclusive = ts1)
+            atTs3FromTs3 <- streamed(store, onboardingEffectiveTime = ts3, fromExclusive = ts3)
+            atTs3OnlyOtk <- streamed(
+              store,
+              onboardingEffectiveTime = ts3,
+              filterTypes = Some(NonEmpty(Seq, TopologyMapping.Code.OwnerToKeyMapping)),
+            )
+          } yield {
+            // no proposals and no transactions deactivated at or before the onboarding time
+            hashes(atTs3).toSet shouldBe
+              Set(nsd_p1.hash, otk_p1.hash, nsd_p2.hash, otk_p2.hash, dtc_p2_synchronizer1.hash)
+            // results are ordered by effective time
+            atTs3.map(_.validFrom.value) shouldBe atTs3.map(_.validFrom.value).sorted
+
+            // nsd_p3 is still active at ts2, and the p2 onboarding transactions are not yet effective
+            hashes(atTs2).toSet shouldBe Set(nsd_p1.hash, otk_p1.hash, nsd_p3.hash)
+
+            // fromExclusive excludes the transactions effective at that time
+            hashes(atTs3FromTs1).toSet shouldBe
+              Set(nsd_p2.hash, otk_p2.hash, dtc_p2_synchronizer1.hash)
+            atTs3FromTs3 shouldBe empty
+
+            hashes(atTs3OnlyOtk).toSet shouldBe Set(otk_p1.hash, otk_p2.hash)
+          }
+        }
+
+        "return only replacements that are not rejected" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "atInitRejected")
+          for {
+            _ <- store.update(
+              SequencedTime(ts1),
+              EffectiveTime(ts1),
+              removals = Map.empty,
+              additions = Seq(
+                ValidatedTopologyTransaction(nsd_p1, None),
+                ValidatedTopologyTransaction(
+                  nsd_p2,
+                  Some(TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping("sad")),
+                ),
+              ),
+            )
+            result <- streamed(store, ts1)
+          } yield hashes(result) shouldBe Seq(nsd_p1.hash)
+        }
+
+        "stream a large state in effective time order" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "atInitLarge")
+          val from = CantonTimestamp.Epoch.plusSeconds(10)
+          val to = CantonTimestamp.Epoch.plusSeconds(30)
+          for {
+            _ <- store.bulkInsert(largeTestSnapshot)
+            result <- streamed(store, onboardingEffectiveTime = to, fromExclusive = from)
+          } yield {
+            val expected = largeTestSnapshot.result
+              .filter(tx => tx.validFrom.value > from && tx.validFrom.value <= to)
+            expected should not be empty
+            hashes(result) shouldBe expected.map(_.hash)
+          }
+        }
       }
 
       "findStoredByHashes" should {

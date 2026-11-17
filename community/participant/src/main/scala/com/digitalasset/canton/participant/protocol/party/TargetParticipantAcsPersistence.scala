@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.protocol.party
 import cats.Eval
 import cats.data.EitherT
 import com.digitalasset.canton.RepairCounter
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -54,18 +54,6 @@ trait AcsReplicationContractHandler {
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, String, AcsTransferCheckpoint] = for {
-    validatedContracts <- EitherT.fromEither[FutureUnlessShutdown](
-      ReceivedContractValidation.validateContracts(contracts, synchronizerId)
-    )
-    checkpointAfter <- handleValidatedContracts(validatedContracts, checkpoint)
-  } yield checkpointAfter
-
-  def handleValidatedContracts(
-      validatedActivations: NonEmpty[Seq[ContractReassignment]],
-      checkpoint: AcsTransferCheckpoint,
-  )(implicit
-      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, AcsTransferCheckpoint]
 }
 
@@ -109,6 +97,20 @@ class TargetParticipantAcsPersistence(
     extends AcsReplicationContractHandler
     with NamedLogging {
 
+  override def handleContracts(
+      contracts: NonEmpty[Seq[ActiveContract]],
+      checkpoint: AcsTransferCheckpoint,
+      synchronizerId: SynchronizerId,
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, String, AcsTransferCheckpoint] = for {
+    validatedContracts <- EitherT.fromEither[FutureUnlessShutdown](
+      ReceivedContractValidation.validateContracts(contracts, synchronizerId)
+    )
+    checkpointAfter <- handleValidatedContracts(validatedContracts, checkpoint)
+  } yield checkpointAfter
+
   /** Import contracts as part of online party replication performing the following activities.
     *   - persist contracts at a determined time of change updating in-memory request-tracker state
     *     accordingly
@@ -121,7 +123,7 @@ class TargetParticipantAcsPersistence(
     * @return
     *   the transfer checkpoint reached after this chunk
     */
-  override def handleValidatedContracts(
+  def handleValidatedContracts(
       validatedActivations: NonEmpty[Seq[ContractReassignment]],
       checkpoint: AcsTransferCheckpoint,
   )(implicit
@@ -167,9 +169,6 @@ class TargetParticipantAcsPersistence(
 }
 
 object TargetParticipantAcsPersistence {
-
-  // TODO(#22251): Make this configurable.
-  private[party] val contractsToRequestEachTime = PositiveInt.tryCreate(10)
 
   def apply(
       requestId: AddPartyRequestId,

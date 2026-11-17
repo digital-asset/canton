@@ -21,8 +21,8 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
-import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor
+import com.digitalasset.canton.participant.party.AcsReplicationTestInterceptorImpl
 import com.digitalasset.canton.participant.protocol.TransactionProcessor
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ExternalParty, Party, PartyId}
@@ -88,8 +88,8 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
   // Use the test interceptor to slow down OnPR if OnPR appears to proceed too quickly for
   // enough of the workload to occur concurrently to OnPR. This deviates from the approach
   // in other tests that rely on low-volume handcrafted transactions.
-  private def createTargetParticipantTestInterceptor(): PartyReplicationTestInterceptor =
-    PartyReplicationTestInterceptorImpl.targetParticipantProceedsIf { state =>
+  private def createTargetParticipantTestInterceptor(): AcsReplicationTestInterceptor =
+    AcsReplicationTestInterceptorImpl.targetParticipantProceedsIf { state =>
       val millisNow = System.currentTimeMillis()
       partyReplicationStartedAt.get match {
         case None =>

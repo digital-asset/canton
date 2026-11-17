@@ -362,7 +362,7 @@ trait MessageDispatcherTest {
         TestViewType,
         requestId,
         TestHash.dummyRootHash,
-        Verdict.Approve(testedProtocolVersion),
+        Verdict.Approve.create(testedProtocolVersion),
         testedProtocolVersion,
       ),
       testedProtocolVersion,
@@ -375,7 +375,7 @@ trait MessageDispatcherTest {
         OtherTestViewType,
         requestId,
         TestHash.dummyRootHash,
-        Verdict.Approve(testedProtocolVersion),
+        Verdict.Approve.create(testedProtocolVersion),
         testedProtocolVersion,
       ),
       testedProtocolVersion,
@@ -463,11 +463,7 @@ trait MessageDispatcherTest {
       .value
 
     def malformedVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject =
-      MediatorReject.tryCreate(
-        MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext(),
-        isMalformed = true,
-        protocolVersion,
-      )
+      MediatorReject.fromMediatorError(MediatorError.MalformedMessage.Reject(""), protocolVersion)
 
     val reject = malformedVerdict(testedProtocolVersion)
     val MalformedMediatorConfirmationRequestResult =
@@ -853,7 +849,7 @@ trait MessageDispatcherTest {
             UnknownTestViewType,
             requestId,
             TestHash.dummyRootHash,
-            Verdict.Approve(testedProtocolVersion),
+            Verdict.Approve.create(testedProtocolVersion),
             testedProtocolVersion,
           ),
           testedProtocolVersion,

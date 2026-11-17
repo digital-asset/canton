@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
@@ -203,9 +203,8 @@ class DirectSequencerConnection(
     val source = Source
       .futureSource(sourceF)
       .watchTermination() { (matF, terminationF) =>
-        val directExecutionContext = DirectExecutionContext(noTracingLogger)
         val killSwitchF = matF.map { case (killSwitch, _) => killSwitch }(directExecutionContext)
-        val killSwitch = new DelayedKillSwitch(killSwitchF, noTracingLogger)
+        val killSwitch = new DelayedKillSwitch(killSwitchF)
         val doneF = matF
           .flatMap { case (_, doneF) => doneF.unwrap }(directExecutionContext)
           .flatMap(_ => terminationF)(directExecutionContext)

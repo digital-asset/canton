@@ -4,7 +4,7 @@
 package com.digitalasset.canton.logging
 
 import cats.data.{EitherT, OptionT}
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.logging.SuppressingLogger.{
   ActiveState,
   LogEntryOptionality,
@@ -66,8 +66,6 @@ class SuppressingLogger private[logging] (
   /** Logger used to log internal problems of this class.
     */
   private val internalLogger: Logger = underlyingLoggerFactory.getLogger(getClass)
-
-  val directExecutionContext: ExecutionContext = DirectExecutionContext(internalLogger)
 
   private val SuppressionPrefix: String = "Suppressed %s: %s"
 

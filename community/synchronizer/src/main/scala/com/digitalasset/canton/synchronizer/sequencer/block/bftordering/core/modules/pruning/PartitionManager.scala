@@ -256,17 +256,19 @@ object PartitionManager {
           for {
             _ <-
               sqlu"""create table if not exists #$partitionName partition of #$tableName for values from (#$newPartitionFrom) to (#$newPartitionTo);"""
-            _ <-
-              sqlu"""alter table #$partitionName set (
+            _ <- tableName match {
+              case `consensusInProgressTable` =>
+                sqlu"""alter table #$partitionName set (
                     -- avoid that inserts trigger vacuuming in a hot partition
-                    autovacuum_vacuum_insert_threshold = -1,
-                    -- avoid that a few deletes trigger vacuuming,
-                    -- which is only useful really for the batches table, the only table that is expected to have occasional deletes,
-                    -- and even there, we want to avoid this kind of autovacuuming.
-                    -- the below settings will make it so that 100M deletes will be needed to trigger delete autovacuum
-                    autovacuum_vacuum_threshold = 100000000,
-                    autovacuum_vacuum_scale_factor = 0
+                    autovacuum_vacuum_insert_threshold = -1
                   )"""
+              case _ =>
+                sqlu"""alter table #$partitionName set (
+                    autovacuum_freeze_min_age = 0,
+                    autovacuum_freeze_table_age = 0,
+                    autovacuum_vacuum_insert_scale_factor = 0
+                  )"""
+            }
           } yield ()
       }
 

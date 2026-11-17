@@ -51,4 +51,6 @@ object BatchId {
   def createForTesting(value: String): BatchId =
     BatchId(Hash.digest(hashPurpose, ByteString.copyFromUtf8(value), HashAlgorithm.Sha256))
 
+  @VisibleForTesting
+  def createFromHash(hash: Hash): BatchId = BatchId(hash)
 }

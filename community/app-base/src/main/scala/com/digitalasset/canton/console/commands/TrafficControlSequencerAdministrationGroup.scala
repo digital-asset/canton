@@ -35,14 +35,21 @@ class TrafficControlSequencerAdministrationGroup(
   @Help.Description(
     """Use this command to get the traffic state of a list of members at the latest safe
       |timestamp.
+      |Set includeOnboardingMembers to true to also return members that traffic was purchased
+      |for before they joined the synchronizer.
       """
   )
   def traffic_state_of_members(
-      members: Seq[Member]
+      members: Seq[Member],
+      includeOnboardingMembers: Boolean = false,
   ): SequencerTrafficStatus =
     consoleEnvironment.run(
       runner.adminCommand(
-        SequencerAdminCommands.GetTrafficControlState(members, TimestampSelector.LatestSafe)
+        SequencerAdminCommands.GetTrafficControlState(
+          members,
+          TimestampSelector.LatestSafe,
+          includeOnboardingMembers,
+        )
       )
     )
 
@@ -53,16 +60,21 @@ class TrafficControlSequencerAdministrationGroup(
       |
       |CAREFUL: The returned state is only an approximation in the future and might not be the
       |actual correct state by the time this timestamp is reached by the synchronizer.
+      |
+      |Set includeOnboardingMembers to true to also return members that traffic was purchased
+      |for before they joined the synchronizer.
       """
   )
   def traffic_state_of_members_approximate(
-      members: Seq[Member]
+      members: Seq[Member],
+      includeOnboardingMembers: Boolean = false,
   ): SequencerTrafficStatus =
     consoleEnvironment.run(
       runner.adminCommand(
         SequencerAdminCommands.GetTrafficControlState(
           members,
           TimestampSelector.LatestApproximate,
+          includeOnboardingMembers,
         )
       )
     )
@@ -71,34 +83,44 @@ class TrafficControlSequencerAdministrationGroup(
   @Help.Description(
     """Use this command to get the last traffic state update of each member. It will be last
       |updated when a member consumed traffic.
+      |Set includeOnboardingMembers to true to also return members that traffic was purchased
+      |for before they joined the synchronizer.
+      |Such members have not consumed traffic yet, so their state does not show the purchase.
       """
   )
   def last_traffic_state_update_of_members(
-      members: Seq[Member]
+      members: Seq[Member],
+      includeOnboardingMembers: Boolean = false,
   ): SequencerTrafficStatus =
     consoleEnvironment.run(
       runner.adminCommand(
         SequencerAdminCommands.GetTrafficControlState(
           members,
           TimestampSelector.LastUpdatePerMember,
+          includeOnboardingMembers,
         )
       )
     )
 
   @Help.Summary("Return the traffic state of the given members at a specific timestamp")
   @Help.Description(
-    """Use this command to get the traffic state of specified members at a given timestamp."""
+    """Use this command to get the traffic state of specified members at a given timestamp.
+      |Set includeOnboardingMembers to true to also return members that traffic was purchased
+      |for before they joined the synchronizer.
+      """
   )
   // TODO(#25930): Make this command return what its name suggests, i.e., the traffic state exactly at the given timestamp.
   def traffic_state_of_members_at_timestamp(
       members: Seq[Member],
       timestamp: CantonTimestamp,
+      includeOnboardingMembers: Boolean = false,
   ): SequencerTrafficStatus =
     consoleEnvironment.run(
       runner.adminCommand(
         SequencerAdminCommands.GetTrafficControlState(
           members,
           TimestampSelector.ExactTimestamp(timestamp),
+          includeOnboardingMembers,
         )
       )
     )
@@ -110,10 +132,13 @@ class TrafficControlSequencerAdministrationGroup(
       |base traffic) at the latest possible timestamp the sequencer can calculate it. This an
       |approximation only because the sequencer may use its wall clock which could be beyond
       |the synchronizer time.
+      |Set includeOnboardingMembers to true to also return members that traffic was purchased
+      |for before they joined the synchronizer.
       """
   )
   def traffic_state_of_all_members(
-      latestApproximate: Boolean = false
+      latestApproximate: Boolean = false,
+      includeOnboardingMembers: Boolean = false,
   ): SequencerTrafficStatus =
     consoleEnvironment.run(
       runner.adminCommand(
@@ -121,6 +146,7 @@ class TrafficControlSequencerAdministrationGroup(
           Seq.empty,
           if (latestApproximate) TimestampSelector.LatestApproximate
           else TimestampSelector.LatestSafe,
+          includeOnboardingMembers,
         )
       )
     )

@@ -42,7 +42,7 @@ services:
   grafana:
     # Grafana version
     # https://github.com/grafana/grafana/blob/main/CHANGELOG.md
-    image: grafana/grafana:9.5.12-ubuntu
+    image: grafana/grafana:13.3.0-ubuntu
     container_name: daml_observability_grafana
     volumes:
       # Grafana configuration

@@ -33,7 +33,12 @@ import com.digitalasset.canton.participant.store.memory.{
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.apiserver.services.admin.PackageUpgradeValidator
 import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  ForceFlag,
+  ForceFlags,
+  SynchronizerId,
+}
 import com.digitalasset.canton.util.{BinaryFileUtil, MonadUtil}
 import com.digitalasset.canton.{
   BaseTest,
@@ -127,6 +132,7 @@ abstract class BasePackageServiceTest(enableStrictDarValidation: Boolean)
       exitOnFatalFailures = false,
     )
     mutablePackageMetadataView.refreshState.futureValueUS
+    val packageOps = new PackageOpsForTesting(participantId, loggerFactory)
     private val engine =
       DAMLe.newEngine(
         enableLfDev = false,
@@ -145,7 +151,7 @@ abstract class BasePackageServiceTest(enableStrictDarValidation: Boolean)
       enableStrictDarValidation = enableStrictDarValidation,
       loggerFactory = loggerFactory,
       metrics = ParticipantTestMetrics,
-      packageOps = new PackageOpsForTesting(participantId, loggerFactory),
+      packageOps = packageOps,
       timeouts = processingTimeouts,
     )
   }
@@ -357,6 +363,44 @@ abstract class BasePackageServiceTest(enableStrictDarValidation: Boolean)
       }
     }
 
+    def darUnvetTest(unvetDependencies: Boolean)(env: Env) = {
+      import env.*
+
+      val exampleDar = PackageServiceTest.loadExampleDar()
+      val mainPackageId = DamlPackageStore.readPackageId(exampleDar.main)
+      val allPackageIds = exampleDar.all.map(DamlPackageStore.readPackageId)
+      for {
+        darId <- sut
+          .upload(
+            darBytes = ByteString.copyFrom(bytes),
+            description = Some("some/path/CantonExamples.dar"),
+            submissionIdO = None,
+            vettingInfo = None,
+            expectedMainPackageId = None,
+          )
+          .valueOrFail("upload dar")
+        _ <- sut
+          .unvetDar(darId, psid, unvetDarDependencies = unvetDependencies)
+          .valueOrFail("unvet dar")
+      } yield {
+        val call = packageOps.revokeVettingCalls.loneElement
+        call.packages shouldBe (if (unvetDependencies) allPackageIds else Seq(mainPackageId))
+        call.darDescriptor.mainPackageId shouldBe darId
+        call.psid shouldBe psid
+        call.forceFlags shouldBe (if (unvetDependencies)
+                                    ForceFlags(ForceFlag.AllowUnvettedDependencies)
+                                  else ForceFlags.none)
+      }
+    }
+
+    "unvet only the main package of a DAR when unvetDarDependencies is false" in withEnvUS(
+      darUnvetTest(unvetDependencies = false)
+    )
+
+    "unvet all packages of a DAR when unvetDarDependencies is true" in withEnvUS(
+      darUnvetTest(unvetDependencies = true)
+    )
+
     "fetching dependencies" in withEnv { env =>
       import env.*
 
@@ -455,11 +499,12 @@ abstract class BasePackageServiceTest(enableStrictDarValidation: Boolean)
 
     val unknownDarId = DarMainPackageId.tryCreate("darid")
     val psid = SynchronizerId.tryFromString("test::synchronizer").toPhysical
+    val unsafeUnvetDarDependencies = true
 
     "requested by PackageService.unvetDar" should {
       "reject the request with an error" in withEnv(
         rejectOnMissingDar(
-          _.unvetDar(unknownDarId, psid),
+          _.unvetDar(unknownDarId, psid, unsafeUnvetDarDependencies),
           unknownDarId,
           "DAR archive unvetting",
         )

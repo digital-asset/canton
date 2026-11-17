@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.ledgerapi.auth
 import com.daml.jwt.StandardJWTPayload
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authorization
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.{
   CantonFixture,
   CreatesParties,

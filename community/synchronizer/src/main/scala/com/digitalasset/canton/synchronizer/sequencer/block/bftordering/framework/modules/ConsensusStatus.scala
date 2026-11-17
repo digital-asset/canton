@@ -78,7 +78,7 @@ object ConsensusStatus {
       )
 
     def fromProto(
-        from: BftNodeId,
+        sentBy: BftNodeId,
         protoEpochStatus: v30.EpochStatus,
     )(originalByteString: ByteString): ParsingResult[EpochStatus] =
       for {
@@ -90,7 +90,7 @@ object ConsensusStatus {
           )
         rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData30)
       } yield EpochStatus(
-        from,
+        sentBy,
         EpochNumber(protoEpochStatus.epochNumber),
         nonEmptySegments,
       )(rpv, Some(originalByteString))

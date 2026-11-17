@@ -78,6 +78,11 @@ jobs:
     name: Build Docs Snippets
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_build_docs_snippets.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -98,6 +103,11 @@ jobs:
     name: Unstable Test 36
     needs: [pick_runner, package_community]
     uses: ./.github/workflows/_unstable_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -107,6 +117,11 @@ jobs:
     name: Test 36 With Java 17
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       override_java_version_for_tests: "17"
@@ -129,6 +144,11 @@ jobs:
     name: Ledger API Compatibility Tests
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_ledger_api_compatibility_tests.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -146,6 +166,11 @@ jobs:
     name: Stability Crash Recovery Test
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_stability_crash_recovery_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -175,6 +200,11 @@ jobs:
     name: External Parties Test 36
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_external_parties_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       override_java_version_for_tests: ""
@@ -185,6 +215,11 @@ jobs:
     name: Nightly Integration Test 36
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_nightly_integration_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}

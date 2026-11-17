@@ -13,7 +13,10 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShu
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
+import com.digitalasset.canton.topology.store.StoredTopologyTransaction.{
+  GenericStoredTopologyTransaction,
+  PositiveStoredTopologyTransaction,
+}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.{
   GenericStoredTopologyTransactions,
   NegativeStoredTopologyTransactions,
@@ -290,7 +293,7 @@ private[canton] class DummyCopyTopologyStore(
   ): FutureUnlessShutdown[Option[GenericStoredTopologyTransaction]] = ???
   override def findEffectiveStateChanges(
       fromEffectiveInclusive: CantonTimestamp,
-      filterTypes: Option[Seq[TopologyMapping.Code]],
+      filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]],
       onlyAtEffective: Boolean,
   )(implicit
       traceContext: TraceContext
@@ -302,4 +305,12 @@ private[canton] class DummyCopyTopologyStore(
   override def deleteDataChunk(chunkSize: PositiveInt)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean] = ???
+
+  override def findEffectiveStateChangesAtTopologyInit(
+      fromExclusive: EffectiveTime,
+      toInclusive: EffectiveTime,
+      filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]],
+  )(implicit
+      traceContext: TraceContext
+  ): Source[PositiveStoredTopologyTransaction, NotUsed] = ???
 }

@@ -5,6 +5,7 @@ package com.digitalasset.canton.tracing
 
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -49,7 +50,7 @@ class SpanningTest extends AnyWordSpec with BaseTest with BeforeAndAfterEach {
     def nestedFuture(
         inner: Future[Unit]
     ): EitherT[OptionT[CheckedT[FutureUnlessShutdown, Int, Int, *], *], String, HandlerResult] = {
-      implicit val directExecutionContext = DirectExecutionContext(noTracingLogger)
+      implicit val directExecutionContextImplicit: DirectExecutionContext = directExecutionContext
       withNewTrace("Outer.nestedFuture") { _ => span =>
         span.addEvent("running Outer.foo")
         EitherT.pure(

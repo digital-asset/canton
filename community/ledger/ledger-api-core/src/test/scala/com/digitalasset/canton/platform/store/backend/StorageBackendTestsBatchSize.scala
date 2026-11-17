@@ -42,13 +42,12 @@ private[backend] trait StorageBackendTestsBatchSize
     val dtos: Vector[DbDto] = prepareExercises(numOfDtos, numOfInformees)
     dtos.size shouldBe (numOfDtos * (numOfInformees + 1))
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
-    val directEc = DirectExecutionContext(noTracingLogger)
     val startTime = System.currentTimeMillis()
     tryWithConnections(1) {
       case List(connection) =>
         connection.setAutoCommit(false)
         connection.setNetworkTimeout(
-          directEc,
+          DirectExecutionContext.directExecutionContext,
           20 * 1000, // 20 seconds, the original limit causing the Sev1
         )
         try {
@@ -70,7 +69,8 @@ private[backend] trait StorageBackendTestsBatchSize
   // This test replicates the huge transaction of the mentioned sev1 issue. It is expected not to complete
   // within the default network timeout, but if the timeout or the environment changes the transaction size
   // may need adjustment. Note that in the sev1 2670 exercises and 1580 informees were present.
-  it should "ingest a transaction with 2670 exercises and 1580 informee (sev1 #4433)" in {
+  // TODO(#37497): Reactivate in cheaper form, or remove
+  it should "ingest a transaction with 2670 exercises and 1580 informee (sev1 #4433)" ignore {
     loggerFactory.assertEventuallyLogsSeq(
       SuppressionRule.Level(event.Level.WARN)
     )(

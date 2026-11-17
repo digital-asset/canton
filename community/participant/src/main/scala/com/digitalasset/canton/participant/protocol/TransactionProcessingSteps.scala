@@ -319,7 +319,7 @@ class TransactionProcessingSteps(
       // but that is not supported in our current architecture as the indexer assigns the global offset at a later stage
       // of processing.
       lazy val emptyDeduplicationPeriod =
-        DeduplicationPeriod.DeduplicationDuration(java.time.Duration.ZERO)
+        DeduplicationPeriod.DeduplicationDuration.Zero
 
       val (error, dedupInfo): (TransactionError, DeduplicationPeriod) = failure match {
         case CommandDeduplicator.AlreadyExists(completionOffset, accepted, submissionId) =>
@@ -352,6 +352,10 @@ class TransactionProcessingSteps(
               )
           }
           error -> emptyDeduplicationPeriod
+        case CommandDeduplicator.InvalidDeduplicationDuration(reason) =>
+          SubmissionInternalError.Failure(
+            new IllegalStateException(s"Invalid calculated deduplication duration: $reason")
+          ) -> emptyDeduplicationPeriod
       }
       mkTransactionSubmissionTrackingData(
         error,

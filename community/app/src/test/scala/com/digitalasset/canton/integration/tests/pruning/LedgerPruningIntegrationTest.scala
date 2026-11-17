@@ -817,7 +817,9 @@ abstract class LedgerPruningIntegrationTest
                 "AcsCommitmentProcessorManager"
               ))
               logEntry.message should (
-                include("Ledger subscription PingService failed with an error") or
+                include regex "Ledger subscription (PingService|AcsReplicationAdminWorkflow) failed with an error" or
+                  include regex "Setting the ledger subscription AcsReplicationAdminWorkflow offset to a later offset .* due to pruning" or
+                  include regex "FAILED_PRECONDITION: PARTICIPANT_PRUNED_DATA_ACCESSED.* Transactions request for offset range .* precedes pruned offset" or
                   include("failed to start running digest processor")
               )
               ()

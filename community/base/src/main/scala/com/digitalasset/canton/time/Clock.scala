@@ -272,6 +272,53 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
   }
 
   /** Schedule an action to be performed at the given timestamp. If the closeContext is closed, then
+    * the task is cancelled. Returns the future result and a handle for cancelling the scheduled
+    * task.
+    *
+    * If the provided timestamp is before `now`, the action skips queueing and is executed
+    * immediately.
+    *
+    * @param action
+    *   action to run at the given timestamp (passing in the timestamp for when the task was
+    *   scheduled)
+    * @param taskName
+    *   name of the task
+    * @param timestamp
+    *   timestamp when to run the task
+    * @return
+    *   Tuple of (future result, cancellation handle)
+    */
+  def scheduleAtCancellableCancelledOnShutdown[A](
+      action: CantonTimestamp => A,
+      taskName: String,
+      timestamp: CantonTimestamp,
+  )(implicit
+      ec: ExecutionContext,
+      closeContext: CloseContext,
+  ): (FutureUnlessShutdown[A], ClockHandle[A]) = {
+    val (f, handle) = scheduleAtCancellable(action, taskName, timestamp)
+    val cancelTask = new RunOnClosing {
+      override def name: String = s"cancel-$taskName"
+      override def done: Boolean = f.isCompleted
+      override def run()(implicit traceContext: TraceContext): Unit = {
+        logger.debug(s"Aborting scheduled task '$taskName' due to shutdown")
+        handle.cancel(AbortedDueToShutdown)
+      }
+    }
+    // Cancel the task upon shutdown
+    val lifeCycleRegistrationHandleUS: UnlessShutdown[LifeCycleRegistrationHandle] =
+      closeContext.context.runOnClose(cancelTask)
+
+    (
+      f.thereafter { _ =>
+        // Remove the lifeCycleRegistrationHandle when the task is finished
+        lifeCycleRegistrationHandleUS.foreach(_.cancel().discard)
+      },
+      handle,
+    )
+  }
+
+  /** Schedule an action to be performed at the given timestamp. If the closeContext is closed, then
     * the task is cancelled.
     *
     * If the provided timestamp is before `now`, the action skips queueing and is executed
@@ -291,28 +338,8 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
       action: CantonTimestamp => A,
       taskName: String,
       timestamp: CantonTimestamp,
-  )(implicit ec: ExecutionContext, closeContext: CloseContext): FutureUnlessShutdown[A] = {
-
-    val (f, handle) = scheduleAtCancellable(action, taskName, timestamp)
-
-    val cancelTask = new RunOnClosing {
-      override def name: String = s"cancel-$taskName"
-      override def done: Boolean = f.isCompleted
-      override def run()(implicit traceContext: TraceContext): Unit = {
-        logger.debug(s"Aborting scheduled task '$taskName' due to shutdown")
-        handle.cancel(AbortedDueToShutdown)
-      }
-    }
-
-    // Cancel the task upon shutdown
-    val lifeCycleRegistrationHandleUS: UnlessShutdown[LifeCycleRegistrationHandle] =
-      closeContext.context.runOnClose(cancelTask)
-
-    f.thereafter { _ =>
-      // Remove the lifeCycleRegistrationHandle when the task is finished
-      lifeCycleRegistrationHandleUS.foreach(_.cancel().discard)
-    }
-  }
+  )(implicit ec: ExecutionContext, closeContext: CloseContext): FutureUnlessShutdown[A] =
+    scheduleAtCancellableCancelledOnShutdown(action, taskName, timestamp)._1
 
   /** Schedule an action to be performed at the given timestamp. If the closeContext is closed, then
     * the task is cancelled.

@@ -7,6 +7,7 @@ import com.digitalasset.canton.data.DeduplicationPeriod
 import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationDuration
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
+import org.scalatest.EitherValues.*
 
 import java.time.Duration
 
@@ -14,7 +15,10 @@ object GeneratorsApi {
   import com.digitalasset.canton.ledger.offset.GeneratorsOffset.*
 
   implicit val deduplicationDurationArb: Arbitrary[DeduplicationDuration] = Arbitrary(
-    Gen.posNum[Long].map(Duration.ofMillis).map(DeduplicationDuration.apply)
+    Gen
+      .posNum[Long]
+      .map(Duration.ofMillis)
+      .map(duration => DeduplicationDuration.create(duration).value)
   )
   implicit val deduplicationPeriodArb: Arbitrary[DeduplicationPeriod] = genArbitrary
 }

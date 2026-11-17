@@ -1986,7 +1986,7 @@ final class AvailabilityModule[E <: Env[E]](
 object AvailabilityModule {
 
   private def parseAvailabilityNetworkMessage(
-      from: BftNodeId,
+      claimedOriginator: BftNodeId,
       message: v30.AvailabilityMessage,
       originalMessage: ByteString,
   ): ParsingResult[Availability.RemoteProtocolMessage] =
@@ -1996,19 +1996,23 @@ object AvailabilityModule {
       case v30.AvailabilityMessage.Message.Ping(_) =>
         Left(ProtoDeserializationError.OtherError("Ping Received"))
       case v30.AvailabilityMessage.Message.StoreRequest(value) =>
-        Availability.RemoteDissemination.RemoteBatch.fromProtoV30(from, value)(originalMessage)
-      case v30.AvailabilityMessage.Message.StoreResponse(value) =>
-        Availability.RemoteDissemination.RemoteBatchAcknowledged.fromProtoV30(from, value)(
+        Availability.RemoteDissemination.RemoteBatch.fromProtoV30(claimedOriginator, value)(
           originalMessage
         )
+      case v30.AvailabilityMessage.Message.StoreResponse(value) =>
+        Availability.RemoteDissemination.RemoteBatchAcknowledged
+          .fromProtoV30(claimedOriginator, value)(
+            originalMessage
+          )
       case v30.AvailabilityMessage.Message.BatchRequest(value) =>
-        Availability.RemoteOutputFetch.FetchRemoteBatchData.fromProtoV30(from, value)(
+        Availability.RemoteOutputFetch.FetchRemoteBatchData.fromProtoV30(claimedOriginator, value)(
           originalMessage
         )
       case v30.AvailabilityMessage.Message.BatchResponse(value) =>
-        Availability.RemoteOutputFetch.RemoteBatchDataFetched.fromProtoV30(from, value)(
-          originalMessage
-        )
+        Availability.RemoteOutputFetch.RemoteBatchDataFetched
+          .fromProtoV30(claimedOriginator, value)(
+            originalMessage
+          )
     }
 
   private[bftordering] def hasDisseminationQuorum(
@@ -2024,9 +2028,11 @@ object AvailabilityModule {
       protoSignedMessage: v30.SignedMessage
   ): ParsingResult[Availability.UnverifiedProtocolMessage] =
     SignedMessage
-      .fromProtoWithNodeId(v30.AvailabilityMessage, SupportedVersions.ProtoData30)(from =>
-        proto =>
-          originalByteString => parseAvailabilityNetworkMessage(from, proto, originalByteString)
+      .fromProtoWithNodeId(v30.AvailabilityMessage, SupportedVersions.ProtoData30)(
+        claimedOriginator =>
+          proto =>
+            originalByteString =>
+              parseAvailabilityNetworkMessage(claimedOriginator, proto, originalByteString)
       )(protoSignedMessage)
       .map(Availability.UnverifiedProtocolMessage.apply)
 

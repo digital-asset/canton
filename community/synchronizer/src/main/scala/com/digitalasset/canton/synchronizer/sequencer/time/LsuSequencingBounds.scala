@@ -108,13 +108,11 @@ object LsuSequencingBounds {
             .maxTimestamp(sequencedTime = SequencedTime(upgradeTime), includeRejected = true)
             .map {
               case Some((_, latestEffectiveTime)) =>
-                /*
-                Note: the require in the LsuSequencingBounds might throw if the invariant is not respected.
-                This is fine because it means that something went terribly wrong: a topology change is effective after upgrade time.
-                 */
                 LsuSequencingBounds(
                   upgradeTime = upgradeTime,
-                  lowerBoundSequencingTimeExclusive = latestEffectiveTime.value,
+                  // In case when it happens that latestEffectiveTime > upgradeTime we clamp it to upgradeTime.
+                  // This effectively means that during this LSU test sequencing cannot happen before upgradeTime.
+                  lowerBoundSequencingTimeExclusive = upgradeTime.min(latestEffectiveTime.value),
                 ).some
               case None =>
                 ErrorUtil.invalidState(

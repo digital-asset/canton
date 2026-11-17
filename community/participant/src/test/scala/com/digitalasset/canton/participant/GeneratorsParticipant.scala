@@ -20,6 +20,7 @@ import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
   ReplicationParams,
 }
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AgreementStatus.{
   Exists,
   NotProposed,
@@ -33,10 +34,13 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplica
   AgreementStatus,
   PersistentProgress,
 }
-import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.acsreplication.{
   AcsReplicationSourceParticipantMessage,
   AcsReplicationTargetParticipantMessage,
+}
+import com.digitalasset.canton.participant.protocol.party.{
+  FreezingToOnboardingOperation,
+  OnboardingClearanceOperation,
 }
 import com.digitalasset.canton.participant.protocol.submission.TransactionSubmissionTrackingData.{
   CauseWithTemplate,
@@ -258,6 +262,27 @@ final class GeneratorsParticipant(
       } yield error
     )
 
+  implicit val acsReplicationParameters: Arbitrary[AcsReplicationParameters] =
+    Arbitrary(
+      for {
+        requestId <- Arbitrary.arbitrary[Hash]
+        partyId <- Arbitrary.arbitrary[PartyId]
+        synchronizerId <- Arbitrary.arbitrary[SynchronizerId]
+        sourceParticipantId <- Arbitrary.arbitrary[ParticipantId]
+        targetParticipantId <- Arbitrary.arbitrary[ParticipantId]
+        timestamp <- Arbitrary.arbitrary[CantonTimestamp]
+        acsReplicationDestination = AcsReplicationDestination.Persistence
+      } yield AcsReplicationParameters(
+        requestId,
+        partyId,
+        synchronizerId,
+        sourceParticipantId,
+        targetParticipantId,
+        timestamp,
+        acsReplicationDestination,
+      )
+    )
+
   implicit val acsReplicationStatusArb: Arbitrary[AcsReplicationStatus] =
     Arbitrary(
       for {
@@ -430,5 +455,14 @@ final class GeneratorsParticipant(
             OnboardingClearanceOperation.protocolVersionRepresentativeFor(version)
           )
         )
+    )
+
+  implicit val freezingToOnboardingOperationArb: Arbitrary[FreezingToOnboardingOperation] =
+    Arbitrary(
+      Gen.const(
+        FreezingToOnboardingOperation()(
+          FreezingToOnboardingOperation.protocolVersionRepresentativeFor(version)
+        )
+      )
     )
 }

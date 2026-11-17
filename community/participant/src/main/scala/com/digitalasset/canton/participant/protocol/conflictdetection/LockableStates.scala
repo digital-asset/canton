@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.protocol.conflictdetection
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.RequestCounter
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -63,8 +63,6 @@ private[conflictdetection] class LockableStates[
   private val states: concurrent.Map[Key, MutableLockableState[Status]] =
     new TrieMap[Key, MutableLockableState[Status]]()
 
-  private val directExecutionContext = DirectExecutionContext(noTracingLogger)
-
   /** Registers the activeness check as pending for the given request.
     *
     * Must not be called concurrently with other methods of this class unless stated otherwise.
@@ -90,7 +88,7 @@ private[conflictdetection] class LockableStates[
     var otherStatesAvailable: Future[Unit] = Future.unit
     def joinFuture(f: Future[?]): Unit = {
       // deliberately discard the contents of the future
-      implicit val ec = directExecutionContext
+      implicit val ec: ExecutionContext = directExecutionContext
       otherStatesAvailable = otherStatesAvailable.zip(f).void
     }
 

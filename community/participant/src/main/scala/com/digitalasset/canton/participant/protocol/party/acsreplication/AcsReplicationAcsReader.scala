@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.party.acsreplication
 
 import cats.syntax.either.*
-import com.digitalasset.canton.ReassignmentCounter
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -15,15 +14,13 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.LapiAcsHelper
 import com.digitalasset.canton.participant.protocol.party.SourceParticipantStore
-import com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationAcsReader.{
-  flowControlBackoffMillis,
-  maxQueueSize,
-}
+import com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationAcsReader.flowControlBackoffMillis
 import com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationSourceParticipantMessage.GetAcsArguments
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, Mutex}
+import com.digitalasset.canton.{ReassignmentCounter, checked}
 import com.google.protobuf.ByteString
 import org.apache.pekko.stream.scaladsl.{Keep, Sink}
 import org.apache.pekko.stream.{KillSwitches, Materializer}
@@ -50,6 +47,12 @@ import scala.util.chaining.scalaUtilChainingOps
   * @param excludedStakeholders
   *   Shared contract stakeholder parties to exclude from the read ACS, for example as in the case
   *   of party replication, exclude parties already hosted by the target participants.
+  * @param acsBatchSize
+  *   The expected batch size read from the reader. Used to limit the size of a queue buffer fed by
+  *   the Pekko flow until the queue is drained by reads from the caller.
+  * @param maxQueueSize
+  *   The size of the queue to allow prefetching of ACS entries for reading. Must be at least as
+  *   large as acsBatchSize to prevent hanging.
   * @param lapiIndexService
   *   The Ledger API index service used to read the ACS.
   * @param spStore
@@ -63,6 +66,8 @@ private[party] final class AcsReplicationAcsReader(
     excludedStakeholders: Set[PartyId],
     sourceParticipantId: ParticipantId,
     agreedAt: CantonTimestamp,
+    acsBatchSize: PositiveInt,
+    maxQueueSize: PositiveInt,
     lapiIndexService: InternalIndexService,
     spStore: SourceParticipantStore,
     protected val loggerFactory: NamedLoggerFactory,
@@ -165,25 +170,22 @@ private[party] final class AcsReplicationAcsReader(
         }
       }
 
-  /** Helper to read up to `numContractsToRead` contracts from the ACS queue and dequeue them.
+  /** Helper to read batches from the ACS queue and dequeue them.
+    *
+    * @param numContractsRequested
+    *   The number of contracts requested by the target participant.
     * @return
-    *   A tuple of true iff we have read and sent the entire ACS and a potentially empty batch of
-    *   contracts.
+    *   A tuple of true iff we have read and sent the entire ACS and a potentially empty list of ACS
+    *   batches.
     */
-  def readContracts(
-      numContractsToRead: PositiveInt
-  ): (Boolean, Seq[ActiveContract]) =
+  def readContracts(numContractsRequested: PositiveInt): (Boolean, Seq[Seq[ActiveContract]]) =
     lock.exclusive {
-      // Return contract batch if numContractsToRead are in the queue or if the ACS replication has
-      // completed successfully indicating that there might be fewer or no entries in the queue.
-      val isAcsReaderFinished = hasAcsReaderCompletedSuccessfully.get()
-      val canReturnContractBatch =
-        queue.sizeIs >= numContractsToRead.unwrap || isAcsReaderFinished
-      val batch = if (canReturnContractBatch) {
-        (0 until numContractsToRead.unwrap).flatMap(_ => queue.dequeueFirst(_ => true))
-      } else Seq.empty
-      val isDone = isAcsReaderFinished && queue.isEmpty
-      (isDone, batch)
+      AcsReplicationAcsReader.readContracts(
+        numContractsRequested,
+        acsBatchSize,
+        queue,
+        hasAcsReaderCompletedSuccessfully.get(),
+      )
     }
 
   /** Return the contracts digest at the end of the ACS replication.
@@ -207,9 +209,51 @@ private[party] final class AcsReplicationAcsReader(
   }
 }
 
-private object AcsReplicationAcsReader {
-  // TODO(#22251): Make this configurable. The maxQueueSize cannot be below the TP request-batch-size
-  //  AcsReplicationTargetParticipantProcessor.contractsToRequestEachTime to avoid a deadlock.
-  lazy val maxQueueSize: PositiveInt = PositiveInt.tryCreate(1000)
+private[acsreplication] object AcsReplicationAcsReader {
   lazy val flowControlBackoffMillis = 1000L
+
+  // Separate function for unit testing.
+  private[acsreplication] def readContracts[T](
+      numContractsRequested: PositiveInt,
+      batchSize: PositiveInt,
+      queue: mutable.Queue[T],
+      isAcsReaderFinished: Boolean,
+  ): (Boolean, Seq[Seq[T]]) = {
+    @tailrec
+    def go(
+        numRequested: PositiveInt,
+        acsBatchesAccum: Seq[Seq[T]],
+    ): Seq[Seq[T]] = {
+      // Return contract batch if at least a batch or the number of request contracts are in the
+      // queue or if the ACS replication has completed successfully indicating that there might be
+      // fewer or no entries in the queue.
+      val numContractsRequestedNext = batchSize.unwrap.min(numRequested.unwrap)
+      val canDequeueContractBatch =
+        queue.sizeIs >= numContractsRequestedNext || (queue.nonEmpty && isAcsReaderFinished)
+
+      // Case 1: Return if we don't have enough elements for a batch.
+      if (!canDequeueContractBatch) {
+        acsBatchesAccum
+      } else {
+        val nextBatch =
+          (0 until numContractsRequestedNext).flatMap(_ => queue.dequeueFirst(_ => true))
+        val numAccum = nextBatch +: acsBatchesAccum
+
+        // Case 2: Return if we have requested all the elements.
+        if (numContractsRequestedNext >= numRequested.unwrap) {
+          numAccum
+        } else {
+          // Case 3: Check if we can return another batch.
+          go(
+            checked(PositiveInt.tryCreate(numRequested.unwrap - numContractsRequestedNext)),
+            numAccum,
+          )
+        }
+      }
+    }
+
+    val batchesReversed = go(numContractsRequested, Seq.empty)
+    val isDone = isAcsReaderFinished && queue.isEmpty
+    (isDone, batchesReversed.reverse)
+  }
 }

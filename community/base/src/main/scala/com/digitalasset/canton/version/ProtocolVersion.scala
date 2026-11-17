@@ -334,6 +334,12 @@ object ProtocolVersion {
   lazy val transparencyAndCiphertextId: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
     dev
 
+  // First protocol version with sequencer channels and the ACS replication over them, i.e. all code
+  // paths of get_remote_acs. Online party replication stays on dev.
+  // TODO(#37839) Move to the stable protocol version that ships get_remote_acs; the proto messages
+  //  then also need to extend `StableProtoVersion`.
+  lazy val sequencerChannel: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] = dev
+
   /*
   Ensure the list of alpha versions is not empty (required for some tests)
   Very high value that is almost the dev version.

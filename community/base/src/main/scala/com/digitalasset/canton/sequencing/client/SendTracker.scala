@@ -7,7 +7,7 @@ import cats.syntax.option.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.MetricsContext.{withEmptyMetricsContext, withExtraMetricLabels}
 import com.digitalasset.canton.SequencerAlias
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonBaseError
@@ -54,10 +54,6 @@ class SendTracker(
     with AutoCloseable {
 
   import SendTracker.LatestAttemptRef
-
-  private implicit val directExecutionContext: DirectExecutionContext = DirectExecutionContext(
-    noTracingLogger
-  )
 
   /** Details of sends in-flight
     * @param startedAtNanoO
@@ -316,7 +312,7 @@ class SendTracker(
         )
       case (Some(tsc), Some(UnlessShutdown.Outcome(Timeout(timestamp)))) =>
         // Event was not sequenced but we can still advance the base rate at the timestamp
-        tsc.tickStateAt(timestamp)
+        tsc.tickStateAt(timestamp)(directExecutionContext, traceContext)
       case _ =>
     }
 

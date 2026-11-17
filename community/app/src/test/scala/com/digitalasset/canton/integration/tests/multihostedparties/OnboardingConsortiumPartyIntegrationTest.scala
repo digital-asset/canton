@@ -11,6 +11,7 @@ import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.integration.EnvironmentDefinition
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.LoggerSuppressionHelpers
+import com.digitalasset.canton.participant.admin.data.ImportPartyAcsForceFlag
 import com.digitalasset.canton.topology.transaction.{
   DecentralizedNamespaceDefinition,
   ParticipantPermission,
@@ -181,7 +182,14 @@ sealed trait OnboardingConsortiumPartyIntegrationTest extends ConsortiumPartyInt
 
           logger.debug("Onboarding: Import ACS to P4 (an empty participant)")
           participant4.ledger_api.state.acs.count() shouldEqual 0
-          participant4.parties.import_party_acs(daId, Some(consortiumPartyId), acsFilename)
+          // P4 processed the activation while connected, but no event of the party since then:
+          // the transfer above happens after P4 disconnected.
+          participant4.parties.import_party_acs(
+            daId,
+            Some(consortiumPartyId),
+            acsFilename,
+            forceFlags = Set(ImportPartyAcsForceFlag.AllowImportAfterActivation),
+          )
 
           logger.debug(s"Onboarding: Connect P4 to the synchronizer $daName")
           participant4.synchronizers.connect_local(sequencer1, daName)

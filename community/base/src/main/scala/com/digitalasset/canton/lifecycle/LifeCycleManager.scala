@@ -5,6 +5,7 @@ package com.digitalasset.canton.lifecycle
 
 import cats.syntax.either.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.LifeCycleManager.LifeCycleManagerImpl
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
@@ -192,9 +193,6 @@ object LifeCycleManager {
 
     override protected[this] def nameInternal: String = name
 
-    private[this] val directExecutionContext: DirectExecutionContext =
-      DirectExecutionContext(noTracingLogger)
-
     private[this] val tasks =
       new TwoPhasePriorityAccumulator[LifeCycleManagerTask, CloseInfo](
         // When new tasks are registered, automatically remove obsolete RunOnClosing tasks
@@ -295,7 +293,7 @@ object LifeCycleManager {
               LifeCycleManagerImpl.closeSignalPropagationPriority,
             )
 
-            implicit val ec: ExecutionContext = directExecutionContext
+            implicit val ec: DirectExecutionContext = directExecutionContext
             // Execute the RunOnClosing tasks in another thread
             doRunOnClosingAsync(drainingIterator)
               .flatMap(_ => synchronizeAndReleaseRegistered(drainingIterator))
@@ -516,15 +514,14 @@ object LifeCycleManager {
               "RunOnClosing tasks should have been run before ManagedResources."
             )
         }
-        implicit val ec: DirectExecutionContext = directExecutionContext
+        implicit val ec: ExecutionContext = directExecutionContext
         Future.sequence(runFutures).map(errors => errors.flatten ++ acc)
       }
 
       def goByPriority(acc: CollectedErrors): Future[CollectedErrors] =
         if (iterator.hasNext) {
           val drained = drainSamePriority()
-          implicit val ec: DirectExecutionContext = directExecutionContext
-          releaseInParallel(drained, acc).flatMap(goByPriority)
+          releaseInParallel(drained, acc).flatMap(goByPriority)(directExecutionContext)
         } else {
           Future.successful(acc)
         }

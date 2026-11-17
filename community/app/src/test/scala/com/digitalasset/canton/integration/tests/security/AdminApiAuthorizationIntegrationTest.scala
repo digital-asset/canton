@@ -66,6 +66,11 @@ trait AdminApiAuthorizationIntegrationTest
   private val adminToken = CantonAdminToken.create(new SymbolicPureCrypto())
   private val expirationLeeway: Long = 3600
 
+  private val hypotheticalLedgerApiToken = JwtTokenUtilities.buildUnsafeToken(
+    secret = "little-lamb",
+    userId = Some("mary"),
+  )
+
   lazy private val securityAsset: SecurityTest =
     SecurityTest(property = Authenticity, asset = "admin api client")
 
@@ -90,11 +95,13 @@ trait AdminApiAuthorizationIntegrationTest
   def remoteParticipantWithToken(
       localConfig: ParticipantNodeConfig,
       token: Option[String],
+      adminApiToken: Option[String] = None,
   ): RemoteParticipantConfig =
     RemoteParticipantConfig(
       ledgerApi = localConfig.ledgerApi.clientConfig,
       adminApi = localConfig.adminApi.clientConfig,
       token = token,
+      adminApiToken = adminApiToken,
     )
 
   def createRemoteConfigForMediator(
@@ -295,6 +302,28 @@ trait AdminApiAuthorizationIntegrationTest
                     )
                   ),
                 ),
+              "p2-overrideNoToken" ->
+                remoteParticipantWithToken(
+                  localConfig,
+                  token = None,
+                  adminApiToken = Some(
+                    JwtTokenUtilities.buildUnsafeToken(
+                      mySecret.unwrap,
+                      scope = Some(scope),
+                    )
+                  ),
+                ),
+              "p2-overrideLedgerToken" ->
+                remoteParticipantWithToken(
+                  localConfig,
+                  token = Some(hypotheticalLedgerApiToken),
+                  adminApiToken = Some(
+                    JwtTokenUtilities.buildUnsafeToken(
+                      mySecret.unwrap,
+                      scope = Some(scope),
+                    )
+                  ),
+                ),
             ),
         )
       }
@@ -397,6 +426,8 @@ trait AdminApiAuthorizationIntegrationTest
             "p1-noToken",
             "p2-adminToken",
             "p2-privileged",
+            "p2-overrideNoToken",
+            "p2-overrideLedgerToken",
             "p3-adminToken",
             "p3-privileged",
             "p3-noToken",
@@ -508,6 +539,24 @@ trait AdminApiAuthorizationIntegrationTest
         ).futureValue shouldBe ()
 
         testRemote(rp("p2-privileged"))
+      }
+
+      "use admin-api with privileged token as an override to no ledger API token" taggedAs securityAsset
+        .setHappyCase(
+          "use privileged token as an override to no ledger API token"
+        ) in { implicit env =>
+        import env.*
+
+        testRemote(rp("p2-overrideNoToken"))
+      }
+
+      "use admin-api with privileged token as an override to a ledger API token" taggedAs securityAsset
+        .setHappyCase(
+          "use privileged token as an override to a ledger API token"
+        ) in { implicit env =>
+        import env.*
+
+        testRemote(rp("p2-overrideLedgerToken"))
       }
 
       "don't allow using admin-api without any token" taggedAs securityAsset.setAttack(

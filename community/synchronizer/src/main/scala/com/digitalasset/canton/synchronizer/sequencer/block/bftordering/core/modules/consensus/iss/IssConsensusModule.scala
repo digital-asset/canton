@@ -1055,14 +1055,16 @@ object IssConsensusModule {
       actualSender: BftNodeId,
   ): ParsingResult[SignedMessage[ConsensusSegment.ConsensusMessage.PbftNetworkMessage]] =
     SignedMessage
-      .fromProtoWithNodeId(v30.ConsensusMessage, SupportedVersions.ProtoData30)(from =>
+      .fromProtoWithNodeId(v30.ConsensusMessage, SupportedVersions.ProtoData30)(claimedOriginator =>
         proto =>
           originalByteString =>
-            parseConsensusNetworkMessage(from, Some(actualSender), proto)(originalByteString)
+            parseConsensusNetworkMessage(claimedOriginator, Some(actualSender), proto)(
+              originalByteString
+            )
       )(protoSignedMessage)
 
   def parseConsensusNetworkMessage(
-      from: BftNodeId,
+      claimedFrom: BftNodeId,
       actualSender: Option[BftNodeId],
       message: v30.ConsensusMessage,
   )(
@@ -1071,45 +1073,30 @@ object IssConsensusModule {
     for {
       header <- headerFromProto(message)
       result <- (message.message match {
-        case v30.ConsensusMessage.Message.PrePrepare(value) =>
-          ConsensusSegment.ConsensusMessage.PrePrepare.fromProto(
-            header.blockMetadata,
-            header.viewNumber,
-            value,
-            from,
-            actualSender,
+        case v30.ConsensusMessage.Message.PrePrepare(_) =>
+          ConsensusSegment.ConsensusMessage.PrePrepare.fromProtoConsensusMessage(
+            (claimedFrom, actualSender),
+            message,
           )(originalByteString)
-        case v30.ConsensusMessage.Message.Prepare(value) =>
-          ConsensusSegment.ConsensusMessage.Prepare.fromProto(
-            header.blockMetadata,
-            header.viewNumber,
-            value,
-            from,
-            actualSender,
+        case v30.ConsensusMessage.Message.Prepare(_) =>
+          ConsensusSegment.ConsensusMessage.Prepare.fromProtoConsensusMessage(
+            (claimedFrom, actualSender),
+            message,
           )(originalByteString)
-        case v30.ConsensusMessage.Message.Commit(value) =>
-          ConsensusSegment.ConsensusMessage.Commit.fromProto(
-            header.blockMetadata,
-            header.viewNumber,
-            value,
-            from,
-            actualSender,
+        case v30.ConsensusMessage.Message.Commit(_) =>
+          ConsensusSegment.ConsensusMessage.Commit.fromProtoConsensusMessage(
+            (claimedFrom, actualSender),
+            message,
           )(originalByteString)
-        case v30.ConsensusMessage.Message.ViewChange(value) =>
-          ConsensusSegment.ConsensusMessage.ViewChange.fromProto(
-            header.blockMetadata,
-            header.viewNumber,
-            value,
-            from,
-            actualSender,
+        case v30.ConsensusMessage.Message.ViewChange(_) =>
+          ConsensusSegment.ConsensusMessage.ViewChange.fromProtoConsensusMessage(
+            (claimedFrom, actualSender),
+            message,
           )(originalByteString)
-        case v30.ConsensusMessage.Message.NewView(value) =>
-          ConsensusSegment.ConsensusMessage.NewView.fromProto(
-            header.blockMetadata,
-            header.viewNumber,
-            value,
-            from,
-            actualSender,
+        case v30.ConsensusMessage.Message.NewView(_) =>
+          ConsensusSegment.ConsensusMessage.NewView.fromProtoConsensusMessage(
+            (claimedFrom, actualSender),
+            message,
           )(originalByteString)
         case v30.ConsensusMessage.Message.Empty =>
           Left(ProtoDeserializationError.OtherError("Empty Received"))
@@ -1117,21 +1104,21 @@ object IssConsensusModule {
     } yield result
 
   def parseRetransmissionMessage(
-      from: BftNodeId,
+      sentBy: BftNodeId,
       message: v30.RetransmissionMessage,
   ): ParsingResult[Consensus.RetransmissionsMessage] =
     (message.message match {
       case v30.RetransmissionMessage.Message.RetransmissionRequest(value) =>
-        Consensus.RetransmissionsMessage.RetransmissionRequest.fromProto(from, value)
+        Consensus.RetransmissionsMessage.RetransmissionRequest.fromProto(sentBy, value)
       case v30.RetransmissionMessage.Message.RetransmissionResponse(value) =>
-        Consensus.RetransmissionsMessage.RetransmissionResponse.fromProto(from, value)
+        Consensus.RetransmissionsMessage.RetransmissionResponse.fromProto(sentBy, value)
       case v30.RetransmissionMessage.Message.Empty =>
         Left(ProtoDeserializationError.OtherError("Empty Received"))
     })
       .map(Consensus.RetransmissionsMessage.UnverifiedNetworkMessage.apply)
 
   def parseStateTransferMessage(
-      from: BftNodeId,
+      sentBy: BftNodeId,
       message: v30.StateTransferMessage,
   )(
       originalByteString: ByteString
@@ -1139,14 +1126,14 @@ object IssConsensusModule {
     message.message match {
       case v30.StateTransferMessage.Message.BlockRequest(value) =>
         Consensus.StateTransferMessage.BlockTransferRequest.fromProto(
-          from,
+          sentBy,
           value,
           SupportedVersions.ProtoData30,
         )(
           originalByteString
         )
       case v30.StateTransferMessage.Message.BlockResponse(value) =>
-        Consensus.StateTransferMessage.BlockTransferResponse30.fromProto(from, value)(
+        Consensus.StateTransferMessage.BlockTransferResponse30.fromProto(sentBy, value)(
           originalByteString
         )
       case v30.StateTransferMessage.Message.Empty =>

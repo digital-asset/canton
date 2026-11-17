@@ -8,16 +8,20 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.data.ActiveContract
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.protocol.party.AcsReplicationContractHandler.AcsTransferCheckpoint
-import com.digitalasset.canton.participant.protocol.party.PartyReplicationFileImporter.ImportFailedException
+import com.digitalasset.canton.participant.protocol.party.PartyReplicationFileImporter.{
+  ImportFailedException,
+  acsChunkSize,
+}
 import com.digitalasset.canton.participant.store.{
   AcsReplicationProgress,
   ParticipantNodePersistentState,
@@ -62,7 +66,7 @@ class PartyReplicationFileImporter(
     protected val replicationProgressState: AcsReplicationProgress,
     acsReplicationContractHandler: AcsReplicationContractHandler,
     acsReader: Source[ActiveContract, NotUsed],
-    testOnlyInterceptorO: Option[PartyReplicationTestInterceptor],
+    testOnlyInterceptorO: Option[AcsReplicationTestInterceptor],
     isClosing: () => Boolean,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val executionContext: ExecutionContext, mat: Materializer)
@@ -89,7 +93,7 @@ class PartyReplicationFileImporter(
 
     // Run the stream
     val doneF = acsReader
-      .grouped(TargetParticipantAcsPersistence.contractsToRequestEachTime.unwrap)
+      .grouped(acsChunkSize.unwrap)
       .mapAsync(1) { contracts =>
         val eitherT = for {
           _ <- EitherT.liftF[FutureUnlessShutdown, String, Unit](awaitTestInterceptor())
@@ -181,12 +185,12 @@ class PartyReplicationFileImporter(
             .map(interceptor.onTargetParticipantProgress) match {
             case None =>
               FutureUnlessShutdown.unit
-            case Some(PartyReplicationTestInterceptor.Proceed) =>
+            case Some(AcsReplicationTestInterceptor.Proceed) =>
               FutureUnlessShutdown.unit
-            case Some(PartyReplicationTestInterceptor.Wait) =>
+            case Some(AcsReplicationTestInterceptor.Wait) =>
               blocking(Threading.sleep(200))
               go()
-            case Some(PartyReplicationTestInterceptor.Fail(reason)) =>
+            case Some(AcsReplicationTestInterceptor.Fail(reason)) =>
               FutureUnlessShutdown.failed(ImportFailedException(reason))
           }
         }
@@ -201,6 +205,8 @@ object PartyReplicationFileImporter {
   // mapAsync and safely recover them back into EitherT Lefts.
   final case class ImportFailedException(msg: String) extends RuntimeException(msg)
 
+  private val acsChunkSize = PositiveInt.tryCreate(10)
+
   def apply(
       partyId: PartyId,
       requestId: AddPartyRequestId,
@@ -210,7 +216,7 @@ object PartyReplicationFileImporter {
       connectedSynchronizer: ConnectedSynchronizer,
       partyReplicationIndexingStore: PartyReplicationIndexingStore,
       acsReader: Source[ActiveContract, NotUsed],
-      testOnlyInterceptorO: Option[PartyReplicationTestInterceptor],
+      testOnlyInterceptorO: Option[AcsReplicationTestInterceptor],
       isClosing: () => Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit

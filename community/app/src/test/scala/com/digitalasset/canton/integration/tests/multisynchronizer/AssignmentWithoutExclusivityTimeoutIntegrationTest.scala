@@ -7,6 +7,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.integration.HasSimClockUtils.advanceClockInStepsTo
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.PartiesAllocator
@@ -17,6 +18,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.topology.Party
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.version.ProtocolVersion
@@ -153,11 +155,11 @@ final class AssignmentWithoutExclusivityTimeoutIntegrationTest
         // sequenced at a stale time and then timed out by the next event
         val latestSubmissionTime =
           unassignmentTs.plus(p1AutomaticAssignmentDelay.asJava.multipliedBy(2))
-        val step = java.time.Duration.ofSeconds(10)
-        val remaining =
-          java.time.Duration.between(clock.now.toInstant, latestSubmissionTime.toInstant)
-        (1 to Math.ceil(remaining.toMillis.toDouble / step.toMillis).toInt).foreach { _ =>
-          clock.advance(step)
+        advanceClockInStepsTo(
+          clock,
+          latestSubmissionTime,
+          maxStep = PositiveFiniteDuration.tryOfSeconds(10),
+        ) {
           participants.all.foreach(_.testing.fetch_synchronizer_times())
         }
         eventually() {

@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
+import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.version.ProtocolVersion
@@ -11,15 +13,13 @@ import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import org.scalatest.wordspec.AnyWordSpec
 
-import scala.concurrent.ExecutionContext
-
 class ExternalCallConsistencyCheckerTest
     extends AnyWordSpec
     with BaseTest
     with ProtocolVersionChecksAnyWordSpec
     with ExternalCallValidationTestUtil {
 
-  implicit val ec: ExecutionContext = directExecutionContext
+  implicit val dec: DirectExecutionContext = directExecutionContext
 
   protected val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()
 
