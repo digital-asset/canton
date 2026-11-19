@@ -8,7 +8,8 @@ import com.digitalasset.daml.lf.language.LanguageVersion
 import com.google.common.annotations.VisibleForTesting
 
 case class InterpretationConfig(
-    allowedLanguageVersions: List[LanguageVersion]
+    allowedLanguageVersions: List[LanguageVersion],
+    errorOnContractKeyHashMismatch: Boolean,
 )
 
 object InterpretationConfig {
@@ -24,18 +25,21 @@ object InterpretationConfig {
 
   val PV36: InterpretationConfig = InterpretationConfig(
     allowedLanguageVersions =
-      LanguageVersion.allLfVersions.filter(LanguageVersion.featurePV36.enabledIn)
+      LanguageVersion.allLfVersions.filter(LanguageVersion.featurePV36.enabledIn),
+    errorOnContractKeyHashMismatch = false,
   )
 
   // PV37 is still alpha: this constant may change until PV37 becomes stable.
   val PV37: InterpretationConfig = InterpretationConfig(
     allowedLanguageVersions =
-      LanguageVersion.allLfVersions.filter(LanguageVersion.featurePV37.enabledIn)
+      LanguageVersion.allLfVersions.filter(LanguageVersion.featurePV37.enabledIn),
+    errorOnContractKeyHashMismatch = true,
   )
 
   // The config of dev protocol versions. Not frozen: may change at any time.
   val Dev: InterpretationConfig = InterpretationConfig(
-    allowedLanguageVersions = LanguageVersion.allLfVersions
+    allowedLanguageVersions = LanguageVersion.allLfVersions,
+    errorOnContractKeyHashMismatch = true,
   )
 
   /** Not tied to any protocol version: changes over time, as the language evolves. Production code
@@ -43,6 +47,7 @@ object InterpretationConfig {
     */
   @VisibleForTesting
   val DefaultForTesting: InterpretationConfig = InterpretationConfig(
-    allowedLanguageVersions = LanguageVersion.stableLfVersions
+    allowedLanguageVersions = LanguageVersion.stableLfVersions,
+    errorOnContractKeyHashMismatch = true,
   )
 }

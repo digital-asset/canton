@@ -11,6 +11,7 @@ import com.daml.ledger.api.v2.admin.{
 }
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.base.error.ErrorsAssertions
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthServiceJWTSuppressionRule
 import com.digitalasset.canton.integration.{ConfigTransforms, TestConsoleEnvironment}
 import com.digitalasset.canton.logging.SuppressionRule

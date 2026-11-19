@@ -305,6 +305,8 @@ object SignatureReader {
         case Ast.BTOptional => \/-((1, PrimType.Optional))
         case Ast.BTTextMap => \/-((1, PrimType.TextMap))
         case Ast.BTGenMap => \/-((2, PrimType.GenMap))
+        case Ast.BTUint256 =>
+          throw new UnsupportedOperationException("Uint256 is not supported by api-type-signature")
         case Ast.BTNumeric =>
           unserializableDataType(
             ctx,

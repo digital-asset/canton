@@ -78,6 +78,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           reassignment_counter = None,
           reassignment_id = None,
           representative_package_id = someRepresentativePackageId,
+          participant_event_category = None,
           notPersistedContractId = hashCid("1"),
           internal_contract_id = 3,
           create_key_hash = Some("hash"),
@@ -158,6 +159,76 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           reassignment_counter = Some(19),
           reassignment_id = Some(Array(1, 2)),
           representative_package_id = someRepresentativePackageId,
+          participant_event_category = None,
+          notPersistedContractId = hashCid("1"),
+          internal_contract_id = 3,
+          create_key_hash = Some("abc"),
+          notPersistedContractKey = Some(someContractKey),
+        ),
+        DbDto.IdFilterActivateStakeholder(
+          IdFilter(
+            event_sequential_id = 3,
+            template_id = someTemplateId,
+            party_id = someParty3,
+            first_per_sequential_id = true,
+          )
+        ),
+        DbDto.IdFilterActivateStakeholder(
+          IdFilter(
+            event_sequential_id = 3,
+            template_id = someTemplateId,
+            party_id = someParty4,
+            first_per_sequential_id = false,
+          )
+        ),
+      )
+    }
+  }
+
+  "DbDto.addedEventDbDtos" should {
+    "populate correct DbDtos" in {
+      DbDto
+        .addedEventDbDtos(
+          event_offset = 1,
+          update_id = updateIdByteArray,
+          workflow_id = Some("w"),
+          record_time = 2,
+          synchronizer_id = someSynchronizerId,
+          trace_context = serializableTraceContext,
+          event_sequential_id = 3,
+          node_id = 4,
+          reassignment_counter = 19,
+          representative_package_id = someRepresentativePackageId,
+          participant_event_category = 2,
+          notPersistedContractId = hashCid("1"),
+          internal_contract_id = 3,
+          create_key_hash = Some("abc"),
+          notPersistedContractKey = Some(someContractKey),
+        )(
+          party_ids = someParties("party3", "party4"),
+          template_id = someTemplateId,
+        )
+        .toList should contain theSameElementsInOrderAs List(
+        DbDto.EventActivate(
+          event_offset = 1,
+          update_id = updateIdByteArray,
+          workflow_id = Some("w"),
+          command_id = None,
+          submitters = None,
+          record_time = 2,
+          synchronizer_id = someSynchronizerId,
+          trace_context = serializableTraceContext,
+          external_transaction_hash = None,
+          traffic_cost = None,
+          event_type = PersistentEventType.Add.asInt,
+          event_sequential_id = 3,
+          node_id = 4,
+          additional_witnesses = None,
+          source_synchronizer_id = None,
+          reassignment_counter = Some(19),
+          reassignment_id = None,
+          representative_package_id = someRepresentativePackageId,
+          participant_event_category = Some(2),
           notPersistedContractId = hashCid("1"),
           internal_contract_id = 3,
           create_key_hash = Some("abc"),
@@ -246,6 +317,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           assignment_exclusivity = None,
           target_synchronizer_id = None,
           reassignment_counter = None,
+          participant_event_category = None,
           contract_id = hashCid("23"),
           internal_contract_id = Some(3),
           template_id = someTemplateId,
@@ -346,6 +418,96 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           assignment_exclusivity = Some(10),
           target_synchronizer_id = Some(someSynchronizerId2),
           reassignment_counter = Some(234),
+          participant_event_category = None,
+          contract_id = hashCid("23"),
+          internal_contract_id = Some(3),
+          template_id = someTemplateId,
+          package_id = somePackageId,
+          stakeholders = someParties("1", "2", "3"),
+          ledger_effective_time = None,
+          notPersistedContractKey = Some(someContractKey),
+        ),
+        DbDto.IdFilterDeactivateStakeholder(
+          IdFilter(
+            event_sequential_id = 3,
+            template_id = someTemplateId,
+            party_id = Ref.Party.assertFromString("1"),
+            first_per_sequential_id = true,
+          )
+        ),
+        DbDto.IdFilterDeactivateStakeholder(
+          IdFilter(
+            event_sequential_id = 3,
+            template_id = someTemplateId,
+            party_id = Ref.Party.assertFromString("2"),
+            first_per_sequential_id = false,
+          )
+        ),
+        DbDto.IdFilterDeactivateStakeholder(
+          IdFilter(
+            event_sequential_id = 3,
+            template_id = someTemplateId,
+            party_id = Ref.Party.assertFromString("3"),
+            first_per_sequential_id = false,
+          )
+        ),
+      )
+    }
+  }
+
+  "DbDto.removedEventDbDtos" should {
+    "populate correct DbDtos" in {
+      DbDto
+        .removedEventDbDtos(
+          event_offset = 1,
+          update_id = updateIdByteArray,
+          workflow_id = Some("w"),
+          record_time = 2,
+          synchronizer_id = someSynchronizerId,
+          trace_context = serializableTraceContext,
+          event_sequential_id = 3,
+          node_id = 4,
+          deactivated_event_sequential_id = Some(10),
+          exercise_actors = Some(someParties("1", "2")),
+          reassignment_counter = 234,
+          participant_event_category = 3,
+          contract_id = hashCid("23"),
+          internal_contract_id = Some(3),
+          template_id = someTemplateId,
+          package_id = somePackageId,
+          stakeholders = someParties("1", "2", "3"),
+          notPersistedContractKey = Some(someContractKey),
+        )
+        .toList should contain theSameElementsInOrderAs List(
+        DbDto.EventDeactivate(
+          event_offset = 1,
+          update_id = updateIdByteArray,
+          workflow_id = Some("w"),
+          command_id = None,
+          submitters = None,
+          record_time = 2,
+          synchronizer_id = someSynchronizerId,
+          trace_context = serializableTraceContext,
+          external_transaction_hash = None,
+          traffic_cost = None,
+          event_type = PersistentEventType.Remove.asInt,
+          event_sequential_id = 3,
+          node_id = 4,
+          deactivated_event_sequential_id = Some(10),
+          additional_witnesses = None,
+          exercise_choice = None,
+          exercise_choice_interface_id = None,
+          exercise_argument = None,
+          exercise_result = None,
+          exercise_actors = Some(someParties("1", "2")),
+          exercise_last_descendant_node_id = None,
+          exercise_argument_compression = None,
+          exercise_result_compression = None,
+          reassignment_id = None,
+          assignment_exclusivity = None,
+          target_synchronizer_id = None,
+          reassignment_counter = Some(234),
+          participant_event_category = Some(3),
           contract_id = hashCid("23"),
           internal_contract_id = Some(3),
           template_id = someTemplateId,

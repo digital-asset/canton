@@ -8,8 +8,14 @@ import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.block.AsyncWriterParameters
-import com.digitalasset.canton.synchronizer.sequencer.config.AlphaSequencerChannelConfig.defaultMaxActiveSequencerChannels
+import com.digitalasset.canton.synchronizer.sequencer.config.AlphaSequencerChannelConfig.{
+  defaultMaxActiveSequencerChannels,
+  defaultMaxMetadataWaitingTime,
+  defaultSequencerChannelTtl,
+}
 import io.scalaland.chimney.dsl.*
+
+import scala.concurrent.duration.DurationInt
 
 /** Async block sequencer writer control parameters
   *
@@ -77,8 +83,8 @@ final case class SequencerNodeParameterConfig(
     override val betaVersionSupport: Boolean = false,
     override val dontWarnOnDeprecatedPV: Boolean = false,
     maxConfirmationRequestsBurstFactor: PositiveDouble = PositiveDouble.tryCreate(0.5),
-    override val batching: BatchingConfig = BatchingConfig(),
-    override val caching: CachingConfigs = CachingConfigs(),
+    override val batching: SequencerBatchingConfig = SequencerBatchingConfig(),
+    override val caching: SequencerCachingConfigs = SequencerCachingConfigs(),
     override val watchdog: Option[WatchdogConfig] = None,
     alphaSequencerChannelSupport: Option[AlphaSequencerChannelConfig] = None,
     asyncWriter: AsyncWriterConfig = AsyncWriterConfig(),
@@ -143,13 +149,23 @@ final case class LsuSequencingBoundsOverride(
   *
   * @param maxActiveSequencerChannels
   *   The Maximum concurrently active sequencer channels that the sequencer node supports.
+  * @param sequencerChannelTtl
+  *   The maximum lifetime of an individual sequencer channel, after which it is automatically
+  *   closed. Measured from when the first member connects.
+  * @param maxMetadataWaitingTime
+  *   The maximum time a channel may stay pending before it sends its channel metadata. After this
+  *   timeout it is automatically closed.
   */
 final case class AlphaSequencerChannelConfig(
-    // TODO(#21339): Enforce the maximum number of sequencer channels; config already listed to avoid empty case class
-    maxActiveSequencerChannels: config.RequireTypes.PositiveInt = defaultMaxActiveSequencerChannels
+    maxActiveSequencerChannels: config.RequireTypes.PositiveInt = defaultMaxActiveSequencerChannels,
+    sequencerChannelTtl: config.PositiveFiniteDuration = defaultSequencerChannelTtl,
+    maxMetadataWaitingTime: config.PositiveFiniteDuration = defaultMaxMetadataWaitingTime,
 )
 
 object AlphaSequencerChannelConfig {
   lazy val defaultMaxActiveSequencerChannels: PositiveInt =
     config.RequireTypes.PositiveInt.tryCreate(10)
+
+  lazy val defaultSequencerChannelTtl = config.PositiveFiniteDuration(10.minutes)
+  lazy val defaultMaxMetadataWaitingTime = config.PositiveFiniteDuration(2.minutes)
 }

@@ -11,6 +11,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.networking.grpc.GrpcError.GrpcServiceUnavailable
+import com.digitalasset.canton.sequencing.channel.errors.SequencerChannelErrors.PoolCapacityExhausted
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason
 import com.digitalasset.canton.sequencing.client.channel.endpoint.SequencerChannelClientEndpoint
 import com.digitalasset.canton.sequencing.client.transports.GrpcSubscriptionError
@@ -59,6 +60,7 @@ trait SequencerChannelProtocolProcessor extends FlagCloseable with NamedLogging 
   // These accessors enable tests to observe and interact with all protocol processor implementations.
   def isChannelConnected: Boolean = this.isConnected.get()
   def hasChannelCompleted: Boolean = this.hasCompleted.get()
+  def hasChannelEndpoint: Boolean = this.channelEndpoint.get().nonEmpty
 
   /** Notification that the processor is now connected and can begin sending and receiving messages.
     */
@@ -154,6 +156,11 @@ trait SequencerChannelProtocolProcessor extends FlagCloseable with NamedLogging 
       case Success(SubscriptionCloseReason.Closed) =>
         logger.debug(s"$channel is being closed")
         Either.unit
+      case Success(GrpcSubscriptionError(err))
+          if err.decodedCantonError.exists(_.code.id == PoolCapacityExhausted.id) =>
+        // The sequencer channel pool is full; transient, the caller is expected to retry later.
+        logger.info(s"$channel is being closed because the sequencer channel pool is full: $err")
+        Left(s"$channel closed due to PoolCapacityExhausted (sequencer channel pool is full)")
       case Success(GrpcSubscriptionError(sequencerUnavailable: GrpcServiceUnavailable)) =>
         // Log GrpcServiceUnavailable as info which happens when a reconnect after a disconnect fails
         // because the sequencer is not ready yet.

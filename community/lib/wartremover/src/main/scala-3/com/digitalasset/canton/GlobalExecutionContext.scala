@@ -33,7 +33,7 @@ object GlobalExecutionContext extends WartTraverser {
 
   val messageGlobal: String = "The global execution context should not be used."
   val messageParasitic: String =
-    "Use a DirectExecutionContext instead of ExecutionContext.parasitic."
+    "Use DirectExecutionContext.directExecutionContext instead of ExecutionContext.parasitic."
 
   @SuppressWarnings(Array("org.wartremover.warts.GlobalExecutionContext"))
   def apply(u: WartUniverse): u.Traverser =

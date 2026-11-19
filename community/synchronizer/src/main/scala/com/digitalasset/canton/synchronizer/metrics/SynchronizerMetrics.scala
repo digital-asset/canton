@@ -20,9 +20,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.environment.BaseMetrics
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.metrics.{
-  ActiveRequestsMetrics,
   CryptoMetrics,
   DbStorageHistograms,
   DbStorageMetrics,
@@ -72,11 +70,8 @@ class SequencerMetrics(
   override val declarativeApiMetrics: DeclarativeApiMetrics =
     new DeclarativeApiMetrics(prefix, openTelemetryMetricsFactory)
 
-  override val grpcMetrics: GrpcServerMetricsX =
-    (
-      new DamlGrpcServerMetrics(openTelemetryMetricsFactory, "sequencer"),
-      new ActiveRequestsMetrics(openTelemetryMetricsFactory, "sequencer"),
-    )
+  override val grpcMetrics: DamlGrpcServerMetrics =
+    new DamlGrpcServerMetrics(openTelemetryMetricsFactory, "sequencer")
 
   override val healthMetrics: HealthMetrics = new HealthMetrics(openTelemetryMetricsFactory)
 
@@ -84,10 +79,7 @@ class SequencerMetrics(
     new BftOrderingMetrics(
       histograms.bftOrdering,
       openTelemetryMetricsFactory,
-      (
-        new DamlGrpcServerMetrics(openTelemetryMetricsFactory, "bftordering"),
-        new ActiveRequestsMetrics(openTelemetryMetricsFactory, "bftordering"),
-      ),
+      new DamlGrpcServerMetrics(openTelemetryMetricsFactory, "bftordering"),
       new HealthMetrics(openTelemetryMetricsFactory),
     )
 
@@ -466,11 +458,8 @@ class MediatorMetrics(
 
   private implicit val mc: MetricsContext = MetricsContext.Empty
 
-  override val grpcMetrics: GrpcServerMetricsX =
-    (
-      new DamlGrpcServerMetrics(openTelemetryMetricsFactory, "mediator"),
-      new ActiveRequestsMetrics(openTelemetryMetricsFactory, "mediator"),
-    )
+  override val grpcMetrics: DamlGrpcServerMetrics =
+    new DamlGrpcServerMetrics(openTelemetryMetricsFactory, "mediator")
   override val healthMetrics: HealthMetrics = new HealthMetrics(openTelemetryMetricsFactory)
 
   override val prefix: MetricName = histograms.prefix

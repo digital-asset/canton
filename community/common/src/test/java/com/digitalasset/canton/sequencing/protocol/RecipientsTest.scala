@@ -197,6 +197,16 @@ class RecipientsTest
         NonEmpty.mk(Set, recP2, recP3, recP4, recP6)
     }
 
+    "correctly check leaf recipients" in {
+      Seq(recP1, recP2, recP4, recP6).foreach(recipients.isLeafRecipient(_) shouldBe true)
+      Seq(recP3, recP5).foreach(recipients.isLeafRecipient(_) shouldBe false)
+      recipients.isLeafRecipient(recP7) shouldBe false
+
+      // A leaf in one tree is enough, even if it is an inner node in another tree
+      Recipients(NonEmpty(Seq, t3, RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, recP3))))
+        .isLeafRecipient(recP3) shouldBe true
+    }
+
     "correctly compute depth of tree" in {
       t1.depth shouldBe 1
       t2.depth shouldBe 1

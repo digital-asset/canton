@@ -469,6 +469,7 @@ private[lf] final class PhaseOne(
           case BShiftNumeric => SBShiftNumeric
           case BInt64ToNumeric => SBInt64ToNumeric
           case BTextToNumeric => SBTextToNumeric
+          case BTextToContractId => SBTextToContractId
           case BNumericToInt64 => SBNumericToInt64
           case BNumericToBigNumeric => SBNumericToBigNumeric
           case BBigNumericToNumeric => SBBigNumericToNumeric
@@ -501,6 +502,14 @@ private[lf] final class PhaseOne(
           case BAnyExceptionMessage => SBAnyExceptionMessage
 
           case BFailWithStatus => SBFailWithStatus
+
+          case BAddUint256 | BSubUint256 | BMulUint256 | BDivUint256 | BModUint256 | BExpUint256 |
+              BAndUint256 | BOrUint256 | BXorUint256 | BNotUint256 | BShlUint256 | BShrUint256 |
+              BUint256ToText | BTextToUint256 | BInt64ToUint256 | BUint256ToInt64 | BAddModUint256 |
+              BMulModUint256 | BSDivUint256 | BSModUint256 | BSltUint256 | BSgtUint256 |
+              BSarUint256 | BByteUint256 | BSignExtendUint256 =>
+            new NotImplement(bf.getClass.getSimpleName, 1)
+
         })
     }
   }
@@ -521,6 +530,7 @@ private[lf] final class PhaseOne(
       case BLDate(d) => SDate(d)
       case BLRoundingMode(roundingMode) => SInt64(roundingMode.ordinal.toLong)
       case BLFailureCategory(failureCategory) => SInt64(failureCategory.cantonCategoryId.toLong)
+      case BLUint256(_) => throw CompilationError(s"UInt256 not supported")
     })
 
   // ERecUpd(_, f2, ERecUpd(_, f1, e0, e1), e2) => (e0, [f1, f2], [e1, e2])

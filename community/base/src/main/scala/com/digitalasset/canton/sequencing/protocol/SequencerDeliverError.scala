@@ -193,6 +193,21 @@ object SequencerErrors extends SequencerErrorGroup {
   }
 
   @Explanation(
+    """This error happens when a submission request specifies recipients that are known to the synchronizer but are not currently authorized to receive events."""
+  )
+  @Resolution(
+    """Check the synchronizer topology at the sequencing time and ensure that each recipient is active and authorized. Retry after correcting the topology or recipient list."""
+  )
+  case object UnauthorizedRecipients
+      extends SequencerDeliverErrorCode(
+        id = "SEQUENCER_UNAUTHORIZED_RECIPIENTS",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    def apply(unauthorizedRecipients: Seq[Member]): SequencerDeliverError =
+      apply(s"Unauthorized recipients: ${unauthorizedRecipients.toList.take(1000).mkString(", ")}")
+  }
+
+  @Explanation(
     """This error occurs when the provided aggregation rule cannot be resolved against the topology state."""
   )
   @Resolution(

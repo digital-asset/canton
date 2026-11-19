@@ -95,11 +95,18 @@ final class GeneratorsProtocol(
 
       acsCommitmentLimits = StaticSynchronizerParameters.defaultAcsCommitmentLimitsUntil
         .orValue(allLimits.acsCommitmentLimits, protocolVersion)
+      bftOrdererLimits = StaticSynchronizerParameters.defaultBftOrdererLimitsUntil
+        .orValue(
+          allLimits.bftOrdererLimits
+            .copy(maxSequencersInSynchronizer = SynchronizerLimits.MaxSequencersInSynchronizer),
+          protocolVersion,
+        )
 
       synchronizerLimits = allLimits.copy(
         transactionProtocolLimits = transactionProtocolLimits,
         topologyLimits = topologyLimits,
         acsCommitmentLimits = acsCommitmentLimits,
+        bftOrdererLimits = bftOrdererLimits,
       )
       parameters = StaticSynchronizerParameters
         .create(
@@ -310,21 +317,9 @@ final class GeneratorsProtocol(
 
   implicit val requestIdArb: Arbitrary[RequestId] = genArbitrary
 
-  implicit val rollbackContextArb: Arbitrary[RollbackContext] =
-    Arbitrary[RollbackContext](
-      if (protocolVersion >= ProtocolVersion.v36) {
-        Gen.oneOf(true, false).map(inRollback => NoPathRollbackContext(inRollback))
-      } else {
-        boundedListGen[PositiveInt].map(l =>
-          PathRollbackContext(l.toVector, PathRollbackContext.firstChild)
-        )
-      }
-    )
-
-  val createdContractRolledBackArb: Arbitrary[Boolean] =
-    Arbitrary(
-      if (protocolVersion >= ProtocolVersion.v36) Gen.const(false)
-      else Gen.oneOf(true, false)
+  implicit val rollbackContextArb: Arbitrary[RollbackScope] =
+    Arbitrary[RollbackScope](
+      Gen.oneOf(true, false).map(inRollback => RollbackScope(inRollback))
     )
 
   implicit val contractReassignmentBatch: Arbitrary[ContractsReassignmentBatch] = {

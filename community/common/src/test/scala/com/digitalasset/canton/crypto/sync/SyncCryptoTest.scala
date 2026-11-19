@@ -8,12 +8,12 @@ import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.config.KmsConfig.Driver
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
-  BatchingConfig,
   CachingConfigs,
   CryptoConfig,
   CryptoProvider,
   SessionEncryptionKeyCacheConfig,
   SessionSigningKeysConfig,
+  TestBatchingConfig,
 }
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner
 import com.digitalasset.canton.crypto.verifier.SyncCryptoVerifier
@@ -177,7 +177,7 @@ trait SyncCryptoTest
       CommonMockMetrics.cryptoMetrics,
       executorService,
       timeouts,
-      BatchingConfig(),
+      TestBatchingConfig(),
       loggerFactory,
       NoReportingTracerProvider,
       new ExecutorServiceMetrics(NoOpMetricsFactory),

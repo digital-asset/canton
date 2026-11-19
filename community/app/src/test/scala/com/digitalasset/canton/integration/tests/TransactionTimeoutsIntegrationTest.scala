@@ -16,7 +16,7 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseProgrammableSequencer}
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
-import com.digitalasset.canton.sequencing.SequencedSerializedEvent
+import com.digitalasset.canton.sequencing.ConnectionSerializedEvent
 import com.digitalasset.canton.sequencing.client.DelayedSequencerClient
 import com.digitalasset.canton.sequencing.client.DelayedSequencerClient.{
   DelaySequencerClient,
@@ -258,8 +258,8 @@ abstract class TransactionTimeoutsIntegrationTest
           case _ => false
         }
 
-      override def apply(event: SequencedSerializedEvent): DelaySequencerClient = {
-        if (isConfirmationResponse(event.underlying.value.content)) {
+      override def apply(event: ConnectionSerializedEvent): DelaySequencerClient = {
+        if (isConfirmationResponse(event.signedEvent.content)) {
           val count = confirmationResponseCount.incrementAndGet()
           logger.info(s"Received confirmation response #$count")
           if (count == 1) {

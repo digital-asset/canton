@@ -102,6 +102,14 @@ class TeaMemoryTrafficStore(override val loggerFactory: NamedLoggerFactory)(impl
   ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[SubmissionCorrelation]] =
     EitherT.rightT(lock.exclusive(correlations.get(key)))
 
+  override def deleteCorrelation(key: CorrelationKey, insertedAt: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Unit] =
+    EitherT.rightT(lock.exclusive {
+      if (correlations.get(key).exists(_.insertedAt == insertedAt))
+        correlations.remove(key).discard
+    })
+
   override def getBalance(accountId: AccountId)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[AccountState]] =

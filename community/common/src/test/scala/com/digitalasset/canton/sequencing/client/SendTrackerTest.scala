@@ -44,8 +44,8 @@ class SendTrackerTest extends AnyWordSpec with BaseTest with MetricsUtils with F
   private lazy val msgId1 = MessageId.tryCreate("msgId1")
   private lazy val msgId2 = MessageId.tryCreate("msgId2")
 
-  private def sign(event: RawProtocolEvent): SignedContent[RawProtocolEvent] =
-    SignedContent(event, SymbolicCrypto.emptySignature, None, testedProtocolVersion)
+  private def sign(event: RawProtocolEvent): AggregatedSignedContent[RawProtocolEvent] =
+    AggregatedSignedContent(event, SymbolicCrypto.emptySignature, testedProtocolVersion)
 
   private def deliverDefault(timestamp: CantonTimestamp): SequencedProtocolEvent =
     SequencedEventWithTraceContext(

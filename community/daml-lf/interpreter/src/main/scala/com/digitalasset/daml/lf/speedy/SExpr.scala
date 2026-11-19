@@ -236,7 +236,7 @@ private[lf] object SExpr {
   }
 
   /** Location annotation. When encountered the location is stored in the 'lastLocation' variable of
-    * the machine. When commit is begun the location is stored in 'commitLocation'.
+    * the machine.
     */
   final case class SELocation(loc: Location, expr: SExpr) extends SExpr {
     override def execute[Q](machine: Machine[Q]): Control.Expression = {

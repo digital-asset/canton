@@ -3,6 +3,7 @@
 // create the synchronizers
 val iouAlias = "iou"
 val paintAlias = "paint"
+val protocolVersion = ProtocolVersion.forSynchronizer
 
 val iouSynchronizerOwner = iou_sequencer
 val iouId = bootstrap
@@ -12,8 +13,7 @@ val iouId = bootstrap
     mediators = Seq(iou_mediator),
     synchronizerOwners = Seq(iouSynchronizerOwner),
     synchronizerThreshold = PositiveInt.one,
-    staticSynchronizerParameters =
-      StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
+    staticSynchronizerParameters = StaticSynchronizerParameters.defaults(protocolVersion),
   )
   .logical
 
@@ -25,8 +25,7 @@ val paintId = bootstrap
     mediators = Seq(paint_mediator),
     synchronizerOwners = Seq(paintSynchronizerOwner),
     synchronizerThreshold = PositiveInt.one,
-    staticSynchronizerParameters =
-      StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
+    staticSynchronizerParameters = StaticSynchronizerParameters.defaults(protocolVersion),
   )
   .logical
 
@@ -38,34 +37,37 @@ paintSynchronizerOwner.topology.synchronizer_parameters
   .propose_update(paintId, _.update(assignmentExclusivityTimeout = 2 seconds))
 
 // enable multi-synchronizer topology feature flag for all participants for both synchronizers
-val featureFlag = Seq(
-  SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableMultiSynchronizer
-)
-participant1.topology.synchronizer_trust_certificates.propose(
-  participant1,
-  iouId,
-  featureFlags = featureFlag,
-)
-participant2.topology.synchronizer_trust_certificates.propose(
-  participant2,
-  iouId,
-  featureFlags = featureFlag,
-)
-participant3.topology.synchronizer_trust_certificates.propose(
-  participant3,
-  iouId,
-  featureFlags = featureFlag,
-)
-participant2.topology.synchronizer_trust_certificates.propose(
-  participant2,
-  paintId,
-  featureFlags = featureFlag,
-)
-participant3.topology.synchronizer_trust_certificates.propose(
-  participant3,
-  paintId,
-  featureFlags = featureFlag,
-)
+// The feature flag is only needed before protocol version 37
+if (protocolVersion < ProtocolVersion.v37) {
+  val featureFlag = Seq(
+    SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableMultiSynchronizer
+  )
+  participant1.topology.synchronizer_trust_certificates.propose(
+    participant1,
+    iouId,
+    featureFlags = featureFlag,
+  )
+  participant2.topology.synchronizer_trust_certificates.propose(
+    participant2,
+    iouId,
+    featureFlags = featureFlag,
+  )
+  participant3.topology.synchronizer_trust_certificates.propose(
+    participant3,
+    iouId,
+    featureFlags = featureFlag,
+  )
+  participant2.topology.synchronizer_trust_certificates.propose(
+    participant2,
+    paintId,
+    featureFlags = featureFlag,
+  )
+  participant3.topology.synchronizer_trust_certificates.propose(
+    participant3,
+    paintId,
+    featureFlags = featureFlag,
+  )
+}
 
 // connect participants to the synchronizers
 participant1.synchronizers.connect_local(iou_sequencer, alias = iouAlias)

@@ -32,6 +32,14 @@ message SubmissionTrackingData {
   // using a oneof as an extension point for other tracking types in the future
   oneof tracking {
     TransactionSubmissionTrackingData transaction = 1;
+    ReassignmentSubmissionTrackingData reassignment = 2;
+  }
+}
+
+message RejectionCause {
+  oneof cause {
+    google.protobuf.Empty timeout = 1;
+    CommandRejected.GrpcRejectionReasonTemplate rejection_reason_template = 2;
   }
 }
 
@@ -40,11 +48,10 @@ message TransactionSubmissionTrackingData {
   RejectionCause rejection_cause = 2;
   string physical_synchronizer_id = 3;
   bytes transaction_hash = 4;
+}
 
-  message RejectionCause {
-    oneof cause {
-      google.protobuf.Empty timeout = 1;
-      CommandRejected.GrpcRejectionReasonTemplate rejection_reason_template = 2;
-    }
-  }
+message ReassignmentSubmissionTrackingData {
+  CompletionInfo completion_info = 1;
+  RejectionCause rejection_cause = 2;
+  string physical_synchronizer_id = 3;
 }

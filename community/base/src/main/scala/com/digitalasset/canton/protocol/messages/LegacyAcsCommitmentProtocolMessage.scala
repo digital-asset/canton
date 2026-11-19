@@ -15,14 +15,14 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionValidation,
   RepresentativeProtocolVersion,
+  UnsupportedProtoCodec,
   VersionedProtoCodec,
   VersioningCompanion,
 }
 import com.digitalasset.nonempty.NonEmpty
 
-/** INTERNAL protocol message type used for ACS commitments in transit starting with PV35. Do NOT
-  * USE this message outside of envelope transit (e.g.,
-  * `ClosedUncompressedEnvelope.tryFromProtocolMessage` and
+/** INTERNAL protocol message type used for ACS commitments in transit. Do NOT USE this message
+  * outside of envelope transit (e.g., `ClosedUncompressedEnvelope.tryFromProtocolMessage` and
   * `ClosedUncompressedEnvelope.toOpenEnvelope`).
   *
   * This type allows us to hide the signatures from the sequencer so that they are not verified when
@@ -79,7 +79,8 @@ object LegacyAcsCommitmentProtocolMessage
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
-    )
+    ),
+    ProtoVersion(31) -> UnsupportedProtoCodec(fromInclusive = ProtocolVersion.v38),
   )
 
   private[messages] def fromProtoV30(
@@ -100,7 +101,7 @@ object LegacyAcsCommitmentProtocolMessage
           ProtoValidation.MaxCollectionSize,
         )
       signatures <- ProtoConverter.parseRequiredNonEmpty(
-        Signature.fromProtoV30,
+        Signature.fromProtoV30(pvv, _),
         "signatures",
         signaturesSeqP,
       )

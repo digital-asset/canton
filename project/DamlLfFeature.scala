@@ -49,6 +49,12 @@ object DamlLfFeature {
     }
   }
 
+  val featureUint256 = DamlLfFeature(
+    name = "Uint256",
+    cppFlag = "DAML_UINT256",
+    versionRange = VersionRange.From(v2_dev),
+  )
+
   val featureUnstable = DamlLfFeature(
     name = "Unstable, experimental features",
     cppFlag = "DAML_UNSTABLE",
@@ -151,6 +157,12 @@ object DamlLfFeature {
     versionRange = VersionRange.From(v2_3),
   )
 
+  val featureTextToContractId = DamlLfFeature(
+    name = "Text to ContractId conversion",
+    cppFlag = "DAML_TEXT_TO_CONTRACT_ID",
+    versionRange = VersionRange.From(v2_dev),
+  )
+
   val featurePV34 = DamlLfFeature(
     name = "LF versions supported by PV34",
     cppFlag = "DAML_PV34",
@@ -193,11 +205,13 @@ object DamlLfFeature {
     "featureUnsafeFromInterface" -> featureUnsafeFromInterface,
     "featureExtendedCryptoPrimitives" -> featureExtendedCryptoPrimitives,
     "featureStableCallStack" -> featureStableCallStack,
+    "featureTextToContractId" -> featureTextToContractId,
     "featurePV34" -> featurePV34,
     "featurePV35" -> featurePV35,
     "featurePV36" -> featurePV36,
     "featurePV37" -> featurePV37,
     "featureUnpack" -> featureUnpack,
+    "featureUint256" -> featureUint256,
   )
 
   def generateFeaturesScala = Def.task {

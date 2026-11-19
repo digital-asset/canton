@@ -105,8 +105,7 @@ final class SequencerWriterSourceTest
   }
 
   private class Env(
-      keepAliveInterval: Option[NonNegativeFiniteDuration],
-      blockSequencerMode: Boolean,
+      keepAliveInterval: Option[NonNegativeFiniteDuration]
   ) extends FlagCloseableAsync {
     override val timeouts: ProcessingTimeout = SequencerWriterSourceTest.this.timeouts
     protected val logger: TracedLogger = SequencerWriterSourceTest.this.logger
@@ -125,7 +124,6 @@ final class SequencerWriterSourceTest
     ) extends InMemorySequencerStore(
           testedProtocolVersion,
           sequencerMember,
-          blockSequencerMode = blockSequencerMode,
           loggerFactory = loggerFactory,
           timeouts = timeouts,
           sequencerMetrics = SequencerMetrics.noop("sequencer-writer-source-test"),
@@ -182,7 +180,6 @@ final class SequencerWriterSourceTest
         SequencerMetrics.noop(suiteName),
         lsuSequencingBounds = None,
         drSequencingTimeUpperBound = None,
-        blockSequencerMode = blockSequencerMode,
       )(executorService, implicitly[TraceContext], implicitly[ErrorLoggingContext])
         .toMat(Sink.ignore)(Keep.both),
       errorLogMessagePrefix = "Writer flow failed",
@@ -209,10 +206,9 @@ final class SequencerWriterSourceTest
   }
 
   private def withEnv(
-      keepAliveInterval: Option[NonNegativeFiniteDuration] = None,
-      blockSequencerMode: Boolean = true,
+      keepAliveInterval: Option[NonNegativeFiniteDuration] = None
   )(testCode: Env => Future[Assertion]): Future[Assertion] = {
-    val env = new Env(keepAliveInterval, blockSequencerMode)
+    val env = new Env(keepAliveInterval)
     val result = testCode(env)
     result.onComplete(_ => env.close())
     result
@@ -329,6 +325,47 @@ final class SequencerWriterSourceTest
         events.events should have size 1
         events.events.headOption.map(_.event).value should matchPattern {
           case DeliverStoreEvent(_, `messageId2`, _, _, _, _) =>
+        }
+      }
+    }
+  }
+
+  "generating an event from an unknown sender" should {
+    "return SenderUnknown even when the recipient is registered" in withEnv() { implicit env =>
+      import env.*
+
+      for {
+        _ <- store.registerMember(bob, CantonTimestamp.Epoch)
+        batch = Batch.fromClosed(
+          testedProtocolVersion,
+          ClosedUncompressedEnvelope.create(
+            ByteString.EMPTY,
+            Recipients.cc(bob),
+            Seq.empty,
+            testedProtocolVersion,
+          ),
+        )
+        submission = SubmissionRequest.tryCreate(
+          alice,
+          MessageId.tryCreate("test-unknown-sender"),
+          batch,
+          CantonTimestamp.MaxValue,
+          None,
+          None,
+          testedProtocolVersion,
+        )
+        result <- new SendEventGenerator(
+          SequencerWriterStore.singleInstance(store),
+          () => PayloadId(CantonTimestamp.Epoch.immediateSuccessor),
+          testedProtocolVersion,
+        ).generate(Left(submission)).value
+      } yield {
+        result match {
+          case Left(error) =>
+            SequencerErrors.SenderUnknown.unapply(
+              error.rpcStatusWithoutLoggingContext()
+            ) shouldBe defined
+          case other => fail(s"Expected an unknown-sender error, got $other")
         }
       }
     }

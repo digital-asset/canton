@@ -75,6 +75,7 @@ object Hash {
   object HashingError {
     final case class ForbiddenContractId()
         extends HashingError("Contract IDs are not supported in contract keys.")
+    final case class Unsupported(message: String) extends HashingError(message)
   }
 
   sealed abstract class NodeHashingError(val msg: String) extends Exception
@@ -699,6 +700,8 @@ object Hash {
           addLong(v)
         case Value.ValueNumeric(v) =>
           addNumeric(v)
+        case Value.ValueUint256(_) =>
+          throw HashingError.Unsupported("uint256 not supported by Legacy hashing")
         case Value.ValueTimestamp(v) =>
           addLong(v.micros)
         case Value.ValueDate(v) =>
@@ -819,6 +822,8 @@ object Hash {
           addLong(v.micros)
         case Value.ValueNumeric(v) =>
           addNumeric(v)
+        case Value.ValueUint256(_) =>
+          throw HashingError.Unsupported("uint256 not supported by UpgradeFriendly hashing")
         case Value.ValueParty(v) =>
           addString(v)
         case Value.ValueText(v) =>
@@ -892,6 +897,10 @@ object Hash {
                   discard(addField.addByte(1.toByte, s"true (bool)"))
               case Value.ValueUnit =>
               // We never write unit
+              case Value.ValueUint256(_) =>
+                throw HashingError.Unsupported(
+                  "uint256 not supported by UpgradeFriendly hashing"
+                )
             }
           case Value.ValueRecord(_, fields) =>
             // No default value for records
@@ -1090,10 +1099,10 @@ object Hash {
       .addString(submitter)
       .build
 
-  def hashAssignmentReassignmentId(reassignmentId: Ref.HexString): Hash =
-    // Ok to enable upgradeFriendlyUnsafe, as addString does not have known security limitations.
+  def hashAssignmentReassignmentId(reassignmentId: Bytes): Hash =
+    // Ok to enable upgradeFriendlyUnsafe, as addBytes does not have known security limitations.
     builder(Purpose.AssignmentReassignmentId, noCid2String, upgradeFriendlyUnsafe = true)
-      .addString(reassignmentId)
+      .addBytes(reassignmentId, s"${reassignmentId.toHexString} (reassignmentId)")
       .build
 
   def deriveTransactionSeed(

@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.store
 import cats.data.{EitherT, OptionT}
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -97,7 +97,7 @@ object ContractAndKeyLookup {
       override type ContractsCreatedAtTime = CreationTime.CreatedAt
 
       override protected val loggerFactory: NamedLoggerFactory = namedLoggerFactory
-      implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
+      implicit val ec: ExecutionContext = directExecutionContext
 
       override def lookup(id: LfContractId)(implicit
           traceContext: TraceContext

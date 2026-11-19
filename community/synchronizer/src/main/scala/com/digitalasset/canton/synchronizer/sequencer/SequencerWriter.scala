@@ -8,7 +8,6 @@ import cats.syntax.bifunctor.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
@@ -24,7 +23,6 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SequencerWriter.*
-import com.digitalasset.canton.synchronizer.sequencer.WriterStartupError.FailedToInitializeFromSnapshot
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.synchronizer.sequencer.store.{
   SequencerMemberId,
@@ -36,7 +34,7 @@ import com.digitalasset.canton.synchronizer.sequencer.time.{
   LsuSequencingBounds,
 }
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager
-import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SimClock}
+import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.*
@@ -50,16 +48,9 @@ import org.apache.pekko.stream.scaladsl.{Keep, Sink}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.duration.*
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
-
-final case class OnlineSequencerCheckConfig(
-    onlineCheckInterval: config.NonNegativeFiniteDuration =
-      config.NonNegativeFiniteDuration.ofSeconds(5L),
-    offlineDuration: config.NonNegativeFiniteDuration =
-      config.NonNegativeFiniteDuration.ofSeconds(8L),
-)
 
 object TotalNodeCountValues {
   val SingleSequencerTotalNodeCount: PositiveInt = PositiveInt.tryCreate(1)
@@ -123,7 +114,6 @@ class SequencerWriter(
     rateLimitManagerO: Option[SequencerRateLimitManager],
     clock: Clock,
     expectedCommitMode: Option[CommitMode],
-    blockSequencerMode: Boolean,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -227,18 +217,15 @@ class SequencerWriter(
     * status operation and could be used by a process monitor to externally restart the sequencer.
     */
   def startOrLogError(
-      initialSnapshot: Option[SequencerInitialState],
-      resetWatermarkTo: => ResetWatermark,
+      resetWatermarkTo: => ResetWatermark
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    start(initialSnapshot, resetWatermarkTo).fold(
+    start(resetWatermarkTo).fold(
       err => logger.error(s"Failed to startup sequencer writer: $err"),
       identity,
     )
 
   def start(
-      // TODO(#18401): Move initialization from snapshot into the sequencer factory
-      initialSnapshot: Option[SequencerInitialState] = None,
-      resetWatermarkTo: => ResetWatermark,
+      resetWatermarkTo: => ResetWatermark
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, WriterStartupError, Unit] =
     synchronizeWithClosing(functionFullName) {
       def createStoreAndRunCrashRecovery()
@@ -264,14 +251,6 @@ class SequencerWriter(
                     () => writerStore.close(),
                   ) {
                     for {
-                      _ <- initialSnapshot
-                        .fold[EitherT[FutureUnlessShutdown, WriterStartupError, Unit]](
-                          EitherT.rightT(())
-                        )(snapshot =>
-                          generalStore
-                            .initializeFromSnapshot(snapshot)
-                            .leftMap(FailedToInitializeFromSnapshot.apply)
-                        )
                       // validate that the datastore has an appropriate commit mode set in order to run the writer
                       _ <- expectedCommitMode
                         .fold(EitherTUtil.unitUS[String])(writerStore.validateCommitMode)
@@ -289,20 +268,12 @@ class SequencerWriter(
                             writerStore.resetWatermark(timestamp).leftMap(_.toString)
                         }).leftMap(WriterStartupError.WatermarkResetError.apply)
                       }
-                      onlineTimestamp <- EitherT.right[WriterStartupError](
+                      // Time is determined by the underlying ordering service, so we can't
+                      // reliably wait here for the online timestamp.
+                      _ <- EitherT.right[WriterStartupError](
                         runRecovery(writerStore, resetWatermarkToValue)
                       )
                       _ <- EitherT.right(generalStore.resetAndPreloadBuffer())
-                      _ <-
-                        if (blockSequencerMode) {
-                          // In blockSequencerMode, time is determined by the underlying ordering service, so we can't
-                          // reliably wait here for the online timestamp.
-                          EitherTUtil.unitUS[WriterStartupError]
-                        } else {
-                          EitherT
-                            .right[WriterStartupError](waitForOnline(onlineTimestamp))
-                            .mapK(FutureUnlessShutdown.outcomeK)
-                        }
                     } yield ()
                   }
               } yield writerStore
@@ -380,43 +351,7 @@ class SequencerWriter(
       onlineTimestamp <- store.goOnline(
         goOnlineAt
       ) // actual online timestamp depends on other instances
-      _ = if (clock.isSimClock && clock.now < onlineTimestamp && !blockSequencerMode) {
-        logger.debug(s"The sequencer will not start unless sim clock moves to $onlineTimestamp")
-        logger.debug(
-          s"In order to prevent deadlocking in tests the clock's timestamp will now be advanced to $onlineTimestamp"
-        )
-        clock.asInstanceOf[SimClock].advanceTo(onlineTimestamp)
-      }
     } yield onlineTimestamp
-
-  /** When we go online we're given the value of the new watermark that is inserted for this
-    * sequencer. We cannot start the writer before this point to ensure that no events before this
-    * point are inserted. It may have already be surpassed in which case we can immediately start.
-    * Otherwise we wait until this point has been reached.
-    */
-  private def waitForOnline(
-      onlineTimestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[Unit] =
-    if (clock.now.isBefore(onlineTimestamp)) {
-      val durationToWait =
-        java.time.Duration.between(clock.now.toInstant, onlineTimestamp.toInstant)
-      logger.debug(
-        s"Delaying sequencer writer start for $durationToWait to reach our online watermark"
-      )
-
-      val onlineP = Promise[Unit]()
-      FutureUtil.doNotAwait(
-        clock
-          .scheduleAtCancelledOnShutdown(
-            _ => onlineP.success(()),
-            s"${getClass.getName}: completing online promise",
-            onlineTimestamp,
-          )
-          .unwrap,
-        s"wait for becoming online at $onlineTimestamp",
-      )
-      onlineP.future
-    } else Future.unit
 
   private def startWriter(
       store: SequencerWriterStore
@@ -461,7 +396,7 @@ class SequencerWriter(
               // Wait for the writer store to be closed before re-starting, otherwise we might end up with
               // concurrent write stores trying to connect to the DB within the same sequencer node
               closed.flatMap(_ =>
-                startOrLogError(None, SequencerWriter.DoNotResetWatermark)(traceContext)
+                startOrLogError(SequencerWriter.DoNotResetWatermark)(traceContext)
               ),
               "SequencerWriter recovery",
             )
@@ -539,7 +474,6 @@ object SequencerWriter {
       eventSignaller: EventSignaller[SequencerMemberId, Unit],
       protocolVersion: ProtocolVersion,
       loggerFactory: NamedLoggerFactory,
-      blockSequencerMode: Boolean,
       lsuSequencingBounds: Option[LsuSequencingBounds],
       drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
       metrics: SequencerMetrics,
@@ -564,7 +498,6 @@ object SequencerWriter {
           loggerFactory,
           protocolVersion,
           metrics,
-          blockSequencerMode,
           lsuSequencingBounds,
           drSequencingTimeUpperBound,
         )
@@ -587,7 +520,6 @@ object SequencerWriter {
       rateLimitManagerO,
       clock,
       writerConfig.commitModeValidation,
-      blockSequencerMode,
       processingTimeout,
       loggerFactory,
     )

@@ -3,16 +3,17 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import cats.data.EitherT
+import cats.data.{EitherT, Nested}
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.crypto.SynchronizerSnapshotSyncCryptoApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
-import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator.NoTrafficCostValidation
-import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
+import com.digitalasset.canton.sequencing.client.SequencerClientSend.{
+  PreparedSubmission,
+  SendRequestTimestamps,
+}
 import com.digitalasset.canton.sequencing.protocol.{AggregationRule, Batch, MessageId}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -26,6 +27,18 @@ trait SequencerClientSend {
   final def protocolVersion: ProtocolVersion = psid.protocolVersion
 
   implicit protected def executionContext: ExecutionContext
+
+  /** Builds and checks the request without sending it. See [[sendAsync]] for the parameters. */
+  def prepareSend(
+      batch: Batch[DefaultOpenEnvelope],
+      currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
+      timestamps: SendRequestTimestamps,
+      messageId: MessageId,
+      aggregationRule: Option[AggregationRule],
+  )(implicit
+      traceContext: TraceContext,
+      metricsContext: MetricsContext,
+  ): EitherT[FutureUnlessShutdown, SendAsyncClientError, PreparedSubmission]
 
   /** Sends a request to sequence a deliver event to the sequencer. If we fail to make the request
     * to the sequencer and are certain that it was not received by the sequencer an error is
@@ -79,10 +92,6 @@ trait SequencerClientSend {
     *   leave it empty and the sequencer client will retrieve it internally via the crypto client.
     * @param timestamps
     *   Aggregated timestamps needed for sending a request.
-    * @param trafficCostValidator
-    *   Validate the traffic cost of the submission batch against the local traffic state of the
-    *   member, only if traffic control is enabled for the sequencer. If validation fails, the
-    *   submission request is not sent to the sequencer and an error is returned.
     */
   def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
@@ -91,13 +100,18 @@ trait SequencerClientSend {
       messageId: MessageId = generateMessageId,
       aggregationRule: Option[AggregationRule] = None,
       callback: SendCallback = SendCallback.empty,
-      trafficCostValidator: TrafficCostValidator,
       amplify: Boolean = false,
       useConfirmationResponseAmplificationParameters: Boolean = false,
   )(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,
-  ): SendAsyncResult
+  ): SendAsyncResult =
+    Nested(
+      prepareSend(batch, currentSnapshotApproximation, timestamps, messageId, aggregationRule)
+        .flatMap(
+          _.sendAsync(callback, amplify, useConfirmationResponseAmplificationParameters).value
+        )
+    )
 
   protected[canton] def clock: Clock
 
@@ -110,7 +124,6 @@ trait SequencerClientSend {
       messageId: MessageId = generateMessageId,
       aggregationRule: Option[AggregationRule] = None,
       callback: SendCallback = SendCallback.empty,
-      trafficCostValidator: TrafficCostValidator = NoTrafficCostValidation,
       amplify: Boolean = false,
       useConfirmationResponseAmplificationParameters: Boolean = false,
   )(implicit
@@ -123,7 +136,6 @@ trait SequencerClientSend {
     messageId = messageId,
     aggregationRule = aggregationRule,
     callback = callback,
-    trafficCostValidator = trafficCostValidator,
     amplify = amplify,
     useConfirmationResponseAmplificationParameters = useConfirmationResponseAmplificationParameters,
   ).value.flatMap(identity)
@@ -151,6 +163,26 @@ trait SequencerClientSend {
 }
 
 object SequencerClientSend {
+
+  /** A submission request that passed the sequencer client checks and is ready to send. */
+  trait PreparedSubmission {
+
+    /** The cost of the submission request, calculated by this node using the current topology
+      * snapshot. None if traffic control parameters are missing or we're in replay mode.
+      */
+    def trafficCost: Option[Long]
+
+    /** Sends the prepared request, just like `SequencerClientSend.sendAsync`.
+      *
+      * Only call this once. Preparation fixes the message ID, so calling it again while the first
+      * send is still tracked fails with `SendAsyncClientError.DuplicateMessageId`.
+      */
+    def sendAsync(
+        callback: SendCallback,
+        amplify: Boolean,
+        useConfirmationResponseAmplificationParameters: Boolean,
+    ): SendAsyncResult
+  }
 
   /** Aggregates all the timestamps needed when sending a request.
     *

@@ -87,6 +87,9 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
   * @param dynamicallyOnboardedSequencerNames
   *   Names of sequencers that are not part of the initial network config, and can be added later as
   *   part of a test.
+  * @param sequencingParameters
+  *   If provided, the plugin will propose the given sequencing parameters. This only works if the
+  *   environment is automatically initialized, else the test must do it manually.
   * @param shouldGenerateEndpointsOnly
   *   If true, replaces addresses and ports only (instead of building a full config) to avoid their
   *   clashes. Useful for config file integration tests.
@@ -179,11 +182,10 @@ final class UseBftSequencer(
       config: CantonConfig,
       environment: TestConsoleEnvironment,
   ): Unit =
+    // Propose sequencing parameters if provided. This only works if the environment
+    //  is automatically initialized, else the test must do it manually.
     sequencingParameters.foreach { sequencingParameters =>
       val sequencingParametersByteString = sequencingParameters.toByteString
-      // > PV34: take the sequencer parameters from the topology.
-      //  This only works if the environment is automatically initialized,
-      //  else the test must do it manually.
       environment.runOnAllInitializedSynchronizersForAllOwners { case (owner, synchronizer) =>
         owner.topology.sequencing_parameters.propose(
           synchronizer.synchronizerId,
@@ -366,7 +368,6 @@ final class UseBftSequencer(
             val existingBlockSequencerConfig =
               config.sequencers.get(selfInstanceName).map(_.sequencer) match {
                 case Some(bft: SequencerConfig.BftSequencer) => bft.block
-                case Some(external: SequencerConfig.External) => external.block
                 case _ => BlockSequencerConfig()
               }
             if (shouldBenchmarkBftSequencer)

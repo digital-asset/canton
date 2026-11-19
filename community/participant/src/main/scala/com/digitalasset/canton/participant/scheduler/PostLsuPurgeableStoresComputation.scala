@@ -25,7 +25,6 @@ import scala.concurrent.ExecutionContext
 class PostLsuPurgeableStoresComputation(
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     syncPersistentStateManager: SyncPersistentStateManager,
-    acsDigestProcessorEnabled: Boolean,
     override val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
@@ -114,37 +113,31 @@ class PostLsuPurgeableStoresComputation(
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[Boolean] =
+  ): FutureUnlessShutdown[Boolean] = {
     // Check if the latest ACS digest checkpoint is after the upgrade time
-    if (acsDigestProcessorEnabled) {
-      logger.debug(
-        s"Checking if ACS digest processor has caught up for predecessor synchronizer ${synchronizerPredecessor.psid}"
-      )
-      val acsDigestCheckpoint = acsDigestStore.latestCheckpointUpTo(
-        Offset.MaxValue,
-        allCheckpointsFilter,
-      )
+    logger.debug(
+      s"Checking if ACS digest processor has caught up for predecessor synchronizer ${synchronizerPredecessor.psid}"
+    )
+    val acsDigestCheckpoint =
+      acsDigestStore.latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter)
 
-      acsDigestCheckpoint.map { checkpointO =>
-        logger.debug(
-          s"ACS digest processor latest checkpoint: $acsDigestCheckpoint"
-        )
-        checkpointO.fold(false) { checkpoint =>
-          if (checkpoint.timepoint.recordTime > synchronizerPredecessor.upgradeTime) {
-            logger.debug(
-              s"ACS digest processor has progressed beyond upgrade time ${synchronizerPredecessor.upgradeTime}) for predecessor ${synchronizerPredecessor.psid}, stores are safe to be purged"
-            )
-            true
-          } else {
-            logger.debug(
-              s"ACS digest processor has not yet progressed beyond upgrade time ${synchronizerPredecessor.upgradeTime}) for predecessor ${synchronizerPredecessor.psid}"
-            )
-            false
-          }
+    acsDigestCheckpoint.map { checkpointO =>
+      logger.debug(
+        s"ACS digest processor latest checkpoint: $acsDigestCheckpoint"
+      )
+      checkpointO.fold(false) { checkpoint =>
+        if (checkpoint.timepoint.recordTime > synchronizerPredecessor.upgradeTime) {
+          logger.debug(
+            s"ACS digest processor has progressed beyond upgrade time ${synchronizerPredecessor.upgradeTime}) for predecessor ${synchronizerPredecessor.psid}, stores are safe to be purged"
+          )
+          true
+        } else {
+          logger.debug(
+            s"ACS digest processor has not yet progressed beyond upgrade time ${synchronizerPredecessor.upgradeTime}) for predecessor ${synchronizerPredecessor.psid}"
+          )
+          false
         }
       }
-    } else {
-      logger.debug(s"Not considering ACS digest processor for store purging as it is disabled")
-      FutureUnlessShutdown.pure(true)
     }
+  }
 }

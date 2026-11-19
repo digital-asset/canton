@@ -35,6 +35,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
   actions: write
   issues: write
 

@@ -13,7 +13,7 @@ trait AbstractHttpServiceIntegrationTestFunsUserToken extends HttpServiceUserFix
   protected def headersWithUserAuth(
       user: Option[String]
   ) =
-    HttpServiceTestFixture.headersWithUserAuth(user)
+    HttpServiceTestFixture.headersWithUserAuth(user, ExpectedAudience)
 }
 
 /** Tests that may behave differently depending on

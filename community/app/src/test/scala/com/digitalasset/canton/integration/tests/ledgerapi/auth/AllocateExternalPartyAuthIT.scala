@@ -58,7 +58,7 @@ final class AllocateExternalPartyAuthIT
           cryptoProto.SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL,
         ),
       )
-    SigningPublicKey.fromProtoV30(protoKey).value
+    SigningPublicKey.fromProtoV30(testedProtocolVersionValidation, protoKey).value
   }
 
   override def serviceCall(

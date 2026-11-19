@@ -3,12 +3,14 @@
 
 package com.digitalasset.canton
 
+import cats.Id
 import com.digitalasset.canton.BaseTest.UnsupportedExternalPartyTest
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.topology.PartyKind
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalactic.source
+import org.scalactic.source.Position
 import org.scalatest.compatible.Assertion
 import org.scalatest.wordspec.{
   AnyWordSpecLike,
@@ -19,8 +21,9 @@ import org.scalatest.wordspec.{
 
 import scala.annotation.nowarn
 import scala.concurrent.Future
+import scala.language.implicitConversions
 
-/** Adds utilities for ignoring tests based on a predicate in FixtureAnyWordSpec tests. For example:
+/** Adds utilities for ignoring tests based on a predicate in various scalatest suites. For example:
   * {{{
   * class MyTest extends EnterpriseIntegrationTest with ProtocolVersionChecksFixtureAnyWordSpec {
   *   "some feature" onlyRunWithOrGreaterThan ProtocolVersion.v4 in { implicit env =>
@@ -31,101 +34,143 @@ import scala.concurrent.Future
   * }
   * }}}
   *
-  * See [[com.digitalasset.canton.BaseTest.testedProtocolVersion]] on how to set the protocol
-  * version for tests at runtime.
+  * @see
+  *   com.digitalasset.canton.BaseTest.testedProtocolVersion on how to set the protocol version for
+  *   tests at runtime.
   */
-trait TestPredicateFiltersFixtureAnyWordSpec {
-  this: TestEssentials & FixtureAnyWordSpecLike =>
+trait ProtocolVersionCheckString[F[_], FUS[_], A, Wrapper] {
+  protected def wrapper(condition: => Boolean): Wrapper
+  protected def partiesKind: PartyKind
+  protected def testedProtocolVersion: ProtocolVersion
 
-  @nowarn(
-    "cat=unused"
-  ) // Reason is not used but forces us to identify the reason which can be linked to a T O D O
-  def onlyLocalParty(reason: UnsupportedExternalPartyTest): Boolean = partiesKind == PartyKind.Local
+  def onlyRunWhen(condition: => Boolean): Wrapper = wrapper(condition)
 
-  implicit class CheckString(verb: String) {
-    def onlyRunWhen(condition: Boolean): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, condition)
-    def onlyRunWithOrGreaterThan(
-        minProtocolVersion: ProtocolVersion
-    ): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion >= minProtocolVersion)
+  // Reason is not used but forces us to identify the reason which can be linked to a T O D O
+  @nowarn("cat=unused")
+  def onlyRunWithLocalParty(reason: UnsupportedExternalPartyTest): Wrapper =
+    onlyRunWhen(partiesKind == PartyKind.Local)
 
-    def onlyRunWith(protocolVersion: ProtocolVersion): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion == protocolVersion)
+  def onlyRunWithOrGreaterThan(minProtocolVersion: ProtocolVersion): Wrapper =
+    onlyRunWhen(testedProtocolVersion >= minProtocolVersion)
 
-    @nowarn(
-      "cat=unused"
-    ) // Reason is not used but forces us to identify the reason which can be linked to a T O D O
-    def onlyRunWithLocalParty(
-        reason: UnsupportedExternalPartyTest
-    ): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, partiesKind == PartyKind.Local)
+  def onlyRunWith(protocolVersion: ProtocolVersion): Wrapper =
+    onlyRunWhen(testedProtocolVersion == protocolVersion)
 
-    def onlyRunWhen(condition: ProtocolVersion => Boolean): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, condition(testedProtocolVersion))
+  def onlyRunWhen(condition: ProtocolVersion => Boolean): Wrapper =
+    onlyRunWhen(condition(testedProtocolVersion))
 
-    def onlyRunLessThan(
-        pvUpperBoundExclusive: ProtocolVersion
-    ): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion < pvUpperBoundExclusive)
+  def onlyRunLessThan(pvUpperBoundExclusive: ProtocolVersion): Wrapper =
+    onlyRunWhen(testedProtocolVersion < pvUpperBoundExclusive)
 
-    def onlyRunWithOrLessThan(
-        pvUpperBoundInclusive: ProtocolVersion
-    ): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion <= pvUpperBoundInclusive)
-  }
-
-  implicit class ProtocolCheckTaggedString(verb: ResultOfTaggedAsInvocationOnString) {
-    def onlyRunWhen(condition: Boolean): OnlyRunWhenResultOfTaggedAsInvocationOnString =
-      new OnlyRunWhenResultOfTaggedAsInvocationOnString(verb, condition)
-
-    def onlyRunWithOrGreaterThan(
-        minProtocolVersion: ProtocolVersion
-    ): OnlyRunWhenResultOfTaggedAsInvocationOnString =
-      new OnlyRunWhenResultOfTaggedAsInvocationOnString(
-        verb,
-        testedProtocolVersion >= minProtocolVersion,
-      )
-
-    def onlyRunWithOrLessThan(
-        minProtocolVersion: ProtocolVersion
-    ): OnlyRunWhenResultOfTaggedAsInvocationOnString =
-      new OnlyRunWhenResultOfTaggedAsInvocationOnString(
-        verb,
-        testedProtocolVersion <= minProtocolVersion,
-      )
-  }
-
-  protected final class OnlyRunWhenResultOfTaggedAsInvocationOnString(
-      verb: ResultOfTaggedAsInvocationOnString,
-      condition: => Boolean,
-  ) {
-    def in(testFun: FixtureParam => Any /* Assertion */ )(implicit pos: source.Position): Unit =
-      if (condition) verb.in(testFun) else verb.ignore(testFun)
-  }
-  protected final class OnlyRunWhenWordSpecStringWrapper(
-      verb: WordSpecStringWrapper,
-      condition: => Boolean,
-  ) {
-    def in(testFun: FixtureParam => Any /* Assertion */ )(implicit pos: source.Position): Unit =
-      if (condition) verb.in(testFun) else verb.ignore(testFun)
-    def ignore(
-        testFun: FixtureParam => Any /* Assertion */
-    )(implicit pos: source.Position): Unit =
-      verb.ignore(testFun)
-
-    def when(testFun: => Unit /* Assertion */ )(implicit pos: source.Position): Unit =
-      if (condition) verb.when(testFun) else verb.ignore(() => testFun)
-
-    def andWhen(otherCondition: => Boolean) =
-      new OnlyRunWhenWordSpecStringWrapper(verb, condition && otherCondition)
-  }
+  def onlyRunWithOrLessThan(pvUpperBoundInclusive: ProtocolVersion): Wrapper =
+    onlyRunWhen(testedProtocolVersion <= pvUpperBoundInclusive)
 }
 
-/** Adds utilities for checking protocol versions in FixtureAsyncWordSpec tests. For example:
+object ProtocolVersionCheckString {
+  private final class Impl[Verb, F[_], FUS[_], A, Wrapper](
+      verbWrapper: VerbWrapper[Verb, F, FUS, A, Wrapper],
+      verb: Verb,
+      override val testedProtocolVersion: ProtocolVersion,
+      override val partiesKind: PartyKind,
+  ) extends ProtocolVersionCheckString[F, FUS, A, Wrapper] {
+    override protected def wrapper(condition: => Boolean): Wrapper =
+      verbWrapper.wrapper(verb, condition)
+  }
+
+  def apply[V, F[_], FUS[_], A, W](verbWrapper: VerbWrapper[V, F, FUS, A, W])(
+      verb: V,
+      protocolVersion: ProtocolVersion,
+      partiesKind: PartyKind,
+  ): ProtocolVersionCheckString[F, FUS, A, W] =
+    new Impl[V, F, FUS, A, W](verbWrapper, verb, protocolVersion, partiesKind)
+}
+
+/** Defines the test case methods to be called on test names annotated with the extensions from
+  * [[ProtocolVersionCheckString]]
+  */
+trait OnlyRunWhenWordSpecStringWrapper[F[_], FUS[_], A] {
+  def in(testFun: => F[A])(implicit pos: source.Position): Unit
+  def inUS(testFun: => FUS[A])(implicit pos: source.Position): Unit
+  def ignore(testFun: => F[A])(implicit pos: source.Position): Unit
+}
+
+object OnlyRunWhenWordSpecStringWrapper {
+  class Impl[Verb, F[_], FUS[_], A](
+      verbWrapper: VerbWrapper[Verb, F, FUS, A, ?],
+      verb: Verb,
+      condition: => Boolean,
+  ) extends OnlyRunWhenWordSpecStringWrapper[F, FUS, A] {
+    def in(testFun: => F[A])(implicit pos: source.Position): Unit =
+      if (condition) verbWrapper.inVerb(verb, testFun) else verbWrapper.ignoreVerb(verb, testFun)
+
+    def inUS(testFun: => FUS[A])(implicit pos: source.Position): Unit =
+      if (condition) verbWrapper.inVerb(verb, verbWrapper.FUStoF(testFun))
+      else verbWrapper.ignoreVerb(verb, verbWrapper.FUStoF(testFun))
+
+    override def ignore(testFun: => F[A])(implicit pos: Position): Unit =
+      verbWrapper.ignoreVerb(verb, testFun)
+  }
+
+  def apply[Verb, F[_], FUS[_], A](
+      verbWrapper: VerbWrapper[Verb, F, FUS, A, ?],
+      verb: Verb,
+      condition: => Boolean,
+  ): OnlyRunWhenWordSpecStringWrapper[F, FUS, A] =
+    new Impl[Verb, F, FUS, A](verbWrapper, verb, condition)
+}
+
+/** Defines further the test case methods to be called on test names annotated with the extensions
+  * from [[ProtocolVersionCheckString]]
+  */
+trait RichOnlyRunWhenWordSpecStringWrapper[F[_], FUS[_], A]
+    extends OnlyRunWhenWordSpecStringWrapper[F, FUS, A] {
+  def when(testFun: => Unit)(implicit pos: source.Position): Unit
+}
+
+object RichOnlyRunWhenWordSpecStringWrapper {
+  class Impl[Verb, F[_], FUS[_], A](
+      verbWrapper: RichVerbWrapper[Verb, F, FUS, A, ?],
+      verb: Verb,
+      condition: => Boolean,
+  ) extends OnlyRunWhenWordSpecStringWrapper.Impl[Verb, F, FUS, A](verbWrapper, verb, condition)
+      with RichOnlyRunWhenWordSpecStringWrapper[F, FUS, A] {
+    override def when(testFun: => Unit)(implicit pos: Position): Unit =
+      if (condition) verbWrapper.whenVerb(verb, testFun)
+  }
+
+  def apply[Verb, F[_], FUS[_], A](
+      verbWrapper: RichVerbWrapper[Verb, F, FUS, A, ?],
+      verb: Verb,
+      condition: => Boolean,
+  ): RichOnlyRunWhenWordSpecStringWrapper[F, FUS, A] =
+    new Impl[Verb, F, FUS, A](verbWrapper, verb, condition)
+}
+
+/** Type class for possibly annotated test case names (`Verb`). */
+trait VerbWrapper[Verb, F[_], FUS[_], A, Wrapper] {
+  def inVerb(verb: Verb, testFun: => F[A])(implicit pos: source.Position): Unit
+  def ignoreVerb(verb: Verb, testFun: => F[A])(implicit pos: source.Position): Unit
+  def FUStoF(testFun: => FUS[A])(implicit pos: source.Position): F[A]
+  def wrapper(verb: Verb, condition: => Boolean): Wrapper
+}
+
+trait RichVerbWrapper[Verb, F[_], FUS[_], A, Wrapper]
+    extends VerbWrapper[Verb, F, FUS, A, Wrapper] {
+  def whenVerb(verb: Verb, testFun: => Unit)(implicit pos: source.Position): Unit
+}
+
+trait VerbWrapper1[Verb, F[_], A, Wrapper] extends VerbWrapper[Verb, F, F, A, Wrapper] {
+  override final def FUStoF(testFun: => F[A])(implicit pos: Position): F[A] = testFun
+}
+
+trait RichVerbWrapper1[Verb, F[_], A, Wrapper]
+    extends VerbWrapper1[Verb, F, A, Wrapper]
+    with RichVerbWrapper[Verb, F, F, A, Wrapper]
+
+/** Adds utilities for ignoring tests based on a predicate in FixtureAnyWordSpec tests. For example:
   * {{{
-  * class MyTest extends FixtureAsyncWordSpec with ProtocolVersionChecksFixtureAsyncWordSpec {
-  *   "some feature"  in { implicit env =>
+  * class MyTest extends CommunityIntegrationTest with ProtocolVersionChecksFixtureAnyWordSpec {
+  *   "some feature" onlyRunWithOrGreaterThan ProtocolVersion.v4 in { implicit env =>
   *     // this test is run only if the protocol version is v4 or later.
   *     // otherwise scalatest reports this test as ignored.
   *     testedProtocolVersion should be >= ProtocolVersion.v4
@@ -133,78 +178,198 @@ trait TestPredicateFiltersFixtureAnyWordSpec {
   * }
   * }}}
   *
-  * See [[com.digitalasset.canton.BaseTest.testedProtocolVersion]] on how to set the protocol
-  * version for tests at runtime.
+  * @see
+  *   com.digitalasset.canton.BaseTest.testedProtocolVersion on how to set the protocol version for
+  *   tests at runtime.
+  */
+trait TestPredicateFiltersFixtureAnyWordSpec {
+  this: TestEssentials & FixtureAnyWordSpecLike =>
+
+  private type F[A] = FixtureParam => A
+  private type Wrapper = OnlyRunWhenWordSpecStringWrapper[F, F, Any]
+  private type RichWrapper = RichOnlyRunWhenWordSpecStringWrapper[F, F, Any]
+
+  // Reason is not used but forces us to identify the reason which can be linked to a T O D O
+  @nowarn("cat=unused")
+  def onlyLocalParty(reason: UnsupportedExternalPartyTest): Boolean =
+    partiesKind == PartyKind.Local
+
+  private object FixtureAnyWordSpecLikeVerbWrapperString
+      extends RichVerbWrapper1[WordSpecStringWrapper, F, Any, RichWrapper] {
+    override def inVerb(verb: WordSpecStringWrapper, testFun: => F[Any])(implicit
+        pos: Position
+    ): Unit =
+      verb.in(testFun)
+
+    override def ignoreVerb(verb: WordSpecStringWrapper, testFun: => F[Any])(implicit
+        pos: Position
+    ): Unit = verb.ignore(testFun)
+
+    override def whenVerb(verb: WordSpecStringWrapper, testFun: => Unit)(implicit
+        pos: Position
+    ): Unit = verb.when(testFun)
+
+    override def wrapper(verb: WordSpecStringWrapper, condition: => Boolean): RichWrapper =
+      RichOnlyRunWhenWordSpecStringWrapper(this, verb, condition)
+  }
+
+  implicit def protocolVersionPartyCheckString(
+      verb: String
+  ): ProtocolVersionCheckString[
+    FixtureParam => *,
+    FixtureParam => *,
+    Any,
+    RichOnlyRunWhenWordSpecStringWrapper[FixtureParam => *, FixtureParam => *, Any],
+  ] =
+    ProtocolVersionCheckString(FixtureAnyWordSpecLikeVerbWrapperString)(
+      verb,
+      testedProtocolVersion,
+      partiesKind,
+    )
+
+  private object FixtureAnyWordSpecLikeVerbWrapperTagged
+      extends VerbWrapper1[ResultOfTaggedAsInvocationOnString, F, Any, Wrapper] {
+    override def inVerb(verb: ResultOfTaggedAsInvocationOnString, testFun: => F[Any])(implicit
+        pos: Position
+    ): Unit = verb.in(testFun)
+
+    override def ignoreVerb(
+        verb: ResultOfTaggedAsInvocationOnString,
+        testFun: => F[Any],
+    )(implicit pos: Position): Unit = verb.ignore(testFun)
+
+    override def wrapper(verb: ResultOfTaggedAsInvocationOnString, condition: => Boolean): Wrapper =
+      OnlyRunWhenWordSpecStringWrapper(this, verb, condition)
+  }
+
+  implicit def protocolVersionPartyCheckTagged(
+      verb: ResultOfTaggedAsInvocationOnString
+  ): ProtocolVersionCheckString[
+    FixtureParam => *,
+    FixtureParam => *,
+    Any,
+    OnlyRunWhenWordSpecStringWrapper[FixtureParam => *, FixtureParam => *, Any],
+  ] =
+    ProtocolVersionCheckString(FixtureAnyWordSpecLikeVerbWrapperTagged)(
+      verb,
+      testedProtocolVersion,
+      partiesKind,
+    )
+}
+
+/** Adds utilities for checking protocol versions in FixtureAsyncWordSpec tests. For example:
+  * {{{
+  * class MyTest extends FixtureAsyncWordSpec with ProtocolVersionChecksFixtureAsyncWordSpec {
+  *   "some feature" onlyRunWithOrGreaterThan ProtocolVersion.v4 in { implicit env =>
+  *     // this test is run only if the protocol version is v4 or later.
+  *     // otherwise scalatest reports this test as ignored.
+  *     testedProtocolVersion should be >= ProtocolVersion.v4
+  *   }
+  * }
+  * }}}
+  *
+  * @see
+  *   com.digitalasset.canton.BaseTest.testedProtocolVersion on how to set the protocol version for
+  *   tests at runtime.
   */
 trait ProtocolVersionChecksFixtureAsyncWordSpec {
   this: TestEssentials & FixtureAsyncWordSpecLike =>
 
-  implicit class ProtocolCheckString(verb: String) {
-    def onlyRunWithOrGreaterThan(
-        minProtocolVersion: ProtocolVersion
-    ): OnlyRunWhenWordSpecStringWrapper =
-      onlyRunWhen(testedProtocolVersion >= minProtocolVersion)
+  private type F[A] = FixtureParam => Future[A]
+  private type FUS[A] = FixtureParam => FutureUnlessShutdown[A]
+  private type Wrapper = OnlyRunWhenWordSpecStringWrapper[F, FUS, Assertion]
+  private type RichWrapper = RichOnlyRunWhenWordSpecStringWrapper[F, FUS, Assertion]
 
-    def onlyRunWith(protocolVersion: ProtocolVersion): OnlyRunWhenWordSpecStringWrapper =
-      onlyRunWhen(testedProtocolVersion == protocolVersion)
+  private object FixtureAsyncWordSpecVerbWrapperString
+      extends RichVerbWrapper[WordSpecStringWrapper, F, FUS, Assertion, RichWrapper] {
+    override def inVerb(verb: WordSpecStringWrapper, testFun: => F[Assertion])(implicit
+        pos: Position
+    ): Unit = verb.in(testFun)
 
-    def onlyRunWhen(condition: Boolean): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, condition)
-  }
+    override def ignoreVerb(
+        verb: WordSpecStringWrapper,
+        testFun: => F[Assertion],
+    )(implicit pos: Position): Unit = verb.ignore(testFun)
 
-  implicit class ProtocolCheckTaggedString(verb: ResultOfTaggedAsInvocationOnString) {
-    def onlyRunWithOrGreaterThan(
-        minProtocolVersion: ProtocolVersion
-    ): OnlyRunWhenResultOfTaggedAsInvocationOnString =
-      new OnlyRunWhenResultOfTaggedAsInvocationOnString(
-        verb,
-        testedProtocolVersion >= minProtocolVersion,
+    override def whenVerb(verb: WordSpecStringWrapper, testFun: => Unit)(implicit
+        pos: Position
+    ): Unit = verb.when(testFun)
+
+    override def FUStoF(testFun: => FUS[Assertion])(implicit
+        pos: Position
+    ): F[Assertion] = fixture =>
+      testFun(fixture).onShutdown(
+        fail(s"Unexpected shutdown in protocol version checks inUS wrapper")
       )
 
-    def onlyRunWithOrLessThan(
-        minProtocolVersion: ProtocolVersion
-    ): OnlyRunWhenResultOfTaggedAsInvocationOnString =
-      new OnlyRunWhenResultOfTaggedAsInvocationOnString(
-        verb,
-        testedProtocolVersion <= minProtocolVersion,
+    override def wrapper(verb: WordSpecStringWrapper, condition: => Boolean): RichWrapper =
+      RichOnlyRunWhenWordSpecStringWrapper(this, verb, condition)
+  }
+
+  implicit def protocolVersionCheckString(
+      verb: String
+  ): ProtocolVersionCheckString[
+    Lambda[x => FixtureParam => Future[x]],
+    Lambda[x => FixtureParam => FutureUnlessShutdown[x]],
+    Assertion,
+    RichOnlyRunWhenWordSpecStringWrapper[
+      Lambda[x => FixtureParam => Future[x]],
+      Lambda[x => FixtureParam => FutureUnlessShutdown[x]],
+      Assertion,
+    ],
+  ] =
+    ProtocolVersionCheckString(FixtureAsyncWordSpecVerbWrapperString)(
+      verb,
+      testedProtocolVersion,
+      partiesKind,
+    )
+
+  private object FixtureAsyncWordSpecVerbWrapperTaggedAs
+      extends VerbWrapper[ResultOfTaggedAsInvocationOnString, F, FUS, Assertion, Wrapper] {
+    override def inVerb(
+        verb: ResultOfTaggedAsInvocationOnString,
+        testFun: => F[Assertion],
+    )(implicit pos: Position): Unit = verb.in(testFun)
+
+    override def ignoreVerb(
+        verb: ResultOfTaggedAsInvocationOnString,
+        testFun: => F[Assertion],
+    )(implicit pos: Position): Unit = verb.ignore(testFun)
+
+    override def FUStoF(testFun: => FUS[Assertion])(implicit
+        pos: Position
+    ): F[Assertion] = fixture =>
+      testFun(fixture).onShutdown(
+        fail(s"Unexpected shutdown in protocol version checks inUS wrapper")
       )
+
+    override def wrapper(verb: ResultOfTaggedAsInvocationOnString, condition: => Boolean): Wrapper =
+      OnlyRunWhenWordSpecStringWrapper(this, verb, condition)
   }
 
-  protected final class OnlyRunWhenResultOfTaggedAsInvocationOnString(
-      verb: ResultOfTaggedAsInvocationOnString,
-      condition: => Boolean,
-  ) {
-    def in(testFun: FixtureParam => Future[Assertion])(implicit pos: source.Position): Unit =
-      if (condition) verb.in(testFun) else verb.ignore(testFun)
-  }
-  protected final class OnlyRunWhenWordSpecStringWrapper(
-      verb: WordSpecStringWrapper,
-      condition: => Boolean,
-  ) {
-    def in(testFun: FixtureParam => Future[Assertion])(implicit pos: source.Position): Unit =
-      if (condition) verb.in(testFun) else verb.ignore(testFun)
-
-    def inUS(
-        testFun: FixtureParam => FutureUnlessShutdown[Assertion]
-    )(implicit pos: source.Position): Unit = {
-      def testFunHandleShutdown: FixtureParam => Future[Assertion] =
-        testFun(_).onShutdown(fail(s"Unexpected shutdown in OnlyRunWhenWordSpecStringWrapper.inUS"))
-      if (condition) verb.in(testFunHandleShutdown) else verb.ignore(testFunHandleShutdown)
-    }
-
-    def when(testFun: => Unit)(implicit pos: source.Position): Unit =
-      if (condition) verb.when(testFun)
-      else
-        verb.ignore { _ =>
-          Future.successful { testFun; succeed }
-        }
-  }
+  implicit def protocolVersionCheckTaggedAs(
+      verb: ResultOfTaggedAsInvocationOnString
+  ): ProtocolVersionCheckString[
+    Lambda[x => FixtureParam => Future[x]],
+    Lambda[x => FixtureParam => FutureUnlessShutdown[x]],
+    Assertion,
+    OnlyRunWhenWordSpecStringWrapper[
+      Lambda[x => FixtureParam => Future[x]],
+      Lambda[x => FixtureParam => FutureUnlessShutdown[x]],
+      Assertion,
+    ],
+  ] =
+    ProtocolVersionCheckString(FixtureAsyncWordSpecVerbWrapperTaggedAs)(
+      verb,
+      testedProtocolVersion,
+      partiesKind,
+    )
 }
 
 /** Adds utilities for checking protocol versions in AsyncWordSpec tests. For example:
   * {{{
   * class MyTest extends AsyncWordSpec with ProtocolVersionChecksAsyncWordSpec {
-  *   "some feature"  in {
+  *   "some feature" onlyRunWithOrGreaterThan ProtocolVersion.v4 in {
   *     // this test is run only if the protocol version is v4 or later.
   *     // otherwise scalatest reports this test as ignored.
   *     Future {
@@ -214,55 +379,68 @@ trait ProtocolVersionChecksFixtureAsyncWordSpec {
   * }
   * }}}
   *
-  * See [[com.digitalasset.canton.BaseTest.testedProtocolVersion]] on how to set the protocol
-  * version for tests at runtime.
+  * @see
+  *   com.digitalasset.canton.BaseTest.testedProtocolVersion on how to set the protocol version for
+  *   tests at runtime.
   */
 trait ProtocolVersionChecksAsyncWordSpec {
   this: TestEssentials & AsyncWordSpecLike =>
 
-  implicit class ProtocolCheckString(verb: String) {
-    def onlyRunWhen(condition: Boolean): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, condition)
-    def onlyRunWithOrGreaterThan(
-        minProtocolVersion: ProtocolVersion
-    ): OnlyRunWhenWordSpecStringWrapper =
-      onlyRunWhen(_ >= minProtocolVersion)
+  private type Wrapper =
+    RichOnlyRunWhenWordSpecStringWrapper[Future, FutureUnlessShutdown, Assertion]
 
-    def onlyRunWithOrLessThan(
-        minProtocolVersion: ProtocolVersion
-    ): OnlyRunWhenWordSpecStringWrapper =
-      onlyRunWhen(testedProtocolVersion <= minProtocolVersion)
+  private object AsyncWordSpecLikeVerbWrapper
+      extends RichVerbWrapper[
+        WordSpecStringWrapper,
+        Future,
+        FutureUnlessShutdown,
+        Assertion,
+        Wrapper,
+      ] {
+    override def inVerb(verb: WordSpecStringWrapper, testFun: => Future[Assertion])(implicit
+        pos: Position
+    ): Unit =
+      verb.in(testFun)
 
-    private def onlyRunWhen(
-        condition: ProtocolVersion => Boolean
-    ): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, condition(testedProtocolVersion))
-  }
+    override def ignoreVerb(verb: WordSpecStringWrapper, testFun: => Future[Assertion])(implicit
+        pos: Position
+    ): Unit =
+      verb.ignore(testFun)
 
-  protected final class OnlyRunWhenWordSpecStringWrapper(
-      verb: WordSpecStringWrapper,
-      condition: => Boolean,
-  ) {
-    def in(testFun: => Future[Assertion])(implicit pos: source.Position): Unit =
-      if (condition) verb.in(testFun) else verb.ignore(testFun)
+    override def whenVerb(verb: WordSpecStringWrapper, testFun: => Unit)(implicit
+        pos: Position
+    ): Unit = verb.when(testFun)
 
-    def inUS(
+    override def FUStoF(
         testFun: => FutureUnlessShutdown[Assertion]
-    )(implicit pos: source.Position): Unit = {
-      def testFunHandleShutdown(): Future[Assertion] =
-        testFun.onShutdown(fail(s"Unexpected shutdown in OnlyRunWhenWordSpecStringWrapper.inUS"))
-      if (condition) verb.in(testFunHandleShutdown()) else verb.ignore(testFunHandleShutdown())
-    }
+    )(implicit pos: Position): Future[Assertion] =
+      testFun.onShutdown(
+        fail(s"Unexpected shutdown in protocol version checks inUS wrapper")
+      )
 
-    def when(testFun: => Unit)(implicit pos: source.Position): Unit =
-      if (condition) verb.when(testFun)
+    override def wrapper(verb: WordSpecStringWrapper, condition: => Boolean): Wrapper =
+      RichOnlyRunWhenWordSpecStringWrapper(this, verb, condition)
   }
+
+  implicit def protocolVersionCheckString(
+      verb: String
+  ): ProtocolVersionCheckString[
+    Future,
+    FutureUnlessShutdown,
+    Assertion,
+    RichOnlyRunWhenWordSpecStringWrapper[Future, FutureUnlessShutdown, Assertion],
+  ] =
+    ProtocolVersionCheckString(AsyncWordSpecLikeVerbWrapper)(
+      verb,
+      testedProtocolVersion,
+      partiesKind,
+    )
 }
 
 /** Adds utilities for checking protocol versions in AnyWordSpec tests. For example:
   * {{{
   * class MyTest extends AnyWordSpec with ProtocolVersionChecksAnyWordSpec {
-  *   "some feature"  in {
+  *   "some feature" onlyRunWithOrGreaterThan ProtocolVersion.v4 in {
   *     // this test is run only if the protocol version is v4 or later.
   *     // otherwise scalatest reports this test as ignored.
   *     testedProtocolVersion should be >= ProtocolVersion.v4
@@ -270,45 +448,38 @@ trait ProtocolVersionChecksAsyncWordSpec {
   * }
   * }}}
   *
-  * See [[com.digitalasset.canton.BaseTest.testedProtocolVersion]] on how to set the protocol
-  * version for tests at runtime.
+  * @see
+  *   com.digitalasset.canton.BaseTest.testedProtocolVersion on how to set the protocol version for
+  *   tests at runtime.
   */
 trait ProtocolVersionChecksAnyWordSpec {
   this: TestEssentials & AnyWordSpecLike =>
 
-  implicit class ProtocolCheckString(verb: String) {
-    def onlyRunWithOrGreaterThan(
-        minProtocolVersion: ProtocolVersion
-    ): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion >= minProtocolVersion)
+  type Wrapper = RichOnlyRunWhenWordSpecStringWrapper[Id, Id, Any]
 
-    def onlyRunWith(protocolVersion: ProtocolVersion): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion == protocolVersion)
+  private object AnyWordSpecLikeVerbWrapper
+      extends RichVerbWrapper1[WordSpecStringWrapper, Id, Any, Wrapper] {
+    override def inVerb(verb: WordSpecStringWrapper, testFun: => Id[Any])(implicit
+        pos: Position
+    ): Unit =
+      verb.in(testFun)
 
-    def onlyRunLessThan(
-        maxProtocolVersion: ProtocolVersion
-    ): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion < maxProtocolVersion)
+    override def ignoreVerb(verb: WordSpecStringWrapper, testFun: => Id[Any])(implicit
+        pos: Position
+    ): Unit =
+      verb.ignore(testFun)
 
-    def onlyRunWithOrLessThan(
-        maxProtocolVersion: ProtocolVersion
-    ): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion <= maxProtocolVersion)
+    override def whenVerb(verb: WordSpecStringWrapper, testFun: => Unit)(implicit
+        pos: Position
+    ): Unit =
+      verb.when(testFun)
 
-    def onlyRunWhen(
-        condition: ProtocolVersion => Boolean
-    ): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, condition(testedProtocolVersion))
+    override def wrapper(verb: WordSpecStringWrapper, condition: => Boolean): Wrapper =
+      RichOnlyRunWhenWordSpecStringWrapper(this, verb, condition)
   }
 
-  protected final class OnlyRunWhenWordSpecStringWrapper(
-      verb: WordSpecStringWrapper,
-      condition: => Boolean,
-  ) {
-    def in(testFun: => Any /* Assertion */ )(implicit pos: source.Position): Unit =
-      if (condition) verb.in(testFun) else verb.ignore(testFun)
-
-    def when(testFun: => Unit /* Assertion */ )(implicit pos: source.Position): Unit =
-      if (condition) verb.when(testFun) else verb.ignore(testFun)
-  }
+  implicit def protocolCheckString(
+      verb: String
+  ): ProtocolVersionCheckString[Id, Id, Any, RichOnlyRunWhenWordSpecStringWrapper[Id, Id, Any]] =
+    ProtocolVersionCheckString(AnyWordSpecLikeVerbWrapper)(verb, testedProtocolVersion, partiesKind)
 }

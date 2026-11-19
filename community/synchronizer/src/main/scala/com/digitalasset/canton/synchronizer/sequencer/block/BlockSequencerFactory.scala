@@ -68,7 +68,6 @@ abstract class BlockSequencerFactory(
       nodeParameters.processingTimeouts,
       protocolVersion,
       sequencerId,
-      blockSequencerMode = true,
       metrics,
     )
     with NamedLogging {

@@ -22,6 +22,8 @@ import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.base.error.utils.ErrorDetails.RetryInfoDetail
 import com.digitalasset.base.error.{ErrorCode, ErrorsAssertions}
+import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.v30.SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED
 import com.digitalasset.canton.crypto.{
@@ -112,8 +114,8 @@ import org.slf4j.event.Level
 import scalapb.lenses.{Lens, Mutation}
 
 import java.security.{KeyPair, KeyPairGenerator, Signature}
+import scala.concurrent.Future
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
-import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 class ApiPartyManagementServiceSpec
@@ -199,7 +201,7 @@ class ApiPartyManagementServiceSpec
   override def afterEach(): Unit =
     testTelemetrySetup.close()
 
-  private implicit val ec: ExecutionContext = directExecutionContext
+  private implicit val dec: DirectExecutionContext = directExecutionContext
 
   val ApiPartyManagementServiceSuppressionRule: SuppressionRule =
     SuppressionRule.LoggerNameContains("ApiPartyManagementService") &&
@@ -255,6 +257,7 @@ class ApiPartyManagementServiceSpec
     def cantonSigningPublicKey(publicKey: crypto.SigningPublicKey) =
       SigningPublicKey
         .fromProtoV30(
+          testedProtocolVersionValidation,
           com.digitalasset.canton.crypto.v30.SigningPublicKey(
             format =
               publicKey.format.transformInto[com.digitalasset.canton.crypto.v30.CryptoKeyFormat],
@@ -264,7 +267,7 @@ class ApiPartyManagementServiceSpec
             usage = Seq(SigningKeyUsage.Namespace.toProtoEnumV30.valueOrFail("serializing usage")),
             keySpec =
               publicKey.keySpec.transformInto[com.digitalasset.canton.crypto.v30.SigningKeySpec],
-          )
+          ),
         )
         .value
 

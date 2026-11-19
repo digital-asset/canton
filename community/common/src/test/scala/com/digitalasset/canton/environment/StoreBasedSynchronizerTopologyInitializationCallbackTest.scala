@@ -4,7 +4,7 @@
 package com.digitalasset.canton.environment
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.{BatchAggregatorConfig, BatchingConfig, TopologyConfig}
+import com.digitalasset.canton.config.{BatchAggregatorConfig, TestBatchingConfig, TopologyConfig}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -65,7 +65,7 @@ class StoreBasedSynchronizerTopologyInitializationCallbackTest
       val validator = new InitialTopologySnapshotValidator(
         pureCrypto = pureCrypto,
         store = topologyStore,
-        BatchingConfig().copy(
+        TestBatchingConfig().copy(
           topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting
         ),
         TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),

@@ -122,7 +122,7 @@ object AcsCommitmentProtocolMessage
         ),
       )(AcsCommitment.fromByteString(expectedProtocolVersion, _))
       signature <- ProtoConverter.parseRequired(
-        Signature.fromProtoV30,
+        Signature.fromProtoV30(expectedProtocolVersion, _),
         "signature",
         signatureP,
       )

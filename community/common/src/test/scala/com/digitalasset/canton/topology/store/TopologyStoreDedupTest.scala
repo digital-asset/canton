@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.topology.store
 
+import cats.data.EitherT
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, RequireTypes}
 import com.digitalasset.canton.crypto.Hash
@@ -11,9 +12,13 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
+import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
+import com.digitalasset.canton.topology.store.StoredTopologyTransaction.{
+  GenericStoredTopologyTransaction,
+  PositiveStoredTopologyTransaction,
+}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.{
   GenericStoredTopologyTransactions,
   NegativeStoredTopologyTransactions,
@@ -290,7 +295,7 @@ private[canton] class DummyCopyTopologyStore(
   ): FutureUnlessShutdown[Option[GenericStoredTopologyTransaction]] = ???
   override def findEffectiveStateChanges(
       fromEffectiveInclusive: CantonTimestamp,
-      filterTypes: Option[Seq[TopologyMapping.Code]],
+      filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]],
       onlyAtEffective: Boolean,
   )(implicit
       traceContext: TraceContext
@@ -302,4 +307,19 @@ private[canton] class DummyCopyTopologyStore(
   override def deleteDataChunk(chunkSize: PositiveInt)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean] = ???
+
+  override def checkConsistency(
+      synchronizerParameters: StaticSynchronizerParameters,
+      ignoreLsuPsidCheck: Boolean,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] = ???
+
+  override def findEffectiveStateChangesAtTopologyInit(
+      fromExclusive: EffectiveTime,
+      toInclusive: EffectiveTime,
+      filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]],
+  )(implicit
+      traceContext: TraceContext
+  ): Source[PositiveStoredTopologyTransaction, NotUsed] = ???
 }

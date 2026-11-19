@@ -37,6 +37,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentPro
 }
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.ViewHashAndRecipients
 import com.digitalasset.canton.participant.protocol.submission.{
+  ChangeIdHash,
   EncryptedViewMessageFactory,
   SeedGenerator,
 }
@@ -74,6 +75,14 @@ import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
+
+final case class UnassignmentSubmissionData(
+    messages: Seq[(ProtocolMessage, Recipients)],
+    rootHash: RootHash,
+    approximateTimestampForSigning: CantonTimestamp,
+    maxSequencingTime: CantonTimestamp,
+    mkReassignmentId: CantonTimestamp => ReassignmentId,
+)
 
 private[reassignment] class UnassignmentProcessingSteps(
     val psid: Source[PhysicalSynchronizerId],
@@ -124,7 +133,9 @@ private[reassignment] class UnassignmentProcessingSteps(
   override def submissionIdOfPendingRequest(pendingData: PendingUnassignment): RootHash =
     pendingData.unassignmentValidationResult.rootHash
 
-  override def createSubmission(
+  /** Builds the submission data for an unassignment. Does not have any side effects.
+    */
+  def buildSubmissionData(
       submissionParam: SubmissionParam,
       mediator: MediatorGroupRecipient,
       ephemeralState: SyncEphemeralState,
@@ -132,17 +143,15 @@ private[reassignment] class UnassignmentProcessingSteps(
       generateMaxSequencingTime: CantonTimestamp => CantonTimestamp,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[
-    FutureUnlessShutdown,
-    ReassignmentProcessorError,
-    (Submission, PendingSubmissionData),
-  ] = {
+  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, UnassignmentSubmissionData] = {
     val SubmissionParam(
-      submitterMetadata,
+      submissionInfo,
       contractIds,
       targetSynchronizer,
       overrideSourceValidationPackageIds,
       overrideTargetValidationPackageIds,
+      validatedContractPackageIds,
+      _,
       _,
     ) = submissionParam
     val pureCrypto = sourceRecentSnapshot.pureCrypto
@@ -170,8 +179,14 @@ private[reassignment] class UnassignmentProcessingSteps(
           overrideValidationPackageIds,
           snapshot,
           packageMetadata,
+          validatedContractPackageIds = validatedContractPackageIds,
         )
       }
+
+    // For a `ReassignmentsSubmission`, we use `clock.now` + `defaultMaxSequencingTimeOffset`
+    // to generate the max sequencing time and determine a valid session signing key to use.
+    val now = clock.now
+    val maxSequencingTime = generateMaxSequencingTime(now)
 
     for {
       _ <- condUnitET[FutureUnlessShutdown](
@@ -250,7 +265,7 @@ private[reassignment] class UnassignmentProcessingSteps(
           participantId,
           contracts,
           contractValidator,
-          submitterMetadata,
+          submissionInfo.toSubmitterMetadata(maxSequencingTime, protocolVersion.unwrap),
           psid,
           mediator,
           targetSynchronizer,
@@ -268,10 +283,6 @@ private[reassignment] class UnassignmentProcessingSteps(
 
       rootHash = fullTree.rootHash
 
-      // For a `ReassignmentsSubmission`, we use `clock.now` + `defaultMaxSequencingTimeOffset`
-      // to generate the max sequencing time and determine a valid session signing key to use.
-      now = clock.now
-      maxSequencingTime = generateMaxSequencingTime(now)
       signingTimestampOverrides = SigningTimestampOverrides(
         approximateTimestamp = now,
         validityPeriodEnd = Some(maxSequencingTime),
@@ -350,28 +361,60 @@ private[reassignment] class UnassignmentProcessingSteps(
         viewMessage -> recipientsT,
         rootHashMessage -> rootHashRecipients,
       )
-
-      pendingSubmission <-
-        performPendingSubmissionMapUpdate(
-          pendingSubmissions(ephemeralState),
-          ReassignmentRef(submissionParam.contractIds.toSet),
-          submissionParam.submittingParty,
-          rootHash,
-          validated.request.mkReassignmentId,
-        )
-      _ = reassignmentMetrics.submitted.inc()(
-        ReassignmentMetrics.unassignment(psid.map(_.logical), targetSynchronizer.map(_.logical))
-      )
-    } yield (
-      ReassignmentsSubmission(
-        Batch.of(protocolVersion.unwrap, messages*),
-        rootHash,
-        now,
-        maxSequencingTime,
-      ),
-      Some(pendingSubmission),
+    } yield UnassignmentSubmissionData(
+      messages = messages,
+      rootHash = rootHash,
+      approximateTimestampForSigning = now,
+      maxSequencingTime = maxSequencingTime,
+      mkReassignmentId = validated.request.mkReassignmentId,
     )
   }
+
+  override def createSubmission(
+      submissionParam: SubmissionParam,
+      mediator: MediatorGroupRecipient,
+      ephemeralState: SyncEphemeralState,
+      sourceRecentSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      generateMaxSequencingTime: CantonTimestamp => CantonTimestamp,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[
+    FutureUnlessShutdown,
+    ReassignmentProcessorError,
+    (Submission, PendingSubmissionData),
+  ] =
+    for {
+      submissionData <- buildSubmissionData(
+        submissionParam,
+        mediator,
+        ephemeralState,
+        sourceRecentSnapshot,
+        generateMaxSequencingTime,
+      )
+
+      submission <- EitherT.fromEither[FutureUnlessShutdown](
+        trackedFromReplayProtection(
+          ReassignmentsSubmission(
+            batch = Batch.of(protocolVersion.unwrap, submissionData.messages*),
+            rootHash = submissionData.rootHash,
+            reassignmentRef = ReassignmentRef(submissionParam.contractIds.toSet),
+            submissionInfo = submissionParam.submissionInfo,
+            pendingSubmissionMap = pendingSubmissions(ephemeralState),
+            pendingSubmission = PendingReassignmentSubmission(submissionData.mkReassignmentId),
+            changeIdHash = submissionParam.changeIdHash,
+            approximateTimestampForSigning = submissionData.approximateTimestampForSigning,
+            maxSequencingTime = submissionData.maxSequencingTime,
+          )
+        )
+      )
+
+      _ = reassignmentMetrics.submitted.inc()(
+        ReassignmentMetrics.unassignment(
+          psid.map(_.logical),
+          submissionParam.targetSynchronizer.map(_.logical),
+        )
+      )
+    } yield submission
 
   override def validateSubmittersNotOnboarding(
       submissionParam: SubmissionParam,
@@ -402,10 +445,17 @@ private[reassignment] class UnassignmentProcessingSteps(
       deliver: Deliver[Batch[Envelope[?]]],
       pendingSubmission: PendingSubmissionData,
   ): SubmissionResult =
-    SubmissionResult(
+    UnassignmentSubmitted(
       pendingSubmission.value.mkReassignmentId(deliver.timestamp),
       pendingSubmission.value.reassignmentCompletion.future,
     )
+
+  override protected def submissionFailure(
+      cause: Option[com.google.rpc.status.Status]
+  ): SubmissionResult = UnassignmentSubmissionFailure(cause)
+
+  override protected def submissionUnknown(maxSequencingTime: CantonTimestamp): SubmissionResult =
+    UnassignmentSubmissionUnknown(maxSequencingTime)
 
   override protected def decryptTree(
       sourceSnapshot: SynchronizerSnapshotSyncCryptoApi,
@@ -559,6 +609,7 @@ private[reassignment] class UnassignmentProcessingSteps(
           }
 
       val entry = PendingUnassignment(
+        parsedRequest.isFreshOwnTimelyRequest,
         parsedRequest.requestId,
         requestCounter,
         parsedRequest.sc,
@@ -587,10 +638,10 @@ private[reassignment] class UnassignmentProcessingSteps(
   }
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       pendingRequestData: PendingUnassignment,
-      pendingSubmissionMap: PendingSubmissions,
+      pendingSubmissionDataO: Option[PendingSubmissionData],
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext
@@ -600,6 +651,7 @@ private[reassignment] class UnassignmentProcessingSteps(
     CommitAndStoreContractsAndPublishEvent,
   ] = {
     val PendingUnassignment(
+      freshOwnTimelyTx,
       requestId,
       _requestCounter,
       requestSequencerCounter,
@@ -614,7 +666,6 @@ private[reassignment] class UnassignmentProcessingSteps(
     ) = pendingRequestData
 
     val isReassigningParticipant = unassignmentValidationResult.isReassigningParticipant
-    val pendingSubmissionData = pendingSubmissionMap.get(unassignmentValidationResult.rootHash)
     def rejected(
         errorDetails: ErrorDetails
     ): EitherT[
@@ -707,7 +758,7 @@ private[reassignment] class UnassignmentProcessingSteps(
                 )
               )
 
-            notInitiator = pendingSubmissionData.isEmpty
+            notInitiator = pendingSubmissionDataO.isEmpty
             _ <-
               if (notInitiator && storedInReassignmentStore)
                 triggerAssignmentWhenExclusivityTimeoutExceeded(pendingRequestData)
@@ -715,7 +766,10 @@ private[reassignment] class UnassignmentProcessingSteps(
 
             reassignmentAccepted =
               unassignmentValidationResult.createReassignmentAccepted(
-                participantId,
+                shouldEmitCompletion(
+                  unassignmentValidationResult.submitterMetadata,
+                  freshOwnTimelyTx,
+                ),
                 requestId.unwrap,
                 trafficCost,
                 storedInReassignmentStore = storedInReassignmentStore,
@@ -854,22 +908,30 @@ private[reassignment] class UnassignmentProcessingSteps(
 object UnassignmentProcessingSteps {
 
   final case class SubmissionParam(
-      submitterMetadata: ReassignmentSubmitterMetadata,
+      submissionInfo: ReassignmentSubmissionInfo,
       contractIds: Seq[LfContractId],
       targetSynchronizer: Target[PhysicalSynchronizerId],
       overrideSourceValidationPkgIds: Source[Map[LfContractId, LfPackageId]],
       overrideTargetValidationPkgIds: Target[Map[LfContractId, LfPackageId]],
+      validatedContractPackageIds: Map[LfContractId, Set[LfPackageId]],
       accounting: SubmissionAccounting,
+      changeIdHash: ChangeIdHash,
   ) {
-    val submittingParty: LfPartyId = submitterMetadata.submitter
+    val submittingParty: LfPartyId = submissionInfo.submitter
   }
 
-  final case class SubmissionResult(
+  sealed trait SubmissionResult extends Product with Serializable
+  final case class UnassignmentSubmitted(
       reassignmentId: ReassignmentId,
       unassignmentCompletionF: Future[com.google.rpc.status.Status],
-  )
+  ) extends SubmissionResult
+  final case class UnassignmentSubmissionFailure(cause: Option[com.google.rpc.status.Status])
+      extends SubmissionResult
+  final case class UnassignmentSubmissionUnknown(maxSequencingTime: CantonTimestamp)
+      extends SubmissionResult
 
   final case class PendingUnassignment(
+      override val freshOwnTimelyTx: Boolean,
       override val requestId: RequestId,
       override val requestCounter: RequestCounter,
       override val requestSequencerCounter: SequencerCounter,

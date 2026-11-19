@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.server
 
+import com.daml.metrics.grpc.DamlGrpcServerMetrics
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.HasGeneralCantonNodeParameters
 import com.digitalasset.canton.health.{
@@ -12,7 +13,6 @@ import com.digitalasset.canton.health.{
 }
 import com.digitalasset.canton.lifecycle.LifeCycle.{CloseableServer, toCloseableServer}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.networking.grpc.ratelimiting.ActiveRequestCounterInterceptor
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
@@ -32,7 +32,7 @@ class DynamicGrpcServer(
     maxRequestSize: MaxRequestSize,
     nodeParameters: HasGeneralCantonNodeParameters,
     serverConfig: PublicServerConfig,
-    grpcMetrics: GrpcServerMetricsX,
+    grpcMetrics: DamlGrpcServerMetrics,
     grpcHealthReporter: GrpcHealthReporter,
     healthService: DependenciesHealthService,
 )(implicit executionContext: ExecutionContextExecutorService)

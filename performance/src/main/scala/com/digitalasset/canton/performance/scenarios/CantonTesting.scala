@@ -282,8 +282,8 @@ object CantonTesting {
           TraderDriver.toPartyGrowth(0),
         ),
       ),
-      quorumIssuers = numberOfIssuersPerParticipant,
-      quorumParticipants = numberOfTradersPerParticipant,
+      quorumProviders = numberOfIssuersPerParticipant,
+      quorumUsers = numberOfTradersPerParticipant,
     )
 
     // ------------------------------------------------------------------

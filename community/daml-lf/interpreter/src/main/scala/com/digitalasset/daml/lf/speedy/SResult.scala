@@ -84,25 +84,47 @@ object Question {
 
   sealed abstract class Cmd extends Product with Serializable
   object Cmd {
-    final case class Create(tmplId: TypeConId, createArg: SValue.SRecord) extends Cmd
-    final case class FetchTemplate(tmplId: TypeConId, coid: ContractId) extends Cmd
+    final case class Create(
+        tmplId: TypeConId,
+        createArg: SValue.SRecord,
+        location: Option[Location],
+    ) extends Cmd
+    final case class FetchTemplate(tmplId: TypeConId, coid: ContractId, location: Option[Location])
+        extends Cmd
     final case class ExerciseTemplate(
         ifaceId: TypeConId,
         coid: ContractId,
         choice: ChoiceName,
         arg: SValue,
+        location: Option[Location],
     ) extends Cmd
-    final case class FetchInterface(ifaceId: TypeConId, coid: ContractId) extends Cmd
+    final case class FetchInterface(
+        ifaceId: TypeConId,
+        coid: ContractId,
+        location: Option[Location],
+    ) extends Cmd
     final case class ExerciseInterface(
         ifaceId: Identifier,
         coid: ContractId,
         choice: ChoiceName,
         arg: SValue,
+        location: Option[Location],
     ) extends Cmd
-    final case class QueryContractKey(tmplId: Identifier, key: SValue, n: Int) extends Cmd
-    final case class FetchByKey(tmplId: TypeConId, key: SValue) extends Cmd
-    final case class ExerciseByKey(tmplId: Identifier, key: SValue, choice: ChoiceName, arg: SValue)
+    final case class QueryContractKey(
+        tmplId: Identifier,
+        key: SValue,
+        n: Int,
+        location: Option[Location],
+    ) extends Cmd
+    final case class FetchByKey(tmplId: TypeConId, key: SValue, location: Option[Location])
         extends Cmd
+    final case class ExerciseByKey(
+        tmplId: Identifier,
+        key: SValue,
+        choice: ChoiceName,
+        arg: SValue,
+        location: Option[Location],
+    ) extends Cmd
     final case class ExternalCall(
         extensionId: String,
         functionId: String,

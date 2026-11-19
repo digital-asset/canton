@@ -228,6 +228,16 @@ final class GrpcSequencerServiceTest
       testedProtocolVersion,
     )
 
+  /** [[AggregatedSignedContent]] shares the wire format, so it can produce a request with several
+    * signatures.
+    */
+  private def withTwoSignatures(bytes: ByteString): ByteString =
+    AggregatedSignedContent(
+      BytestringWithCryptographicEvidence(bytes),
+      NonEmpty(Seq, Signature.noSignature, Signature.noSignature),
+      testedProtocolVersion,
+    ).toByteString
+
   private lazy val content = ByteString.copyFromUtf8("123")
   private lazy val defaultRequest: SubmissionRequest = {
     val sender: Member = participant
@@ -329,6 +339,18 @@ final class GrpcSequencerServiceTest
           },
         ),
         _.warningMessage should include("ValueConversionError(sender,Invalid member ``"),
+      )
+    }
+
+    "reject a request with several signatures" in { implicit env =>
+      loggerFactory.assertLogs(
+        sendProtoAndCheckError(
+          withTwoSignatures(defaultRequest.toByteString),
+          { case ex: StatusRuntimeException =>
+            ex.getMessage should include("exceeding the maximum of 1")
+          },
+        ),
+        _.warningMessage should include("exceeding the maximum of 1"),
       )
     }
 
@@ -865,6 +887,16 @@ final class GrpcSequencerServiceTest
 
     "succeed with correct participant" in { implicit env =>
       performAcknowledgeRequest(env)(defaultAcknowledgedRequest).map(_ => succeed)
+    }
+
+    "reject an acknowledgement with several signatures" in { implicit env =>
+      val signedRequest = withTwoSignatures(
+        VersionedMessage(defaultAcknowledgedRequest.toProtoV30.toByteString, 30).toByteString
+      )
+      env.service
+        .acknowledgeSigned(v30.AcknowledgeSignedRequest(signedRequest))
+        .failed
+        .map(_.getMessage should include("exceeding the maximum of 1"))
     }
 
     "conflate acknowledgements within the conflate window" in { implicit env =>

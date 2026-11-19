@@ -318,7 +318,7 @@ class TrafficEnforcementServiceTest extends AsyncWordSpec with BaseTest with Fai
       } yield {
         inside(tooLow) { case Left(error) => error.code.id shouldBe InsufficientBalance.id }
         afterTooLow shouldBe None
-        enough shouldBe Right(RegisterSubmissionResponse())
+        enough shouldBe Right(RegisterSubmissionResponse(Some(registeredAt.toProtoTimestamp)))
         afterEnough shouldBe Some(
           SubmissionCorrelation(aliceKey, CorrelationAccount.Account(alice), registeredAt)
         )
@@ -327,11 +327,11 @@ class TrafficEnforcementServiceTest extends AsyncWordSpec with BaseTest with Fai
           error.code.id shouldBe InsufficientBalance.id
         }
         afterUnknownChecked shouldBe None
-        unchecked shouldBe Right(RegisterSubmissionResponse())
+        unchecked shouldBe Right(RegisterSubmissionResponse(Some(registeredAt.toProtoTimestamp)))
         afterUnchecked shouldBe Some(
           SubmissionCorrelation(bobKey, CorrelationAccount.Account(bob), registeredAt)
         )
-        marker shouldBe Right(RegisterSubmissionResponse())
+        marker shouldBe Right(RegisterSubmissionResponse(Some(registeredAt.toProtoTimestamp)))
         afterMarker shouldBe Some(
           SubmissionCorrelation(markerKey, CorrelationAccount.NoAccountSelected, registeredAt)
         )

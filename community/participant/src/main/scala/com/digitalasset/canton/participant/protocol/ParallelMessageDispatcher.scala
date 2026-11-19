@@ -220,7 +220,7 @@ class ParallelMessageDispatcher(
   private def processOrdinary(
       sequencerCounter: SequencerCounter,
       signedEventE: WithOpeningErrors[
-        SignedContent[DecompressedSequencedEvent[DefaultOpenEnvelope]]
+        AggregatedSignedContent[DecompressedSequencedEvent[DefaultOpenEnvelope]]
       ],
   )(implicit traceContext: TraceContext): ProcessingResult =
     signedEventE.event.content match {
@@ -240,9 +240,10 @@ class ParallelMessageDispatcher(
           logFaultyEvent(sequencerCounter, ts, msgId, signedEventE.map(_.content))
         }
         @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-        val deliverE =
-          signedEventE
-            .asInstanceOf[WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]]]
+        val deliverE = signedEventE
+          .asInstanceOf[WithOpeningErrors[
+            AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]
+          ]]
         processBatch(sequencerCounter, deliverE)
           .transform {
             case success @ Success(_) => success

@@ -4,13 +4,14 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.Eval
-import cats.data.EitherT
+import cats.data.{EitherT, Nested}
 import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.base.error.RpcError
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{
@@ -23,9 +24,14 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, NotInserted}
-import com.digitalasset.canton.data.{CantonTimestamp, SubmissionTrackerData}
+import com.digitalasset.canton.data.{CantonTimestamp, Offset, SubmissionTrackerData}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
+import com.digitalasset.canton.ledger.participant.state.{
+  ChangeId,
+  CompletionInfo,
+  SequencedEventUpdate,
+  Update,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   DefaultPromiseUnlessShutdownFactory,
@@ -34,8 +40,12 @@ import com.digitalasset.canton.lifecycle.{
   LifeCycle,
   UnlessShutdown,
 }
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
-import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.admin.party.{
+  FreezingToOnboardingScheduler,
+  OnboardingClearanceScheduler,
+}
 import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
@@ -64,20 +74,23 @@ import com.digitalasset.canton.participant.{
   DefaultParticipantStateValues,
   ParticipantNodeParameters,
 }
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend.TrafficRegistration
+import com.digitalasset.canton.platform.indexer.parallel.PostPublishData
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.resource.MemoryStorage
-import com.digitalasset.canton.sequencing.client.SendResult.Success
-import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
+  SendAsyncResult,
   SendCallback,
+  SendResult,
   SequencerClientSend,
 }
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
+import com.digitalasset.canton.sequencing.traffic.{TrafficControlErrors, TrafficReceipt}
 import com.digitalasset.canton.sequencing.{AsyncResult, UnthrottledAsync}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.store.{IndexedPhysicalSynchronizer, IndexedSynchronizer}
@@ -96,6 +109,7 @@ import com.digitalasset.canton.{
   RequestCounter,
   SequencerCounter,
 }
+import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.mockito.ArgumentMatchers.eq as isEq
@@ -104,10 +118,9 @@ import org.scalatest.{Assertion, Tag}
 
 import java.time.Duration
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.ExecutionContext
+import scala.concurrent.Promise
 import scala.language.implicitConversions
 
 class ProtocolProcessorTest
@@ -157,57 +170,65 @@ class ProtocolProcessorTest
   private val crypto =
     TestingIdentityFactory(topology, loggerFactory, TestSynchronizerParameters.defaultDynamic)
       .forOwnerAndSynchronizer(participant, psid)
-  private val mockSequencerClient = mock[SequencerClientSend]
-  when(mockSequencerClient.psid).thenAnswer(psid)
-  when(mockSequencerClient.protocolVersion).thenAnswer(psid.protocolVersion)
-  when(
-    mockSequencerClient.send(
-      any[Batch[DefaultOpenEnvelope]],
-      any[Option[SynchronizerSnapshotSyncCryptoApi]],
-      any[SendRequestTimestamps],
-      any[MessageId],
-      any[Option[AggregationRule]],
-      any[SendCallback],
-      any[TrafficCostValidator],
-      amplify = any[Boolean],
-      useConfirmationResponseAmplificationParameters = any[Boolean],
-    )(anyTraceContext, any[MetricsContext])
-  )
-    .thenAnswer {
-      (
-          batch: Batch[DefaultOpenEnvelope],
-          _: Option[SynchronizerSnapshotSyncCryptoApi],
-          _: SendRequestTimestamps,
-          messageId: MessageId,
-          _: Option[AggregationRule],
-          callback: SendCallback,
-      ) =>
-        callback(
-          UnlessShutdown.Outcome(
-            Success(
-              Deliver.create(
-                None,
-                CantonTimestamp.Epoch,
-                psid,
-                Some(messageId),
-                Batch.filterOpenEnvelopesFor(batch, participant, Set.empty),
-                Option.empty[TrafficReceipt],
-                testedProtocolVersion,
-              )
-            )
-          )
-        )
-        EitherTUtil.unitUS
-    }
+  private type Send = SendCallback => EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit]
+  private type Prepare =
+    EitherT[FutureUnlessShutdown, SendAsyncClientError, SequencerClientSend.PreparedSubmission]
+  // With None, the test fails if the processor registers.
+  private type Registration = Option[UnlessShutdown[Either[RpcError, Unit]]]
 
-  private val mockInFlightSubmissionSynchronizerTracker =
-    mock[InFlightSubmissionSynchronizerTracker]
-  when(
-    mockInFlightSubmissionSynchronizerTracker.observeSequencedRootHash(
-      any[RootHash],
-      any[SequencedSubmission],
-    )(anyTraceContext)
-  ).thenAnswer(FutureUnlessShutdown.unit)
+  private val registers: Registration = Some(UnlessShutdown.Outcome(Right(())))
+
+  private lazy val delivered = Deliver.create(
+    None,
+    CantonTimestamp.Epoch,
+    psid,
+    Some(MessageId.tryCreate("delivered")),
+    Batch.empty[Envelope[?]](testedProtocolVersion),
+    Option.empty[TrafficReceipt],
+    testedProtocolVersion,
+  )
+
+  private def callsBack(result: UnlessShutdown[SendResult]): Send = { callback =>
+    callback(result)
+    EitherTUtil.unitUS
+  }
+
+  // With a cost, the processor registers and has a correlation to release.
+  private def prepared(send: Send, cost: Option[Long] = Some(1L)): Prepare =
+    EitherT.rightT[FutureUnlessShutdown, SendAsyncClientError](
+      new SequencerClientSend.PreparedSubmission {
+        override def trafficCost: Option[Long] = cost
+
+        override def sendAsync(
+            callback: SendCallback,
+            amplify: Boolean,
+            useConfirmationResponseAmplificationParameters: Boolean,
+        ): SendAsyncResult =
+          Nested(EitherT.rightT[FutureUnlessShutdown, SendAsyncClientError](send(callback)))
+      }
+    )
+
+  private def sendReturns(result: SendResult, cost: Option[Long] = Some(1L)): Prepare =
+    prepared(callsBack(UnlessShutdown.Outcome(result)), cost)
+
+  private def preparingClient(prepare: Prepare): SequencerClientSend = {
+    val client = mock[SequencerClientSend]
+    when(client.psid).thenAnswer(psid)
+    when(client.protocolVersion).thenAnswer(psid.protocolVersion)
+    when(
+      client.prepareSend(
+        any[Batch[DefaultOpenEnvelope]],
+        any[Option[SynchronizerSnapshotSyncCryptoApi]],
+        any[SendRequestTimestamps],
+        any[MessageId],
+        any[Option[AggregationRule]],
+      )(anyTraceContext, any[MetricsContext])
+    ).thenReturn(prepare)
+    client
+  }
+
+  private val mockSequencerClient =
+    preparingClient(sendReturns(SendResult.Success(delivered), cost = None))
 
   private val trm = mock[ConfirmationResultMessage]
   when(trm.prettyCompanion).thenAnswer(
@@ -251,6 +272,124 @@ class ProtocolProcessorTest
   private def waitForAsyncResult(asyncResult: AsyncResult[UnthrottledAsync]) =
     asyncResult.unwrap.flatMap(_.future).futureValueUS
 
+  private def checkMismatchedMediatorSubmissionCleanup(isReceipt: Boolean): Assertion = {
+    val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
+    val publishedPostPublishDataP = Promise[Option[PostPublishData]]()
+
+    // Capture the completion emitted when the invalid request is terminated, then feed it through
+    //  the same post-publication tracker that deletes completed in-flight submissions.
+    val publishUpdate = new PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate] {
+      override def apply(eventO: Option[SequencedEventUpdate]): Unit =
+        publishedPostPublishDataP.trySuccess(
+          eventO.flatMap(
+            PostPublishData.from(_, Offset.tryFromLong(1), requestId.unwrap)
+          )
+        )
+    }
+
+    // viewMessage's mediator defaults to group 0.
+    //  The mediator argument below is the root-hash message recipient, group 1,
+    //  so processRequestInternal takes the mediator-mismatch branch.
+    val otherMediatorGroup = MediatorGroupRecipient(MediatorGroupIndex.one)
+
+    // TestProcessingSteps does not construct transaction rejections, so provide the completion
+    //  that the production transaction steps would create for this local submitter.
+    val rejectionError =
+      TransactionProcessor.SubmissionErrors.NoViewWithValidRecipients.Error(requestId.unwrap)
+    val rejectionEvent = Update.SequencedCommandRejected(
+      completionInfo = CompletionInfo(
+        List.empty,
+        changeId.userId,
+        changeId.commandId,
+        None,
+        Some(subId),
+        paidTrafficCost = NonNegativeLong.zero,
+      ),
+      reasonTemplate = Update.CommandRejected.FinalReason(rejectionError.rpcStatus()),
+      synchronizerId = psid.logical,
+      recordTime = requestId.unwrap,
+      isTransaction = true,
+      transactionHash = None,
+      traceContext = TraceContext.empty,
+    )
+
+    testProcessingSteps(
+      submissionDataForTrackerO = submissionTrackerData(),
+      overrideInFlightSubmissionStoreO = Some(inFlightSubmissionStore),
+      rejectedCommandEventO = Some(rejectionEvent),
+    ) { (sut, _, ephemeral) =>
+      val synchronizerTracker = ephemeral.inFlightSubmissionSynchronizerTracker
+      val publicationTracker = new InFlightSubmissionTracker(
+        Eval.now(inFlightSubmissionStore),
+        new NoCommandDeduplicator(),
+        loggerFactory,
+      )
+      val deduplicationPeriod = DeduplicationDuration.create(Duration.ofSeconds(10)).value
+
+      // Seed the tracked submission before delivering its receipt or preplay.
+      synchronizerTracker
+        .register(unsequencedSubmission, deduplicationPeriod)
+        .valueOrFailShutdown("register submission")
+        .futureValue
+        .isRight shouldBe true
+
+      // Receipts are observed by message ID here; processRequest observes preplays by root hash.
+      if (isReceipt) {
+        synchronizerTracker
+          .observeSequencing(
+            Map(unsequencedSubmission.messageId -> SequencedSubmission(requestId.unwrap))
+          )
+          .futureValueUS
+      }
+
+      loggerFactory.assertLogs(
+        waitForAsyncResult(
+          processRequest(
+            sut,
+            requestBatch(mediator = otherMediatorGroup, isReceipt = isReceipt),
+            publishUpdate = publishUpdate,
+          )
+        ),
+        _.errorMessage should include(
+          s"Mediator ${MediatorGroupRecipient(MediatorGroupIndex.zero)} declared in views is not the recipient $otherMediatorGroup of the root hash message"
+        ),
+      )
+
+      // Both paths must leave the row sequenced until its rejection completion is published.
+      inFlightSubmissionStore
+        .lookup(changeIdHash)
+        .value
+        .futureValueUS
+        .value
+        .sequencingInfo shouldBe SequencedSubmission(requestId.unwrap)
+      inFlightSubmissionStore
+        .lookupEarliest(psid.logical)
+        .futureValueUS shouldBe Some(requestId.unwrap)
+
+      // The bad request is terminated at its immediate successor, publishing the rejection above.
+      ephemeral.requestTracker.tick(requestSc + 1, requestId.unwrap.immediateSuccessor)
+      val postPublishData = publishedPostPublishDataP.future.futureValue.getOrElse(
+        fail("Expected the local submitter rejection to publish a completion")
+      )
+      publicationTracker.processPublications(Seq(postPublishData)).futureValueUS
+
+      // Completion publication releases the pruning watermark
+      //  and permits resubmission with the same change ID.
+      inFlightSubmissionStore.lookup(changeIdHash).value.futureValueUS shouldBe None
+      inFlightSubmissionStore.lookupEarliest(psid.logical).futureValueUS shouldBe None
+
+      synchronizerTracker
+        .register(
+          unsequencedSubmission.copy(messageUuid = UUID.randomUUID()),
+          deduplicationPeriod,
+        )
+        .valueOrFailShutdown("resubmit change ID")
+        .futureValue
+        .isRight shouldBe true
+    }
+    succeed
+  }
+
   private def testProcessingSteps(
       overrideConstructedPendingRequestDataO: Option[TestPendingRequestData] = None,
       startingPoints: ProcessingStartingPoints = ProcessingStartingPoints.default,
@@ -262,43 +401,10 @@ class ProtocolProcessorTest
       ] = None,
       submissionDataForTrackerO: Option[SubmissionTrackerData] = None,
       overrideInFlightSubmissionStoreO: Option[InFlightSubmissionStore] = None,
-  )(
-      test: (
-          (TestInstance, SyncPersistentState, SyncEphemeralState, ParticipantNodeEphemeralState)
-      ) => Assertion
-  ): Unit = {
-    val (sut, persistent, ephemeral, node) = buildTestEnv(
-      overrideConstructedPendingRequestDataO = overrideConstructedPendingRequestDataO,
-      startingPoints = startingPoints,
-      pendingSubmissionMap = pendingSubmissionMap,
-      sequencerClient = sequencerClient,
-      crypto = crypto,
-      overrideInFlightSubmissionSynchronizerTrackerO =
-        overrideInFlightSubmissionSynchronizerTrackerO,
-      submissionDataForTrackerO = submissionDataForTrackerO,
-      overrideInFlightSubmissionStoreO = overrideInFlightSubmissionStoreO,
-    )
-    test((sut, persistent, ephemeral, node))
-    LifeCycle.close(sut)(logger)
-  }
-
-  private def buildTestEnv(
-      overrideConstructedPendingRequestDataO: Option[TestPendingRequestData],
-      startingPoints: ProcessingStartingPoints,
-      pendingSubmissionMap: concurrent.Map[Int, Unit],
-      sequencerClient: SequencerClientSend,
-      crypto: SynchronizerCryptoClient,
-      overrideInFlightSubmissionSynchronizerTrackerO: Option[
-        InFlightSubmissionSynchronizerTracker
-      ],
-      submissionDataForTrackerO: Option[SubmissionTrackerData],
-      overrideInFlightSubmissionStoreO: Option[InFlightSubmissionStore],
-  ): (
-      TestInstance,
-      SyncPersistentState,
-      SyncEphemeralState,
-      ParticipantNodeEphemeralState,
-  ) = {
+      rejectedCommandEventO: Option[SequencedEventUpdate] = None,
+      trafficEnforcementBackend: TrafficEnforcementBackend = releasingTrafficEnforcementBackend(),
+      trafficRegistration: Registration = registers,
+  )(test: (TestInstance, SyncPersistentState, SyncEphemeralState) => Assertion): Unit = {
     val clock = new WallClock(timeouts, loggerFactory)
     val testParameters = ParticipantNodeParameters.forTestingOnly(testedProtocolVersion)
 
@@ -315,6 +421,7 @@ class ProtocolProcessorTest
           LedgerApiServerConfig(),
           futureSupervisor,
           loggerFactory,
+          None,
         )
         .failOnShutdown
     )
@@ -346,8 +453,6 @@ class ProtocolProcessorTest
 
     val persistentState = new SyncPersistentState(logical, physical, loggerFactory)
 
-    val ephemeralState = new AtomicReference[SyncEphemeralState]()
-
     val ledgerApiIndexer = mock[LedgerApiIndexer]
 
     when(ledgerApiIndexer.enqueue).thenAnswer((_: Update) => FutureUnlessShutdown.unit)
@@ -370,7 +475,7 @@ class ProtocolProcessorTest
       clock = clock,
       performLsu = SynchronizerConnectionsManager.NoAutomaticLsuHandler(logger),
     )
-    val unseqeuncedSubmissionMap = new UnsequencedSubmissionMap[SubmissionTrackingData](
+    val unsequencedSubmissionMap = new UnsequencedSubmissionMap[SubmissionTrackingData](
       psid,
       1000,
       ParticipantTestMetrics.synchronizer.inFlightSubmissionSynchronizerTracker.unsequencedInFlight,
@@ -386,13 +491,11 @@ class ProtocolProcessorTest
           new NoCommandDeduplicator(),
           recordOrderPublisher,
           timeTracker,
-          unseqeuncedSubmissionMap,
+          unsequencedSubmissionMap,
           loggerFactory,
         )
       }
-    val participantNodeEphemeralState = mock[ParticipantNodeEphemeralState]
-
-    ephemeralState.set(
+    val ephemeralState =
       new SyncEphemeralState(
         participant,
         recordOrderPublisher,
@@ -400,6 +503,7 @@ class ProtocolProcessorTest
         inFlightSubmissionSynchronizerTracker,
         mock[AcsCommitmentSender],
         mock[OnboardingClearanceScheduler],
+        mock[FreezingToOnboardingScheduler],
         persistentState,
         ledgerApiIndexer,
         contractStore,
@@ -416,32 +520,27 @@ class ProtocolProcessorTest
         FutureSupervisor.Noop,
         clock,
       )
-    )
 
     val steps = new TestProcessingSteps(
       pendingSubmissionMap = pendingSubmissionMap,
       overrideConstructedPendingRequestDataO,
       informeesOfView = _ => Set(party.toLf),
       submissionDataForTrackerO = submissionDataForTrackerO,
+      rejectedCommandEventO = rejectedCommandEventO,
     )
 
-    val sut: ProtocolProcessor[
-      Int,
-      Unit,
-      TestViewType,
-      TestProcessingSteps.TestProcessingError,
-    ] =
+    val sut: TestInstance =
       new ProtocolProcessor(
         steps,
         inFlightSubmissionSynchronizerTracker,
-        ephemeralState.get(),
+        ephemeralState,
         crypto,
         sequencerClient,
         clock,
         loggerFactory,
         FutureSupervisor.Noop,
         FlagCloseable.withCloseContext(logger, timeouts),
-      )(directExecutionContext: ExecutionContext) {
+      )(directExecutionContext) {
         override def testingConfig: TestingConfigInternal =
           TestingConfigInternal()
 
@@ -453,29 +552,65 @@ class ProtocolProcessorTest
             submissionParam: Int
         ): MetricsContext = MetricsContext.Empty
 
-        override protected def validateLocalTrafficCost(submissionParam: Int)(
+        override protected def registerTrafficCost(
+            submissionParam: Int,
             trafficCost: Long,
-            traceContext: TraceContext,
-        ): EitherT[FutureUnlessShutdown, RpcError, Unit] = EitherT.rightT(())
+        )(implicit
+            traceContext: TraceContext
+        ): EitherT[FutureUnlessShutdown, RpcError, Option[TrafficRegistration]] =
+          trafficRegistration match {
+            case None => fail("The processor must not register this submission")
+            case Some(outcome) =>
+              EitherT(
+                FutureUnlessShutdown.lift(
+                  outcome.map(
+                    _.map(_ => Option(TrafficRegistration(changeId, subId, trafficRegisteredAt)))
+                  )
+                )
+              )
+          }
+
+        override protected def releaseTrafficRegistration(registration: TrafficRegistration)(
+            implicit traceContext: TraceContext
+        ): FutureUnlessShutdown[Unit] =
+          trafficEnforcementBackend.releaseSubmission(
+            registration.changeId,
+            registration.submissionId,
+            registration.registeredAt,
+          )
       }
 
-    (sut, persistentState, ephemeralState.get(), participantNodeEphemeralState)
+    try test(sut, persistentState, ephemeralState).discard
+    finally LifeCycle.close(sut)(logger)
+  }
+
+  private def releasingTrafficEnforcementBackend(): TrafficEnforcementBackend = {
+    val backend = mock[TrafficEnforcementBackend]
+    when(
+      backend.releaseSubmission(any[ChangeId], any[Ref.SubmissionId], any[CantonTimestamp])(
+        anyTraceContext
+      )
+    ).thenReturn(FutureUnlessShutdown.unit)
+    backend
   }
 
   private lazy val rootHash = RootHash(TestHash.digest(1))
+  private lazy val trafficRegisteredAt = CantonTimestamp.Epoch.plusSeconds(1)
   private lazy val testTopologyTimestamp = CantonTimestamp.Epoch
   private lazy val viewHash = ViewHash(TestHash.digest(2))
 
-  private lazy val viewMessage: EncryptedViewMessage[TestViewType] =
+  private def singleView(encryptedViewBytes: ByteString): EncryptedViewMessage[TestViewType] =
     EncryptedViewMessageUtils.exampleEncryptedSingleView(TestViewType)(
       submittingParticipantSignature = None,
       viewHash = viewHash,
       viewEncryptionKeyRandomness = sessionKeyMapTest,
-      encryptedViewBytes = rootHash.toProtoPrimitive,
+      encryptedViewBytes = encryptedViewBytes,
       synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
       viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
       protocolVersion = testedProtocolVersion,
     )
+
+  private lazy val viewMessage = singleView(rootHash.toProtoPrimitive)
 
   private lazy val rootHashMessage = RootHashMessage(
     rootHash,
@@ -486,12 +621,57 @@ class ProtocolProcessorTest
     testedProtocolVersion,
   )
   private lazy val someRecipients = Recipients.cc(participant)
-  private lazy val someRequestBatch = RequestAndRootHashMessage(
-    NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion)),
-    rootHashMessage,
-    MediatorGroupRecipient(MediatorGroupIndex.zero),
-    isReceipt = false,
+
+  private type TestRequestBatch =
+    RequestAndRootHashMessage[OpenEnvelope[EncryptedViewMessage[TestViewType]]]
+
+  private def requestBatch(
+      views: Seq[EncryptedViewMessage[TestViewType]] = Seq(viewMessage),
+      rootHashMsg: RootHashMessage[SerializedRootHashMessagePayload] = rootHashMessage,
+      mediator: MediatorGroupRecipient = MediatorGroupRecipient(MediatorGroupIndex.zero),
+      isReceipt: Boolean = false,
+  ): TestRequestBatch =
+    RequestAndRootHashMessage(
+      NonEmpty
+        .from(views.map(view => OpenEnvelope(view, someRecipients)(testedProtocolVersion)))
+        .value,
+      rootHashMsg,
+      mediator,
+      isReceipt,
+    )
+
+  private lazy val someRequestBatch = requestBatch()
+
+  private def processRequest(
+      sut: TestInstance,
+      batch: TestRequestBatch = someRequestBatch,
+      ts: CantonTimestamp = requestId.unwrap,
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate] = publishNoop,
+  ): AsyncResult[UnthrottledAsync] =
+    sut
+      .processRequest(ts, rc, requestSc, batch, publishUpdate, NonNegativeLong.zero)
+      .onShutdown(fail())
+      .futureValue
+
+  private lazy val pendingRequestData = TestPendingRequestData(
+    rc,
+    requestSc,
+    MediatorGroupRecipient(MediatorGroupIndex.one),
+    locallyRejectedF = FutureUnlessShutdown.pure(false),
+    abortEngine = _ => (),
+    engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
+    publishNoop,
   )
+
+  private def submissionTrackerData(
+      submitter: ParticipantId = participant
+  ): Option[SubmissionTrackerData] =
+    Some(
+      SubmissionTrackerData(
+        submittingParticipant = submitter,
+        maxSequencingTime = requestId.unwrap.plusSeconds(10),
+      )
+    )
 
   private lazy val topologySnapshot = topology.build().topologySnapshot()
 
@@ -516,7 +696,7 @@ class ProtocolProcessorTest
           Some(subId),
           paidTrafficCost = NonNegativeLong.zero,
         ),
-        TransactionSubmissionTrackingData.TimeoutCause,
+        SubmissionTrackingData.TimeoutCause,
         psid,
         transactionHash = None,
       ),
@@ -525,83 +705,200 @@ class ProtocolProcessorTest
   )
 
   "submit" should {
+    import com.digitalasset.canton.sequencing.protocol.SequencerDeliverError as DeliverErrorReason
 
-    "succeed without errors" in {
-      val submissionMap = TrieMap[Int, Unit]()
-      testProcessingSteps(pendingSubmissionMap = submissionMap) {
-        case (sut, _persistent, _ephemeral, _) =>
-          sut
-            .submit(0, topologySnapshot)
-            .valueOrFailShutdown("submission")
-            .futureValue
-            .failOnShutdown("shutting down while test is running")
-            .futureValue shouldBe ()
-          submissionMap.get(0) shouldBe Some(()) // store the pending submission
+    type SubmitResult = UnlessShutdown[Either[TestProcessingSteps.TestProcessingError, Unit]]
+
+    final case class SubmitCase(
+        name: String,
+        prepare: Prepare,
+        expected: SubmitResult,
+        registration: Registration = registers,
+        releases: Boolean = false,
+    )
+
+    def sendFails(error: SendAsyncClientError): Prepare = prepared(_ => EitherT.leftT(error))
+    val sendNotCalled = prepared(_ => fail("The processor must not send this submission"))
+    def submitFails(error: ProcessorError): SubmitResult =
+      UnlessShutdown.Outcome(Left(TestProcessorError(error)))
+    def deliverError(reason: DeliverErrorReason): DeliverError =
+      DeliverError.create(
+        None,
+        CantonTimestamp.Epoch,
+        psid,
+        MessageId.tryCreate("error"),
+        reason,
+        None,
+        testedProtocolVersion,
+      )
+
+    val succeeded: SubmitResult = UnlessShutdown.Outcome(Right(()))
+    val aborted: SubmitResult = UnlessShutdown.AbortedDueToShutdown
+    val requestFailed = SendAsyncClientError.RequestFailed("no thank you")
+    val alreadyExists = SendAsyncClientError.RequestAlreadyExists("dup")
+    val requestInvalid = SendAsyncClientError.RequestInvalid("invalid")
+    val refused = deliverError(SequencerErrors.SubmissionRequestRefused("refused"))
+    val aggregateSent = deliverError(SequencerErrors.AggregateSubmissionAlreadySent("already sent"))
+    val teaRejection: RpcError = TrafficControlErrors.TrafficStateNotFound.Error()(
+      ErrorLoggingContext.fromTracedLogger(logger)
+    )
+
+    val submitCases = Seq(
+      SubmitCase("the send succeeds", sendReturns(SendResult.Success(delivered)), succeeded),
+      SubmitCase(
+        "there is no traffic cost",
+        sendReturns(SendResult.Success(delivered), cost = None),
+        succeeded,
+        registration = None,
+      ),
+      SubmitCase(
+        "the request fails",
+        sendFails(requestFailed),
+        submitFails(SequencerRequestError(requestFailed)),
+        releases = true,
+      ),
+      SubmitCase(
+        "the request already exists",
+        sendFails(alreadyExists),
+        submitFails(SequencerRequestError(alreadyExists)),
+      ),
+      SubmitCase(
+        "the send times out",
+        sendReturns(SendResult.Timeout(CantonTimestamp.Epoch)),
+        submitFails(SequencerTimeoutError),
+        releases = true,
+      ),
+      SubmitCase(
+        "the sequencer refuses the request",
+        sendReturns(SendResult.Error(refused)),
+        submitFails(ProtocolProcessor.SequencerDeliverError(refused)),
+        releases = true,
+      ),
+      SubmitCase(
+        "the aggregate submission was already sent",
+        sendReturns(SendResult.Error(aggregateSent)),
+        submitFails(ProtocolProcessor.SequencerDeliverError(aggregateSent)),
+      ),
+      SubmitCase(
+        "sending aborts",
+        prepared(_ =>
+          EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit](
+            FutureUnlessShutdown.abortedDueToShutdown
+          )
+        ),
+        aborted,
+      ),
+      SubmitCase(
+        "the result aborts",
+        prepared(callsBack(UnlessShutdown.AbortedDueToShutdown)),
+        aborted,
+      ),
+      SubmitCase(
+        "preparing fails",
+        EitherT.leftT[FutureUnlessShutdown, SequencerClientSend.PreparedSubmission](
+          requestInvalid
+        ),
+        submitFails(SequencerRequestError(requestInvalid)),
+        registration = None,
+      ),
+      SubmitCase(
+        "TEA rejects",
+        sendNotCalled,
+        submitFails(TrafficEnforcementRejected(teaRejection)),
+        registration = Some(UnlessShutdown.Outcome(Left(teaRejection))),
+      ),
+      SubmitCase(
+        "registration aborts",
+        sendNotCalled,
+        aborted,
+        registration = Some(UnlessShutdown.AbortedDueToShutdown),
+      ),
+    )
+
+    "keep, clean up, or release the pending submission" when {
+      submitCases.foreach { submitCase =>
+        submitCase.name in {
+          val submissionMap = TrieMap[Int, Unit]()
+          val backend = releasingTrafficEnforcementBackend()
+
+          testProcessingSteps(
+            sequencerClient = preparingClient(submitCase.prepare),
+            pendingSubmissionMap = submissionMap,
+            trafficEnforcementBackend = backend,
+            trafficRegistration = submitCase.registration,
+          ) { (sut, _, _) =>
+            val result = loggerFactory.suppressWarnings(
+              sut.submit(0, topologySnapshot).value.unwrap.futureValue
+            )
+
+            result.map(_.map(_.futureValueUS)) shouldBe submitCase.expected
+            submissionMap.contains(0) shouldBe (submitCase.expected == succeeded)
+            if (submitCase.releases)
+              verify(backend)
+                .releaseSubmission(isEq(changeId), isEq(subId), isEq(trafficRegisteredAt))(
+                  anyTraceContext
+                )
+                .discard
+            else verifyZeroInteractions(backend)
+            succeed
+          }
+        }
       }
     }
 
-    "clean up the pending submissions when send request fails" in {
-      val submissionMap = TrieMap[Int, Unit]()
-      val failingSequencerClient = mock[SequencerClientSend]
-      val sendError = SendAsyncClientError.RequestFailed("no thank you")
-      when(
-        failingSequencerClient.send(
-          any[Batch[DefaultOpenEnvelope]],
-          any[Option[SynchronizerSnapshotSyncCryptoApi]],
-          any[SendRequestTimestamps],
-          any[MessageId],
-          any[Option[AggregationRule]],
-          any[SendCallback],
-          any[TrafficCostValidator],
-          amplify = any[Boolean],
-          useConfirmationResponseAmplificationParameters = any[Boolean],
-        )(anyTraceContext, any[MetricsContext])
-      )
-        .thenReturn(EitherT.leftT[FutureUnlessShutdown, Unit](sendError))
+    val exception = new RuntimeException("boom")
+    def throws[A]: EitherT[FutureUnlessShutdown, SendAsyncClientError, A] =
+      EitherT.liftF(FutureUnlessShutdown.failed[A](exception))
+    val decisionTime = parameters.decisionTimeFor(CantonTimestamp.Epoch).value
 
-      testProcessingSteps(
-        sequencerClient = failingSequencerClient,
-        pendingSubmissionMap = submissionMap,
-      ) { case (sut, _persistent, _ephemeral, _) =>
-        val submissionResult = loggerFactory.assertLogs(
-          sut.submit(0, topologySnapshot).futureValueUS,
-          _.warningMessage should include(s"Failed to submit submission due to"),
-        )
+    "clean up the pending submission without releasing it" when {
+      Seq[(String, Prepare, Registration, Boolean)](
+        ("preparing", throws, None, false),
+        ("sending", prepared(_ => throws), registers, false),
+        ("scheduling the removal", sendReturns(SendResult.Success(delivered)), registers, true),
+      ).foreach { case (step, prepare, registration, decisionTickThrows) =>
+        s"$step throws" in {
+          val submissionMap = TrieMap[Int, Unit]()
+          val backend = releasingTrafficEnforcementBackend()
 
-        submissionResult shouldEqual Left(TestProcessorError(SequencerRequestError(sendError)))
-        submissionMap.get(0) shouldBe None // remove the pending submission
+          testProcessingSteps(
+            sequencerClient = preparingClient(prepare),
+            pendingSubmissionMap = submissionMap,
+            trafficEnforcementBackend = backend,
+            trafficRegistration = registration,
+          ) { (sut, _, ephemeral) =>
+            if (decisionTickThrows)
+              when(
+                ephemeral.timeTracker
+                  .requestTick(isEq(decisionTime), any[Boolean])(any[TraceContext])
+              ).thenThrow(exception).discard
+            sut.submit(0, topologySnapshot).value.unwrap.failed.futureValue shouldBe exception
+            submissionMap.contains(0) shouldBe false
+            // We can't tell whether the request was sequenced, so we keep the correlation.
+            verifyZeroInteractions(backend)
+            succeed
+          }
+        }
       }
     }
 
     "clean up the pending submissions when no request is received" in {
       val submissionMap = TrieMap[Int, Unit]()
 
-      testProcessingSteps(pendingSubmissionMap = submissionMap) {
-        case (sut, _persistent, _ephemeral, _) =>
-          sut
-            .submit(1, topologySnapshot)
-            .valueOrFailShutdown("submission")
-            .futureValue
-            .failOnShutdown("shutting down while test is running")
-            .futureValue shouldBe ()
-          submissionMap.get(1) shouldBe Some(())
-          val afterDecisionTime =
-            parameters.decisionTimeFor(CantonTimestamp.Epoch).value.plusMillis(1)
-          val asyncRes = sut
-            .processRequest(
-              afterDecisionTime,
-              rc,
-              requestSc,
-              someRequestBatch,
-              publishNoop,
-              NonNegativeLong.zero,
-            )
-            .onShutdown(fail())
-            .futureValue
-          waitForAsyncResult(asyncRes)
-          eventually() {
-            submissionMap.get(1) shouldBe None
-          }
+      testProcessingSteps(pendingSubmissionMap = submissionMap) { (sut, _, _) =>
+        sut
+          .submit(1, topologySnapshot)
+          .valueOrFailShutdown("submission")
+          .futureValue
+          .failOnShutdown("shutting down while test is running")
+          .futureValue shouldBe ()
+        submissionMap.get(1) shouldBe Some(())
+        val afterDecisionTime =
+          parameters.decisionTimeFor(CantonTimestamp.Epoch).value.plusMillis(1)
+        waitForAsyncResult(processRequest(sut, ts = afterDecisionTime))
+        eventually() {
+          submissionMap.get(1) shouldBe None
+        }
       }
     }
 
@@ -611,7 +908,7 @@ class ProtocolProcessorTest
         loggerFactory,
         parameters.parameters,
       ).forOwnerAndSynchronizer(participant, psid)
-      testProcessingSteps(crypto = crypto2) { case (sut, _persistent, _ephemeral, _) =>
+      testProcessingSteps(crypto = crypto2) { (sut, _, _) =>
         val topo2 = crypto2.currentSnapshotApproximation.futureValueUS.ipsSnapshot
         val res = sut.submit(1, topo2).onShutdown(fail("submission shutdown")).value.futureValue
         res shouldBe Left(TestProcessorError(NoMediatorError(CantonTimestamp.Epoch)))
@@ -621,74 +918,23 @@ class ProtocolProcessorTest
 
   "process request" should {
 
-    "succeed without errors" in {
-      testProcessingSteps() { case (sut, _persistent, _ephemeral, _) =>
-        val asyncRes = sut
-          .processRequest(
-            requestId.unwrap,
-            rc,
-            requestSc,
-            someRequestBatch,
-            publishNoop,
-            NonNegativeLong.zero,
-          )
-          .onShutdown(fail())
-          .futureValue
-        waitForAsyncResult(asyncRes)
-        succeed
-      }
-    }
-
     "transit to confirmed" in {
-      val pd = TestPendingRequestData(
-        rc,
-        requestSc,
-        MediatorGroupRecipient(MediatorGroupIndex.one),
-        locallyRejectedF = FutureUnlessShutdown.pure(false),
-        abortEngine = _ => (),
-        engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
-        PublishUpdateViaRecordOrderPublisher.noop,
-      )
+      testProcessingSteps(overrideConstructedPendingRequestDataO = Some(pendingRequestData)) {
+        (sut, _, ephemeral) =>
+          ephemeral.requestJournal.query(rc).value.futureValueUS shouldEqual None
 
-      testProcessingSteps(overrideConstructedPendingRequestDataO = Some(pd)) {
-        case (sut, _persistent, ephemeral, _) =>
-          val before = ephemeral.requestJournal.query(rc).value.futureValueUS
-          before shouldEqual None
-
-          val requestTs = CantonTimestamp.Epoch
-          val asyncRes = sut
-            .processRequest(
-              requestTs,
-              rc,
-              requestSc,
-              someRequestBatch,
-              publishNoop,
-              NonNegativeLong.zero,
-            )
-            .onShutdown(fail())
-            .futureValue
-          waitForAsyncResult(asyncRes)
+          waitForAsyncResult(processRequest(sut))
           val requestState = ephemeral.requestJournal.query(rc).value.futureValueUS
           requestState.value.state shouldEqual RequestState.Pending
           ephemeral.phase37Synchronizer
-            .awaitConfirmed(TestPendingRequestDataType)(RequestId(requestTs))
-            .futureValueUS shouldBe RequestOutcome.Success(Wrapped(pd))
+            .awaitConfirmed(TestPendingRequestDataType)(requestId)
+            .futureValueUS shouldBe RequestOutcome.Success(Wrapped(pendingRequestData))
       }
     }
 
     "leave the request state unchanged when doing a clean replay" in {
-      val pendingData =
-        TestPendingRequestData(
-          rc,
-          requestSc,
-          MediatorGroupRecipient(MediatorGroupIndex.one),
-          locallyRejectedF = FutureUnlessShutdown.pure(false),
-          abortEngine = _ => (),
-          engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
-          PublishUpdateViaRecordOrderPublisher.noop,
-        )
       testProcessingSteps(
-        overrideConstructedPendingRequestDataO = Some(pendingData),
+        overrideConstructedPendingRequestDataO = Some(pendingRequestData),
         startingPoints = ProcessingStartingPoints.tryCreate(
           cleanReplay = MessageCleanReplayStartingPoint(
             rc,
@@ -703,57 +949,22 @@ class ProtocolProcessorTest
             RepairCounter.Genesis,
           ),
         ),
-      ) { case (sut, _persistent, ephemeral, _) =>
-        val before = ephemeral.requestJournal.query(rc).value.futureValueUS
-        before shouldEqual None
+      ) { (sut, _, ephemeral) =>
+        ephemeral.requestJournal.query(rc).value.futureValueUS shouldEqual None
 
-        val asyncRes = sut
-          .processRequest(
-            requestId.unwrap,
-            rc,
-            requestSc,
-            someRequestBatch,
-            publishNoop,
-            NonNegativeLong.zero,
-          )
-          .onShutdown(fail())
-          .futureValue
-        waitForAsyncResult(asyncRes)
-        val requestState = ephemeral.requestJournal.query(rc).value.futureValueUS
-        requestState shouldEqual None
+        waitForAsyncResult(processRequest(sut))
+        ephemeral.requestJournal.query(rc).value.futureValueUS shouldEqual None
       }
     }
 
     "trigger a timeout when the result doesn't arrive" in {
-      val pd = TestPendingRequestData(
-        rc,
-        requestSc,
-        MediatorGroupRecipient(MediatorGroupIndex.one),
-        locallyRejectedF = FutureUnlessShutdown.pure(false),
-        abortEngine = _ => (),
-        engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
-        PublishUpdateViaRecordOrderPublisher.noop,
-      )
-      testProcessingSteps(overrideConstructedPendingRequestDataO = Some(pd)) {
-        case (sut, _persistent, ephemeral, _) =>
+      testProcessingSteps(overrideConstructedPendingRequestDataO = Some(pendingRequestData)) {
+        (sut, _, ephemeral) =>
           val journal = ephemeral.requestJournal
-
-          val initialSTate = journal.query(rc).value.futureValueUS
-          initialSTate shouldEqual None
+          journal.query(rc).value.futureValueUS shouldEqual None
 
           // Process a request but never a corresponding response
-          val asyncRes = sut
-            .processRequest(
-              CantonTimestamp.Epoch,
-              rc,
-              requestSc,
-              someRequestBatch,
-              publishNoop,
-              NonNegativeLong.zero,
-            )
-            .onShutdown(fail())
-            .futureValue
-          waitForAsyncResult(asyncRes)
+          waitForAsyncResult(processRequest(sut))
 
           ephemeral.requestTracker.taskScheduler.readSequencerCounterQueue(
             requestSc
@@ -777,92 +988,28 @@ class ProtocolProcessorTest
       }
     }
 
-    "log wrong root hashes" in {
-      val wrongRootHash = RootHash(TestHash.digest(3))
-      val viewHash1 = ViewHash(TestHash.digest(2))
-
-      val viewMessageWrongRH: EncryptedViewMessage[TestViewType.type] =
-        EncryptedViewMessageUtils.exampleEncryptedSingleView(TestViewType)(
-          submittingParticipantSignature = None,
-          viewHash = viewHash1,
-          viewEncryptionKeyRandomness = sessionKeyMapTest,
-          encryptedViewBytes = wrongRootHash.toProtoPrimitive,
-          synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
-          viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
-          protocolVersion = testedProtocolVersion,
-        )
-
-      val requestBatchWrongRH = RequestAndRootHashMessage(
-        NonEmpty(
-          Seq,
-          OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion),
-          OpenEnvelope(viewMessageWrongRH, someRecipients)(testedProtocolVersion),
-        ),
-        rootHashMessage,
-        MediatorGroupRecipient(MediatorGroupIndex.zero),
-        isReceipt = false,
-      )
-
-      testProcessingSteps() { case (sut, _persistent, _ephemeral, _) =>
-        val asyncRes = loggerFactory.assertLogs(
-          sut
-            .processRequest(
-              requestId.unwrap,
-              rc,
-              requestSc,
-              requestBatchWrongRH,
-              publishNoop,
-              NonNegativeLong.zero,
+    Seq(
+      (
+        "log wrong root hashes",
+        Seq(viewMessage, singleView(RootHash(TestHash.digest(3)).toProtoPrimitive)),
+        s"Request $rc: Found malformed payload: WrongRootHash",
+      ),
+      (
+        "log decryption errors",
+        Seq(singleView(ByteString.EMPTY)),
+        s"Request $rc: Decryption error: SyncCryptoDecryptError(",
+      ),
+    ).foreach { case (name, views, warning) =>
+      name in {
+        testProcessingSteps() { (sut, _, _) =>
+          waitForAsyncResult(
+            loggerFactory.assertLogs(
+              processRequest(sut, requestBatch(views)),
+              _.warningMessage should include(warning),
             )
-            .onShutdown(fail())
-            .futureValue,
-          _.warningMessage should include(s"Request $rc: Found malformed payload: WrongRootHash"),
-        )
-        waitForAsyncResult(asyncRes)
-        succeed
-      }
-    }
-
-    "log decryption errors" in {
-
-      val viewMessage: EncryptedViewMessage[TestViewType] =
-        EncryptedViewMessageUtils.exampleEncryptedSingleView(TestViewType)(
-          submittingParticipantSignature = None,
-          viewHash = viewHash,
-          viewEncryptionKeyRandomness = sessionKeyMapTest,
-          encryptedViewBytes = ByteString.EMPTY,
-          synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
-          viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
-          protocolVersion = testedProtocolVersion,
-        )
-
-      val requestBatchDecryptError = RequestAndRootHashMessage(
-        NonEmpty(
-          Seq,
-          OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion),
-        ),
-        rootHashMessage,
-        MediatorGroupRecipient(MediatorGroupIndex.zero),
-        isReceipt = false,
-      )
-
-      testProcessingSteps() { case (sut, _persistent, _ephemeral, _) =>
-        val asyncRes = loggerFactory.assertLogs(
-          sut
-            .processRequest(
-              requestId.unwrap,
-              rc,
-              requestSc,
-              requestBatchDecryptError,
-              publishNoop,
-              NonNegativeLong.zero,
-            )
-            .onShutdown(fail())
-            .futureValue,
-          _.warningMessage should include(s"Request $rc: Decryption error: SyncCryptoDecryptError("),
-        )
-        waitForAsyncResult(asyncRes)
-        succeed
+          )
+          succeed
+        }
       }
     }
 
@@ -876,35 +1023,24 @@ class ProtocolProcessorTest
       // Instead of rolling back the request in Phase 7, it is discarded in Phase 3. This has the same effect.
 
       val otherMediatorGroup = MediatorGroupRecipient(MediatorGroupIndex.one)
-      val requestBatch = RequestAndRootHashMessage(
-        NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion)),
-        rootHashMessage,
-        otherMediatorGroup,
-        isReceipt = false,
-      )
 
-      testProcessingSteps() { case (sut, _persistent, _ephemeral, _) =>
-        loggerFactory
-          .assertLogs(
-            sut
-              .processRequest(
-                requestId.unwrap,
-                rc,
-                requestSc,
-                requestBatch,
-                publishNoop,
-                NonNegativeLong.zero,
-              )
-              .onShutdown(fail()),
-            _.errorMessage should include(
-              s"Mediator ${MediatorGroupRecipient(MediatorGroupIndex.zero)} declared in views is not the recipient $otherMediatorGroup of the root hash message"
-            ),
-          )
-          .futureValue
-          .discard
+      testProcessingSteps() { (sut, _, _) =>
+        loggerFactory.assertLogs(
+          waitForAsyncResult(processRequest(sut, requestBatch(mediator = otherMediatorGroup))),
+          _.errorMessage should include(
+            s"Mediator ${MediatorGroupRecipient(MediatorGroupIndex.zero)} declared in views is not the recipient $otherMediatorGroup of the root hash message"
+          ),
+        )
         succeed
       }
+    }
 
+    "clear the in-flight submission after a mismatched-mediator receipt" in {
+      checkMismatchedMediatorSubmissionCleanup(isReceipt = true)
+    }
+
+    "clear the in-flight submission after a mismatched-mediator preplay" in {
+      checkMismatchedMediatorSubmissionCleanup(isReceipt = false)
     }
 
     "check that the mediator is active" taggedAs {
@@ -921,118 +1057,65 @@ class ProtocolProcessorTest
         parameters.parameters,
       ).forOwnerAndSynchronizer(participant, psid)
 
-      testProcessingSteps(crypto = testCrypto) { case (sut, _persistent, _ephemeral, _) =>
-        loggerFactory
-          .assertLogs(
-            sut
-              .processRequest(
-                requestId.unwrap,
-                rc,
-                requestSc,
-                someRequestBatch,
-                publishNoop,
-                NonNegativeLong.zero,
-              )
-              .onShutdown(fail()),
-            _.shouldBeCantonError(
-              SyncServiceAlarm,
-              _ shouldBe s"Request $rc: Chosen mediator ${MediatorGroupRecipient(MediatorGroupIndex.zero)} is inactive at ${requestId.unwrap}. Skipping this request.",
-            ),
-          )
-          .futureValue
-          .discard
+      testProcessingSteps(crypto = testCrypto) { (sut, _, _) =>
+        loggerFactory.assertLogs(
+          waitForAsyncResult(processRequest(sut)),
+          _.shouldBeCantonError(
+            SyncServiceAlarm,
+            _ shouldBe s"Request $rc: Chosen mediator ${MediatorGroupRecipient(MediatorGroupIndex.zero)} is inactive at ${requestId.unwrap}. Skipping this request.",
+          ),
+        )
         succeed
       }
     }
 
-    "notify the in-flight submission tracker with the root hash when necessary" in {
+    final case class TrackerCase(
+        name: String,
+        submitter: ParticipantId,
+        isReceipt: Boolean,
+        notifies: Boolean,
+    )
 
-      testProcessingSteps(
-        overrideInFlightSubmissionSynchronizerTrackerO =
-          Some(mockInFlightSubmissionSynchronizerTracker),
-        submissionDataForTrackerO = Some(
-          SubmissionTrackerData(
-            submittingParticipant = participant,
-            maxSequencingTime = requestId.unwrap.plusSeconds(10),
-          )
-        ),
-      ) { case (sut, _persistent, _ephemeral, _) =>
-        val asyncRes = sut
-          .processRequest(
-            requestId.unwrap,
-            rc,
-            requestSc,
-            someRequestBatch,
-            publishNoop,
-            NonNegativeLong.zero,
-          )
-          .onShutdown(fail())
-          .futureValue
-        waitForAsyncResult(asyncRes)
+    Seq(
+      TrackerCase(
+        "notify the in-flight submission tracker with the root hash when necessary",
+        submitter = participant,
+        isReceipt = false,
+        notifies = true,
+      ),
+      TrackerCase(
+        "not notify the in-flight submission tracker when the message is a receipt",
+        submitter = participant,
+        isReceipt = true,
+        notifies = false,
+      ),
+      TrackerCase(
+        "not notify the in-flight submission tracker when not submitting participant",
+        submitter = otherParticipant,
+        isReceipt = false,
+        notifies = false,
+      ),
+    ).foreach { case TrackerCase(name, submitter, isReceipt, notifies) =>
+      name in {
+        val tracker = mock[InFlightSubmissionSynchronizerTracker]
+        when(
+          tracker.observeSequencedRootHash(any[RootHash], any[SequencedSubmission])(anyTraceContext)
+        ).thenAnswer(FutureUnlessShutdown.unit)
 
-        verify(mockInFlightSubmissionSynchronizerTracker).observeSequencedRootHash(
-          isEq(someRequestBatch.rootHashMessage.rootHash),
-          isEq(SequencedSubmission(requestId.unwrap)),
-        )(anyTraceContext)
-        succeed
-      }
-    }
+        testProcessingSteps(
+          overrideInFlightSubmissionSynchronizerTrackerO = Some(tracker),
+          submissionDataForTrackerO = submissionTrackerData(submitter),
+        ) { (sut, _, _) =>
+          waitForAsyncResult(processRequest(sut, requestBatch(isReceipt = isReceipt)))
 
-    "not notify the in-flight submission tracker when the message is a receipt" in {
-      testProcessingSteps(
-        overrideInFlightSubmissionSynchronizerTrackerO =
-          Some(mockInFlightSubmissionSynchronizerTracker),
-        submissionDataForTrackerO = Some(
-          SubmissionTrackerData(
-            submittingParticipant = participant,
-            maxSequencingTime = requestId.unwrap.plusSeconds(10),
-          )
-        ),
-      ) { case (sut, _persistent, _ephemeral, _) =>
-        val asyncRes = sut
-          .processRequest(
-            requestId.unwrap,
-            rc,
-            requestSc,
-            someRequestBatch.copy(isReceipt = true),
-            publishNoop,
-            NonNegativeLong.zero,
-          )
-          .onShutdown(fail())
-          .futureValue
-        waitForAsyncResult(asyncRes)
-
-        verifyZeroInteractions(mockInFlightSubmissionSynchronizerTracker)
-        succeed
-      }
-    }
-
-    "not notify the in-flight submission tracker when not submitting participant" in {
-      testProcessingSteps(
-        overrideInFlightSubmissionSynchronizerTrackerO =
-          Some(mockInFlightSubmissionSynchronizerTracker),
-        submissionDataForTrackerO = Some(
-          SubmissionTrackerData(
-            submittingParticipant = otherParticipant,
-            maxSequencingTime = requestId.unwrap.plusSeconds(10),
-          )
-        ),
-      ) { case (sut, _persistent, _ephemeral, _) =>
-        val asyncRes = sut
-          .processRequest(
-            requestId.unwrap,
-            rc,
-            requestSc,
-            someRequestBatch,
-            publishNoop,
-            NonNegativeLong.zero,
-          )
-          .onShutdown(fail())
-          .futureValue
-        waitForAsyncResult(asyncRes)
-
-        verifyZeroInteractions(mockInFlightSubmissionSynchronizerTracker)
-        succeed
+          if (notifies)
+            verify(tracker).observeSequencedRootHash(
+              isEq(rootHash),
+              isEq(SequencedSubmission(requestId.unwrap)),
+            )(anyTraceContext)
+          else verifyZeroInteractions(tracker)
+          succeed
+        }
       }
     }
 
@@ -1057,19 +1140,17 @@ class ProtocolProcessorTest
 
       val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
       testProcessingSteps(
-        submissionDataForTrackerO = Some(
-          SubmissionTrackerData(
-            submittingParticipant = participant,
-            maxSequencingTime = requestId.unwrap.plusSeconds(10),
-          )
-        ),
+        submissionDataForTrackerO = submissionTrackerData(),
         overrideInFlightSubmissionStoreO = Some(inFlightSubmissionStore),
-      ) { case (sut, persistent, ephemeral, nodeEphemeral) =>
+      ) { (sut, _, ephemeral) =>
         val ifst = ephemeral.inFlightSubmissionSynchronizerTracker
         val subF = for {
           // The participant registers the submission in the in-flight submission tracker
           _ <- ifst
-            .register(unsequencedSubmission, DeduplicationDuration(Duration.ofSeconds(10)))
+            .register(
+              unsequencedSubmission,
+              DeduplicationDuration.create(Duration.ofSeconds(10)).value,
+            )
             .valueOrFailShutdown("register submission")
 
           // Even though sequenced later, the normal notification wins the race
@@ -1084,19 +1165,7 @@ class ProtocolProcessorTest
             .failOnShutdown
 
           // The preplay gets processed and notifies the in-flight submission tracker
-          _ <- sut
-            .processRequest(
-              requestId.unwrap,
-              rc,
-              requestSc,
-              someRequestBatch,
-              publishNoop,
-              NonNegativeLong.zero,
-            )
-            .onShutdown(fail())
-            .futureValue
-            .unwrap
-            .unwrap
+          _ <- processRequest(sut).unwrap.unwrap
 
           // Retrieve the submission from the in-flight submission tracker store to check its info
           sub <- inFlightSubmissionStore.lookup(changeIdHash).getOrElse(fail()).failOnShutdown
@@ -1113,7 +1182,7 @@ class ProtocolProcessorTest
     }
 
     "log a warning for future topology timestamps and replace them with request timestamps" in {
-      testProcessingSteps() { case (sut, _persistent, ephemeral, _) =>
+      testProcessingSteps() { (sut, _, ephemeral) =>
         val submissionTopologyTimestamp = CantonTimestamp.MaxValue
 
         val maliciousRootHashMessage = RootHashMessage(
@@ -1125,31 +1194,14 @@ class ProtocolProcessorTest
           testedProtocolVersion,
         )
 
-        val maliciousBatch = RequestAndRootHashMessage(
-          NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion)),
-          maliciousRootHashMessage,
-          MediatorGroupRecipient(MediatorGroupIndex.zero),
-          isReceipt = false,
-        )
-
         val asyncResult = loggerFactory
           .assertLogs(
-            sut
-              .processRequest(
-                CantonTimestamp.Epoch,
-                rc,
-                requestSc,
-                maliciousBatch,
-                publishNoop,
-                NonNegativeLong.zero,
-              )
-              .onShutdown(fail()),
+            processRequest(sut, requestBatch(rootHashMsg = maliciousRootHashMessage)),
             _.shouldBeCantonError(
               SubmissionTopologyHelper.SubmissionTopologyErrors.TopologyAlarm,
               _ shouldBe s"Received future-dated submission timestamp $submissionTopologyTimestamp. Falling back to request timestamp ${CantonTimestamp.Epoch}.",
             ),
           )
-          .futureValue
         // This awaits the full asynchronous completion of the request processing.
         // If the future timestamp was not being replaced, this call would hang indefinitely.
         waitForAsyncResult(asyncResult)
@@ -1204,21 +1256,7 @@ class ProtocolProcessorTest
         _ <- ephemeral.requestJournal.insert(rc, CantonTimestamp.Epoch)
       } yield ephemeral.phase37Synchronizer
         .registerRequest(TestPendingRequestDataType)(requestId)
-        .complete(
-          Some(
-            Wrapped(
-              TestPendingRequestData(
-                rc,
-                requestSc,
-                MediatorGroupRecipient(MediatorGroupIndex.one),
-                locallyRejectedF = FutureUnlessShutdown.pure(false),
-                abortEngine = _ => (),
-                engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
-                publishUpdate = PublishUpdateViaRecordOrderPublisher.noop,
-              )
-            )
-          )
-        )
+        .complete(Some(Wrapped(pendingRequestData)))
       setupF.futureValueUS
     }
 
@@ -1236,10 +1274,9 @@ class ProtocolProcessorTest
       sut
         .processResultInternal1(
           NoOpeningErrors(
-            SignedContent(
+            AggregatedSignedContent(
               mock[Deliver[Batch[DefaultOpenEnvelope]]],
               Signature.noSignature,
-              None,
               testedProtocolVersion,
             )
           ),
@@ -1252,7 +1289,7 @@ class ProtocolProcessorTest
     }
 
     "succeed without errors and transit to clean" in {
-      testProcessingSteps() { case (sut, persistent, ephemeral, _) =>
+      testProcessingSteps() { (sut, persistent, ephemeral) =>
         addRequestState(ephemeral)
 
         val taskScheduler = ephemeral.requestTracker.taskScheduler
@@ -1272,7 +1309,7 @@ class ProtocolProcessorTest
     }
 
     "wait for request processing to finish" in {
-      testProcessingSteps() { case (sut, _persistent, ephemeral, _) =>
+      testProcessingSteps() { (sut, _, ephemeral) =>
         val taskScheduler = ephemeral.requestTracker.taskScheduler
         val requestJournal = ephemeral.requestJournal
 
@@ -1332,7 +1369,7 @@ class ProtocolProcessorTest
             RepairCounter.Genesis,
           ),
         )
-      ) { case (sut, _persistent, ephemeral, _) =>
+      ) { (sut, _, ephemeral) =>
         addRequestState(ephemeral)
         ephemeral.phase37Synchronizer
           .registerRequest(TestPendingRequestDataType)(requestId)
@@ -1365,7 +1402,7 @@ class ProtocolProcessorTest
     }
 
     "give an error when decision time has elapsed" in {
-      testProcessingSteps() { case (sut, persistent, ephemeral, _) =>
+      testProcessingSteps() { (sut, persistent, ephemeral) =>
         addRequestState(ephemeral, decisionTime = CantonTimestamp.Epoch.plusSeconds(5))
 
         val taskScheduler = ephemeral.requestTracker.taskScheduler

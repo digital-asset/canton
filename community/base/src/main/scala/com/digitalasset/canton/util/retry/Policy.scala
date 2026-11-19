@@ -4,7 +4,7 @@
 package com.digitalasset.canton.util.retry
 
 import cats.Eval
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.ExponentialBackoffConfig
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
@@ -13,7 +13,7 @@ import com.digitalasset.canton.lifecycle.{
   HasSynchronizeWithClosing,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging, TracedLogger}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryWithDelay.{RetryOutcome, RetryTermination}
@@ -65,10 +65,7 @@ object PolicyEffect {
   * If unsure about what retry policy to pick, [[com.digitalasset.canton.util.retry.Backoff]] is a
   * good default.
   */
-abstract class Policy(logger: TracedLogger) {
-
-  protected val directExecutionContext: DirectExecutionContext =
-    DirectExecutionContext(NamedLogging.loggerWithoutTracing(logger))
+trait Policy {
 
   def apply[F[_], T](task: => F[T], retryOk: ExceptionRetryPolicy)(implicit
       success: Success[T],
@@ -102,7 +99,7 @@ abstract class RetryWithDelay(
     hasSynchronizeWithClosing: HasSynchronizeWithClosing,
     retryLogLevel: Option[Level],
     suspendRetries: Eval[FiniteDuration],
-) extends Policy(logger) {
+) extends Policy {
 
   import RetryWithDelay.complainAfterRetries
 
@@ -538,7 +535,7 @@ object Backoff {
 final case class When(
     logger: TracedLogger,
     depends: PartialFunction[Any, Policy],
-) extends Policy(logger) {
+) extends Policy {
 
   override def applyFut[T](task: => Future[T], retryable: ExceptionRetryPolicy)(implicit
       success: Success[T],

@@ -5,8 +5,8 @@ package com.digitalasset.canton.topology.store
 
 import cats.syntax.option.*
 import com.digitalasset.canton.config.CantonRequireTypes.String300
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{BatchAggregatorConfig, BatchingConfig, TopologyConfig}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.{BatchAggregatorConfig, TestBatchingConfig, TopologyConfig}
 import com.digitalasset.canton.crypto.topology.TopologyStateHash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -483,7 +483,7 @@ trait TopologyStoreTest
             _ <- new InitialTopologySnapshotValidator(
               pureCrypto = testData.factory.syncCryptoClient.crypto.pureCrypto,
               store = store,
-              BatchingConfig().copy(
+              TestBatchingConfig().copy(
                 topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting
               ),
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
@@ -649,7 +649,7 @@ trait TopologyStoreTest
             _ <- new InitialTopologySnapshotValidator(
               factory.syncCryptoClient.crypto.pureCrypto,
               store,
-              BatchingConfig().copy(
+              TestBatchingConfig().copy(
                 topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting
               ),
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
@@ -857,7 +857,7 @@ trait TopologyStoreTest
             _ <- new InitialTopologySnapshotValidator(
               factory.syncCryptoClient.crypto.pureCrypto,
               store,
-              BatchingConfig().copy(
+              TestBatchingConfig().copy(
                 topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting
               ),
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
@@ -1308,13 +1308,13 @@ trait TopologyStoreTest
               atTs2ResultWithMappingFilter <- store.findEffectiveStateChanges(
                 fromEffectiveInclusive = ts2,
                 onlyAtEffective = true,
-                filterTypes = Some(Seq(TopologyMapping.Code.PartyToParticipant)),
+                filterTypes = Some(NonEmpty(Seq, TopologyMapping.Code.PartyToParticipant)),
               )
               // no OTK
               atTs2ResultWithMappingEmptyFilter <- store.findEffectiveStateChanges(
                 fromEffectiveInclusive = ts2,
                 onlyAtEffective = true,
-                filterTypes = Some(Seq(TopologyMapping.Code.OwnerToKeyMapping)),
+                filterTypes = Some(NonEmpty(Seq, TopologyMapping.Code.OwnerToKeyMapping)),
               )
               atTs3Result <- store.findEffectiveStateChanges(
                 fromEffectiveInclusive = ts3,
@@ -2004,6 +2004,117 @@ trait TopologyStoreTest
 
       }
 
+      "findEffectiveStateChangesAtTopologyInit" should {
+        def streamed(
+            store: TopologyStore[TopologyStoreId.SynchronizerStore],
+            onboardingEffectiveTime: CantonTimestamp,
+            fromExclusive: CantonTimestamp = CantonTimestamp.MinValue,
+            filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]] = None,
+        ): FutureUnlessShutdown[Seq[StoredTopologyTransaction.GenericStoredTopologyTransaction]] =
+          FutureUnlessShutdown.outcomeF(
+            store
+              .findEffectiveStateChangesAtTopologyInit(
+                fromExclusive = EffectiveTime(fromExclusive),
+                toInclusive = EffectiveTime(onboardingEffectiveTime),
+                filterTypes,
+              )
+              .runWith(Sink.seq)
+          )
+
+        def hashes(txs: Seq[StoredTopologyTransaction.GenericStoredTopologyTransaction]) =
+          txs.map(_.hash)
+
+        "return nothing for an empty store" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "atInitEmpty")
+          streamed(store, ts3).map(_ shouldBe empty)
+        }
+
+        "return the state effective at the onboarding time, honoring bounds and filters" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "atInitState")
+          for {
+            _ <- update(store, ts1, add = Seq(nsd_p1, otk_p1))
+            // nsd_p3 and a proposal for otk_p2 are added
+            _ <- update(store, ts2, add = Seq(nsd_p3, otk_p2_proposal))
+            // p2 onboards at ts3: its namespace delegation and owner-to-key mapping are sequenced
+            // together with the trust certificate. nsd_p3 is deactivated at exactly ts3.
+            _ <- update(
+              store,
+              ts3,
+              add = Seq(nsd_p2, otk_p2, dtc_p2_synchronizer1),
+              removals = Map(nsd_p3.mapping.uniqueKey -> (None, Set(nsd_p3.hash))),
+            )
+            // nsd_p1 is deactivated only after the onboarding, so it is still part of the state at ts3
+            _ <- update(
+              store,
+              ts4,
+              add = Seq(),
+              removals = Map(nsd_p1.mapping.uniqueKey -> (None, Set(nsd_p1.hash))),
+            )
+
+            content <- store.dumpStoreContent()
+            atTs3 <- streamed(store, onboardingEffectiveTime = ts3)
+            atTs2 <- streamed(store, onboardingEffectiveTime = ts2)
+            atTs3FromTs1 <- streamed(store, onboardingEffectiveTime = ts3, fromExclusive = ts1)
+            atTs3FromTs3 <- streamed(store, onboardingEffectiveTime = ts3, fromExclusive = ts3)
+            atTs3OnlyOtk <- streamed(
+              store,
+              onboardingEffectiveTime = ts3,
+              filterTypes = Some(NonEmpty(Seq, TopologyMapping.Code.OwnerToKeyMapping)),
+            )
+          } yield {
+            // no proposals and no transactions deactivated at or before the onboarding time
+            hashes(atTs3).toSet shouldBe
+              Set(nsd_p1.hash, otk_p1.hash, nsd_p2.hash, otk_p2.hash, dtc_p2_synchronizer1.hash)
+            // results are ordered by effective time
+            atTs3.map(_.validFrom.value) shouldBe atTs3.map(_.validFrom.value).sorted
+
+            // nsd_p3 is still active at ts2, and the p2 onboarding transactions are not yet effective
+            hashes(atTs2).toSet shouldBe Set(nsd_p1.hash, otk_p1.hash, nsd_p3.hash)
+
+            // fromExclusive excludes the transactions effective at that time
+            hashes(atTs3FromTs1).toSet shouldBe
+              Set(nsd_p2.hash, otk_p2.hash, dtc_p2_synchronizer1.hash)
+            atTs3FromTs3 shouldBe empty
+
+            hashes(atTs3OnlyOtk).toSet shouldBe Set(otk_p1.hash, otk_p2.hash)
+          }
+        }
+
+        "return only replacements that are not rejected" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "atInitRejected")
+          for {
+            _ <- store.update(
+              SequencedTime(ts1),
+              EffectiveTime(ts1),
+              removals = Map.empty,
+              additions = Seq(
+                ValidatedTopologyTransaction(nsd_p1, None),
+                ValidatedTopologyTransaction(
+                  nsd_p2,
+                  Some(TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping("sad")),
+                ),
+              ),
+            )
+            result <- streamed(store, ts1)
+          } yield hashes(result) shouldBe Seq(nsd_p1.hash)
+        }
+
+        "stream a large state in effective time order" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "atInitLarge")
+          val from = CantonTimestamp.Epoch.plusSeconds(10)
+          val to = CantonTimestamp.Epoch.plusSeconds(30)
+          for {
+            _ <- store.bulkInsert(largeTestSnapshot)
+            result <- streamed(store, onboardingEffectiveTime = to, fromExclusive = from)
+          } yield {
+            val expected = largeTestSnapshot.result
+              .filter(tx => tx.validFrom.value > from && tx.validFrom.value <= to)
+            expected should not be empty
+            hashes(result) shouldBe expected.map(_.hash)
+          }
+        }
+      }
+
       "findStoredByHashes" should {
         "return no records for an empty set of hashes" in {
           val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "findStoredByHashes_empty")
@@ -2295,6 +2406,233 @@ trait TopologyStoreTest
         }
       }
 
+    }
+
+    "detect topology inconsistencies" in {
+      def makeSss(
+          synchronizerId: SynchronizerId,
+          isProposal: Boolean = false,
+          serial: PositiveInt = PositiveInt.one,
+      ) = makeSignedTx(
+        mapping = SequencerSynchronizerState
+          .create(
+            synchronizerId = synchronizerId,
+            threshold = PositiveInt.one,
+            active = Seq(seq1Id),
+            observers = Seq(seq2Id),
+          )
+          .value,
+        op = TopologyChangeOp.Replace,
+        serial = serial,
+        isProposal = isProposal,
+      )(dnd_p1p2_keys*)
+
+      def lsid(i: Int) = SynchronizerId.tryFromString(s"$i::synchronizer-id")
+      def psid(i: Int) = PhysicalSynchronizerId(
+        lsid(i),
+        serial = NonNegativeInt.zero,
+        protocolVersion = testedProtocolVersion,
+      )
+      val store1 = mk(psid(1), "id mismatch with LSU announcement")
+      val store2 = mk(psid(2), "concurrently effective transactions with the same unique key")
+      val store3 = mk(psid(3), "multiple effective proposals for the same transaction hash")
+      val store4 = mk(psid(4), "multiple effective proposals with different serials")
+      val store5 = mk(
+        psid(5),
+        "effective proposals with serial less than or equal to the highest fully authorized transaction",
+      )
+
+      val lsuPsid1 = OpaquePhysicalSynchronizerId(
+        store1.storeId.psid.logical,
+        serial = NonNegativeInt.one, // default PSId and static parameters include serial=0
+        protocolVersionNumber = testedProtocolVersion.v,
+      )
+      for {
+        _ <- store1.update(
+          SequencedTime(ts1),
+          EffectiveTime(ts1),
+          removals = Map.empty,
+          additions = Seq(
+            ValidatedTopologyTransaction(
+              makeSss(lsuPsid1.logical)
+            ), // required to pass the other checks
+            ValidatedTopologyTransaction(
+              makeSignedTx(
+                mapping = LsuAnnouncement(
+                  successorSynchronizerId = lsuPsid1,
+                  upgradeTime = ts1,
+                ),
+                op = TopologyChangeOp.Replace,
+                serial = PositiveInt.one,
+              )(dnd_p1p2_keys*)
+            ),
+          ),
+        )
+        result1 <- store1
+          .checkConsistency(
+            synchronizerParameters = defaultStaticSynchronizerParameters,
+            ignoreLsuPsidCheck = false,
+          )
+          .value
+        fullyAuthorizedTx2 = StoredTopologyTransaction(
+          sequenced = SequencedTime(ts1),
+          validFrom = EffectiveTime(ts1),
+          validUntil = None,
+          transaction = makeSss(store2.storeId.psid.logical),
+          rejectionReason = None,
+        )
+        offendingMultipleFullyAuthorizedTxs2 = Seq(fullyAuthorizedTx2, fullyAuthorizedTx2)
+        _ <- store2.bulkInsert(
+          StoredTopologyTransactions[TopologyChangeOp, TopologyMapping](
+            offendingMultipleFullyAuthorizedTxs2
+          )
+        )
+        result2 <- store2
+          .checkConsistency(
+            synchronizerParameters = defaultStaticSynchronizerParameters,
+            ignoreLsuPsidCheck = false,
+          )
+          .value
+        fullyAuthorizedTx3 = StoredTopologyTransaction(
+          sequenced = SequencedTime(ts1),
+          validFrom = EffectiveTime(ts1),
+          validUntil = None,
+          transaction = makeSss(store3.storeId.psid.logical),
+          rejectionReason = None,
+        )
+        proposalTx3 = StoredTopologyTransaction(
+          sequenced = SequencedTime(ts1),
+          validFrom = EffectiveTime(ts1),
+          validUntil = None,
+          transaction = makeSss(
+            store3.storeId.psid.logical,
+            isProposal = true,
+            serial = PositiveInt.tryCreate(2),
+          ),
+          rejectionReason = None,
+        )
+        offendingMultipleEffectiveProposals5 = Seq(proposalTx3, proposalTx3)
+        _ <- store3.bulkInsert(
+          StoredTopologyTransactions[TopologyChangeOp, TopologyMapping](
+            Seq(fullyAuthorizedTx3) ++ offendingMultipleEffectiveProposals5
+          )
+        )
+        result3 <- store3
+          .checkConsistency(
+            synchronizerParameters = defaultStaticSynchronizerParameters,
+            ignoreLsuPsidCheck = false,
+          )
+          .value
+        fullyAuthorizedTx4 = StoredTopologyTransaction(
+          sequenced = SequencedTime(ts1),
+          validFrom = EffectiveTime(ts1),
+          validUntil = None,
+          transaction = makeSss(store4.storeId.psid.logical),
+          rejectionReason = None,
+        )
+        proposalTx4a = StoredTopologyTransaction(
+          sequenced = SequencedTime(ts1),
+          validFrom = EffectiveTime(ts1),
+          validUntil = None,
+          transaction = makeSss(
+            store4.storeId.psid.logical,
+            isProposal = true,
+            serial = PositiveInt.tryCreate(2),
+          ),
+          rejectionReason = None,
+        )
+        proposalTx4b = StoredTopologyTransaction(
+          sequenced = SequencedTime(ts1),
+          validFrom = EffectiveTime(ts1),
+          validUntil = None,
+          transaction = makeSss(
+            store4.storeId.psid.logical,
+            isProposal = true,
+            serial = PositiveInt.tryCreate(3),
+          ),
+          rejectionReason = None,
+        )
+        offendingMultipleEffectiveProposalsWithDifferentSerials6 = Seq(proposalTx4a, proposalTx4b)
+        _ <- store4.bulkInsert(
+          StoredTopologyTransactions[TopologyChangeOp, TopologyMapping](
+            Seq(fullyAuthorizedTx4) ++ offendingMultipleEffectiveProposalsWithDifferentSerials6
+          )
+        )
+        result4 <- store4
+          .checkConsistency(
+            synchronizerParameters = defaultStaticSynchronizerParameters,
+            ignoreLsuPsidCheck = false,
+          )
+          .value
+        fullyAuthorizedTx5 = StoredTopologyTransaction(
+          sequenced = SequencedTime(ts1),
+          validFrom = EffectiveTime(ts1),
+          validUntil = None,
+          transaction = makeSss(store5.storeId.psid.logical),
+          rejectionReason = None,
+        )
+        offendingEffectiveProposalWithSerialLessThanOrEqualToHighestFullyAuthorizedTx7 = Seq(
+          StoredTopologyTransaction(
+            sequenced = SequencedTime(ts1),
+            validFrom = EffectiveTime(ts1),
+            validUntil = None,
+            transaction = makeSss(
+              store5.storeId.psid.logical,
+              isProposal = true,
+              serial = PositiveInt.tryCreate(1),
+            ),
+            rejectionReason = None,
+          )
+        )
+        _ <- store5.bulkInsert(
+          StoredTopologyTransactions[TopologyChangeOp, TopologyMapping](
+            Seq(
+              fullyAuthorizedTx5
+            ) ++ offendingEffectiveProposalWithSerialLessThanOrEqualToHighestFullyAuthorizedTx7
+          )
+        )
+        result5 <- store5
+          .checkConsistency(
+            synchronizerParameters = defaultStaticSynchronizerParameters,
+            ignoreLsuPsidCheck = false,
+          )
+          .value
+      } yield {
+        result1 shouldBe Left(
+          TopologyManagerError.InconsistentTopologySnapshot.UnexpectedPhysicalSynchronizerId(
+            fromParameters = store1.storeId.psid,
+            fromAnnouncement = lsuPsid1,
+          )
+        )
+        result2 shouldBe Left(
+          TopologyManagerError.InconsistentTopologySnapshot.MultipleEffectiveMappingsPerUniqueKey(
+            Seq(
+              "concurrently effective transactions with the same unique key" -> offendingMultipleFullyAuthorizedTxs2
+            )
+          )
+        )
+        result3 shouldBe Left(
+          TopologyManagerError.InconsistentTopologySnapshot.MultipleEffectiveMappingsPerUniqueKey(
+            Seq(
+              "multiple effective proposals for the same transaction hash" -> offendingMultipleEffectiveProposals5
+            )
+          )
+        )
+        result4 shouldBe Left(
+          TopologyManagerError.InconsistentTopologySnapshot.MultipleEffectiveMappingsPerUniqueKey(
+            Seq(
+              "multiple effective proposals with different serials" -> offendingMultipleEffectiveProposalsWithDifferentSerials6
+            )
+          )
+        )
+        result5 shouldBe Left(
+          TopologyManagerError.InconsistentTopologySnapshot.MultipleEffectiveMappingsPerUniqueKey(
+            Seq(
+              "effective proposals with serial less than or equal to the highest fully authorized transaction" -> offendingEffectiveProposalWithSerialLessThanOrEqualToHighestFullyAuthorizedTx7
+            )
+          )
+        )
+      }
     }
   }
 }

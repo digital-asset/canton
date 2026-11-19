@@ -41,27 +41,22 @@ final class DefaultAcsReplicationContractHandlerFactory(
       replicationTimestamp: CantonTimestamp,
       connectedSynchronizer: ConnectedSynchronizer,
   )(implicit executionContext: ExecutionContext): Either[String, AcsReplicationContractHandler] =
-    connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
-      .toRight(s"Online party replication is not enabled on participant")
-      .flatMap { partyReplicationIndexingStore =>
-        acsReplicationDestination match {
-          case AcsReplicationDestination.Persistence =>
-            Right(
-              TargetParticipantAcsPersistence(
-                requestId,
-                partyId,
-                replicationTimestamp,
-                connectedSynchronizer,
-                partyReplicationIndexingStore,
-                participantNodePersistentState,
-                loggerFactory,
-              )
+    acsReplicationDestination match {
+      case AcsReplicationDestination.Persistence =>
+        connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
+          .toRight(s"Online party replication is not enabled on participant")
+          .map { partyReplicationIndexingStore =>
+            TargetParticipantAcsPersistence(
+              requestId,
+              partyId,
+              replicationTimestamp,
+              connectedSynchronizer,
+              partyReplicationIndexingStore,
+              participantNodePersistentState,
+              loggerFactory,
             )
-          case _ =>
-            Left(
-              s"Unsupported ACS replication destination type $acsReplicationDestination " +
-                s"for the ACS replication request $requestId and party $partyId"
-            )
-        }
-      }
+          }
+      case AcsReplicationDestination.OutputStream(outputStream) =>
+        Right(new TargetParticipantOutputStream(outputStream, loggerFactory))
+    }
 }

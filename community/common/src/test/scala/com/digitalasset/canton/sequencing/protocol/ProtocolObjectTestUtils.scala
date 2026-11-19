@@ -40,8 +40,8 @@ object ProtocolObjectTestUtils extends Matchers {
   }
 
   private def normalizeSignedSequencedEvent[Env <: Envelope[?]](
-      signedSequencedEvent: SignedContent[DecompressedSequencedEvent[Env]]
-  ): SignedContent[DecompressedSequencedEvent[ClosedUncompressedEnvelope]] =
+      signedSequencedEvent: AggregatedSignedContent[DecompressedSequencedEvent[Env]]
+  ): AggregatedSignedContent[DecompressedSequencedEvent[ClosedUncompressedEnvelope]] =
     signedSequencedEvent.traverse[Id, DecompressedSequencedEvent[ClosedUncompressedEnvelope]](
       normalizeSequencedEvent
     )

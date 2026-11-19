@@ -5,7 +5,7 @@ package com.digitalasset.canton.topology.processing
 
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{BatchAggregatorConfig, BatchingConfig, TopologyConfig}
+import com.digitalasset.canton.config.{BatchAggregatorConfig, TestBatchingConfig, TopologyConfig}
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SynchronizerCryptoPureApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
@@ -55,13 +55,13 @@ abstract class InitialTopologySnapshotValidatorTest
   protected def mk(
       store: TopologyStore[TopologyStoreId.SynchronizerStore],
       validateInitialTopologySnapshot: Boolean = true,
-      maxTopologyUpdateBatchSize: PositiveInt = BatchingConfig().maxTopologyUpdateBatchSize,
+      maxTopologyUpdateBatchSize: PositiveInt = TestBatchingConfig().maxTopologyUpdateBatchSize,
   ): (InitialTopologySnapshotValidator, TopologyStore[TopologyStoreId.SynchronizerStore]) = {
 
     val validator = new InitialTopologySnapshotValidator(
       new SynchronizerCryptoPureApi(defaultStaticSynchronizerParameters, crypto),
       store,
-      BatchingConfig().copy(
+      TestBatchingConfig().copy(
         topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting,
         maxTopologyUpdateBatchSize = maxTopologyUpdateBatchSize,
       ),

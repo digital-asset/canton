@@ -4,10 +4,6 @@
 package com.digitalasset.canton.integration.tests.repair
 
 import com.daml.test.evidence.scalatest.OperabilityTestHelpers
-import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.Inspection.{
-  SynchronizerTimeRange,
-  TimeRange,
-}
 import com.digitalasset.canton.admin.api.client.data.{
   GrpcSequencerConnection,
   SequencerConnections,
@@ -42,11 +38,11 @@ import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.admin.data.RepairContract
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError.UnsafeToPrune
-import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.ReceivedCmtState.Match
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.sync.{SyncServiceError, SynchronizerMigrationError}
 import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{KnownPhysicalSynchronizerId, PartyId}
@@ -106,14 +102,7 @@ final class ParticipantMigrateSynchronizerIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
-      .addConfigTransforms(
-        ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
-        // TODO(#34818) Enable the new pipeline
-        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
-        // TODO(#35107) Upon disabling the old ACS commitment processor
-        //  this test fails: (enable the new pipeline) and make the fix
-        ConfigTransforms.enableOldAcsCommitmentProcessor,
-      )
+      .addConfigTransforms(ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration))
       .addConfigTransforms(ConfigTransforms.setProtocolVersion(targetProtocol)*)
 
   private val remedy = operabilityTest("Participant.RepairService")("ProtocolVersion") _
@@ -334,47 +323,47 @@ final class ParticipantMigrateSynchronizerIntegrationTest
               // tsAfterMigrationAcme is the timestamp we know for sure is after migration
               // advance time on acme to be sure that commitments are created after migration
               participant1.health.ping(participantId = participant2, synchronizerId = Some(acmeId))
+
               // check that commitments match on acme
-              val cmtAfterMigrationAcmeP1 =
-                participant1.commitments.lookup_received_acs_commitments(
-                  synchronizerTimeRanges = Seq(
-                    SynchronizerTimeRange(
-                      acmeId,
-                      Some(
-                        TimeRange(
-                          tsAfterMigrationAcme,
-                          CantonTimestamp.MaxValue,
-                        )
-                      ),
-                    )
-                  ),
-                  counterParticipants = Seq(participant2.id),
-                  commitmentState = Seq(Match),
-                  verboseMode = true,
-                )
-              cmtAfterMigrationAcmeP1.size shouldBe >=(1)
+              // TODO(#35265) Replace with new lookup functions
+              val period =
+                CommitmentPeriod.tryCreate(tsAfterMigrationAcme, CantonTimestamp.MaxValue)
+              val stringInterning1 = participant1.underlying.value.sync
+                .connectedSynchronizerForAlias(acmeName)
+                .value
+                .ephemeral
+                .ledgerApiIndexer
+                .ledgerApiStore
+                .stringInterningView
+              val internedPid2 = stringInterning1.participantId.internalize(participant2.id.toLf)
+              val toLookup1 = Seq(internedPid2 -> period)
+              val matched1 = participant1.underlying.value.sync.syncPersistentStateManager
+                .get(acmeId)
+                .value
+                .acsCommitmentPeriodStore
+                .lookupMatched(toLookup1)
+                .futureValueUS
 
-              val cmtAfterMigrationAcmeP2 =
-                participant2.commitments.lookup_received_acs_commitments(
-                  synchronizerTimeRanges = Seq(
-                    SynchronizerTimeRange(
-                      acmeId,
-                      Some(
-                        TimeRange(
-                          tsAfterMigrationAcme,
-                          CantonTimestamp.MaxValue,
-                        )
-                      ),
-                    )
-                  ),
-                  counterParticipants = Seq(participant1.id),
-                  commitmentState = Seq(Match),
-                  verboseMode = true,
-                )
-              cmtAfterMigrationAcmeP2.size shouldBe >=(1)
+              matched1.map(_.participant).toSet shouldBe Set(internedPid2)
 
-              cmtAfterMigrationAcmeP1.head._2.head.receivedCommitment should not be None
-              cmtAfterMigrationAcmeP1.head._2.head.receivedCommitment shouldBe cmtAfterMigrationAcmeP2.head._2.head.receivedCommitment
+              val stringInterning2 = participant2.underlying.value.sync
+                .connectedSynchronizerForAlias(acmeName)
+                .value
+                .ephemeral
+                .ledgerApiIndexer
+                .ledgerApiStore
+                .stringInterningView
+              val internedPid1 = stringInterning2.participantId.internalize(participant1.id.toLf)
+              val toLookup2 = Seq(internedPid1 -> period)
+
+              val matched2 = participant2.underlying.value.sync.syncPersistentStateManager
+                .get(acmeId)
+                .value
+                .acsCommitmentPeriodStore
+                .lookupMatched(toLookup2)
+                .futureValueUS
+
+              matched2.map(_.participant).toSet shouldBe Set(internedPid1)
             }
         }
 
@@ -572,10 +561,6 @@ final class ParticipantMigrateSynchronizerCrashRecoveryIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
-      .addConfigTransforms(
-        // TODO(#34818) Enable the new pipeline
-        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline
-      )
       .withSetup { implicit env =>
         import env.*
 

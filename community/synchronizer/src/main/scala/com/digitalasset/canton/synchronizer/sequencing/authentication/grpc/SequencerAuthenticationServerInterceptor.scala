@@ -20,6 +20,8 @@ import com.digitalasset.canton.synchronizer.sequencing.authentication.grpc.Seque
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.*
 
+import java.util.concurrent.RejectedExecutionException
+
 class SequencerAuthenticationServerInterceptor(
     tokenValidator: MemberAuthenticationService,
     override val loggerFactory: NamedLoggerFactory,
@@ -95,18 +97,29 @@ object SequencerAuthenticationServerInterceptor {
           )
       }
     } catch {
-      // To be on the safe side, in case `verifyToken` throws an exception
-      case ex: Throwable =>
-        logger.warn(s"Authentication token verification caused an unexpected exception", ex)
-        setNextListener(
-          failVerification(
-            s"Verification failed for participant $memberId with an internal error",
-            serverCall,
-            headers,
-            Some(TokenVerificationException(memberId).code),
-          )
+      // To be on the safe side, in case `verifyToken` or starting the call throws an exception
+      case ex: RejectedExecutionException =>
+        // The gRPC transport rejects new work once the server is shutting down. The token is not
+        // at fault then, so this is not worth a warning.
+        logger.info(
+          "Starting the authenticated call was rejected, most likely because the server is shutting down",
+          ex,
         )
+        failWithInternalError()
+      case ex: Throwable =>
+        logger.warn("Authentication token verification caused an unexpected exception", ex)
+        failWithInternalError()
     }
+
+    private def failWithInternalError(): Unit =
+      setNextListener(
+        failVerification(
+          s"Verification failed for participant $memberId with an internal error",
+          serverCall,
+          headers,
+          Some(TokenVerificationException(memberId).code),
+        )
+      )
   }
 
   private def failVerification[ReqT, RespT](

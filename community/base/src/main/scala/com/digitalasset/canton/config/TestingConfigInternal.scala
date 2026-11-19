@@ -57,11 +57,6 @@ import com.digitalasset.canton.metrics.MetricsFactoryType.External
   *   unless the test expressly checks the behavior of the degradation.
   * @param useLegacyContractIdVersionV11
   *   Uses contract id version V11 for testing purposes.
-  * @param warnOnJwtScopeUsage
-  *   When true, we log a warning on the first time a JWT with a scope but no audience is sent to
-  *   the Ledger API, provided that no explicit targetAudience or targetScope is configured. (In
-  *   other cases, other appropriate warnings are raised on startup if needed). Such tokens are
-  *   currently discouraged for security reasons and will be removed from use in future versions.
   * @param trafficEnforcementProjectionEventCommitted
   *   Hook invoked on every debit event that the traffic enforcement app has just committed. Used to
   *   react exactly after a known number of events have been committed, for example to interrupt a
@@ -79,8 +74,6 @@ final case class TestingConfigInternal(
     participantsWithoutLapiVerification: Set[String] = Set.empty,
     enableInMemoryTransactionStoreForParticipants: Boolean = false,
     warnOnAcsCommitmentDegradation: Boolean = true,
-    // TODO (i#33090): remove this when we clean up scope based token
-    warnOnJwtScopeUsage: Boolean = true,
     useLegacyContractIdVersionV11: Boolean = false,
     trafficEnforcementProjectionEventCommitted: () => Unit = () => (),
 )

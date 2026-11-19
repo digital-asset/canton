@@ -1423,6 +1423,8 @@ object TopologyManager {
   }
 
   final case object NoPV extends Version {
+    // Initial topology skips the limits, so that stricter limits do not break earlier transactions.
+    @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
     override def validation: ProtocolVersionValidation = ProtocolVersionValidation.NoValidation
     override def serialization: ProtocolVersion = ProtocolVersion.latest
   }

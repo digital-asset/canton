@@ -5,6 +5,7 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
+import com.digitalasset.canton.admin.api.client.AdminApiResponseValidation
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   TimeoutType,
@@ -78,7 +79,7 @@ object VaultAdminCommands {
           "private_keys_metadata",
           ProtocolVersionValidation.AlwaysValidation,
           ProtoValidation.MaxCollectionSize,
-        )((entry, _) => PrivateKeyMetadata.fromProtoV30(entry))
+        )((entry, _) => PrivateKeyMetadata.fromProtoV30(AdminApiResponseValidation.Trusted, entry))
         .leftMap(_.toString)
   }
 
@@ -127,7 +128,7 @@ object VaultAdminCommands {
           "public_keys_v30",
           ProtocolVersionValidation.AlwaysValidation,
           ProtoValidation.MaxCollectionSize,
-        )((entry, _) => PublicKeyWithName.fromProto30(entry))
+        )((entry, _) => PublicKeyWithName.fromProto30(AdminApiResponseValidation.Trusted, entry))
         .leftMap(_.toString)
   }
 
@@ -208,7 +209,9 @@ object VaultAdminCommands {
     ): Either[String, SigningPublicKey] =
       response.publicKey match {
         case v30.GenerateSigningKeyResponse.PublicKey.V30(k) =>
-          SigningPublicKey.fromProtoV30(k).leftMap(_.toString)
+          SigningPublicKey
+            .fromProtoV30(AdminApiResponseValidation.Trusted, k)
+            .leftMap(_.toString)
         case _ => Left("No public key returned")
       }
 
@@ -286,7 +289,9 @@ object VaultAdminCommands {
     ): Either[String, SigningPublicKey] =
       response.publicKey match {
         case v30.RegisterKmsSigningKeyResponse.PublicKey.V30(k) =>
-          SigningPublicKey.fromProtoV30(k).leftMap(_.toString)
+          SigningPublicKey
+            .fromProtoV30(AdminApiResponseValidation.Trusted, k)
+            .leftMap(_.toString)
         case _ => Left("No public key returned")
       }
 

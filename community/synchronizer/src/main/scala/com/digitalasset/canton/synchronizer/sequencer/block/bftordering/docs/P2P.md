@@ -381,11 +381,16 @@ connection backoff, not send backoff:
 | Limit | unbounded; **logs escalate INFO→WARN after `maxConnectionAttemptsBeforeWarning` (30)** | `MaxAttempts` = 5, then the message is dropped |
 | Notable | initial attempt also jittered by `initialConnectionMaxDelay` (≤500ms) to avoid thundering-herd | **`Initialize` is retried forever** (modules block on quorum, so giving up could deadlock startup) |
 
-A send that throws on `onNext` must, per gRPC, end the stream (`onError` is terminal): the actor
+A send that throws on `onNext` must, per gRPC, end the stream (`onError` is terminal). For an outgoing
+connection, the actor uses
 `failGrpcStreamObserver` + `shutdownConnection(clearNetworkRefAssociations=false)` to *invalidate but
 not forget* the connection, then reschedules the same `SendMessage` — the next attempt transparently
 rebuilds the connection, re-running the full authentication handshake (§2). Retry/backoff knobs are
-all under `P2PConnectionManagementConfig`.
+all under `P2PConnectionManagementConfig`. For an incoming connection, send failure instead performs
+the same sender-identity-checked full cleanup as remote completion (§5.4), closing the network ref and
+clearing its associations atomically with removing the sender. Otherwise, a racing remote-completion
+callback could find no sender and leave the incoming ref alive. Only still-configured endpoints are
+re-armed by `Network.Disconnected`; incoming connections are not retried through the old ref.
 
 ### 5.4 Disconnect and shutdown
 
@@ -393,6 +398,23 @@ all under `P2PConnectionManagementConfig`.
   `shutdownConnection(endpointId, clearNetworkRefAssociations=true, closeNetworkRefs=true)`:
   removes associations, completes the sender, shuts the channel, fires `onDisconnect`. A subsequent
   send re-dials and re-authenticates from scratch.
+- **Connection-managing actor teardown** cleans up once, on `PostStop`, and only if its own network
+  ref still owns the address. The ownership check and association cleanup are atomic. A delayed
+  teardown after a failed send or remote completion must not erase a replacement ref: otherwise,
+  operator endpoint removal could no longer find and close the replacement actor.
+  Stopping outgoing connection attempts also checks the attempt ID captured before ref cleanup:
+  a replacement installed between ref cleanup and stopping those attempts must not be disconnected.
+  Cancellation covers every affected endpoint sharing the ref, not just the requested endpoint.
+  Attempt IDs survive channel creation and subsequent state transitions.
+  Outgoing connection attempt IDs also identify their owning network ref. After ref removal,
+  teardown checks for outgoing connection attempts registered after its initial snapshot and stops
+  those whose ref no longer owns the endpoint. Registration rechecks ref ownership after its CAS
+  update, covering registration after teardown's final check without introducing locks. Queued
+  initialization or sends from a removed ref are rejected before setup; genuine replacements are
+  preserved. Actor-driven endpoint-to-node association checks ref ownership in the same CAS update
+  as the association, so teardown cannot be followed by a stale actor recreating a mapping without
+  a ref. Channel publication also checks the outgoing connection attempt ID, so a stopped
+  outgoing connection attempt cannot attach its channel to a replacement.
 - **Remote-initiated, outgoing** (`onError`/`onCompleted` on an outgoing connection's receiver) →
   `shutdownOutgoingConnectionDueToRemoteCompletion`: shuts the outgoing channel, completes the
   sender and notifies disconnection (`cleanupPeerSender`), but **keeps** the node↔endpoint
@@ -405,6 +427,11 @@ all under `P2PConnectionManagementConfig`.
   managed by this node, so there is nothing to re-establish at the transport level (the peer re-dials
   if needed), and a retained ref would wrongly re-assert the transient node↔endpoint association or
   keep a dead stream addressable. The endpoint→node-id mapping is also cleared.
+  Incoming cleanup also cancels pending outgoing workers for every affected endpoint, without
+  relying on the closing actor's `PostStop` (which no longer owns a ref). Cancellation is conditional
+  on the outgoing attempt captured before cleanup still owning that endpoint, so a replacement
+  transport started while the old ref closes is preserved. Cancellation precedes disconnection
+  notification, preventing a removed endpoint from reconnecting before the module processes it.
 - **Re-arming configured endpoints after any disconnection.** Because the cleanup above erases *all*
   runtime state for the endpoint, `P2PNetworkOut` re-asserts the invariant "every **configured**
   endpoint has a network ref" on every `Network.Disconnected`: it looks the endpoint up in its

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.ledger.api.v2.event.{ArchivedEvent, CreatedEvent, Event}
+import com.daml.ledger.api.v2.event.{ArchivedEvent, CreatedEvent, Event, ExercisedEvent}
 import com.daml.ledger.api.v2.reassignment.{
   AssignedEvent,
   Reassignment,
@@ -14,7 +14,9 @@ import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.trace_context.TraceContext as DamlTraceContext
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
+import com.digitalasset.canton.LfValue
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.ledger.api.TransactionShape
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
@@ -29,15 +31,20 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   RawEvent,
   RawExercisedEvent,
   RawFatActiveContract,
+  RawFatAddEvent,
   RawFatAssignEvent,
   RawFatCreatedEvent,
+  RawParticipantEvent,
   RawReassignmentEvent,
+  RawRemoveEvent,
   RawThinActiveContract,
+  RawThinAddEvent,
   RawThinAssignEvent,
   RawThinCreatedEvent,
   RawThinEvent,
   RawTransactionEvent,
   RawUnassignEvent,
+  RawUpdateEvent,
 }
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.dao.{
@@ -45,9 +52,17 @@ import com.digitalasset.canton.platform.store.dao.{
   EventProjectionProperties,
   LedgerDaoUpdateReader,
 }
-import com.digitalasset.canton.platform.{FatContract, InternalUpdateFormat, TemplatePartiesFilter}
+import com.digitalasset.canton.platform.{
+  ContractId,
+  FatContract,
+  InternalUpdateFormat,
+  TemplatePartiesFilter,
+}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.daml.lf.data.Ref.ChoiceName
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.transaction.{SerializationVersion, Versioned}
 import io.opentelemetry.api.trace.Span
 import org.apache.pekko.stream.scaladsl.Source
 import org.apache.pekko.{Done, NotUsed}
@@ -350,25 +365,77 @@ private[dao] object UpdateReader {
         }
       )
 
+  private def toApiReassignmentEnvelope(rawEvents: Seq[RawUpdateEvent & RawEvent])(
+      events: Seq[ReassignmentEvent]
+  ): Option[Reassignment] =
+    rawEvents.headOption.map { first =>
+      Reassignment(
+        updateId = first.updateId,
+        commandId = first.commandId.getOrElse(""),
+        workflowId = first.workflowId.getOrElse(""),
+        offset = first.offset,
+        events = events,
+        recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
+        traceContext = Some(DamlTraceContext.parseFrom(first.traceContext)),
+        synchronizerId = first.synchronizerId,
+        paidTrafficCost = first.trafficCost,
+      )
+    }
+
   def archivedEvent(
       eventProjectionProperties: EventProjectionProperties,
       lfValueTranslation: LfValueTranslation,
   )(rawArchived: RawArchivedEvent): ArchivedEvent =
-    ArchivedEvent(
+    archivedEvent(
+      eventProjectionProperties = eventProjectionProperties,
+      lfValueTranslation = lfValueTranslation,
       offset = rawArchived.offset,
       nodeId = rawArchived.nodeId,
-      contractId = rawArchived.contractId.coid,
+      contractId = rawArchived.contractId,
+      templateId = rawArchived.templateId,
+      witnessParties = rawArchived.witnessParties,
+    )
+
+  def archivedEvent(
+      eventProjectionProperties: EventProjectionProperties,
+      lfValueTranslation: LfValueTranslation,
+      offset: Long,
+      nodeId: Int,
+      contractId: ContractId,
+      templateId: Ref.FullIdentifier,
+      witnessParties: Set[String],
+  ): ArchivedEvent =
+    ArchivedEvent(
+      offset = offset,
+      nodeId = nodeId,
+      contractId = contractId.coid,
       templateId = Some(
-        LfEngineToApi.toApiIdentifier(rawArchived.templateId.toIdentifier)
+        LfEngineToApi.toApiIdentifier(templateId.toIdentifier)
       ),
-      witnessParties = rawArchived.witnessParties.toSeq,
-      packageName = rawArchived.templateId.pkgName,
+      witnessParties = witnessParties.toSeq,
+      packageName = templateId.pkgName,
       implementedInterfaces = lfValueTranslation.implementedInterfaces(
         eventProjectionProperties,
-        rawArchived.witnessParties,
-        rawArchived.templateId,
+        witnessParties,
+        templateId,
       ),
     )
+
+  /** The Remove events don't carry the LF version of the removed contract. As the version doesn't
+    * influence the rendering of the empty record and unit values, the minimal version is used.
+    */
+  val removedContractValueVersion: SerializationVersion = SerializationVersion.minVersion
+
+  /** The choice of the consuming exercise a Remove event is served as, when served in a transaction
+    * with [[TransactionShape.LedgerEffects]] shape.
+    */
+  val archiveChoice: ChoiceName = ChoiceName.assertFromString("Archive")
+
+  val archiveChoiceArgument: LfValue.VersionedValue =
+    Versioned(removedContractValueVersion, LfValue.ValueRecord(None, ImmArray.empty))
+
+  val archiveExerciseResult: LfValue.VersionedValue =
+    Versioned(removedContractValueVersion, LfValue.ValueUnit)
 
   def deserializeRawTransactionEvent(
       eventProjectionProperties: EventProjectionProperties,
@@ -412,6 +479,187 @@ private[dao] object UpdateReader {
         .map(exercisedEvent => Event(Event.Event.Exercised(exercisedEvent)))
   }
 
+  /** Participant events are served on the Ledger API as a transaction: Add as Create, Remove as
+    * Archive The transaction has no command id and its effective time is its record time.
+    */
+  def toApiParticipantEventTransaction(
+      eventProjectionProperties: EventProjectionProperties,
+      lfValueTranslation: LfValueTranslation,
+      transactionShape: TransactionShape,
+  )(
+      rawParticipantEvents: Seq[RawParticipantEvent]
+  )(implicit lc: LoggingContextWithTrace, ec: ExecutionContext): Future[Option[Transaction]] =
+    MonadUtil
+      .sequentialTraverse(rawParticipantEvents) {
+        case rawAddEvent: RawFatAddEvent =>
+          lfValueTranslation
+            .toApiCreatedEvent(
+              eventProjectionProperties = eventProjectionProperties,
+              fatContractInstance = rawAddEvent.fatContract,
+              offset = rawAddEvent.offset,
+              nodeId = rawAddEvent.nodeId,
+              representativePackageId = rawAddEvent.representativePackageId,
+              witnesses = rawAddEvent.witnessParties,
+              acsDelta = rawAddEvent.acsDeltaForWitnesses,
+            )
+            .map(createdEvent => Event(Event.Event.Created(createdEvent)))
+
+        case rawRemoveEvent: RawRemoveEvent =>
+          transactionShape match {
+            case TransactionShape.AcsDelta =>
+              Future.successful(
+                Event(
+                  Event.Event.Archived(
+                    archivedEvent(
+                      eventProjectionProperties = eventProjectionProperties,
+                      lfValueTranslation = lfValueTranslation,
+                      offset = rawRemoveEvent.offset,
+                      nodeId = rawRemoveEvent.nodeId,
+                      contractId = rawRemoveEvent.contractId,
+                      templateId = rawRemoveEvent.templateId,
+                      witnessParties = rawRemoveEvent.witnessParties,
+                    )
+                  )
+                )
+              )
+            case TransactionShape.LedgerEffects =>
+              removedAsArchiveExercisedEvent(
+                eventProjectionProperties,
+                lfValueTranslation,
+                rawRemoveEvent,
+              ).map(exercisedEvent => Event(Event.Event.Exercised(exercisedEvent)))
+          }
+      }
+      .map(events =>
+        rawParticipantEvents.headOption.map { first =>
+          Transaction(
+            updateId = first.updateId,
+            commandId = "",
+            effectiveAt = Some(TimestampConversion.fromLf(first.recordTime)),
+            workflowId = first.workflowId.getOrElse(""),
+            offset = first.offset,
+            events = events,
+            synchronizerId = first.synchronizerId,
+            traceContext = Some(DamlTraceContext.parseFrom(first.traceContext)),
+            recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
+            externalTransactionHash = None,
+            paidTrafficCost = first.trafficCost,
+            transactionHash = None,
+          )
+        }
+      )
+
+  /** A Remove event is served on the Ledger API as a consuming exercise of the `Archive` choice by
+    * the signatories of the removed contract.
+    */
+  def removedAsArchiveExercisedEvent(
+      eventProjectionProperties: EventProjectionProperties,
+      lfValueTranslation: LfValueTranslation,
+      rawRemoveEvent: RawRemoveEvent,
+  )(implicit lc: LoggingContextWithTrace, ec: ExecutionContext): Future[ExercisedEvent] = {
+    val templateId = rawRemoveEvent.templateId.toIdentifier
+    for {
+      choiceArgument <- lfValueTranslation.toApiValue(
+        value = archiveChoiceArgument,
+        verbose = eventProjectionProperties.verbose,
+        attribute = "exercise argument",
+        enrich = value =>
+          lfValueTranslation.enricher
+            .enrichChoiceArgument(templateId, None, archiveChoice, value.unversioned),
+      )
+      exerciseResult <- lfValueTranslation.toApiValue(
+        value = archiveExerciseResult,
+        verbose = eventProjectionProperties.verbose,
+        attribute = "exercise result",
+        enrich = value =>
+          lfValueTranslation.enricher
+            .enrichChoiceResult(templateId, None, archiveChoice, value.unversioned),
+      )
+    } yield ExercisedEvent(
+      offset = rawRemoveEvent.offset,
+      nodeId = rawRemoveEvent.nodeId,
+      contractId = rawRemoveEvent.contractId.coid,
+      templateId = Some(LfEngineToApi.toApiIdentifier(templateId)),
+      interfaceId = None,
+      choice = archiveChoice,
+      choiceArgument = Some(choiceArgument),
+      actingParties = rawRemoveEvent.exerciseActors.toSeq,
+      consuming = true,
+      witnessParties = rawRemoveEvent.witnessParties.toSeq,
+      lastDescendantNodeId = rawRemoveEvent.nodeId,
+      exerciseResult = Some(exerciseResult),
+      packageName = rawRemoveEvent.templateId.pkgName,
+      implementedInterfaces = lfValueTranslation.implementedInterfaces(
+        eventProjectionProperties,
+        rawRemoveEvent.witnessParties,
+        rawRemoveEvent.templateId,
+      ),
+      acsDelta = rawRemoveEvent.witnessParties.nonEmpty,
+    )
+  }
+
+  /** Participant events are served on the Ledger API as reassignments */
+  def toApiParticipantEventReassignment(
+      eventProjectionProperties: EventProjectionProperties,
+      lfValueTranslation: LfValueTranslation,
+  )(
+      rawParticipantEvents: Seq[RawParticipantEvent]
+  )(implicit lc: LoggingContextWithTrace, ec: ExecutionContext): Future[Option[Reassignment]] =
+    MonadUtil
+      .sequentialTraverse(rawParticipantEvents) {
+        case rawAddEvent: RawFatAddEvent =>
+          lfValueTranslation
+            .toApiCreatedEvent(
+              eventProjectionProperties = eventProjectionProperties,
+              fatContractInstance = rawAddEvent.fatContract,
+              offset = rawAddEvent.offset,
+              nodeId = rawAddEvent.nodeId,
+              representativePackageId = rawAddEvent.representativePackageId,
+              witnesses = rawAddEvent.witnessParties,
+              acsDelta = rawAddEvent.acsDeltaForWitnesses,
+            )
+            .map(createdEvent =>
+              ReassignmentEvent(
+                ReassignmentEvent.Event.Assigned(
+                  AssignedEvent(
+                    source = rawAddEvent.synchronizerId,
+                    target = rawAddEvent.synchronizerId,
+                    reassignmentId = "",
+                    submitter = "",
+                    reassignmentCounter =
+                      rawAddEvent.participantEventProperties.reassignmentCounter,
+                    createdEvent = Some(createdEvent),
+                  )
+                )
+              )
+            )
+
+        case rawRemoveEvent: RawRemoveEvent =>
+          Future.successful(
+            ReassignmentEvent(
+              ReassignmentEvent.Event.Unassigned(
+                UnassignedEvent(
+                  offset = rawRemoveEvent.offset,
+                  nodeId = rawRemoveEvent.nodeId,
+                  reassignmentId = "",
+                  contractId = rawRemoveEvent.contractId.coid,
+                  templateId =
+                    Some(LfEngineToApi.toApiIdentifier(rawRemoveEvent.templateId.toIdentifier)),
+                  packageName = rawRemoveEvent.templateId.pkgName,
+                  source = rawRemoveEvent.synchronizerId,
+                  target = rawRemoveEvent.synchronizerId,
+                  submitter = "",
+                  reassignmentCounter =
+                    rawRemoveEvent.participantEventProperties.reassignmentCounter,
+                  assignmentExclusivity = None,
+                  witnessParties = rawRemoveEvent.witnessParties.toSeq,
+                )
+              )
+            )
+          )
+      }
+      .map(toApiReassignmentEnvelope(rawParticipantEvents))
+
   def toApiTransaction(
       eventProjectionProperties: EventProjectionProperties,
       lfValueTranslation: LfValueTranslation,
@@ -448,6 +696,7 @@ private[dao] object UpdateReader {
       reassignmentEventProjectionProperties: Option[EventProjectionProperties],
       transactionEventProjectionProperties: Option[EventProjectionProperties],
       lfValueTranslation: LfValueTranslation,
+      transactionShape: Option[TransactionShape],
   )(rawEvents: Seq[RawEvent])(
       convertReassignment: Reassignment => T,
       convertTransaction: Transaction => T,
@@ -461,14 +710,27 @@ private[dao] object UpdateReader {
     val transactionEvents = rawEvents.collect { case raw: RawTransactionEvent =>
       raw
     }
-    if (transactionEvents.nonEmpty && reassignmentEvents.isEmpty) {
+    val participantEvents = rawEvents.collect { case raw: RawParticipantEvent =>
+      raw
+    }
+    val numberOfNonEmptyCategories =
+      Seq(
+        transactionEvents,
+        reassignmentEvents,
+        participantEvents,
+      ).count(_.nonEmpty)
+
+    if (numberOfNonEmptyCategories > 1) {
+      throw new IllegalStateException(
+        s"transaction, reassignment and participant events mixed for one offset"
+      )
+    } else if (transactionEvents.nonEmpty) {
       transactionEventProjectionProperties match {
         case Some(eventProjectionProperties) =>
-          UpdateReader
-            .toApiTransaction(
-              eventProjectionProperties = eventProjectionProperties,
-              lfValueTranslation = lfValueTranslation,
-            )(transactionEvents)
+          toApiTransaction(
+            eventProjectionProperties = eventProjectionProperties,
+            lfValueTranslation = lfValueTranslation,
+          )(transactionEvents)
             .map(_.map(convertTransaction))
 
         case None =>
@@ -476,52 +738,53 @@ private[dao] object UpdateReader {
             s"no internal event format for transactions and transaction event returned from the stream"
           )
       }
-    } else if (reassignmentEvents.nonEmpty && transactionEvents.isEmpty) {
+    } else if (reassignmentEvents.nonEmpty) {
       reassignmentEventProjectionProperties match {
         case Some(eventProjectionProperties) =>
-          UpdateReader
-            .toApiReassignment(
-              eventProjectionProperties = eventProjectionProperties,
-              lfValueTranslation = lfValueTranslation,
-            )(reassignmentEvents)
+          toApiReassignment(
+            eventProjectionProperties = eventProjectionProperties,
+            lfValueTranslation = lfValueTranslation,
+          )(reassignmentEvents)
             .map(_.map(convertReassignment))
 
         case None =>
           throw new IllegalStateException(
-            s"no internal event format for transactions and transaction event returned from the stream"
+            s"no internal event format for reassignments and reassignment event returned from the stream"
           )
       }
-    } else if (transactionEvents.isEmpty && reassignmentEvents.isEmpty) {
-      Future.successful(None)
+    } else if (participantEvents.nonEmpty) {
+      if (participantEvents.headOption.exists(_.category.renderAsTransaction)) {
+        transactionEventProjectionProperties.zip(transactionShape) match {
+          case Some((eventProjectionProperties, shape)) =>
+            toApiParticipantEventTransaction(
+              eventProjectionProperties = eventProjectionProperties,
+              lfValueTranslation = lfValueTranslation,
+              transactionShape = shape,
+            )(participantEvents)
+              .map(_.map(convertTransaction))
+          case None => Future.successful(None)
+        }
+      } else {
+        reassignmentEventProjectionProperties match {
+          case Some(eventProjectionProperties) =>
+            toApiParticipantEventReassignment(
+              eventProjectionProperties = eventProjectionProperties,
+              lfValueTranslation = lfValueTranslation,
+            )(participantEvents)
+              .map(_.map(convertReassignment))
+
+          case None =>
+            Future.successful(None)
+        }
+      }
     } else {
-      throw new IllegalStateException(s"reassignment and transaction events mixed for one offset")
+      Future.successful(None)
     }
   }
 
   def eventFilter(templatePartiesFilterO: Option[TemplatePartiesFilter]): RawEvent => Boolean =
-    templatePartiesFilterO
-      .map { templatePartiesFilter =>
-        val templateWildcardPartiesO = templatePartiesFilter.templateWildcardParties
-        val templateSpecifiedPartiesMap = templatePartiesFilter.relation.map {
-          case (identifier, partiesO) => (identifier, partiesO.map(_.map(_.toString)))
-        }
-        templateWildcardPartiesO match {
-          // the filter allows all parties for all templates (wildcard)
-          case None => (_: RawEvent) => true
-
-          case Some(templateWildcardParties) =>
-            val templateWildcardPartiesStrings: Set[String] = templateWildcardParties.toSet[String]
-            (event: RawEvent) =>
-              // at least one of the witnesses exist in the template wildcard filter
-              event.witnessParties.exists(templateWildcardPartiesStrings) ||
-                (templateSpecifiedPartiesMap.get(event.templateId.toNameTypeConRef) match {
-                  // the event's template id was not found in the filters
-                  case None => false
-                  case Some(partiesO) => partiesO.fold(true)(event.witnessParties.exists)
-                })
-        }
-      }
-      .getOrElse(_ => false)
+    (event: RawEvent) =>
+      templatePartiesFilterO.exists(_(event.templateId.toNameTypeConRef, event.witnessParties))
 
   def filterRawEvents(
       internalUpdateFormat: InternalUpdateFormat
@@ -534,9 +797,17 @@ private[dao] object UpdateReader {
     val transactionFilter = eventFilter(
       internalUpdateFormat.includeTransactions.map(_.internalEventFormat.templatePartiesFilter)
     )
+    val participantEventFilter = (re: RawParticipantEvent) => {
+      if (re.category.renderAsReassignment) {
+        reassignmentFilter(re)
+      } else {
+        transactionFilter(re)
+      }
+    }
     rawEvents.collect {
       case tx: RawTransactionEvent if transactionFilter(tx) => tx
       case r: RawReassignmentEvent if reassignmentFilter(r) => r
+      case ar: RawParticipantEvent if participantEventFilter(ar) => ar
     }
   }
 
@@ -544,8 +815,10 @@ private[dao] object UpdateReader {
     case raw: RawThinAssignEvent => Some(raw.thinCreatedEventProperties.internalContractId)
     case raw: RawThinCreatedEvent => Some(raw.thinCreatedEventProperties.internalContractId)
     case raw: RawThinActiveContract => Some(raw.thinCreatedEventProperties.internalContractId)
+    case raw: RawThinAddEvent => Some(raw.thinCreatedEventProperties.internalContractId)
     case _: RawArchivedEvent => None
     case _: RawUnassignEvent => None
+    case _: RawRemoveEvent => None
     case _: RawExercisedEvent => None
   }
 
@@ -578,8 +851,18 @@ private[dao] object UpdateReader {
             tryFatContract(raw.thinCreatedEventProperties.internalContractId, fatContractO),
         ),
       )
+    case (raw: RawThinAddEvent, fatContractO) =>
+      RawFatAddEvent(
+        participantEventProperties = raw.participantEventProperties,
+        fatCreatedEventProperties = FatCreatedEventProperties(
+          thinCreatedEventProperties = raw.thinCreatedEventProperties,
+          fatContract =
+            tryFatContract(raw.thinCreatedEventProperties.internalContractId, fatContractO),
+        ),
+      )
     case (raw: RawArchivedEvent, _) => raw
     case (raw: RawUnassignEvent, _) => raw
+    case (raw: RawRemoveEvent, _) => raw
     case (raw: RawExercisedEvent, _) => raw
   }
 

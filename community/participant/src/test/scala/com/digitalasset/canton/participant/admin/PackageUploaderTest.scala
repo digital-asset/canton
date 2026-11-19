@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin
 
 import com.digitalasset.canton.config.CantonRequireTypes.String255
-import com.digitalasset.canton.config.{CachingConfigs, PackageMetadataViewConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.{PackageMetadataViewConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.Dummy
 import com.digitalasset.canton.ledger.error.PackageServiceErrors
@@ -13,6 +13,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.admin.PackageService.{DarDescription, DarMainPackageId}
+import com.digitalasset.canton.participant.config.PackageUpgradeCacheConfig
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.store.memory.{
   InMemoryDamlPackageStore,
@@ -276,7 +277,10 @@ class PackageUploaderTest
     val mutablePackageMetadataViewImpl = new MutablePackageMetadataViewImpl(
       clock = clock,
       packageStore = packageStore,
-      new PackageUpgradeValidator(CachingConfigs.defaultPackageUpgradeCache, loggerFactory),
+      new PackageUpgradeValidator(
+        PackageUpgradeCacheConfig.defaultPackageUpgradeCache,
+        loggerFactory,
+      ),
       loggerFactory = loggerFactory,
       packageMetadataViewConfig = PackageMetadataViewConfig(),
       timeouts = ProcessingTimeout(),

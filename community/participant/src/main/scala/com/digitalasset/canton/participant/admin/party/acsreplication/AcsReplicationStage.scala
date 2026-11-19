@@ -98,6 +98,16 @@ object AcsReplicationStage {
     }).flatMap {
       case (params, _, None, _, _) =>
         Some(AcsReplicationStage.VerifyingOnboardingTopologyAuthorization(params))
+      // The SP may get disconnected after having sent the entire ACS and the TP having archived the
+      // agreement. There is no need to reconnect then, only to finish.
+      case (
+            params,
+            AcsReplicationStatus.AgreementStatus.Archived,
+            Some(_),
+            Some(replicationProgress),
+            Some(_: AcsReplicationStatus.Disconnected),
+          ) if replicationProgress.fullyProcessedAcs =>
+        Some(AcsReplicationStage.ReplicatingPartyAcs(params, replicationProgress))
       case (
             _,
             _: AcsReplicationStatus.AgreementStatus.Exists,

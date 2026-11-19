@@ -191,6 +191,10 @@ enum BuiltinType {
   ROUNDING_MODE = 1003;
 
   reserved 1004; // Was builtin type 'SCENARIO'
+
+  // Builtin type 'Uint256'
+  // *Available in versions >= 2.dev*
+  UINT256 = 1005;
 }
 
 // Types
@@ -377,6 +381,8 @@ enum BuiltinFunction {
   /* Dev Builtins */
   // We use fields above 1000 for dev features
 
+  TEXT_TO_CONTRACT_ID = 1001; // *Available in versions >= 2.dev*
+
   SCALE_BIGNUMERIC = 2001; // *Available in versions >= 2.dev*
   PRECISION_BIGNUMERIC = 2002; // *Available in versions >= 2.dev*
   ADD_BIGNUMERIC = 2003; // *Available in versions >= 2.dev*
@@ -389,6 +395,45 @@ enum BuiltinFunction {
   BIGNUMERIC_TO_TEXT = 2010; // *Available in versions >= 2.dev*
 
   TYPE_REP_TYCON_NAME = 3011; // *Available in versions >= 2.dev*
+
+  // Uint256 operations
+  //
+  // Values in the 0x4000-0x40ff range use 0x40 as a namespace prefix
+  // for EVM opcode-compatible operations. The low byte is the EVM opcode.
+  // Values in the 0x4100 range are Uint256 operations without a direct
+  // EVM opcode equivalent.
+  reserved 0x4000; // STOP opcode
+  ADD_UINT256 = 0x4001; // *Available in versions >= 2.dev*
+  MUL_UINT256 = 0x4002; // *Available in versions >= 2.dev*
+  SUB_UINT256 = 0x4003; // *Available in versions >= 2.dev*
+  DIV_UINT256 = 0x4004; // *Available in versions >= 2.dev*
+  SDIV_UINT256 = 0x4005; // *Available in versions >= 2.dev*
+  MOD_UINT256 = 0x4006; // *Available in versions >= 2.dev*
+  SMOD_UINT256 = 0x4007; // *Available in versions >= 2.dev*
+  ADDMOD_UINT256 = 0x4008; // *Available in versions >= 2.dev*
+  MULMOD_UINT256 = 0x4009; // *Available in versions >= 2.dev*
+  EXP_UINT256 = 0x400a; // *Available in versions >= 2.dev*
+  SIGNEXTEND_UINT256 = 0x400b; // *Available in versions >= 2.dev*
+  reserved 0x400c to 0x400f; // Undefined opcodes
+  reserved 0x4010; // Potential LT_UINT256
+  reserved 0x4011; // Potential GT_UINT256
+  SLT_UINT256 = 0x4012; // *Available in versions >= 2.dev*
+  SGT_UINT256 = 0x4013; // *Available in versions >= 2.dev*
+  reserved 0x4014; // Potential EQ_UINT256
+  reserved 0x4015; // Potential ISZERO_UINT256
+  AND_UINT256 = 0x4016; // *Available in versions >= 2.dev*
+  OR_UINT256 = 0x4017; // *Available in versions >= 2.dev*
+  XOR_UINT256 = 0x4018; // *Available in versions >= 2.dev*
+  NOT_UINT256 = 0x4019; // *Available in versions >= 2.dev*
+  BYTE_UINT256 = 0x401a; // *Available in versions >= 2.dev*
+  SHL_UINT256 = 0x401b; // *Available in versions >= 2.dev*
+  SHR_UINT256 = 0x401c; // *Available in versions >= 2.dev*
+  SAR_UINT256 = 0x401d; // *Available in versions >= 2.dev*
+  reserved 0x401e to 0x40ff; // Remaining opcode space
+  UINT256_TO_TEXT = 0x4100; // *Available in versions >= 2.dev*
+  TEXT_TO_UINT256 = 0x4101; // *Available in versions >= 2.dev*
+  INT64_TO_UINT256 = 0x4102; // *Available in versions >= 2.dev*
+  UINT256_TO_INT64 = 0x4103; // *Available in versions >= 2.dev*
 
   //SECP256K1_VALIDATE_KEY = 4001; // REMAINS HERE TEMPORARELY TO PARSE CHECKED IN DARS
 
@@ -433,6 +478,10 @@ message BuiltinLit {
     // rounding mode for arithmetic operation
     // *Available in versions >= 2.dev*
     RoundingMode rounding_mode = 1001;
+
+    // Uint256 literal (stored as big-endian unsigned bytes)
+    // *Available in versions >= 2.dev*
+    bytes uint256 = 1002;
   }
 }
 

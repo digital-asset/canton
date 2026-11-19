@@ -11,13 +11,14 @@ import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.ReassignmentCounter
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyUtil}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessChangeDetail.*
@@ -71,7 +72,7 @@ class DbActiveContractStore(
     protected[this] override val indexedSynchronizer: IndexedSynchronizer,
     enableAdditionalConsistencyChecks: Option[Long],
     batchingParametersConfig: PrunableByTimeParameters,
-    batchingConfig: BatchingConfig,
+    batchingConfig: ParticipantBatchingConfig,
     val indexedStringStore: IndexedStringStore,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -162,7 +163,7 @@ class DbActiveContractStore(
 
   private val fetchAggregator = BatchAggregator(
     fetchAggregatorProcessor,
-    batchingConfig.contractStoreAggregator,
+    batchingConfig.contractJournalAggregator,
   )
 
   private type ActiveContractJournalUpdate = ((LfContractId, TimeOfChange), ActivenessChangeDetail)
@@ -189,7 +190,7 @@ class DbActiveContractStore(
 
   private val insertAggregator = BatchAggregator(
     insertAggregatorProcessor,
-    batchingConfig.contractStoreAggregator,
+    batchingConfig.contractJournalAggregator,
   )
 
   override def markContractsCreatedOrAdded(

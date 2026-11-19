@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration.tests.upgrade
 import better.files.File
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
-import com.digitalasset.canton.config.{BatchAggregatorConfig, BatchingConfig, TopologyConfig}
+import com.digitalasset.canton.config.{BatchAggregatorConfig, TopologyConfig}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.plugins.toxiproxy.UseToxiproxy.ToxiproxyConfig
@@ -20,6 +20,7 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.NodeLoggingUtil
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage}
 import com.digitalasset.canton.store.IndexedTopologyStoreId
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -94,7 +95,7 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
     val validator = new InitialTopologySnapshotValidator(
       participant1.underlying.value.cryptoPureApi,
       store,
-      BatchingConfig().copy(
+      ParticipantBatchingConfig().copy(
         topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting
       ),
       TopologyConfig.forTesting
@@ -107,6 +108,10 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
     validator
       .validateAndApplyInitialTopologySnapshot(txs)
       .futureValueUS(Timeout(timeout)) // See https://github.com/DACH-NY/canton/issues/26651
+      .value
+    store
+      .checkConsistency(static, ignoreLsuPsidCheck = true)
+      .futureValueUS(Timeout(timeout))
       .value
     (store, validator)
   }
@@ -133,7 +138,7 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
           predecessor = None,
           testedProtocolVersion,
           timeouts,
-          BatchingConfig(),
+          ParticipantBatchingConfig(),
           loggerFactory,
         )
     }

@@ -47,6 +47,7 @@ class DbDispatcherImplTest
       executorService = executionContextService,
       overallWaitTimer = metrics.waitTimer,
       overallExecutionTimer = metrics.executionTimer,
+      queryCostTracker = None,
       loggerFactory = loggerFactory,
     )
     val exec = sut.executeSql(metrics) { conn =>
@@ -69,6 +70,7 @@ class DbDispatcherImplTest
       executorService = executionContextService,
       overallWaitTimer = metrics.waitTimer,
       overallExecutionTimer = metrics.executionTimer,
+      queryCostTracker = None,
       loggerFactory = loggerFactory,
     )
     val exec = sut.executeSql(metrics) { conn =>
@@ -94,6 +96,7 @@ class DbDispatcherImplTest
       overallWaitTimer = metrics.waitTimer,
       overallExecutionTimer = metrics.executionTimer,
       loggerFactory = loggerFactory,
+      queryCostTracker = None,
     )
     val exec = sut.executeSql(metrics) { conn =>
       val v = conn.createStatement()
@@ -117,6 +120,7 @@ class DbDispatcherImplTest
       executorService = executionContextService,
       overallWaitTimer = metrics.waitTimer,
       overallExecutionTimer = metrics.executionTimer,
+      queryCostTracker = None,
       loggerFactory = loggerFactory,
     )
     val exec = sut.executeSql(metrics) { conn =>
@@ -142,6 +146,7 @@ class DbDispatcherImplTest
       executorService = executionContextService,
       overallWaitTimer = metrics.waitTimer,
       overallExecutionTimer = metrics.executionTimer,
+      queryCostTracker = None,
       loggerFactory = loggerFactory,
     )
     val exec = sut.executeSql(metrics) { conn =>
@@ -166,6 +171,7 @@ class DbDispatcherImplTest
       executorService = executionContextService,
       overallWaitTimer = metrics.waitTimer,
       overallExecutionTimer = metrics.executionTimer,
+      queryCostTracker = None,
       loggerFactory = loggerFactory,
     )
     val exec = sut.executeSql(metrics) { conn =>
@@ -190,6 +196,7 @@ class DbDispatcherImplTest
       executorService = executionContextService,
       overallWaitTimer = metrics.waitTimer,
       overallExecutionTimer = metrics.executionTimer,
+      queryCostTracker = None,
       loggerFactory = loggerFactory,
     )
     val exec = sut.executeSql(metrics) { conn =>
@@ -215,6 +222,7 @@ class DbDispatcherImplTest
       executorService = executionContextService,
       overallWaitTimer = metrics.waitTimer,
       overallExecutionTimer = metrics.executionTimer,
+      queryCostTracker = None,
       loggerFactory = loggerFactory,
     )
     val exec = sut.executeSql(metrics) { conn =>

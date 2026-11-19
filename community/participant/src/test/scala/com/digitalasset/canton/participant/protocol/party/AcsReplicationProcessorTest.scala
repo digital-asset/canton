@@ -184,7 +184,7 @@ sealed trait AcsReplicationProcessorTestBaseWithFixture
         loggerFactory = processorLoggerFactory,
       )
 
-      new AcsReplicationTargetParticipantProcessor(
+      val processor = new AcsReplicationTargetParticipantProcessor(
         psid = psid,
         partyId = alice,
         requestId = addPartyRequestId,
@@ -264,6 +264,12 @@ sealed trait AcsReplicationProcessorTestBaseWithFixture
 
         override def getCryptoClient: Option[SynchronizerCryptoClient] = cryptoClientO
       }
+      // Register the processor so that its progress updates are accepted.
+      replicationProgressState
+        .update_(addPartyRequestId, _.setProcessor(processor))
+        .futureValueUS
+        .value
+      processor
     }
 
     lazy val acsDigest = AcsReplicationSourceParticipantMessage.AcsDigest(

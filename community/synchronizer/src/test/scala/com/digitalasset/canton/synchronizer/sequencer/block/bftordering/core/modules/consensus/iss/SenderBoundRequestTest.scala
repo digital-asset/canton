@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -34,7 +35,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SegmentStatus,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.{v30, v31}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -111,7 +112,15 @@ final class SenderBoundRequestTest
       checkSenderBinding(
         status,
         AuthenticatedMessageType.BftSignedRetransmissionMessage,
-        (sentBy, wire) => RetransmissionRequest.fromProto(sentBy, wire).map(_.signedEpochStatus),
+        (sentBy, wire) =>
+          RetransmissionRequest
+            .fromProto(
+              ProtocolVersionValidation.AlwaysValidation,
+              BftOrdererLimits.default,
+              sentBy,
+              wire,
+            )
+            .map(_.signedEpochStatus),
       )
     }
 
@@ -120,8 +129,17 @@ final class SenderBoundRequestTest
         BlockTransferRequest.create(EpochNumber.First, sender)(ProtocolVersion.v36),
         AuthenticatedMessageType.BftSignedStateTransferMessage,
         (sentBy, wire) =>
-          SignedMessage.fromProto(v30.StateTransferMessage, SupportedVersions.ProtoData30)(
-            IssConsensusModule.parseStateTransferMessage(sentBy, _)
+          SignedMessage.fromProto(
+            ProtocolVersionValidation.AlwaysValidation,
+            v30.StateTransferMessage,
+            SupportedVersions.ProtoData30,
+          )(
+            IssConsensusModule.parseStateTransferMessage(
+              ProtocolVersionValidation.AlwaysValidation,
+              BftOrdererLimits.default,
+              sentBy,
+              _,
+            )
           )(wire),
       )
     }
@@ -131,8 +149,17 @@ final class SenderBoundRequestTest
         BlockTransferRequest.create(EpochNumber.First, sender)(ProtocolVersion.v37),
         AuthenticatedMessageType.BftSignedStateTransferMessage,
         (sentBy, wire) =>
-          SignedMessage.fromProto(v31.StateTransferMessage, SupportedVersions.ProtoData31)(
-            IssConsensusModule.parseStateTransferMessage31(sentBy, _)
+          SignedMessage.fromProto(
+            ProtocolVersionValidation.AlwaysValidation,
+            v31.StateTransferMessage,
+            SupportedVersions.ProtoData31,
+          )(
+            IssConsensusModule.parseStateTransferMessage31(
+              ProtocolVersionValidation.AlwaysValidation,
+              BftOrdererLimits.default,
+              sentBy,
+              _,
+            )
           )(wire),
       )
     }

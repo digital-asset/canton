@@ -106,7 +106,7 @@ final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3
     S3Dump
       .getDumpBaseDirectoriesForVersion(None)
       // Filter-out dumps that don't contain the config
-      .filter { case (_, releaseVersion) => releaseVersion >= ReleaseVersion.tryCreate("3.4.10-a") }
+      .filter { case (_, releaseVersion) => releaseVersion >= ReleaseVersion.tryCreate("3.5.0") }
       // Skip dumps from newer release lines, their configs can have keys this version does not know
       .filter { case (_, releaseVersion) =>
         releaseVersion.majorMinor <= ReleaseVersion.current.majorMinor

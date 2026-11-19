@@ -20,6 +20,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.AvailabilityAck.ValidationError
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.AvailabilityAck as ProtoAvailabilityAck
+import com.digitalasset.canton.version.ProtocolVersionValidation
 
 final case class AvailabilityAck(from: BftNodeId, signature: Signature)
     extends PrettyPrintingFromCompanion {
@@ -61,11 +62,12 @@ object AvailabilityAck extends PrettyPrintingCompanion[AvailabilityAck] {
   }
 
   def fromProto(
+      pvv: ProtocolVersionValidation,
       ack: ProtoAvailabilityAck,
       signature: v30.Signature,
   ): ParsingResult[AvailabilityAck] =
     for {
-      sig <- Signature.fromProtoV30(signature)
+      sig <- Signature.fromProtoV30(pvv, signature)
       originatingNode = BftNodeId(ack.from)
     } yield AvailabilityAck(originatingNode, sig)
 

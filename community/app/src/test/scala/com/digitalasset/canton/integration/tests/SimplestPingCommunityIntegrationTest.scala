@@ -31,7 +31,6 @@ sealed trait SimplestPingCommunityIntegrationTest
 
   "we can run a trivial ping" in { implicit env =>
     import env.*
-
     sequencer1.start()
     mediator1.start()
     sequencer1.health.status shouldBe NodeStatus.NotInitialized(

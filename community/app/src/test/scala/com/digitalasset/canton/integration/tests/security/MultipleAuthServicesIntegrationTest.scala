@@ -16,10 +16,7 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
-import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
-  AuthServiceJWTSuppressionRule,
-  AuthStartupConfigSuppressionRule,
-}
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthServiceJWTSuppressionRule
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -37,13 +34,7 @@ trait MultipleAuthServicesIntegrationTest
 
   private val mySecret1 = NonEmptyString.tryCreate("pyjama")
   private val mySecret2 = NonEmptyString.tryCreate("underpants")
-
-  // TODO (i#33090): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
-  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
-  override def beforeAll(): Unit =
-    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
-      super.beforeAll()
-    }
+  private val audience = "ledger-api-audience"
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
@@ -54,13 +45,13 @@ trait MultipleAuthServicesIntegrationTest
               AuthServiceConfig
                 .UnsafeJwtHmac256(
                   secret = mySecret1,
-                  targetAudience = None,
+                  targetAudience = Some(audience),
                   targetScope = None,
                 ),
               AuthServiceConfig
                 .UnsafeJwtHmac256(
                   secret = mySecret2,
-                  targetAudience = None,
+                  targetAudience = Some(audience),
                   targetScope = None,
                 ),
             )
@@ -89,6 +80,7 @@ trait MultipleAuthServicesIntegrationTest
         JwtTokenUtilities.buildUnsafeToken(
           secret,
           userId = Some(user),
+          audience = audience,
         ),
       ),
       owner,

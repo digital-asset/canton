@@ -28,6 +28,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendPolicy,
 }
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.store.TimeQuery
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.blocking
@@ -194,6 +195,14 @@ class TopologyTicksIntegrationTest
         initializedSynchronizers(daName).synchronizerOwners,
         synchronize = None, // set to none so we don't wait for transactions to be effective
       )
+      // The proposal is only dispatched at this point: wait until sequencer1 has sequenced it before
+      //  advancing the clock, otherwise it is sequenced (and becomes effective) later than the test assumes.
+      //  `TimeQuery.Range(None, None)` also returns transactions that are not effective yet.
+      eventually() {
+        sequencer1.topology.sequencers
+          .list(store = daId.logical, timeQuery = TimeQuery.Range(None, None))
+          .flatMap(_.item.active) should contain(sequencer2.id)
+      }
 
       // advance time by half epsilon, so that new sequencer's topology transactions are not effective yet
       simClock.advance(epsilon.duration.dividedBy(2))
@@ -201,6 +210,12 @@ class TopologyTicksIntegrationTest
 
       // now propose new party topology transactions after new sequencer's topology transactions, but before they are effective
       val partyId = participant1.parties.enable("testParty3", synchronize = None)
+      // As above, make sure it is sequenced before the new sequencer's topology transactions become effective
+      eventually() {
+        sequencer1.topology.party_to_participant_mappings
+          .list(daId, timeQuery = TimeQuery.Range(None, None), filterParty = partyId.filterString)
+          .map(_.item.partyId) should contain(partyId)
+      }
       participant1.ledger_api.parties.list().map(_.party) should not contain partyId
 
       // advance time so new sequencer's topology transactions become effective,

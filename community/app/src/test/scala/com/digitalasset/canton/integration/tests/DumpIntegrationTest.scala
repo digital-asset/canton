@@ -28,6 +28,7 @@ import com.digitalasset.canton.store.SequencedEventStore.{
   LatestUpto,
   PossiblyIgnoredSequencedEvent,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter, config}
 import com.google.protobuf.{ByteString, InvalidProtocolBufferException}
 
@@ -214,7 +215,7 @@ sealed trait DumpIntegrationTest extends CommunityIntegrationTest with SharedEnv
     }
   }
 
-  "dump and load the last acs commitment" in { implicit env =>
+  "dump and load the last acs commitment" onlyRunLessThan ProtocolVersion.v38 in { implicit env =>
     import env.*
 
     val createIou = new iou.Iou(

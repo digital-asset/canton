@@ -44,7 +44,11 @@ private[reassignment] class UnassignmentValidation(
       parsedRequest.fullViewTree.isReassigningParticipant(participantId)
 
     for {
-      commonValidationResult <- new CommonUnassignmentValidator(activenessF, contractValidator)
+      commonValidationResult <- new CommonUnassignmentValidator(
+        participantId,
+        activenessF,
+        contractValidator,
+      )
         .performValidation(
           parsedRequest
         )
@@ -99,6 +103,7 @@ private[reassignment] object UnassignmentValidation {
   ): ValidationErrorOr[Option[A]] = EitherT.right(f.value.map(e => e.swap.toOption))
 
   class CommonUnassignmentValidator(
+      val participantId: ParticipantId,
       val activenessF: FutureUnlessShutdown[ActivenessResult],
       val contractValidator: ContractValidator,
   )(implicit
@@ -152,6 +157,12 @@ private[reassignment] object UnassignmentValidation {
             psid = parsedRequest.fullViewTree.sourceSynchronizer.unwrap,
           )
       )
+      replayCheckResult = ReassignmentValidation.checkReplayedReassignment(
+        participantId,
+        parsedRequest.fullViewTree.submitterMetadata,
+        parsedRequest.fullViewTree.sourceSynchronizer.unwrap.protocolVersion,
+        isFreshOwnTimelyRequest = parsedRequest.isFreshOwnTimelyRequest,
+      )
     } yield UnassignmentValidationResult.CommonValidationResult(
       activenessResult,
       participantSignatureVerificationResult,
@@ -159,6 +170,7 @@ private[reassignment] object UnassignmentValidation {
       packageVettingErrors,
       submitterCheckResult,
       multiSynchronizerCheckResult,
+      replayCheckResult,
     )
 
     // check the package of the template is vetted

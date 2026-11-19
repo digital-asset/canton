@@ -104,6 +104,7 @@ object ApiServiceOwner {
         _ => None, // Used for Canton rate-limiting,
       authServices: Seq[AuthService],
       jwtVerifierLoader: JwtVerifierLoader,
+      enableScopeOnlyJwt: Boolean,
       partyReplicationEndpointsO: Option[PartyReplicationEndpoints],
       userManagement: UserManagementServiceConfig = ApiServiceOwner.DefaultUserManagement,
       partyManagementServiceConfig: PartyManagementServiceConfig =
@@ -182,6 +183,7 @@ object ApiServiceOwner {
         identityProviderConfigLoader = identityProviderConfigLoader,
         jwtVerifierLoader = jwtVerifierLoader,
         loggerFactory = loggerFactory,
+        enableScopeOnlyJwt = enableScopeOnlyJwt,
       )(commandExecutionContext),
       loggerFactory = loggerFactory,
       ec = commandExecutionContext,

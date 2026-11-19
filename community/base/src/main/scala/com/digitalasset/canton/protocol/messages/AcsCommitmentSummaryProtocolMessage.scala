@@ -121,7 +121,7 @@ object AcsCommitmentSummaryProtocolMessage
       )(AcsCommitmentSummary.fromByteString(pvv, context, _))
 
       signature <- ProtoConverter.parseRequired(
-        Signature.fromProtoV30,
+        Signature.fromProtoV30(pvv, _),
         "signature",
         signatureP,
       )

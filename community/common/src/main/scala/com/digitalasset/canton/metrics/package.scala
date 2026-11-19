@@ -7,13 +7,12 @@ import cats.data.EitherT
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
-import com.digitalasset.canton.logging.ErrorLoggingContext
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 import scala.util.{Failure, Success}
 
 package object metrics {
@@ -62,10 +61,8 @@ package object metrics {
         shutdownStatus: String = "fut_shutdown",
         failedStatus: String = "fut_failure",
     )(implicit
-        context: MetricsContext = MetricsContext.Empty,
-        loggingContext: ErrorLoggingContext,
+        context: MetricsContext = MetricsContext.Empty
     ): EitherT[FutureUnlessShutdown, E, A] = {
-      implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.noTracingLogger)
 
       val handle = timer.startAsync()
       EitherT {
@@ -77,7 +74,7 @@ package object metrics {
             case Failure(_) => failedStatus
           }
           handle.stop()(MetricsContext(labelKey -> status))
-        }
+        }(directExecutionContext)
         FutureUnlessShutdown(fut)
       }
     }

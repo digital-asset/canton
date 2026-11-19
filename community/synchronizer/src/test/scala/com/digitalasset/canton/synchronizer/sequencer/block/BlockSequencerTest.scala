@@ -158,7 +158,6 @@ final class BlockSequencerTest
     private val fakeDbSequencerStore = new InMemorySequencerStore(
       testedProtocolVersion,
       sequencer1,
-      blockSequencerMode = true,
       loggerFactory,
       timeouts = timeouts,
       sequencerMetrics = sequencerMetrics,
@@ -169,7 +168,6 @@ final class BlockSequencerTest
         new InMemorySequencerStore(
           testedProtocolVersion,
           sequencer1,
-          blockSequencerMode = true,
           loggerFactory,
           timeouts = timeouts,
           sequencerMetrics = sequencerMetrics,
@@ -267,7 +265,7 @@ final class BlockSequencerTest
     override def send(signedSubmissionRequest: SignedSubmissionRequest)(implicit
         traceContext: TraceContext
     ): EitherT[Future, SequencerDeliverError, Unit] = ???
-    override def health(implicit traceContext: TraceContext): Future[SequencerDriverHealthStatus] =
+    override def health(implicit traceContext: TraceContext): Future[BlockOrdererHealthStatus] =
       ???
     override def acknowledge(signedAcknowledgeRequest: SignedContent[AcknowledgeRequest])(implicit
         traceContext: TraceContext

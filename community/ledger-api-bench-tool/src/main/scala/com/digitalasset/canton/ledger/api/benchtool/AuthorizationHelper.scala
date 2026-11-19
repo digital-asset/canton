@@ -18,10 +18,14 @@ object AuthorizationHelper {
     userTokenO.fold(service)(token => AuthCallCredentials.authorizingStub(service, token))
 }
 
-class AuthorizationHelper(val authorizationTokenSecret: String) {
+/** @param audience
+  *   the audience (`aud` claim) of the minted tokens, as configured by `target-audience` on the
+  *   participant
+  */
+class AuthorizationHelper(authorizationTokenSecret: String, audience: String) {
 
   /** @return
-    *   user token signed with HMAC256
+    *   audience-based user token signed with HMAC256
     */
   def tokenFor(userId: String): String = {
     val payload = StandardJWTPayload(
@@ -29,8 +33,8 @@ class AuthorizationHelper(val authorizationTokenSecret: String) {
       participantId = None,
       userId = userId,
       exp = None,
-      format = StandardJWTTokenFormat.Scope,
-      audiences = List.empty,
+      format = StandardJWTTokenFormat.Audience,
+      audiences = List(audience),
       scope = None,
     )
     JwtSigner

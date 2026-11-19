@@ -46,6 +46,10 @@ class AuthorizerSpec
     RequiredClaim.ListTrafficAccounts[String](acceptExecuteRights = true)
   private val listIgnoringExecute =
     RequiredClaim.ListTrafficAccounts[String](acceptExecuteRights = false)
+  private val adminOrDebitAcceptingExecute =
+    RequiredClaim.AdminOrDebitTrafficFrom[String]("party", acceptExecuteRights = true)
+  private val adminOrListAcceptingExecute =
+    RequiredClaim.AdminOrListTrafficAccounts[String](acceptExecuteRights = true)
 
   private def withClaims(claims: Claim*): ClaimSet.Claims =
     ClaimSet.Claims.Empty.copy(claims = claims)
@@ -309,6 +313,30 @@ class AuthorizerSpec
     ) -> expectedPermissionDenied,
   ).foreach { case (claims, expected) =>
     generateAuthorizationTest(TestDefinition(listIgnoringExecute, claims, expected))
+  }
+
+  behavior of s"$className.authorize for RequiredClaim.AdminOrDebitTrafficFrom"
+
+  List[(ClaimSet.Claims, ExpectedResult)](
+    ClaimSet.Claims.Admin -> ExpectedSuccess,
+    withClaims(ClaimIdentityProviderAdmin) -> expectedPermissionDenied,
+    withClaims(ClaimDebitTrafficFromAccount(account)) -> ExpectedSuccess,
+    withClaims(ClaimDebitTrafficFromAccount(account2)) -> expectedPermissionDenied,
+    withClaims(ClaimExecuteAsParty(party)) -> ExpectedSuccess,
+  ).foreach { case (claims, expected) =>
+    generateAuthorizationTest(TestDefinition(adminOrDebitAcceptingExecute, claims, expected))
+  }
+
+  behavior of s"$className.authorize for RequiredClaim.AdminOrListTrafficAccounts"
+
+  List[(ClaimSet.Claims, ExpectedResult)](
+    ClaimSet.Claims.Admin -> ExpectedSuccess,
+    withClaims(ClaimIdentityProviderAdmin) -> expectedPermissionDenied,
+    withClaims(ClaimDebitTrafficFromAnyAccount) -> ExpectedSuccess,
+    withClaims(ClaimDebitTrafficFromAccount(account)) -> expectedPermissionDenied,
+    withClaims(ClaimExecuteAsAnyParty) -> ExpectedSuccess,
+  ).foreach { case (claims, expected) =>
+    generateAuthorizationTest(TestDefinition(adminOrListAcceptingExecute, claims, expected))
   }
 
   behavior of s"$className.authorize for RequiredClaim.ReadAsAnyParty"

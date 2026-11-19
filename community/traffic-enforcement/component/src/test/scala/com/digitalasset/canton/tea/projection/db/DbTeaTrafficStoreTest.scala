@@ -112,7 +112,10 @@ trait DbTeaTrafficStoreTest extends AsyncWordSpec with BaseTest with TeaTrafficS
         _ <- store.insertCorrelation(pruned).valueOrFail("insert pruned")
         _ <- store.prune(pruned.insertedAt).valueOrFail("prune")
         _ <- store.insertCorrelation(replacement).valueOrFail("insert replacement")
-        deleted <- storage.update(store.deleteCorrelationDBIO(pruned), "delete_pruned")
+        deleted <- storage.update(
+          store.deleteCorrelationDBIO(pruned.key, pruned.insertedAt),
+          "delete_pruned",
+        )
         remaining <- store.lookupCorrelation(pruned.key).valueOrFail("lookup")
       } yield {
         deleted shouldBe 0
@@ -274,16 +277,21 @@ trait DbTeaTrafficStoreTest extends AsyncWordSpec with BaseTest with TeaTrafficS
             } yield ()).transactionally,
             "hold_table_lock",
           )
-          val store = newStore(databaseQueryTimeout = PositiveFiniteDuration.ofMillis(50))
+          val timedOutStore = newStore(databaseQueryTimeout = PositiveFiniteDuration.ofMillis(50))
+          // The check after the lock is released must not run under the 50 ms timeout too: on a
+          // loaded machine even this lookup can take longer and be cancelled.
+          val verificationStore = newStore()
 
           for {
             _ <- FutureUnlessShutdown.outcomeF(lockAcquired.future)
-            result <- store
+            result <- timedOutStore
               .insertCorrelation(fullPoolCorrelation)
               .value
               .thereafter(_ => releaseLock.trySuccess(()).discard)
             _ <- lockHeld
-            stored <- store.lookupCorrelation(fullPoolCorrelation.key).valueOrFail("lookup")
+            stored <- verificationStore
+              .lookupCorrelation(fullPoolCorrelation.key)
+              .valueOrFail("lookup")
           } yield {
             result.left.value shouldBe a[TrafficEnforcementErrors.TransientFailure.Reject]
             stored shouldBe None

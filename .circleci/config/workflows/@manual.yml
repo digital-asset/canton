@@ -365,9 +365,9 @@ manual_test_pv_36:
         requires:
           - compile
 
-manual_test_pv_37:
+manual_test_pv_38:
   when:
-    equal: [ test-37, << pipeline.parameters.manual_job >> ]
+    equal: [ test-38, << pipeline.parameters.manual_job >> ]
   jobs:
     - compile:
         context:
@@ -376,8 +376,8 @@ manual_test_pv_37:
           - maven-mirror
           - da-images
     - test:
-        name: test_37
-        protocol_version: "37"
+        name: test_38
+        protocol_version: "38"
         context:
           - datadog
           - azure-self-cache
@@ -796,6 +796,32 @@ manual_nightly_test_sequencer:
           - da-images
         requires:
           - print_tests
+
+# Runs the nightly tests against AWS and GCP KMS, which create (and delete) KMS keys.
+manual_nightly_test_kms:
+  when:
+    equal: [ nightly-test-kms, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+    - nightly_integration_test_kms_only:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - compile
 
 manual_nightly_test_bftordering:
   when:

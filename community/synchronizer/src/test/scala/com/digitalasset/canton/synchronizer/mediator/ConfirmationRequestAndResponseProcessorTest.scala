@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.mediator
 
 import com.digitalasset.base.error.ErrorCode
-import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
@@ -319,7 +318,7 @@ class ConfirmationRequestAndResponseProcessorTest
       mediatorState,
       loggerFactory,
       timeouts,
-      BatchingConfig(),
+      MediatorBatchingConfig(),
       futureSupervisor,
     )
   }
@@ -1026,7 +1025,7 @@ class ConfirmationRequestAndResponseProcessorTest
             participantResponseDeadline,
             decisionTime,
             mockTopologySnapshot,
-            BatchingConfig(),
+            MediatorBatchingConfig(),
             participantResponseDeadlineTick = None,
             requestState.asInstanceOf[ResponseAggregation[?]].finalizedPromise,
           )

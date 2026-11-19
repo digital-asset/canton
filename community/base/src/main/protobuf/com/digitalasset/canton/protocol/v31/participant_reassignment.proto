@@ -6,6 +6,7 @@ syntax = "proto3";
 package com.digitalasset.canton.protocol.v31;
 
 import "com/digitalasset/canton/crypto/v30/crypto.proto";
+import "com/digitalasset/canton/protocol/v30/common_stable.proto";
 import "com/digitalasset/canton/protocol/v30/participant_reassignment.proto";
 import "google/protobuf/timestamp.proto";
 import "scalapb/scalapb.proto";
@@ -48,4 +49,49 @@ message ActiveContract {
   string source_validation_package_id = 2;
   string target_validation_package_id = 3;
   int64 reassignment_counter = 4;
+}
+
+// Compared with v30, adds the max sequencing time
+message ReassignmentSubmitterMetadata {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  string submitter = 1;
+  string submitting_participant_uid = 2;
+  string command_id = 3;
+  string submission_id = 4; // empty if not set
+  string user_id = 5;
+  string workflow_id = 6; // empty if not set
+  google.protobuf.Timestamp max_sequencing_time = 7;
+}
+
+// Compared with v30, uses v31.ReassignmentSubmitterMetadata
+message UnassignmentCommonData {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  com.digitalasset.canton.crypto.v30.Salt salt = 1;
+  string source_physical_synchronizer_id = 2;
+
+  com.digitalasset.canton.protocol.v30.Stakeholders stakeholders = 3;
+  repeated string reassigning_participant_uids = 4;
+
+  string uuid = 5;
+  int32 source_mediator_group = 6;
+  ReassignmentSubmitterMetadata submitter_metadata = 7;
+}
+
+// Compared with v30, uses v31.ReassignmentSubmitterMetadata
+message AssignmentCommonData {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  com.digitalasset.canton.crypto.v30.Salt salt = 1;
+  string source_physical_synchronizer_id = 8;
+  string target_physical_synchronizer_id = 2;
+  google.protobuf.Timestamp unassignment_ts = 9;
+
+  com.digitalasset.canton.protocol.v30.Stakeholders stakeholders = 3; // stakeholders of the contract
+
+  string uuid = 4; // request uuid
+  int32 target_mediator_group = 5;
+  ReassignmentSubmitterMetadata submitter_metadata = 6;
+  repeated string reassigning_participant_uids = 7;
 }

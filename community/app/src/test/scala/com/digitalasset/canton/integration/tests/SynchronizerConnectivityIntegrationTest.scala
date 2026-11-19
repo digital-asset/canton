@@ -17,6 +17,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.util.SequencerPenaltyUtils.sequencerPenalty
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -303,13 +304,13 @@ sealed trait SynchronizerConnectivityIntegrationTest
 
   "A participant reconnecting to a synchronizer" when_ { setting =>
     "the participant has revoked its synchronizer trust certificate" must_ { cause =>
-      remedy(setting)(cause)("Fail the connection attempt") in { implicit env =>
+      remedy(setting)(cause)("Deny the connection attempts") in { implicit env =>
         import env.*
 
         participant1.synchronizers.connect_local(sequencer1, alias = daName)
 
         val subscriptionPermissionDenied =
-          "Permanently closing sequencer subscription due to permission denied"
+          "Closing sequencer subscription due to permission denied"
         // revoke the synchronizer trust certificate of participant1
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
@@ -318,11 +319,15 @@ sealed trait SynchronizerConnectivityIntegrationTest
               synchronizerId = daId,
               change = TopologyChangeOp.Remove,
             )
+            // The sequencer denies the subscriptions of participant1, which keeps retrying
             eventually() {
-              participant1.synchronizers.is_connected(daId) shouldBe false
               sequencer1.topology.participant_synchronizer_states
                 .active(daId, participant1.id) shouldBe false
+              sequencerPenalty(participant1, daId.logical, sequencer1.id) should be > 0.0
             }
+
+            // Stop the retries
+            participant1.synchronizers.disconnect(daName)
           },
           forEvery(_) { entry =>
             entry.message should (include(

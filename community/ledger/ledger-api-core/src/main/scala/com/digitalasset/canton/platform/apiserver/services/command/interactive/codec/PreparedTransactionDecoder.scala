@@ -32,6 +32,7 @@ import com.digitalasset.canton.protocol.{LfNode, LfNodeId}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.Synchronizer
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.LoggerUtil
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.data.Ref.TypeConId
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
@@ -238,6 +239,24 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
       case None => Result.fromValue(transaction)
     }
 
+  // Later graph walks assume a well-formed transaction, e.g. they loop forever on cycles.
+  private def validateWellFormedness(
+      transaction: lf.transaction.VersionedTransaction
+  ): Result[lf.transaction.VersionedTransaction] = {
+    val errors = transaction.transaction.isWellFormed
+    if (errors.isEmpty) Result.fromValue(transaction)
+    else {
+      val details = errors
+        .groupMap(_.reason.toString)(_.nid.index)
+        .toSeq
+        .sortBy { case (kind, _) => kind }
+        .map { case (kind, ids) =>
+          s"$kind ${LoggerUtil.limitForLogging(ids.toSeq.sorted, maxItems = 5)}"
+        }
+      Result.fromErrorString(s"Transaction is not well-formed: ${details.mkString(", ")}")
+    }
+  }
+
   /*
    * Node Transformers
    * These transformers decode proto nodes to LF nodes. Each proto version can map to several LF version, which is why
@@ -438,6 +457,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         .withConstructor(lfVersionedConstructor _)
         .transform
         .flatMap(validateTransactionVersions)
+        .flatMap(validateWellFormedness)
     }
 
   // Input contract decoder

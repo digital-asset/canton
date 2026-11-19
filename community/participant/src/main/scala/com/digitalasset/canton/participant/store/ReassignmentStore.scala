@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store
 import cats.data.EitherT
 import cats.syntax.functor.*
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.UnassignmentData.{
   AssignmentGlobalOffset,
@@ -27,6 +26,7 @@ import com.digitalasset.canton.ledger.participant.state.{Reassignment, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.protocol.reassignment.{
   AssignmentData,
   IncompleteReassignmentData,
@@ -220,7 +220,7 @@ object ReassignmentStore {
   def reassignmentOffsetPersistenceFor(
       participantId: ParticipantId,
       syncPersistentStateLookup: SyncPersistentStateLookup,
-      batchingConfig: BatchingConfig,
+      batchingConfig: ParticipantBatchingConfig,
   )(implicit
       executionContext: ExecutionContext
   ): ReassignmentOffsetPersistence = new ReassignmentOffsetPersistence {
@@ -249,7 +249,7 @@ object ReassignmentStore {
     */
   private def handleReassignmentAccepted(
       syncPersistentStateLookup: SyncPersistentStateLookup,
-      batchingConfig: BatchingConfig,
+      batchingConfig: ParticipantBatchingConfig,
       tracedLogger: TracedLogger,
   )(
       reassignmentAccepted: Seq[(Offset, Update.ReassignmentAccepted)]

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer
 
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -40,16 +41,20 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage.{
   BlockTransferRequest,
+  BlockTransferResponse,
   BlockTransferResponse30,
   BlockTransferResponse31,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PrePrepare
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.{
+  Commit,
+  PrePrepare,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   BftSequencerBaseTest,
   failingCryptoProvider,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.{v30, v31}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{ProtoDeserializationError, ProtocolVersionChecksAnyWordSpec}
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
@@ -64,6 +69,111 @@ final class StateTransferMessageValidatorTest
   private val metrics = SequencerMetrics.noop(getClass.getSimpleName).bftOrdering
   private val validator =
     new StateTransferMessageValidator[ProgrammableUnitTestEnv](metrics, loggerFactory)
+
+  "preserve validation and certificate bytes when clearing senders in state transfer responses" in {
+    def withLegacySender(certificate: CommitCertificate): CommitCertificate = {
+      val pp = certificate.prePrepare.message
+      CommitCertificate(
+        PrePrepare
+          .create(
+            pp.blockMetadata,
+            pp.viewNumber,
+            pp.block,
+            pp.canonicalCommitSet,
+            pp.from,
+            Some(myId),
+          )
+          .fakeSign,
+        certificate.commits.map { signed =>
+          val commit = signed.message
+          Commit
+            .create(
+              commit.blockMetadata,
+              commit.viewNumber,
+              commit.hash,
+              commit.localTimestamp,
+              commit.from,
+              Some(myId),
+            )
+            .fakeSign
+        },
+      )
+    }
+    val legacyCertificate = withLegacySender(aCommitCert())
+
+    def check(legacy: BlockTransferResponse, parsed: BlockTransferResponse): Unit = {
+      parsed should not be legacy
+      parsed.from shouldBe myId
+      parsed.commitCertificates.map(_.toProto) shouldBe
+        legacy.commitCertificates.map(_.toProto)
+      parsed.commitCertificates.map(_.prePrepare.message.hash) shouldBe
+        legacy.commitCertificates.map(_.prePrepare.message.hash)
+      parsed.commitCertificates.foreach { cert =>
+        cert.prePrepare.message.actualSender shouldBe None
+        cert.commits.foreach(_.message.actualSender shouldBe None)
+      }
+      validator.validateBlockTransferResponse(
+        legacy,
+        BootstrapEpochNumber,
+        aMembershipWithOnlyOtherNode,
+      ) shouldBe Right(())
+      validator.validateBlockTransferResponse(
+        parsed,
+        BootstrapEpochNumber,
+        aMembershipWithOnlyOtherNode,
+      ) shouldBe Right(())
+    }
+
+    val legacy30 = BlockTransferResponse30
+      .create(Some(legacyCertificate), myId)(ProtocolVersion.v36)
+    val parsed30 = SignedMessage
+      .fromProto(
+        ProtocolVersionValidation.AlwaysValidation,
+        v30.StateTransferMessage,
+        SupportedVersions.ProtoData30,
+      )(
+        IssConsensusModule.parseStateTransferMessage(
+          ProtocolVersionValidation.AlwaysValidation,
+          BftOrdererLimits.default,
+          myId,
+          _,
+        )
+      )(legacy30.fakeSign.toProtoV1)
+      .value
+    parsed30.toProtoV1 shouldBe legacy30.fakeSign.toProtoV1
+    parsed30.message match {
+      case response: BlockTransferResponse30 => check(legacy30, response)
+      case other => fail(s"Expected v30 block transfer response, got $other")
+    }
+
+    val legacy31 = BlockTransferResponse31
+      .create(
+        Seq(
+          legacyCertificate,
+          withLegacySender(aCommitCert(BlockMetadata(EpochNumber.First, BlockNumber(1L)))),
+        ),
+        myId,
+      )(ProtocolVersion.v37)
+    val parsed31 = SignedMessage
+      .fromProto(
+        ProtocolVersionValidation.AlwaysValidation,
+        v31.StateTransferMessage,
+        SupportedVersions.ProtoData31,
+      )(
+        IssConsensusModule.parseStateTransferMessage31(
+          ProtocolVersionValidation.AlwaysValidation,
+          BftOrdererLimits.default,
+          myId,
+          _,
+        )
+      )(legacy31.fakeSign.toProtoV1)
+      .value
+    parsed31.toProtoV1 shouldBe legacy31.fakeSign.toProtoV1
+    parsed31.message match {
+      case response: BlockTransferResponse31 => check(legacy31, response)
+      case other => fail(s"Expected v31 block transfer response, got $other")
+    }
+  }
 
   "validate block transfer request" in {
     Table[BlockTransferRequest, Either[String, Unit]](
@@ -272,13 +382,31 @@ final class StateTransferMessageValidatorTest
   }
 
   private def parseStateTransferMessageV31FromWire(proto: v30.SignedMessage) =
-    SignedMessage.fromProto(v31.StateTransferMessage, SupportedVersions.ProtoData31)(
-      IssConsensusModule.parseStateTransferMessage31(otherId, _)
+    SignedMessage.fromProto(
+      testedProtocolVersionValidation,
+      v31.StateTransferMessage,
+      SupportedVersions.ProtoData31,
+    )(
+      IssConsensusModule.parseStateTransferMessage31(
+        testedProtocolVersionValidation,
+        BftOrdererLimits.default,
+        otherId,
+        _,
+      )
     )(proto)
 
   private def parseStateTransferMessageV30FromWire(proto: v30.SignedMessage) =
-    SignedMessage.fromProto(v30.StateTransferMessage, SupportedVersions.ProtoData30)(
-      IssConsensusModule.parseStateTransferMessage(otherId, _)
+    SignedMessage.fromProto(
+      testedProtocolVersionValidation,
+      v30.StateTransferMessage,
+      SupportedVersions.ProtoData30,
+    )(
+      IssConsensusModule.parseStateTransferMessage(
+        testedProtocolVersionValidation,
+        BftOrdererLimits.default,
+        otherId,
+        _,
+      )
     )(proto)
 
   "skip old block transfer responses" in {

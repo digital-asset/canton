@@ -79,8 +79,8 @@ trait HttpJsonApiTestBase extends CantonFixture {
               .map(secret =>
                 AuthServiceConfig.UnsafeJwtHmac256(
                   NonEmptyString.tryCreate(secret),
-                  None,
-                  None,
+                  targetAudience = Some(ExpectedAudience),
+                  targetScope = None,
                 )
               )
               .toList
@@ -204,9 +204,9 @@ trait HttpJsonApiTestBase extends CantonFixture {
       userId = userId,
       participantId = None,
       exp = None,
-      format = StandardJWTTokenFormat.Scope,
-      audiences = List.empty,
-      scope = Some(AuthServiceJWTCodec.scopeLedgerApiFull),
+      format = StandardJWTTokenFormat.Audience,
+      audiences = List(ExpectedAudience),
+      scope = None,
     )
     val header = """{"alg": "HS256", "typ": "JWT"}"""
     val jwt =

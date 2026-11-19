@@ -460,8 +460,18 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
       SQL"""
           SELECT event_sequential_id, event_offset
           FROM lapi_events_activate_contract
-          WHERE (event_type = 2 -- assign
-            AND (source_synchronizer_id IS NULL OR reassignment_counter IS NULL OR reassignment_id IS NULL))
+          WHERE
+            (event_type = 2 -- assign
+              AND (source_synchronizer_id IS NULL OR reassignment_counter IS NULL OR reassignment_id IS NULL)
+            )
+            OR (event_type = 10 -- add
+              AND (
+                reassignment_counter IS NULL OR
+                representative_package_id IS NULL OR
+                internal_contract_id IS NULL OR
+                participant_event_category IS NULL
+              )
+            )
 
           UNION ALL
 
@@ -483,6 +493,14 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
               target_synchronizer_id IS NULL OR
               reassignment_counter IS NULL OR
               contract_id IS NULL
+            )
+          ) OR (event_type = 11 -- remove
+            AND (
+              reassignment_counter IS NULL OR
+              contract_id IS NULL OR
+              template_id IS NULL OR
+              package_id IS NULL OR
+              participant_event_category IS NULL
             )
           )
 

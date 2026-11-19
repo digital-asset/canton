@@ -77,6 +77,8 @@ final case class SequencerNodeParameters(
     disableReleaseVersionHandshakeCheck: Boolean = false,
     enablePrevalidation: Boolean = true, // can be removed in 3.7
     enableAsyncSequencerLogging: Boolean = false,
+    override val batchingConfig: SequencerBatchingConfig = SequencerBatchingConfig(),
+    override val cachingConfigs: SequencerCachingConfigs = SequencerCachingConfigs(),
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters

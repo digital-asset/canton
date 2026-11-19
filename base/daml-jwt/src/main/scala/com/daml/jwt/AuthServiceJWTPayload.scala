@@ -5,10 +5,8 @@ package com.daml.jwt
 
 import io.circe.*
 import io.circe.parser.*
-import org.slf4j.{Logger, LoggerFactory}
 
 import java.time.Instant
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.{Failure, Success, Try}
 
 /** All the JWT payloads that can be used with the JWT auth service. */
@@ -85,8 +83,6 @@ final case class PartyJWTPayload(
   *   - Null values and missing JSON fields map to None or a safe default value (if there is one).
   */
 object AuthServiceJWTCodec {
-
-  protected val logger: Logger = LoggerFactory.getLogger(AuthServiceJWTCodec.getClass)
 
   // ------------------------------------------------------------------------------------------------------------------
   // Constants used in the encoding
@@ -242,6 +238,30 @@ object AuthServiceJWTCodec {
       .flatMap(readPayload)
       .left
       .map(message => new RuntimeException(message))
+
+  /** Guesses the user id of a token payload for the console, which does not validate tokens: the
+    * participant does. A token minted for a configured target audience or target scope carries an
+    * `aud` or `scope` that the general reader rejects, so such a token is read as an audience-based
+    * one. That reader accepts any JSON object with a `sub`, so a token the general reader rejects
+    * for another reason, such as a malformed participant audience, also yields its `sub`.
+    *
+    * Yields no user id for a token that neither reader can read, such as one without a `sub`.
+    *
+    * Must not be used to validate a token.
+    */
+  def guessUserId(payload: String): Option[String] =
+    parse(payload).toOption
+      .flatMap { json =>
+        // The readers throw instead of returning a Left for some unreadable tokens, such as one
+        // without a `sub`. A throw in the general reader must not skip the audience-based one.
+        def read(reader: Json => Either[String, AuthServiceJWTPayload]) =
+          Try(reader(json)).toOption.flatMap(_.toOption)
+        read(readPayload).orElse(read(readAudienceBasedToken))
+      }
+      .map {
+        case s: StandardJWTPayload => s.userId
+        case s: PartyJWTPayload => s.userId
+      }
 
   private def readPayload(value: Json): Either[String, AuthServiceJWTPayload] =
     value.asObject match {
@@ -442,35 +462,7 @@ object AuthServiceJWTCodec {
   // Implicits that can be imported to write JSON
   // ------------------------------------------------------------------------------------------------------------------
 
-  private[this] lazy val sharedWarningCodec = new JsonImplicitsWithWarning()
-
-  def jsonImplicits(warnOnJwtScopeUsage: Boolean): AuthServiceJWTPayloadCodec = if (
-    warnOnJwtScopeUsage
-  )
-    sharedWarningCodec
-  else
-    JsonImplicits
-
   object JsonImplicits extends AuthServiceJWTPayloadCodec(writePayload, readPayload)
-
-  private class JsonImplicitsWithWarning(
-      private val firstRead: AtomicBoolean = new AtomicBoolean(true)
-  ) extends AuthServiceJWTPayloadCodec(
-        writePayload,
-        json => {
-          val decoded = readPayload(json)
-          decoded.foreach {
-            case payload: StandardJWTPayload if payload.format == StandardJWTTokenFormat.Scope =>
-              if (firstRead.getAndSet(false)) {
-                logger.warn(
-                  "Received scope-based token. Scope-based tokens are deprecated and will be removed from use in Canton release 3.7. Please migrate to audience-based tokens."
-                )
-              }
-            case _ =>
-          }
-          decoded
-        },
-      )
 
   object AudienceBasedTokenJsonImplicits
       extends AuthServiceJWTPayloadCodec(writeAudienceBasedPayload, readAudienceBasedToken)

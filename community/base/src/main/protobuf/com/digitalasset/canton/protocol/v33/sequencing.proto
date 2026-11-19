@@ -51,7 +51,9 @@ message SubmissionRequest {
 
 // size limits on various collections, globally enforced on a synchronizer
 //
-// Differences with v32: topology_limits is a v33.TopologyLimits, which adds new limits.
+// Differences with v32:
+// - topology_limits is a v33.TopologyLimits, which adds new limits
+// - new field bft_orderer_limits
 message SynchronizerLimits {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
@@ -60,6 +62,8 @@ message SynchronizerLimits {
   TopologyLimits topology_limits = 2;
 
   AcsCommitmentLimits acs_commitment_limits = 3;
+
+  BftOrdererLimits bft_orderer_limits = 4;
 }
 
 // size limits on collections within topology transactions
@@ -173,6 +177,44 @@ message AcsCommitmentLimits {
 
   // Maximum allowed unsent digests for an ACS commitment summary batch
   uint32 max_unsent_digests = 4;
+}
+
+// Size limits on the `repeated` fields of the BFT ordering service's internal P2P protocol.
+// All limits on individual fields are derived from the values below, as the legitimate size of
+// every collection is bounded by the number of sequencers and the segment length.
+// Synchronizer owners must not configure topology values above these limits, otherwise honest
+// messages are rejected as malformed.
+message BftOrdererLimits {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // The maximum number of sequencers in the synchronizer is not configurable here, it is the constant
+  // SynchronizerLimits.MaxSequencersInSynchronizer. It bounds:
+  // - EpochStatus.segments
+  // - SegmentInViewChange.view_change_messages_present
+  // - BlockInProgress.prepares_present
+  // - BlockInProgress.commits_present
+  // - ProofOfAvailability.acks
+  // - NewView.view_changes
+  // - CanonicalCommitSet.canonical_commits
+  // - PrepareCertificate.prepares
+  // - CommitCertificate.commits
+
+  // maximum number of blocks in a segment
+  // The product max_segment_length * (maximum number of sequencers in the synchronizer) bounds:
+  // - SegmentInViewChange.are_blocks_complete
+  // - SegmentInProgress.block_statuses
+  // - ViewChange.consensus_certs
+  // - NewView.pre_prepares
+  // - RetransmissionResponse.commit_certificates
+  uint32 max_segment_length = 1;
+
+  // maximum number of requests in a Batch
+  // Must be at least the sequencing parameter maxRequestsInBatch
+  uint32 max_ordering_requests = 2;
+
+  // maximum number of proofs in an OrderingBlock
+  // Must be at least the sequencing parameter maxBatchesPerBlockProposal
+  uint32 max_proofs = 3;
 }
 
 // Differences with v32:

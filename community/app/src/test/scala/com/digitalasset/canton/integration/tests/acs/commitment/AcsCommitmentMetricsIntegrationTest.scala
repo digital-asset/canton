@@ -28,6 +28,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsHelpers
 import com.digitalasset.canton.topology.{ParticipantId, Party}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SynchronizerAlias, UniquePortGenerator, config}
 import monocle.Monocle.toAppliedFocusOps
 
@@ -482,216 +483,220 @@ trait AcsCommitmentMetricsIntegrationTest
       )
   }
 
-  "Can get max long value when we have never received a counter commitment" in { implicit env =>
-    import env.*
-    val iou = IouSyntax.createIou(participant1, Some(daId))(alice, bob)
-    val iou2 = IouSyntax.createIou(participant1, Some(daId))(alice, charlie)
-    // Create an Iou contract that involves only the admin party of participant1. This ensures that
-    // the stakeholder group containing only the admin party always exists. Otherwise, this stakeholder group
-    // may or may not be active depending on how often we advance the sim clock and
-    // how the pings align with the reconciliation intervals.
-    val iou3 = IouSyntax
-      .createIou(participant1, Some(daId))(participant1.adminParty, participant1.adminParty)
-    logger.info(s"deploying three IOU contract")
-    deployAndCheckContractOnParticipants(iou, Seq(participant1, participant2))
-    deployAndCheckContractOnParticipants(iou2, Seq(participant1, participant3))
-    deployAndCheckContractOnParticipants(iou3, Seq(participant1))
-    val simClock = environment.simClock.value
+  "Can get max long value when we have never received a counter commitment" onlyRunLessThan ProtocolVersion.v38 in {
+    implicit env =>
+      import env.*
+      val iou = IouSyntax.createIou(participant1, Some(daId))(alice, bob)
+      val iou2 = IouSyntax.createIou(participant1, Some(daId))(alice, charlie)
+      // Create an Iou contract that involves only the admin party of participant1. This ensures that
+      // the stakeholder group containing only the admin party always exists. Otherwise, this stakeholder group
+      // may or may not be active depending on how often we advance the sim clock and
+      // how the pings align with the reconciliation intervals.
+      val iou3 = IouSyntax
+        .createIou(participant1, Some(daId))(participant1.adminParty, participant1.adminParty)
+      logger.info(s"deploying three IOU contract")
+      deployAndCheckContractOnParticipants(iou, Seq(participant1, participant2))
+      deployAndCheckContractOnParticipants(iou2, Seq(participant1, participant3))
+      deployAndCheckContractOnParticipants(iou3, Seq(participant1))
+      val simClock = environment.simClock.value
 
-    logger.info(
-      "we advance time only for participant1, so participant2 & participant3 does not generate commitments"
-    )
-    participant2.stop()
-    participant3.stop()
-    val start = simClock.now
+      logger.info(
+        "we advance time only for participant1, so participant2 & participant3 does not generate commitments"
+      )
+      participant2.stop()
+      participant3.stop()
+      val start = simClock.now
 
-    simClock.advance(
-      interval
-        .multipliedBy(2L)
-        // Add one microsecond to avoid sequencing times that fall on interval boundaries
-        .plusNanos(1000)
-    )
-    participant1.health.ping(participant1)
-    participant1.testing.fetch_synchronizer_times()
-    val end = simClock.now
+      simClock.advance(
+        interval
+          .multipliedBy(2L)
+          // Add one microsecond to avoid sequencing times that fall on interval boundaries
+          .plusNanos(1000)
+      )
+      participant1.health.ping(participant1)
+      participant1.testing.fetch_synchronizer_times()
+      val end = simClock.now
 
-    eventually() {
-      participant1.commitments.computed(daName, start.toInstant, end.toInstant) should have size 2
-    }
+      eventually() {
+        participant1.commitments.computed(daName, start.toInstant, end.toInstant) should have size 2
+      }
 
-    logger.info(
-      "participant1 should see the other two participants being behind with longMaxValue (because they have never send a commitment)"
-    )
+      logger.info(
+        "participant1 should see the other two participants being behind with longMaxValue (because they have never send a commitment)"
+      )
 
-    eventually() {
-      val allIntervalsBehind =
-        participant1.commitments.get_intervals_behind_for_counter_participants(
-          Seq.empty,
-          Seq(daId),
-          None,
+      eventually() {
+        val allIntervalsBehind =
+          participant1.commitments.get_intervals_behind_for_counter_participants(
+            Seq.empty,
+            Seq(daId),
+            None,
+          )
+        allIntervalsBehind.size shouldBe 2
+        allIntervalsBehind.foreach(_.intervalsBehind shouldBe NonNegativeLong.maxValue)
+      }
+
+      participant2.start()
+      participant3.start()
+
+      participants.all.foreach { participant =>
+        connect(
+          participant = participant,
+          localSequencerReference = sequencer1,
+          synchronizerAlias = daName,
         )
-      allIntervalsBehind.size shouldBe 2
-      allIntervalsBehind.foreach(_.intervalsBehind shouldBe NonNegativeLong.maxValue)
-    }
-
-    participant2.start()
-    participant3.start()
-
-    participants.all.foreach { participant =>
-      connect(
-        participant = participant,
-        localSequencerReference = sequencer1,
-        synchronizerAlias = daName,
-      )
-      connect(
-        participant = participant,
-        localSequencerReference = sequencer2,
-        synchronizerAlias = acmeName,
-      )
-    }
+        connect(
+          participant = participant,
+          localSequencerReference = sequencer2,
+          synchronizerAlias = acmeName,
+        )
+      }
   }
 
-  "Can get intervals behind for counter participant" onlyRunWhen (!isInMemory) in { implicit env =>
-    import env.*
+  "Can get intervals behind for counter participant" onlyRunWhen (!isInMemory && testedProtocolVersion < ProtocolVersion.v38) in {
+    implicit env =>
+      import env.*
 
-    logger.info("we increment one interval so all participants have send at least one commitment")
-    incrementIntervals(1)
-    eventually() {
-      participant1.commitments
-        .get_intervals_behind_for_counter_participants(
-          Seq(participant2, participant3),
-          Seq(daId),
-          None,
+      logger.info("we increment one interval so all participants have send at least one commitment")
+      incrementIntervals(1)
+      eventually() {
+        participant1.commitments
+          .get_intervals_behind_for_counter_participants(
+            Seq(participant2, participant3),
+            Seq(daId),
+            None,
+          )
+          .foreach(_.intervalsBehind shouldBe NonNegativeLong.zero)
+      }
+      logger.info("we stop participant2 so it will fall behind")
+      participant2.stop()
+      eventually() {
+        participant2.health.is_running() shouldBe false
+      }
+      val incremental = 2L
+      incrementIntervals(incremental.toInt)
+      logger.info("we validate that we see participant2 being behind")
+      eventually() {
+        val allIntervalsBehind =
+          participant1.commitments.get_intervals_behind_for_counter_participants(
+            Seq.empty,
+            Seq(daId),
+            None,
+          )
+        allIntervalsBehind.nonEmpty shouldBe true
+        allIntervalsBehind.foreach(
+          _.intervalsBehind shouldBe NonNegativeLong.tryCreate(incremental - 1)
         )
-        .foreach(_.intervalsBehind shouldBe NonNegativeLong.zero)
-    }
-    logger.info("we stop participant2 so it will fall behind")
-    participant2.stop()
-    eventually() {
-      participant2.health.is_running() shouldBe false
-    }
-    val incremental = 2L
-    incrementIntervals(incremental.toInt)
-    logger.info("we validate that we see participant2 being behind")
-    eventually() {
-      val allIntervalsBehind =
+      }
+
+      logger.info("we validate we can check status of participant3 even if it is not behind")
+      val participant3Behind =
         participant1.commitments.get_intervals_behind_for_counter_participants(
-          Seq.empty,
+          Seq(participant3.id),
           Seq(daId),
           None,
         )
-      allIntervalsBehind.nonEmpty shouldBe true
-      allIntervalsBehind.foreach(
-        _.intervalsBehind shouldBe NonNegativeLong.tryCreate(incremental - 1)
-      )
-    }
-
-    logger.info("we validate we can check status of participant3 even if it is not behind")
-    val participant3Behind = participant1.commitments.get_intervals_behind_for_counter_participants(
-      Seq(participant3.id),
-      Seq(daId),
-      None,
-    )
-    withClue("participant 3 should be behind") {
-      participant3Behind.nonEmpty shouldBe true
-      participant3Behind.foreach(_.intervalsBehind shouldBe NonNegativeLong.zero)
-    }
+      withClue("participant 3 should be behind") {
+        participant3Behind.nonEmpty shouldBe true
+        participant3Behind.foreach(_.intervalsBehind shouldBe NonNegativeLong.zero)
+      }
   }
 
-  "can get metrics for participants" onlyRunWhen (!isInMemory) in { implicit env =>
-    import env.*
-    logger.info("we restart participant2 to build the configs and then stop it again")
+  "can get metrics for participants" onlyRunWhen (!isInMemory && testedProtocolVersion < ProtocolVersion.v38) in {
+    implicit env =>
+      import env.*
+      logger.info("we restart participant2 to build the configs and then stop it again")
 
-    participant2.start()
-    val participant2Id = participant2.id
-    val slowConfig = new SlowCounterParticipantSynchronizerConfig(
-      Seq(daId),
-      Seq(participant2.id),
-      1,
-      1,
-      Seq.empty,
-    )
-    val secondSlowConfig = new SlowCounterParticipantSynchronizerConfig(
-      Seq(daId),
-      Seq.empty,
-      1,
-      1,
-      Seq(participant2.id, participant3.id),
-    )
-    participant2.stop()
-    participant1.commitments.set_config_for_slow_counter_participants(Seq(slowConfig))
-    incrementIntervals(2)
-
-    logger.info("we validate participant3 is keeping the default up to date")
-    participant1.metrics
-      .get_long_point(
-        s"$metricsPrefix.largest-counter-participant-latency",
-        metricsSynchronizerContext,
+      participant2.start()
+      val participant2Id = participant2.id
+      val slowConfig = new SlowCounterParticipantSynchronizerConfig(
+        Seq(daId),
+        Seq(participant2.id),
+        1,
+        1,
+        Seq.empty,
       )
-      .value shouldBe 0
-
-    logger.info("we validate the distinguished participant2 is falling behind")
-    participant1.metrics
-      .get_long_point(
-        s"$metricsPrefix.largest-distinguished-counter-participant-latency",
-        metricsSynchronizerContext,
+      val secondSlowConfig = new SlowCounterParticipantSynchronizerConfig(
+        Seq(daId),
+        Seq.empty,
+        1,
+        1,
+        Seq(participant2.id, participant3.id),
       )
-      .value should be > 0L
+      participant2.stop()
+      participant1.commitments.set_config_for_slow_counter_participants(Seq(slowConfig))
+      incrementIntervals(2)
 
-    participant1.commitments.set_config_for_slow_counter_participants(Seq(secondSlowConfig))
-    incrementIntervals(2)
-
-    logger.info(
-      "we validate that no default participants and no distinguished participant is behind"
-    )
-
-    eventually() {
+      logger.info("we validate participant3 is keeping the default up to date")
       participant1.metrics
         .get_long_point(
           s"$metricsPrefix.largest-counter-participant-latency",
           metricsSynchronizerContext,
         )
         .value shouldBe 0
+
+      logger.info("we validate the distinguished participant2 is falling behind")
       participant1.metrics
         .get_long_point(
           s"$metricsPrefix.largest-distinguished-counter-participant-latency",
           metricsSynchronizerContext,
         )
-        .value shouldBe 0
-    }
-
-    logger.info(
-      "we validate we can see the uniquely monitored participant2 (still behind) and participant3"
-    )
-
-    eventually() {
-      participant1.metrics
-        .get_long_point(
-          s"$metricsPrefix.counter-participant-latency",
-          metricsSynchronizerContext
-            .updated("counter-participant", participant2Id.uid.toProtoPrimitive),
-        )
         .value should be > 0L
-      participant1.metrics
-        .get_long_point(
-          s"$metricsPrefix.counter-participant-latency",
-          metricsSynchronizerContext
-            .updated("counter-participant", participant3.id.uid.toProtoPrimitive),
-        )
-        .value shouldBe 0
-    }
 
-    eventually() {
-      participant1.metrics
-        .get_long_point(
-          s"$metricsPrefix.active-stakeholder-groups",
-          metricsSynchronizerContext,
-        )
-        .value shouldBe 3L
-    }
+      participant1.commitments.set_config_for_slow_counter_participants(Seq(secondSlowConfig))
+      incrementIntervals(2)
+
+      logger.info(
+        "we validate that no default participants and no distinguished participant is behind"
+      )
+
+      eventually() {
+        participant1.metrics
+          .get_long_point(
+            s"$metricsPrefix.largest-counter-participant-latency",
+            metricsSynchronizerContext,
+          )
+          .value shouldBe 0
+        participant1.metrics
+          .get_long_point(
+            s"$metricsPrefix.largest-distinguished-counter-participant-latency",
+            metricsSynchronizerContext,
+          )
+          .value shouldBe 0
+      }
+
+      logger.info(
+        "we validate we can see the uniquely monitored participant2 (still behind) and participant3"
+      )
+
+      eventually() {
+        participant1.metrics
+          .get_long_point(
+            s"$metricsPrefix.counter-participant-latency",
+            metricsSynchronizerContext
+              .updated("counter-participant", participant2Id.uid.toProtoPrimitive),
+          )
+          .value should be > 0L
+        participant1.metrics
+          .get_long_point(
+            s"$metricsPrefix.counter-participant-latency",
+            metricsSynchronizerContext
+              .updated("counter-participant", participant3.id.uid.toProtoPrimitive),
+          )
+          .value shouldBe 0
+      }
+
+      eventually() {
+        participant1.metrics
+          .get_long_point(
+            s"$metricsPrefix.active-stakeholder-groups",
+            metricsSynchronizerContext,
+          )
+          .value shouldBe 3L
+      }
   }
 
-  "no wait participants does not affect default latency metric" onlyRunWhen (!isInMemory) in {
+  "no wait participants does not affect default latency metric" onlyRunWhen (!isInMemory && testedProtocolVersion < ProtocolVersion.v38) in {
     implicit env =>
       import env.*
 
@@ -754,7 +759,7 @@ trait AcsCommitmentMetricsIntegrationTest
 
   }
 
-  "if slowest participant catch up, we should see next participant behind" onlyRunWhen (!isInMemory) in {
+  "if slowest participant catch up, we should see next participant behind" onlyRunWhen (!isInMemory && testedProtocolVersion < ProtocolVersion.v38) in {
     implicit env =>
       import env.*
 

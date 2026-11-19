@@ -87,7 +87,11 @@ import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal.ping.Ping
-import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, LedgerApiServerConfig}
+import com.digitalasset.canton.participant.config.{
+  AcsCommitmentConfig,
+  LedgerApiServerConfig,
+  ParticipantBatchingConfig,
+}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
@@ -393,7 +397,7 @@ abstract class ParticipantRestartTest
             CommonMockMetrics.cryptoMetrics,
             executionContext,
             timeouts,
-            BatchingConfig(),
+            ParticipantBatchingConfig(),
             loggerFactory,
             NoReportingTracerProvider,
             new ExecutorServiceMetrics(NoOpMetricsFactory),
@@ -472,6 +476,7 @@ abstract class ParticipantRestartTest
               LedgerApiServerConfig(),
               futureSupervisor,
               loggerFactory,
+              None,
             )
             .failOnShutdown
           stateManager = new SyncPersistentStateManager(
@@ -540,8 +545,6 @@ abstract class ParticipantRestartTest
     when(aliasResolution.logicalSynchronizerIds).thenReturn(Set(daId.logical))
     when(synchronizerConnectionConfigStore.aliasResolution).thenReturn(aliasResolution)
 
-    val acsDigestProcessorEnabled = false
-
     new PruningProcessor(
       Eval.now(participantNodePersistentState),
       stateManager,
@@ -551,7 +554,6 @@ abstract class ParticipantRestartTest
       synchronizerConnectionConfigStore,
       legacyAcsCommitmentProcessorDisabled =
         AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Always,
-      acsDigestProcessorEnabled,
       timeouts,
       futureSupervisor,
       loggerFactory,
@@ -2214,7 +2216,8 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
             // Explicitly set a massive deduplication window (1 day) to guarantee
             // that all 6 retries across all 3 node restarts are caught by the same
             // deduplication boundary, rather than being treated as fresh commands.
-            deduplicationPeriod = Some(DeduplicationDuration(java.time.Duration.ofDays(1))),
+            deduplicationPeriod =
+              Some(DeduplicationDuration.create(java.time.Duration.ofDays(1)).value),
           )
         },
         { (result: Either[CommandFailure, ?]) =>

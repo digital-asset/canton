@@ -10,13 +10,13 @@ import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 
 import scala.annotation.tailrec
-import scala.collection.{IterableOps, immutable}
+import scala.collection.{IterableOps, View, immutable}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.math.Ordered.orderingToOrdered
 
 object IterableUtil {
 
-  implicit class Ops[+A](private val self: immutable.Iterable[A]) {
+  implicit class Ops[+A](private val self: immutable.Iterable[A]) extends AnyVal {
 
     /** Calculates a cross product of two iterables. Seq(1,2,3) Seq(a,b,c)
       *
@@ -27,6 +27,25 @@ object IterableUtil {
         x <- self
         y <- ys
       } yield (x, y)
+  }
+
+  implicit class IterableOpsOps[A, CC[_], C](
+      private val self: scala.collection.IterableOps[A, CC, C]
+  ) extends AnyVal {
+    def unzip4[A1, A2, A3, A4](implicit
+        asQuadruple: A => (A1, A2, A3, A4)
+    ): (CC[A1], CC[A2], CC[A3], CC[A4]) = {
+      val first: View[A1] = new View.Map[A, A1](self, asQuadruple(_)._1)
+      val second: View[A2] = new View.Map[A, A2](self, asQuadruple(_)._2)
+      val third: View[A3] = new View.Map[A, A3](self, asQuadruple(_)._3)
+      val fourth: View[A4] = new View.Map[A, A4](self, asQuadruple(_)._4)
+      (
+        self.iterableFactory.from(first),
+        self.iterableFactory.from(second),
+        self.iterableFactory.from(third),
+        self.iterableFactory.from(fourth),
+      )
+    }
   }
 
   /** Split an iterable into a lazy Stream of consecutive elements with the same value of

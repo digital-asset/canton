@@ -26,6 +26,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionValidation,
   RepresentativeProtocolVersion,
+  UnsupportedProtoCodec,
   VersionedProtoCodec,
   VersioningCompanionMemoization,
 }
@@ -111,7 +112,8 @@ object LegacyAcsCommitment
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.AcsCommitment)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
-    )
+    ),
+    ProtoVersion(31) -> UnsupportedProtoCodec(fromInclusive = ProtocolVersion.v38),
   )
 
   @VisibleForTesting

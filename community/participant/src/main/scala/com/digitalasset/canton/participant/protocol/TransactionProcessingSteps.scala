@@ -22,7 +22,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccept
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.*
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
@@ -60,8 +60,8 @@ import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissio
   SubmissionAlreadyInFlight,
   TimeoutTooLow,
 }
+import com.digitalasset.canton.participant.protocol.submission.SubmissionTrackingData.CauseWithTemplate
 import com.digitalasset.canton.participant.protocol.submission.TransactionConfirmationRequestFactory.*
-import com.digitalasset.canton.participant.protocol.submission.TransactionSubmissionTrackingData.CauseWithTemplate
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractInstanceOfId,
   ContractLookupError,
@@ -102,13 +102,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{
-  EitherTUtil,
-  ErrorUtil,
-  FutureUnlessShutdownUtil,
-  LoggerUtil,
-  RoseTree,
-}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUnlessShutdownUtil, RoseTree}
 import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{
   LedgerSubmissionId,
@@ -163,7 +157,7 @@ class TransactionProcessingSteps(
     with NamedLogging {
   private def protocolVersion = staticSynchronizerParameters.protocolVersion
 
-  override type SubmissionSendError = TransactionProcessor.SubmissionErrors.SequencerRequest.Error
+  override type SubmissionSendError = ProtocolProcessor.SubmissionSendFailure
   override type PendingSubmissions = Unit
   override type PendingSubmissionId = Unit
   override type PendingSubmissionData = None.type
@@ -305,7 +299,7 @@ class TransactionProcessingSteps(
       override val approximateTimestampForSigning: CantonTimestamp,
       override val maxSequencingTime: CantonTimestamp,
   )(implicit traceContext: TraceContext)
-      extends TrackedSubmission {
+      extends TrackedSubmissionWithDeduplication {
 
     private def changeId: ChangeId = submitterInfo.changeId
 
@@ -322,7 +316,7 @@ class TransactionProcessingSteps(
       // but that is not supported in our current architecture as the indexer assigns the global offset at a later stage
       // of processing.
       lazy val emptyDeduplicationPeriod =
-        DeduplicationPeriod.DeduplicationDuration(java.time.Duration.ZERO)
+        DeduplicationPeriod.DeduplicationDuration.Zero
 
       val (error, dedupInfo): (TransactionError, DeduplicationPeriod) = failure match {
         case CommandDeduplicator.AlreadyExists(completionOffset, accepted, submissionId) =>
@@ -355,6 +349,10 @@ class TransactionProcessingSteps(
               )
           }
           error -> emptyDeduplicationPeriod
+        case CommandDeduplicator.InvalidDeduplicationDuration(reason) =>
+          SubmissionInternalError.Failure(
+            new IllegalStateException(s"Invalid calculated deduplication duration: $reason")
+          ) -> emptyDeduplicationPeriod
       }
       mkTransactionSubmissionTrackingData(
         error,
@@ -372,7 +370,7 @@ class TransactionProcessingSteps(
     ): TransactionSubmissionTrackingData =
       TransactionSubmissionTrackingData.create(
         completionInfo,
-        TransactionSubmissionTrackingData.CauseWithTemplate(error),
+        SubmissionTrackingData.CauseWithTemplate(error),
         psid,
         transactionHash = submitterInfo.transactionHash,
       )
@@ -392,8 +390,8 @@ class TransactionProcessingSteps(
       def causeWithTemplate(
           message: String,
           reason: TransactionConfirmationRequestCreationError,
-      ): TransactionSubmissionTrackingData.CauseWithTemplate =
-        TransactionSubmissionTrackingData.CauseWithTemplate(
+      ): SubmissionTrackingData.CauseWithTemplate =
+        SubmissionTrackingData.CauseWithTemplate(
           SubmissionErrors.MalformedRequest.Error(message, reason)
         )
 
@@ -402,7 +400,7 @@ class TransactionProcessingSteps(
           .parTraverse(rawSubmitter =>
             EitherT
               .fromEither[FutureUnlessShutdown](LfPartyId.fromString(rawSubmitter))
-              .leftMap[TransactionSubmissionTrackingData.RejectionCause](msg =>
+              .leftMap[SubmissionTrackingData.RejectionCause](msg =>
                 causeWithTemplate(msg, MalformedSubmitter(rawSubmitter))
               )
           )
@@ -426,12 +424,12 @@ class TransactionProcessingSteps(
               protocolVersion,
               protocolLimits,
             )
-            .leftMap[TransactionSubmissionTrackingData.RejectionCause] {
+            .leftMap[SubmissionTrackingData.RejectionCause] {
               case TransactionTreeFactoryError(UnknownPackageError(unknownTo)) =>
-                TransactionSubmissionTrackingData
+                SubmissionTrackingData
                   .CauseWithTemplate(SubmissionErrors.PackageNotVettedByRecipients.Error(unknownTo))
               case TransactionTreeFactoryError(ContractLookupError(contractId, _)) =>
-                TransactionSubmissionTrackingData
+                SubmissionTrackingData
                   .CauseWithTemplate(SubmissionErrors.UnknownContractSynchronizer.Error(contractId))
               case creationError =>
                 causeWithTemplate("Transaction confirmation request creation failed", creationError)
@@ -439,7 +437,7 @@ class TransactionProcessingSteps(
         )
         _ = logger.debug(s"Generated requestUuid=${request.informeeMessage.requestUuid}")
         batch <- EitherT
-          .right[TransactionSubmissionTrackingData.RejectionCause](
+          .right[SubmissionTrackingData.RejectionCause](
             request.asBatch(recentSnapshot.ipsSnapshot)
           )
       } yield {
@@ -469,7 +467,7 @@ class TransactionProcessingSteps(
       }
 
       def mkError(
-          rejectionCause: TransactionSubmissionTrackingData.RejectionCause
+          rejectionCause: SubmissionTrackingData.RejectionCause
       ): Success[Outcome[Either[SubmissionTrackingData, PreparedBatch]]] = {
         val trackingData = TransactionSubmissionTrackingData.create(
           // At this stage we're still preparing the batch to be sent,
@@ -488,7 +486,7 @@ class TransactionProcessingSteps(
         case Success(Outcome(Left(rejectionCause))) => mkError(rejectionCause)
         case Success(AbortedDueToShutdown) => Success(AbortedDueToShutdown)
         case Failure(exception) =>
-          val rejectionCause = TransactionSubmissionTrackingData.CauseWithTemplate(
+          val rejectionCause = SubmissionTrackingData.CauseWithTemplate(
             SyncServiceInjectionError.InjectionFailure.Failure(exception)
           )
           mkError(rejectionCause)
@@ -500,7 +498,7 @@ class TransactionProcessingSteps(
         // Since we're timing out, we have to assume here the event has not been ordered and therefore
         // no traffic was charged
         submitterInfo.toCompletionInfo(NonNegativeLong.zero).copy(optDeduplicationPeriod = None),
-        TransactionSubmissionTrackingData.TimeoutCause,
+        SubmissionTrackingData.TimeoutCause,
         psid,
         transactionHash = submitterInfo.transactionHash,
       )
@@ -518,15 +516,12 @@ class TransactionProcessingSteps(
         TransactionProcessor.SubmissionErrors.TimeoutError.Error()
     }
 
-    override def embedSequencerRequestError(
-        error: ProtocolProcessor.SequencerRequestError
-    ): SubmissionSendError =
-      TransactionProcessor.SubmissionErrors.SequencerRequest.Error(error.sendError)
-
     override def shutdownDuringInFlightRegistration: TransactionSubmissionError =
       TransactionProcessor.SubmissionErrors.SubmissionDuringShutdown.Rejection()
 
-    override def onDefinitiveFailure: TransactionSubmissionResult = TransactionSubmissionFailure
+    override def onDefinitiveFailure(
+        trackingData: Option[SubmissionTrackingData]
+    ): TransactionSubmissionResult = TransactionSubmissionFailure
 
     override def definiteFailureTrackingData(
         failure: UnlessShutdown[Throwable]
@@ -558,26 +553,23 @@ class TransactionProcessingSteps(
   ) extends PreparedBatch {
     override def pendingSubmissionId: Unit = ()
 
-    override def embedSequencerRequestError(
-        error: ProtocolProcessor.SequencerRequestError
-    ): SequencerRequest.Error =
-      TransactionProcessor.SubmissionErrors.SequencerRequest.Error(error.sendError)
-
     override def submissionErrorTrackingData(
-        error: SubmissionSendError
+        error: ProtocolProcessor.SubmissionSendFailure
     )(implicit traceContext: TraceContext): TransactionSubmissionTrackingData = {
-      val rejectionCause = error.sendError match {
-        case refused @ SendAsyncClientError.RequestRefused(refusal) =>
+      val rejectionCause = error match {
+        case ProtocolProcessor.SequencerRequestError(
+              refused @ SendAsyncClientError.RequestRefused(refusal)
+            ) =>
           CauseWithTemplate(
             if (refusal.isOverload) SequencerBackpressure.Rejection(refusal.toString)
             else if (refusal.hasMaxSequencingTimeElapsed) TimeoutError.Error()
             else SequencerRequest.Error(refused): TransactionError
           )
-        case SendAsyncClientError.TrafficEnforcementRejected(reason) =>
+        case ProtocolProcessor.SequencerRequestError(otherSendError) =>
+          CauseWithTemplate(SequencerRequest.Error(otherSendError): TransactionError)
+        case ProtocolProcessor.TrafficEnforcementRejected(reason) =>
           // Traffic enforcement already decided what the client should see, this only renders it.
           CauseWithTemplate(RpcStatus.fromJavaProto(reason.asGrpcStatus))
-        case otherSendError =>
-          CauseWithTemplate(SequencerRequest.Error(otherSendError): TransactionError)
       }
       TransactionSubmissionTrackingData.create(
         completionInfo,
@@ -585,13 +577,6 @@ class TransactionProcessingSteps(
         psid,
         transactionHash = transactionHash,
       )
-    }
-
-    override def logSubmissionSendError(error: SequencerRequest.Error)(implicit
-        errorLoggingContext: ErrorLoggingContext
-    ): Unit = {
-      val logLevel = SendAsyncClientError.logLevel(error.sendError)
-      LoggerUtil.logAtLevel(logLevel, s"Failed to submit transaction due to $error")
     }
   }
 
@@ -1448,10 +1433,10 @@ class TransactionProcessingSteps(
     } yield commitAndContractsAndEvent
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       pendingRequestData: RequestType#PendingRequestData,
-      pendingSubmissionMap: PendingSubmissions,
+      pendingSubmissionDataO: Option[PendingSubmissionData],
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext

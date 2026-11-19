@@ -35,6 +35,7 @@ import com.digitalasset.canton.metrics.DeclarativeApiMetrics
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.participant.admin.AdminWorkflowServices
 import com.digitalasset.canton.participant.config.*
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidation
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnectionValidation}
 import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, BaseWriteRequest, TopologyStoreId}
@@ -211,24 +212,34 @@ class DeclarativeParticipantApi(
       } yield res
     }
 
+    // TODO(#37616): Remove when removing support for PV=36
     if (config.enableMultiSynchronizerTopologyFeatureFlag) {
       queryAdminApi(ListConnectedSynchronizers())
         .flatMap { synchronizerIds =>
-          synchronizerIds.traverse { sid =>
-            for {
-              current <- fetchSynchronizerTrustCertificate(sid.synchronizerId)
-              currentFeatureFlags = current.headOption.map(_.item.featureFlags).getOrElse(Set.empty)
-              shouldUpdate = !currentFeatureFlags.contains(
-                ParticipantTopologyFeatureFlag.EnableMultiSynchronizer
-              )
-              done <-
-                if (shouldUpdate) {
-                  proposeEnableMultiSynchronizerFeatureFlag(sid.synchronizerId, currentFeatureFlags)
-                    .map(_ => UpdateResult(updated = 1))
-                } else Right(UpdateResult())
-            } yield done
+          synchronizerIds
+            .filter(sid =>
+              ReassignmentValidation.isMultiSynchronizerFlagRequired(sid.physicalSynchronizerId)
+            )
+            .traverse { sid =>
+              for {
+                current <- fetchSynchronizerTrustCertificate(sid.synchronizerId)
+                currentFeatureFlags = current.headOption
+                  .map(_.item.featureFlags)
+                  .getOrElse(Set.empty)
+                shouldUpdate = !currentFeatureFlags.contains(
+                  ParticipantTopologyFeatureFlag.EnableMultiSynchronizer
+                )
+                done <-
+                  if (shouldUpdate) {
+                    proposeEnableMultiSynchronizerFeatureFlag(
+                      sid.synchronizerId,
+                      currentFeatureFlags,
+                    )
+                      .map(_ => UpdateResult(updated = 1))
+                  } else Right(UpdateResult())
+              } yield done
 
-          }
+            }
         }
         .map(results => results.foldLeft(UpdateResult())(_.merge(_)))
     } else Right(UpdateResult())

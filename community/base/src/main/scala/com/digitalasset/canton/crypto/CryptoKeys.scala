@@ -250,13 +250,16 @@ object PublicKey {
     // use lastOption to retrieve latest key (newer keys are at the end) */
     availableKeys.last1
 
-  def fromProtoPublicKeyV30(publicKeyP: v30.PublicKey): ParsingResult[PublicKey] =
+  def fromProtoPublicKeyV30(
+      pvv: ProtocolVersionValidation,
+      publicKeyP: v30.PublicKey,
+  ): ParsingResult[PublicKey] =
     publicKeyP.key match {
       case v30.PublicKey.Key.Empty => Left(ProtoDeserializationError.FieldNotSet("key"))
       case v30.PublicKey.Key.EncryptionPublicKey(encPubKeyP) =>
         EncryptionPublicKey.fromProtoV30(encPubKeyP)
       case v30.PublicKey.Key.SigningPublicKey(signPubKeyP) =>
-        SigningPublicKey.fromProtoV30(signPubKeyP)
+        SigningPublicKey.fromProtoV30(pvv, signPubKeyP)
     }
 
 }
@@ -302,24 +305,30 @@ object PublicKeyWithName extends HasVersionedMessageCompanionE[PublicKeyWithName
 
   override def name: String = "PublicKeyWithName"
 
+  // TODO(#34479): HasVersionedWrapper deserializers do not get a pvv.
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
       ProtocolVersion.v36,
-      supportedProtoVersion(v30.PublicKeyWithName)(fromProto30),
+      supportedProtoVersion(v30.PublicKeyWithName)(
+        fromProto30(ProtocolVersionValidation.NoValidation, _)
+      ),
       _.toProtoV30,
     )
   )
 
-  def fromProto30(key: v30.PublicKeyWithName): ParsingResult[PublicKeyWithName] =
+  def fromProto30(
+      pvv: ProtocolVersionValidation,
+      key: v30.PublicKeyWithName,
+  ): ParsingResult[PublicKeyWithName] =
     for {
       publicKey <- ProtoConverter.parseRequired(
-        PublicKey.fromProtoPublicKeyV30,
+        PublicKey.fromProtoPublicKeyV30(pvv, _),
         "public_key",
         key.publicKey,
       )
-      // TODO(#34479): validate the crypto key name once the negotiated pvv is threaded here.
       name <- ProtoValidation
-        .validate(key.name, "name", ProtocolVersionValidation.NoValidation)
+        .validate(key.name, "name", pvv)
         .flatMap(KeyName.fromProtoPrimitive)
     } yield {
       (publicKey: @unchecked) match {

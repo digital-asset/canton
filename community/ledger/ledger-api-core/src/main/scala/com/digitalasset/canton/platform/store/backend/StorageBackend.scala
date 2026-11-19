@@ -9,7 +9,10 @@ import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.ParticipantId
-import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
+  AuthorizationEvent,
+  AuthorizationLevel,
+}
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
 import com.digitalasset.canton.platform.*
@@ -41,6 +44,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.FullIdentifier
 import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
@@ -270,6 +274,116 @@ trait PartyStorageBackend {
   )(
       connection: Connection
   ): List[IndexerPartyDetails]
+
+  /** Returns the inclusive upper bound of a page of hosting triplets matching the party and
+    * participant filters, including revoked triplets and all synchronizers: synchronizer filtering
+    * is left to [[hostedPartyIds]]. The order is by interned (party, participant, synchronizer)
+    * ids, not lexicographic party names.
+    *
+    * @param partyIds
+    *   the interned ids of the parties matched, or None for all parties
+    * @param participantId
+    *   the interned id of the only participant matched, or None for all participants
+    * @param fromInclusive
+    *   the inclusive lower bound of the page
+    * @param limit
+    *   the maximum number of candidate triplets in the page; a party may be split across pages
+    * @param validAtEventSeqId
+    *   The inclusive event sequential id corresponding to the requested snapshot.
+    */
+  def hostedPartyPageBoundary(
+      partyIds: Option[NonEmpty[Set[Int]]],
+      participantId: Option[Int],
+      fromInclusive: PartyStorageBackend.HostedPartyPageBound,
+      limit: Int,
+      validAtEventSeqId: Long,
+  )(connection: Connection): Option[PartyStorageBackend.HostedPartyPageBound]
+
+  /** Returns the latest non-revoked event ids in an inclusive range of hosting triplets matching
+    * the filters, ordered by interned (party, participant, synchronizer) ids. An empty result does
+    * not imply the end of the snapshot: the range may contain only revoked or nonmatching triplets.
+    * Absent id filters match all.
+    */
+  def hostedPartyIds(
+      partyIds: Option[NonEmpty[Set[Int]]],
+      participantId: Option[Int],
+      synchronizerIds: Option[NonEmpty[Set[Int]]],
+      fromInclusive: PartyStorageBackend.HostedPartyPageBound,
+      toInclusive: PartyStorageBackend.HostedPartyPageBound,
+      validAtEventSeqId: Long,
+  )(connection: Connection): Vector[Long]
+
+  /** Returns the hosting relationships recorded by the given events, in no particular order. The
+    * order is left to the caller to avoid tempting the planner into scanning the whole (party,
+    * participant, synchronizer) index.
+    *
+    * @param lastEventSeqIds
+    *   the sequential ids of the latest events per hosting triplet, as returned by
+    *   [[hostedPartyIds]]
+    */
+  def partyHostings(
+      lastEventSeqIds: Iterable[Long]
+  )(connection: Connection): Vector[PartyStorageBackend.PartyHosting]
+}
+
+object PartyStorageBackend {
+
+  /** A pagination bound in interned (party, participant, synchronizer) order. Interned ids are
+    * assigned sequentially from 1, so 0 is below every id and Int.MaxValue is never reached.
+    */
+  final case class HostedPartyPageBound(
+      partyId: Int,
+      participantId: Int,
+      synchronizerId: Int,
+  ) {
+
+    /** The least bound greater than this one. */
+    def successor: HostedPartyPageBound = copy(synchronizerId = synchronizerId + 1)
+  }
+
+  object HostedPartyPageBound {
+    val Min: HostedPartyPageBound = HostedPartyPageBound(0, 0, 0)
+  }
+
+  /** Hosting state for one (party, participant, synchronizer) relationship at a requested snapshot,
+    * with the interned ids of the relationship.
+    */
+  final case class PartyHosting(
+      partyId: Int,
+      participantId: Int,
+      synchronizerId: Int,
+      offset: Offset,
+      recordTime: Timestamp,
+      authorizationLevel: AuthorizationLevel,
+      hostingState: HostingState,
+  )
+
+  object PartyHosting {
+    def apply(
+        partyId: Int,
+        participantId: Int,
+        synchronizerId: Int,
+        offset: Offset,
+        recordTime: Timestamp,
+        authorizationLevelAndHostingState: (AuthorizationLevel, HostingState),
+    ): PartyHosting =
+      PartyHosting(
+        partyId = partyId,
+        participantId = participantId,
+        synchronizerId = synchronizerId,
+        offset = offset,
+        recordTime = recordTime,
+        authorizationLevel = authorizationLevelAndHostingState._1,
+        hostingState = authorizationLevelAndHostingState._2,
+      )
+  }
+
+  sealed trait HostingState extends Product with Serializable
+
+  object HostingState {
+    case object Onboarding extends HostingState
+    case object Active extends HostingState
+  }
 }
 
 trait CompletionStorageBackend {
@@ -658,11 +772,22 @@ object EventStorageBackend {
     def eventSeqId: Long
   }
 
+  sealed trait RawParticipantEvent extends RawEvent with RawUpdateEvent {
+    def participantEventProperties: ParticipantEventProperties
+    def category: PersistentParticipantEventUpdateCategory = participantEventProperties.category
+
+    final override def commonUpdateProperties: CommonUpdateProperties =
+      participantEventProperties.commonUpdateProperties
+    final override def commonEventProperties: CommonEventProperties =
+      participantEventProperties.commonEventProperties
+  }
+
   sealed trait RawThinAcsDeltaEvent extends RawThinEvent
   sealed trait RawThinLedgerEffectsEvent extends RawThinEvent
 
   sealed trait RawThinTransactionEvent extends RawThinEvent
   sealed trait RawThinReassignmentEvent extends RawThinEvent
+  sealed trait RawThinParticipantEvent extends RawThinEvent
 
   final case class CommonEventProperties(
       eventSequentialId: Long,
@@ -692,6 +817,13 @@ object EventStorageBackend {
       reassignmentId: String,
       submitter: Option[String],
       reassignmentCounter: Long,
+  )
+
+  final case class ParticipantEventProperties(
+      commonEventProperties: CommonEventProperties,
+      commonUpdateProperties: CommonUpdateProperties,
+      reassignmentCounter: Long,
+      category: PersistentParticipantEventUpdateCategory,
   )
 
   final case class ThinCreatedEventProperties(
@@ -855,6 +987,45 @@ object EventStorageBackend {
     override def witnessParties: Set[String] = filteredStakeholderParties
 
     override def sourceSynchronizerId: String = synchronizerId
+  }
+
+  final case class RawThinAddEvent(
+      participantEventProperties: ParticipantEventProperties,
+      thinCreatedEventProperties: ThinCreatedEventProperties,
+  ) extends RawThinAcsDeltaEvent
+      with RawThinLedgerEffectsEvent
+      with RawThinParticipantEvent {
+    override def offset: Long = participantEventProperties.commonEventProperties.offset
+    override def eventSeqId: Long =
+      participantEventProperties.commonEventProperties.eventSequentialId
+  }
+
+  final case class RawFatAddEvent(
+      participantEventProperties: ParticipantEventProperties,
+      fatCreatedEventProperties: FatCreatedEventProperties,
+  ) extends RawAcsDeltaEvent
+      with RawLedgerEffectsEvent
+      with RawParticipantEvent
+      with FatCreatedEvent
+
+  /** @param exerciseActors
+    *   the signatories of the removed contract, falling back to all stakeholders if they are not
+    *   known. Used as acting parties if the Remove is served as an archival exercise.
+    */
+  final case class RawRemoveEvent(
+      participantEventProperties: ParticipantEventProperties,
+      contractId: ContractId,
+      templateId: FullIdentifier,
+      filteredStakeholderParties: Set[String],
+      exerciseActors: Set[String],
+      deactivatedEventSeqId: Option[Long],
+  ) extends RawAcsDeltaEvent
+      with RawLedgerEffectsEvent
+      with RawParticipantEvent
+      with RawThinAcsDeltaEvent
+      with RawThinLedgerEffectsEvent
+      with RawThinParticipantEvent {
+    override def witnessParties: Set[String] = filteredStakeholderParties
   }
 
   final case class SynchronizerOffset(

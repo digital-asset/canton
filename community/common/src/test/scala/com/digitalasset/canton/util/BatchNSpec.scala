@@ -12,6 +12,7 @@ import org.scalatest.Inspectors
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import scala.concurrent.Future
 import scala.concurrent.duration.*
 
 class BatchNSpec extends AsyncFlatSpec with Matchers with PekkoBeforeAndAfterAll with Inspectors {
@@ -229,21 +230,7 @@ class BatchNSpec extends AsyncFlatSpec with Matchers with PekkoBeforeAndAfterAll
     val inputSize = 20
     val minBatchSize = 5
     val input = (1 to inputSize).map(i => (if (i % 2 == 0) None else Some(i), Vector(i)))
-    val batchesF =
-      Source(input).async
-        .via(
-          BatchN.apply(
-            MaxBatchSize,
-            MaxBatchCount,
-            minBatchSize = minBatchSize,
-            costFn = intCostFn,
-          )
-        )
-        .initialDelay(10.millis)
-        .async
-        .delay(10.millis, DelayOverflowStrategy.backpressure)
-        .addAttributes(Attributes(InputBuffer(1, 1)))
-        .runWith(Sink.seq[Iterable[(Option[Int], Vector[Int])]])
+    val batchesF = batchesOfWholeInput(input)(minBatchSize = minBatchSize, costFn = intCostFn)
 
     batchesF.map { batches =>
       batches.flatten should contain theSameElementsInOrderAs input
@@ -261,21 +248,7 @@ class BatchNSpec extends AsyncFlatSpec with Matchers with PekkoBeforeAndAfterAll
     )
     val totalCost = input.count(_._1.isDefined)
     val targetBatchSize = totalCost / MaxBatchCount + (if (totalCost % MaxBatchCount > 0) 1 else 0)
-    val batchesF =
-      Source(input).async
-        .via(
-          BatchN.apply(
-            MaxBatchSize,
-            MaxBatchCount,
-            minBatchSize = 1,
-            costFn = intCostFn,
-          )
-        )
-        .initialDelay(10.millis)
-        .async
-        .delay(10.millis, DelayOverflowStrategy.backpressure)
-        .addAttributes(Attributes(InputBuffer(1, 1)))
-        .runWith(Sink.seq[Iterable[(Option[Int], Vector[Int])]])
+    val batchesF = batchesOfWholeInput(input)(minBatchSize = 1, costFn = intCostFn)
 
     batchesF.map { batches =>
       batches.flatten should contain theSameElementsInOrderAs input
@@ -293,21 +266,10 @@ class BatchNSpec extends AsyncFlatSpec with Matchers with PekkoBeforeAndAfterAll
   it should "handle weights bigger than MaxBatchSize in the front" in {
     val inputSize = 18
     val input = (1 to inputSize).map(i => (Some(i), Vector(i)))
-    val batchesF =
-      Source(input).async
-        .via(
-          BatchN.apply(
-            MaxBatchSize,
-            MaxBatchCount,
-            minBatchSize = 1,
-            costFn = in => if (in._1.contains(1)) 15L else 1L,
-          )
-        )
-        .initialDelay(10.millis)
-        .async
-        .delay(10.millis, DelayOverflowStrategy.backpressure)
-        .addAttributes(Attributes(InputBuffer(1, 1)))
-        .runWith(Sink.seq[Iterable[(Option[Int], Vector[Int])]])
+    val batchesF = batchesOfWholeInput(input)(
+      minBatchSize = 1,
+      costFn = in => if (in._1.contains(1)) 15L else 1L,
+    )
 
     batchesF.map { batches =>
       batches.flatten should contain theSameElementsInOrderAs input
@@ -321,25 +283,35 @@ class BatchNSpec extends AsyncFlatSpec with Matchers with PekkoBeforeAndAfterAll
   it should "handle weights bigger than MaxBatchSize at the end" in {
     val inputSize = 18
     val input = (1 to inputSize).map(i => (Some(i), Vector(i)))
-    val batchesF =
-      Source(input).async
-        .via(
-          BatchN.apply(
-            MaxBatchSize,
-            MaxBatchCount,
-            minBatchSize = 1,
-            costFn = in => if (in._1.contains(18)) 15L else 1L,
-          )
-        )
-        .initialDelay(10.millis)
-        .async
-        .delay(10.millis, DelayOverflowStrategy.backpressure)
-        .addAttributes(Attributes(InputBuffer(1, 1)))
-        .runWith(Sink.seq[Iterable[(Option[Int], Vector[Int])]])
+    val batchesF = batchesOfWholeInput(input)(
+      minBatchSize = 1,
+      costFn = in => if (in._1.contains(18)) 15L else 1L,
+    )
 
     batchesF.map { batches =>
       // all input is successfully processed
       batches.flatten should contain theSameElementsInOrderAs input
     }
+  }
+
+  /** Runs the input through BatchN with the first downstream pull held back by an initial delay.
+    * There is no async boundary before BatchN and the total cost of the input fits into its batch
+    * capacity, so the whole input is consumed in the same interpreter run, before the delay lets
+    * the downstream pull the first batch.
+    */
+  private def batchesOfWholeInput[In](input: Seq[In])(
+      minBatchSize: Int,
+      costFn: In => Long,
+  ): Future[Seq[Iterable[In]]] = {
+    val inputCost = input.map(costFn).sum
+    val capacity = MaxBatchSize.toLong * MaxBatchCount
+    require(
+      inputCost <= capacity,
+      s"the input cost $inputCost exceeds the batch capacity $capacity",
+    )
+    Source(input)
+      .via(BatchN(MaxBatchSize, MaxBatchCount, minBatchSize, costFn))
+      .initialDelay(10.millis)
+      .runWith(Sink.seq)
   }
 }

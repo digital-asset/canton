@@ -1,0 +1,22 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Asset where
+
+template Asset
+  with
+    issuer : Party
+    owner : Party
+    amount : Int
+  where
+    signatory issuer
+    observer owner
+
+    choice Split : (ContractId Asset, ContractId Asset)
+      with
+        part : Int
+      controller issuer
+      do
+        a <- create this with amount = part
+        b <- create this with amount = amount - part
+        pure (a, b)

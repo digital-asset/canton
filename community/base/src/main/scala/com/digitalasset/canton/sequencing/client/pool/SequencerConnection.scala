@@ -4,13 +4,13 @@
 package com.digitalasset.canton.sequencing.client.pool
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.sequencing.MaybeCompressedSequencedEventHandler
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.SendAsyncClientResponseError
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
 import com.digitalasset.canton.sequencing.client.{
   SequencerSubscription,
   SequencerSubscriptionPekko,
@@ -70,7 +70,7 @@ trait SequencerConnection extends FlagCloseable with NamedLogging {
     * @param reason
     *   a human-readable reason for the penalty increase, for logging and debugging purposes
     */
-  def increasePenalty(amount: PositiveInt, reason: String)(implicit
+  def increasePenalty(amount: Penalty, reason: String)(implicit
       traceContext: TraceContext
   ): Unit
 

@@ -1,0 +1,15 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.participant.protocol.v30;
+
+import "scalapb/scalapb.proto";
+
+// Records that this participant has imported the ACS of a party it is Freezing for, so that it moves
+// its entry for the party from Freezing to Onboarding once connected to the synchronizer.
+// The party and the synchronizer are the key of the pending operation.
+message FreezingToOnboardingOperation {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StorageProtoVersion";
+}

@@ -98,7 +98,13 @@ class TransactionRoutingProcessor(
         )
 
       _ <- contractsReassigner
-        .reassign(synchronizerRankTarget, submitterInfo, synchronizerState, accounting)
+        .reassign(
+          synchronizerRankTarget,
+          submitterInfo,
+          synchronizerState,
+          accounting,
+          wfTransaction.validatedContractPackageIds,
+        )
 
       topologySnapshot <- EitherT
         .fromEither[FutureUnlessShutdown] {

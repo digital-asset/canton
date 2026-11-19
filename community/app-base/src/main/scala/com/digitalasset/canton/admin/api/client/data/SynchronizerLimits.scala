@@ -11,6 +11,7 @@ import com.digitalasset.canton.logging.pretty.{
 }
 import com.digitalasset.canton.protocol.{
   AcsCommitmentLimits as AcsCommitmentLimitsInternal,
+  BftOrdererLimits as BftOrdererLimitsInternal,
   SynchronizerLimits as SynchronizerLimitsInternal,
   TopologyLimits as TopologyLimitsInternal,
   TransactionProtocolLimits as TransactionProtocolLimitsInternal,
@@ -21,10 +22,12 @@ final case class SynchronizerLimits(
     transactionProtocolLimits: TransactionProtocolLimits,
     topologyLimits: TopologyLimits,
     acsCommitmentLimits: AcsCommitmentLimits,
+    bftOrdererLimits: BftOrdererLimits,
 ) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[SynchronizerLimits] = SynchronizerLimits
 
-  def toInternal: SynchronizerLimitsInternal = this.transformInto[SynchronizerLimitsInternal]
+  def toInternal: SynchronizerLimitsInternal =
+    this.into[SynchronizerLimitsInternal].enableDefaultValues.transform
 }
 
 object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
@@ -32,6 +35,7 @@ object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
     param("transaction protocol limits", _.transactionProtocolLimits),
     param("topology limits", _.topologyLimits),
     param("acs commitment limits", _.acsCommitmentLimits),
+    param("bft orderer limits", _.bftOrdererLimits),
   )
 
   lazy val default: SynchronizerLimits =
@@ -137,4 +141,26 @@ object TopologyLimits extends PrettyPrintingCompanion[TopologyLimits] {
 
   lazy val default: TopologyLimits =
     TopologyLimitsInternal.default.transformInto[TopologyLimits]
+}
+
+final case class BftOrdererLimits(
+    maxSegmentLength: PositiveInt,
+    maxOrderingRequests: PositiveInt,
+    maxProofs: PositiveInt,
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[BftOrdererLimits] = BftOrdererLimits
+
+  def toInternal: BftOrdererLimitsInternal =
+    this.into[BftOrdererLimitsInternal].enableDefaultValues.transform
+}
+
+object BftOrdererLimits extends PrettyPrintingCompanion[BftOrdererLimits] {
+  override protected val pretty: Pretty[BftOrdererLimits] = prettyOfClass(
+    param("max segment length", _.maxSegmentLength),
+    param("max ordering requests", _.maxOrderingRequests),
+    param("max proofs", _.maxProofs),
+  )
+
+  lazy val default: BftOrdererLimits =
+    BftOrdererLimitsInternal.default.transformInto[BftOrdererLimits]
 }

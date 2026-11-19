@@ -11,6 +11,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Postgres}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -52,6 +53,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.{
   Commit,
+  ConsensusSegmentDeserializationContext,
   PbftNetworkMessage,
   PbftNormalCaseMessage,
   PbftViewChangeMessage,
@@ -62,6 +64,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.ConsensusMessage as ProtoConsensusMessage
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.BatchAggregator
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{ProtoDeserializationError, RichGeneratedMessage}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
@@ -98,21 +101,34 @@ class DbEpochStore(
     )
   }
 
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   private implicit val readPbftMessage: GetResult[SignedMessage[PbftNetworkMessage]] =
     GetResult(
       parseSignedMessage(from =>
         // actual sender is not needed when reading from the store
-        IssConsensusModule.parseConsensusNetworkMessage(from, actualSender = None, _)
+        // Trusted path from DB: data was already validated when it was written.
+        // Without validation, the limits are not read.
+        IssConsensusModule.parseConsensusNetworkMessage(
+          ProtocolVersionValidation.NoValidation,
+          BftOrdererLimits.default,
+          from,
+          actualSender = None,
+          _,
+        )
       )
     )
 
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   private implicit val tryReadPrePrepareMessageAndEpochInfo: GetResult[(PrePrepare, EpochInfo)] =
     GetResult { r =>
-      // actual sender is not needed when reading from the store
+      // Trusted path from DB: data was already validated when it was written.
+      // Without validation, the limits are not read.
       val prePrepare =
         parseSignedMessage(originator =>
           PrePrepare.fromProtoConsensusMessage(
-            claimedOriginatorAndActualSender = (originator, None),
+            ProtocolVersionValidation.NoValidation,
+            // actual sender is not needed when reading from the store
+            ConsensusSegmentDeserializationContext(originator, None, BftOrdererLimits.default),
             _,
           )
         )(r)
@@ -164,6 +180,8 @@ class DbEpochStore(
       Some(orderingStage),
     )
 
+  // Trusted path from DB: data was already validated when it was written.
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   private def parseSignedMessage[A <: PbftNetworkMessage](
       parse: BftNodeId => ProtoConsensusMessage => ByteString => ParsingResult[A]
   )(
@@ -175,6 +193,7 @@ class DbEpochStore(
       signedMessageProto <- Try(v30.SignedMessage.parseFrom(messageBytes)).toEither
         .leftMap(x => ProtoDeserializationError.OtherError(x.toString))
       message <- SignedMessage.fromProtoWithNodeId(
+        ProtocolVersionValidation.NoValidation,
         v30.ConsensusMessage,
         SupportedVersions.ProtoData30,
       )(parse)(

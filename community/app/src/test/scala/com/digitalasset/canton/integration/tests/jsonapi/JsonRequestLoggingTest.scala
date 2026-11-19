@@ -3,15 +3,13 @@
 
 package com.digitalasset.canton.integration.tests.jsonapi
 
-import com.daml.jwt.{Jwt, StandardJWTPayload, StandardJWTTokenFormat}
+import com.daml.jwt.Jwt
 import com.daml.ledger.api.v2.admin.user_management_service
 import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.canton.config.CantonConfig
 import com.digitalasset.canton.http.json.v2.JsUserManagementCodecs.*
 import com.digitalasset.canton.integration.EnvironmentSetupPlugin
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
-import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
-import com.digitalasset.canton.integration.tests.ledgerapi.auth.ServiceCallContext
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import com.digitalasset.canton.integration.tests.ledgerapi.services.TestCommands
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
@@ -20,8 +18,6 @@ import io.circe.syntax.EncoderOps
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.http.scaladsl.model.{StatusCodes, Uri}
 
-import java.time.Instant
-import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.regex.Pattern
 
@@ -32,33 +28,12 @@ class JsonRequestLoggingTest
     with HttpServiceUserFixture.UserToken
     with ErrorsAssertions {
 
-  // TODO (i#33090): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
-  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
-  override def beforeAll(): Unit =
-    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
-      super.beforeAll()
-    }
-
-  registerPlugin(ExpectedScopeOverrideConfig(loggerFactory))
+  registerPlugin(RequestLoggingOverrideConfig(loggerFactory))
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
-  override val defaultScope: String = ExpectedScope
-
-  val scopeBaseToken: StandardJWTPayload = StandardJWTPayload(
-    issuer = None,
-    participantId = None,
-    userId = "",
-    exp = Some(Instant.now().plus(2, ChronoUnit.MINUTES)),
-    format = StandardJWTTokenFormat.Scope,
-    audiences = List.empty,
-    scope = Some(defaultScope),
-  )
-
   lazy val adminHeaders: List[org.apache.pekko.http.scaladsl.model.HttpHeader] =
-    HttpServiceTestFixture.authorizationHeader(
-      Jwt(toScopeContext(adminToken).token.getOrElse(""))
-    )
+    HttpServiceTestFixture.authorizationHeader(Jwt(toHeader(adminToken)))
 
   "Json api" should {
     "log access to JSON and gRPC Ledger API" in httpTestFixture { fixture =>
@@ -144,7 +119,7 @@ class JsonRequestLoggingTest
     }
   }
 
-  case class ExpectedScopeOverrideConfig(
+  case class RequestLoggingOverrideConfig(
       protected val loggerFactory: NamedLoggerFactory
   ) extends EnvironmentSetupPlugin {
     override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig =
@@ -154,16 +129,4 @@ class JsonRequestLoggingTest
           _.copy(messagePayloads = true, maxStringLength = 1024, debugInProcessRequests = true)
         )
   }
-
-  private def toScopeContext(
-      payload: StandardJWTPayload
-  ): ServiceCallContext = ServiceCallContext(
-    token = Some(
-      toHeader(
-        payload = payload,
-        enforceFormat = Some(StandardJWTTokenFormat.Scope),
-        secret = jwtSecret.unwrap,
-      )
-    )
-  )
 }

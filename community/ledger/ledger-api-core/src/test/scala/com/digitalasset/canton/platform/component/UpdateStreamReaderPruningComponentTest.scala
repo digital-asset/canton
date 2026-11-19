@@ -74,6 +74,7 @@ class UpdateStreamReaderPruningComponentTest
               requestingPartiesForTx = None,
               requestingPartiesForReassignment = None,
             )(connection),
+        filterParticipantEvents = identity,
         pruningOffsetService = pruningOffsetService,
         queryValidRange = mock[QueryValidRange],
         dbDispatcher = dbDispatcher,

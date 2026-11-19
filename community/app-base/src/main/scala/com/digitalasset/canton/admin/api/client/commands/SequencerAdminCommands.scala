@@ -7,6 +7,7 @@ import cats.syntax.apply.*
 import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
+import com.digitalasset.canton.admin.api.client.AdminApiResponseValidation
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   TimeoutType,
@@ -121,7 +122,9 @@ object SequencerAdminCommands {
     override protected def handleResponse(
         response: proto.PruningStatusResponse
     ): Either[String, SequencerPruningStatus] =
-      SequencerPruningStatus.fromProtoV30(response.getPruningStatus).leftMap(_.toString)
+      SequencerPruningStatus
+        .fromProtoV30(AdminApiResponseValidation.Trusted, response.getPruningStatus)
+        .leftMap(_.toString)
   }
 
   final case class GetTrafficControlState(
@@ -524,11 +527,13 @@ object SequencerAdminCommands {
           Left(reason)
         case proto.SnapshotResponse.Value
               .Success(proto.SnapshotResponse.Success(Some(result))) =>
-          SequencerSnapshot.fromProtoV30(protocolVersion, result).leftMap(_.toString)
+          SequencerSnapshot
+            .fromProtoV30(AdminApiResponseValidation.Trusted, result)
+            .leftMap(_.toString)
         case proto.SnapshotResponse.Value
               .VersionedSuccess(proto.SnapshotResponse.VersionedSuccess(snapshot)) =>
           SequencerSnapshot
-            .fromTrustedByteString(protocolVersion)(snapshot)
+            .fromTrustedByteString(snapshot)
             .leftMap(_.toString)
         case _ => Left("response is empty")
       }

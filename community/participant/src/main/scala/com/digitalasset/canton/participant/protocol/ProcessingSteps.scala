@@ -165,7 +165,7 @@ trait ProcessingSteps[
   /** Phase 1, step 1:
     *
     * Creates the data that controls submission handling, and records the pending submission for
-    * protocols such as reassignment that return an UntrackedSubmission.
+    * protocols that return an UntrackedSubmission.
     *
     * @param submissionParam
     *   The parameter object encapsulating the parameters of the submit method
@@ -238,26 +238,18 @@ trait ProcessingSteps[
     def toSubmissionError(err: SubmissionSendError): SubmissionError
   }
 
-  /** Submission to be tracked in-flight and with deduplication.
+  /** Submission to be tracked in-flight.
     *
-    * The actual batch to be sent is computed only later by [[TrackedSubmission.prepareBatch]] so
-    * that tracking information (e.g., the chosen deduplication period) can be incorporated into the
-    * batch.
+    * The actual batch to be sent is computed only later by `prepareBatch` so that tracking
+    * information (e.g., the chosen deduplication period) can be incorporated into the batch.
     */
-  trait TrackedSubmission extends Submission {
+  sealed trait TrackedSubmission extends Submission {
 
     /** Change id hash to be used for deduplication of requests. */
     def changeIdHash: ChangeIdHash
 
     /** The submission ID of the submission, optional. */
     def submissionId: Option[LedgerSubmissionId]
-
-    /** The deduplication period for the submission as specified in the
-      * [[com.digitalasset.canton.ledger.participant.state.SubmitterInfo]]
-      */
-    def specifiedDeduplicationPeriod: DeduplicationPeriod
-
-    def embedSequencerRequestError(error: SequencerRequestError): SubmissionSendError
 
     /** The tracking data for the submission to be persisted. If the submission is not sequenced by
       * the max sequencing time, this data will be used to generate a timely rejection event via
@@ -271,6 +263,47 @@ trait ProcessingSteps[
       * [[com.digitalasset.canton.participant.protocol.ProtocolProcessor.submit]] method.
       */
     def embedInFlightSubmissionTrackerError(error: InFlightSubmissionTrackerError): SubmissionError
+
+    /** Produce a `SubmissionError` to be returned by the
+      * [[com.digitalasset.canton.participant.protocol.ProtocolProcessor.submit]] method to indicate
+      * that a shutdown has happened during in-flight registration. The resulting `SubmissionError`
+      * must convey neither that the submission is in-flight nor that it is not in-flight.
+      */
+    def shutdownDuringInFlightRegistration: SubmissionError
+
+    /** The `SubmissionResult` to return if something went wrong after having registered the
+      * submission for tracking and before the submission request was sent to a sequencer. This
+      * result must not generate a completion event.
+      *
+      * Must not throw an exception.
+      *
+      * @param trackingData
+      *   The tracking data with the cause of the failure, if known
+      */
+    def onDefinitiveFailure(trackingData: Option[SubmissionTrackingData]): SubmissionResult
+
+    /** The submission tracking data to be used when submission fails definitely after registration
+      * and before being sent to a sequencer.
+      */
+    def definiteFailureTrackingData(failure: UnlessShutdown[Throwable]): SubmissionTrackingData
+
+    /** The `SubmissionResult` to return if something went wrong after having registered the
+      * submission for tracking and the submission result may have been sent to a sequencer. This
+      * result must not generate a completion event. It must not indicate a guaranteed submission
+      * failure over the ledger API.
+      *
+      * Must not throw an exception.
+      */
+    def onPotentialFailure(maxSequencingTime: CantonTimestamp): SubmissionResult
+  }
+
+  /** Submission to be tracked in-flight and with deduplication. */
+  trait TrackedSubmissionWithDeduplication extends TrackedSubmission {
+
+    /** The deduplication period for the submission as specified in the
+      * [[com.digitalasset.canton.ledger.participant.state.SubmitterInfo]]
+      */
+    def specifiedDeduplicationPeriod: DeduplicationPeriod
 
     /** The submission tracking data to be used in case command deduplication failed */
     def commandDeduplicationFailure(failure: DeduplicationFailed): SubmissionTrackingData
@@ -296,35 +329,26 @@ trait ProcessingSteps[
         maxSequencingTime: CantonTimestamp,
         sessionKeyStore: SessionKeyStore,
     ): EitherT[FutureUnlessShutdown, SubmissionTrackingData, PreparedBatch]
+  }
 
-    /** Produce a `SubmissionError` to be returned by the
-      * [[com.digitalasset.canton.participant.protocol.ProtocolProcessor.submit]] method to indicate
-      * that a shutdown has happened during in-flight registration. The resulting `SubmissionError`
-      * must convey neither that the submission is in-flight nor that it is not in-flight.
-      */
-    def shutdownDuringInFlightRegistration: SubmissionError
+  /** Submission to be tracked in-flight and without deduplication. */
+  trait TrackedSubmissionWithoutDeduplication extends TrackedSubmission {
 
-    /** The `SubmissionResult` to return if something went wrong after having registered the
-      * submission for tracking and before the submission request was sent to a sequencer. This
-      * result must not generate a completion event.
+    /** Phase 1, step 1a
+      *
+      * Prepare the batch of envelopes to be sent off.
+      *
+      * Errors will be reported asynchronously by updating the
+      * [[com.digitalasset.canton.participant.protocol.submission.UnsequencedSubmission]] for the
+      * [[changeIdHash]].
       *
       * Must not throw an exception.
       */
-    def onDefinitiveFailure: SubmissionResult
-
-    /** The submission tracking data to be used when submission fails definitely after registration
-      * and before being sent to a sequencer.
-      */
-    def definiteFailureTrackingData(failure: UnlessShutdown[Throwable]): SubmissionTrackingData
-
-    /** The `SubmissionResult` to return if something went wrong after having registered the
-      * submission for tracking and the submission result may have been sent to a sequencer. This
-      * result must not generate a completion event. It must not indicate a guaranteed submission
-      * failure over the ledger API.
-      *
-      * Must not throw an exception.
-      */
-    def onPotentialFailure(maxSequencingTime: CantonTimestamp): SubmissionResult
+    def prepareBatch(
+        approximateTimestampForSigning: CantonTimestamp,
+        maxSequencingTime: CantonTimestamp,
+        sessionKeyStore: SessionKeyStore,
+    ): EitherT[FutureUnlessShutdown, SubmissionTrackingData, PreparedBatch]
   }
 
   /** The actual batch to be sent for a [[TrackedSubmission]] */
@@ -338,19 +362,12 @@ trait ProcessingSteps[
 
     def pendingSubmissionId: PendingSubmissionId
 
-    def embedSequencerRequestError(error: SequencerRequestError): SubmissionSendError
-
     /** The tracking data for the submission to be persisted upon a submission send error, along
       * with the timestamp at which it is supposed to be published.
       */
-    def submissionErrorTrackingData(error: SubmissionSendError)(implicit
+    def submissionErrorTrackingData(error: SubmissionSendFailure)(implicit
         traceContext: TraceContext
     ): SubmissionTrackingData
-
-    /** Log the submission send error */
-    def logSubmissionSendError(error: SubmissionSendError)(implicit
-        errorLoggingContext: ErrorLoggingContext
-    ): Unit
   }
 
   /** Phase 1, step 2:
@@ -588,17 +605,18 @@ trait ProcessingSteps[
     *   The verdict that is contained in the `event`
     * @param pendingRequestData
     *   The `requestType.PendingRequestData` produced in Phase 3
-    * @param pendingSubmissions
-    *   The data stored on submissions in the [[PendingSubmissions]]
+    * @param pendingSubmissionDataO
+    *   The [[PendingSubmissionData]] of this request, removed from the [[PendingSubmissions]].
+    *   [[scala.None$]] if this participant did not submit the request, or after a crash.
     * @return
     *   The [[com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet]], the
     *   contracts from Phase 3 to be persisted to the contract store, and the event to be published
     */
   def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       pendingRequestData: requestType.PendingRequestData,
-      pendingSubmissions: PendingSubmissions,
+      pendingSubmissionDataO: Option[PendingSubmissionData],
       hashOps: HashOps,
   )(implicit
       traceContext: TraceContext

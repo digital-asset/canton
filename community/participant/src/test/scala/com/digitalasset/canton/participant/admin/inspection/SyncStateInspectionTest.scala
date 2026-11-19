@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.admin.inspection
 
 import cats.Eval
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{
   LtHash16,
@@ -18,6 +17,7 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsHelpers
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.ParticipantCommitmentData
 import com.digitalasset.canton.participant.store.db.DbAcsCommitmentStore
@@ -44,11 +44,13 @@ import com.digitalasset.canton.topology.{
   UniqueIdentifier,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   CloseableTest,
   FailOnShutdown,
   HasExecutionContext,
+  ProtocolVersionChecksAsyncWordSpec,
   SynchronizerAlias,
 }
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
@@ -62,7 +64,8 @@ sealed trait SyncStateInspectionTest
     with CloseableTest
     with SortedReconciliationIntervalsHelpers
     with FailOnShutdown
-    with HasExecutionContext {
+    with HasExecutionContext
+    with ProtocolVersionChecksAsyncWordSpec {
   this: DbTest =>
 
   val mockStringInterning = new MockStringInterning
@@ -150,7 +153,7 @@ sealed trait SyncStateInspectionTest
       timeouts,
       loggerFactory,
       Eval.now(mockStringInterning),
-      BatchingConfig(),
+      ParticipantBatchingConfig(),
     )
 
     when(syncStateInspection.syncPersistentStateManager.acsCommitmentStore(synchronizerId))
@@ -336,7 +339,7 @@ sealed trait SyncStateInspectionTest
     crossSynchronizerComputed.value.toSet shouldBe Set.empty
   }
 
-  "fetch a received commitment if it has been stored" in {
+  "fetch a received commitment if it has been stored" onlyRunLessThan ProtocolVersion.v38 in {
     val (syncStateInspection, stateManager) = buildSyncState()
     val store = addSynchronizerToSyncState(
       stateManager,
@@ -401,7 +404,7 @@ sealed trait SyncStateInspectionTest
     } yield crossSynchronizerSent.value.toSet shouldBe Set(sent)
   }
 
-  "fetch matched received and computed commitments with hashes" in {
+  "fetch matched received and computed commitments with hashes" onlyRunLessThan ProtocolVersion.v38 in {
     val (syncStateInspection, stateManager) = buildSyncState()
     val store = addSynchronizerToSyncState(
       stateManager,
@@ -499,7 +502,7 @@ sealed trait SyncStateInspectionTest
     )
   }
 
-  "only fetch requested synchronizers" in {
+  "only fetch requested synchronizers" onlyRunLessThan ProtocolVersion.v38 in {
     val (syncStateInspection, stateManager) = buildSyncState()
     val store = addSynchronizerToSyncState(
       stateManager,
@@ -588,7 +591,7 @@ sealed trait SyncStateInspectionTest
     }
   }
 
-  "fetch requested counter participant from multiple synchronizers" in {
+  "fetch requested counter participant from multiple synchronizers" onlyRunLessThan ProtocolVersion.v38 in {
     val (syncStateInspection, stateManager) = buildSyncState()
     val store = addSynchronizerToSyncState(
       stateManager,
@@ -706,7 +709,7 @@ sealed trait SyncStateInspectionTest
     }
   }
 
-  "only fetch requested states" in {
+  "only fetch requested states" onlyRunLessThan ProtocolVersion.v38 in {
     val (syncStateInspection, stateManager) = buildSyncState()
     val store = addSynchronizerToSyncState(
       stateManager,
@@ -907,7 +910,7 @@ sealed trait SyncStateInspectionTest
     } yield crossSynchronizerReceived.value.toSet shouldBe Set(receivedCmt)
   }
 
-  "not include duplicates with overlapping time periods" in {
+  "not include duplicates with overlapping time periods" onlyRunLessThan ProtocolVersion.v38 in {
     val (syncStateInspection, stateManager) = buildSyncState()
     val store = addSynchronizerToSyncState(
       stateManager,

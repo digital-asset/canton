@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.instances.list.*
 import cats.syntax.foldable.*
-import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
+import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -140,8 +140,9 @@ object ContractStore {
   def create(
       storage: Storage,
       processingTimeouts: ProcessingTimeout,
-      cachingConfigs: CachingConfigs,
-      batchingConfig: BatchingConfig,
+      cacheConfig: CacheConfig,
+      dbQueryBatcherConfig: BatchAggregatorConfig,
+      insertBatchAggregatorConfig: BatchAggregatorConfig,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ContractStore =
     storage match {
@@ -151,9 +152,9 @@ object ContractStore {
       case dbStorage: DbStorage =>
         new DbContractStore(
           dbStorage,
-          cacheConfig = cachingConfigs.contractStore,
-          dbQueryBatcherConfig = batchingConfig.contractStoreAggregator,
-          insertBatchAggregatorConfig = batchingConfig.aggregator,
+          cacheConfig,
+          dbQueryBatcherConfig,
+          insertBatchAggregatorConfig,
           processingTimeouts,
           loggerFactory,
         )

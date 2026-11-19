@@ -5,11 +5,16 @@ package com.digitalasset.canton.validation
 
 import com.digitalasset.canton.ProtoDeserializationError.StringConversionError
 import com.digitalasset.canton.version.ProtocolVersion
-import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.Tables.Table
 import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.{EitherValues, Inspectors}
 
-class StringProtoValidatorTest extends AnyWordSpec with EitherValues with Matchers {
+final class StringProtoValidatorTest
+    extends AnyWordSpec
+    with EitherValues
+    with Matchers
+    with Inspectors {
 
   private val field = Some("f")
   private val bad = "a\u0000b" // NUL — rejected by the content check
@@ -26,15 +31,13 @@ class StringProtoValidatorTest extends AnyWordSpec with EitherValues with Matche
   }
 
   "ProtoValidator[String] validating protocol version" should {
-    "reject bad content from that version on" in {
-      validator
-        .validate(bad, ProtocolVersion.v36, field)
-        .left
-        .value shouldBe a[StringConversionError]
-    }
-
-    "pass bad content through below it (backwards compatibility)" in {
-      validator.validate(bad, ProtocolVersion.v35, field).value shouldBe bad
+    "reject bad content" in {
+      forAll(Table("protocol version", ProtocolVersion.supported.forgetNE*)) { pv =>
+        validator
+          .validate(bad, pv, field)
+          .left
+          .value shouldBe a[StringConversionError]
+      }
     }
   }
 }

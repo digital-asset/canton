@@ -8,7 +8,6 @@ import cats.syntax.either.*
 import com.daml.ledger.api.v2.state_service.ActiveContract as LapiActiveContract
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
-import com.digitalasset.canton.data.ContractReassignment
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -115,13 +114,6 @@ class PartyReplicationFileImporterTest extends AsyncWordSpec with BaseTest with 
               checkpoint.copy(processedContractCount = NonNegativeLong.tryCreate(runningTotal))
             )
           }
-
-          override def handleValidatedContracts(
-              validatedActivations: NonEmpty[Seq[ContractReassignment]],
-              checkpoint: AcsTransferCheckpoint,
-          )(implicit
-              traceContext: TraceContext
-          ): EitherT[FutureUnlessShutdown, String, AcsTransferCheckpoint] = ???
         }
 
         new PartyReplicationFileImporter(

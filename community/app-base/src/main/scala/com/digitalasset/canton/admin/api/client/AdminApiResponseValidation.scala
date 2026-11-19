@@ -13,6 +13,7 @@ private[admin] object AdminApiResponseValidation {
     * operator's node, which validated the content when it entered the node, so the client reads
     * them as trusted and applies no limits.
     */
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   val Trusted: ProtocolVersionValidation = ProtocolVersionValidation.NoValidation
 
   /** The length bound to pass along with [[Trusted]], which never reads it. MUST NOT be used with

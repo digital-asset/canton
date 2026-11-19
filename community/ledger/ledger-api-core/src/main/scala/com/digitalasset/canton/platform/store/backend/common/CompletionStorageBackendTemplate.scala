@@ -155,7 +155,7 @@ class CompletionStorageBackendTemplate(
       rejectionStatus,
     ).mapN(CompletionFromTransaction.toApiRejectedCompletion)
 
-    private def postPublishDataForTransactionParser: RowDef[PostPublishData] = (
+    private[CompletionStorageBackendTemplate] def postPublishDataParser: RowDef[PostPublishData] = (
       synchronizerId(stringInterning),
       publishSource,
       userId(stringInterning),
@@ -165,13 +165,9 @@ class CompletionStorageBackendTemplate(
       publicationTime.map(CantonTimestamp.apply),
       submissionId.?,
       updateId.?.map(_.isDefined),
+      isTransaction,
       traceContext.map(Conversions.traceContextFrom(noTracingLogger)),
     ).mapN(PostPublishData.apply)
-
-    def postPublishDataParser: RowDef[Option[PostPublishData]] = isTransaction.branch(
-      (true, postPublishDataForTransactionParser.map(Some(_))),
-      (false, RowDef.static(None)),
-    )
 
     private def publishSourceFromColumns(messageUuid: Option[UUID], recordTime: Timestamp) =
       messageUuid
@@ -387,6 +383,6 @@ class CompletionStorageBackendTemplate(
       )}
       ORDER BY completion_offset ASC"""
 
-    RowDefs.postPublishDataParser.queryMultipleRows(query)(connection).flatten
+    RowDefs.postPublishDataParser.queryMultipleRows(query)(connection)
   }
 }

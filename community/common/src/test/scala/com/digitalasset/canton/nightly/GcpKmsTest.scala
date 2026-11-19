@@ -5,6 +5,7 @@ package com.digitalasset.canton.nightly
 
 import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.config.KmsConfig
+import com.digitalasset.canton.crypto.kms.Kms
 import com.digitalasset.canton.crypto.kms.KmsError.KmsKeyDisabledError
 import com.digitalasset.canton.crypto.kms.gcp.GcpKms
 import com.digitalasset.canton.crypto.provider.kms.HasPredefinedGcpKmsKeys
@@ -14,6 +15,8 @@ import org.scalatest.wordspec.FixtureAsyncWordSpec
 @RequiresExternalKms
 class GcpKmsTest extends FixtureAsyncWordSpec with HasPredefinedGcpKmsKeys with ExternalKmsTest {
   override type KmsType = GcpKms
+
+  override protected def supportedSchemes: Kms.SupportedSchemes = GcpKms
 
   override protected def defaultKmsConfig: KmsConfig.Gcp =
     KmsConfig.Gcp.defaultTestConfig

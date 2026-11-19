@@ -6,25 +6,25 @@ import DA.Traversable
 assertEquals : (Show a, Ord a) => Text -> a -> a -> Update ()
 assertEquals msg expected actual = assertMsg ("Mismatched " <> msg <> "expected: " <> show expected <> " actual: " <> show actual)  (expected == actual)
 
-fetchQtyAndArchive : Party -> Text -> Text -> Party -> ContractId Asset -> Update Decimal 
+fetchQtyAndArchive : Party -> Text -> Text -> Party -> ContractId Asset -> Update Decimal
 fetchQtyAndArchive owner account id issuer cid = do
-  other <- fetch cid    
+  other <- fetch cid
   archive cid
   assertEquals "owner" owner other.owner
   assertEquals "account" account other.account
   assertEquals "id" id other.id
   assertEquals "issuer" issuer other.issuer
-  return other.qty 
+  return other.qty
 
 template Asset
-  with  
+  with
     registry : Party
-    issuer : Party    
+    issuer : Party
     id : Text
     qty : Decimal
-    owner : Party    
+    owner : Party
     account : Text
-    viewer : Party    
+    viewer : Party
   where
     signatory registry, owner
     observer viewer
@@ -42,7 +42,9 @@ template Asset
         -- we archive and sum the quantities of the other source and target assets
         myOtherQty <- sum <$> DA.Traversable.mapA (fetchQtyAndArchive owner account id issuer) otherSrc
         theirsQty <- sum <$> DA.Traversable.mapA (fetchQtyAndArchive newOwner newAccount id issuer) target
-        assertMsg "Insufficient quantity to transfer" (transferQty <= qty + myOtherQty)
+        assertMsg ("Insufficient quantity to transfer out=" <> show transferQty
+            <> ", have=" <> show (qty + myOtherQty)
+            <> ", id=" <> id) (transferQty <= qty + myOtherQty)
         let remainingQty = qty + myOtherQty - transferQty
         remainder <- if (remainingQty > 0.0) then do
           ret <- create this with qty = remainingQty
@@ -56,7 +58,7 @@ template Asset
       with
         otherCids : [ContractId Asset]
       controller owner
-      do        
+      do
         quantities <- DA.Traversable.mapA (fetchQtyAndArchive owner account id issuer) otherCids
         let newQty = qty + sum quantities
         create this with qty = newQty
@@ -65,13 +67,13 @@ template Asset
       controller owner
       do
         create BurnRequest with ..
-  
+
 template Registry
   with
     registry : Party
     issuer : Party
     id : Text
-    outstanding : Decimal    
+    outstanding : Decimal
   where
     signatory registry, issuer
 
@@ -98,10 +100,10 @@ template Registry
         qty <- DA.Action.mapA (\reqCid -> do
           req <- fetch reqCid
           assertEquals "id" id req.id
-          assertEquals "issuer" issuer req.issuer          
-          _ <- archive reqCid          
+          assertEquals "issuer" issuer req.issuer
+          _ <- archive reqCid
           return req.qty) requests
-        create this with outstanding = outstanding + sum qty          
+        create this with outstanding = outstanding + sum qty
         return ()
 
 template SubRegister
@@ -111,7 +113,7 @@ template SubRegister
   where
     signatory registry, subRegistry
 
-    nonconsuming choice Reassign : ContractId Asset 
+    nonconsuming choice Reassign : ContractId Asset
       with
         assetCid : ContractId Asset
         newRegister : Party
@@ -124,37 +126,37 @@ template SubRegister
         -- validate registry and target registry
         assertMsg "invalid registry" (asset.registry == registry || asset.registry == subRegistry)
         assertMsg "invalid target registry" (newRegister == registry || newRegister == subRegistry)
-        archive assetCid 
-        create asset with registry = newRegister        
-      
+        archive assetCid
+        create asset with registry = newRegister
+
 template MintRequest
-  with  
-    issuer : Party    
+  with
+    issuer : Party
     id : Text
     qty : Decimal
-    owner : Party    
+    owner : Party
     account : Text
-    viewer : Party    
+    viewer : Party
   where
     signatory owner
     observer issuer
 
     choice ApproveMint : ContractId Asset
-      with 
+      with
         registry : Party
       controller issuer, registry
       do
         create Asset with registry = registry, issuer = issuer, id = id, qty = qty, owner = owner, account = account, viewer = viewer
 
-template BurnRequest        
-  with  
+template BurnRequest
+  with
     registry : Party
-    issuer : Party    
+    issuer : Party
     id : Text
     qty : Decimal
-    owner : Party    
+    owner : Party
     account : Text
-    viewer : Party    
+    viewer : Party
   where
     signatory owner, registry
     observer issuer

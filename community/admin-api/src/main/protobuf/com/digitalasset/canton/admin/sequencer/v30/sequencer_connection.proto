@@ -86,11 +86,13 @@ message SubmissionRequestAmplification {
 }
 
 message SequencerConnectionPoolDelays {
-  // Minimum duration after which a failed sequencer connection is restarted.
+  // Initial delay before a failed sequencer connection is restarted.
   // This value must be non-negative.
   google.protobuf.Duration min_restart_delay = 1;
 
-  // Maximum duration after which a failed sequencer connection is restarted.
+  // Maximum delay before a failed sequencer connection is restarted.
+  // The delay doubles at every restart up to this value, and goes back to `min_restart_delay`
+  // once a connection has stayed validated for at least `min_stable_duration`.
   // This value must be non-negative.
   google.protobuf.Duration max_restart_delay = 2;
 
@@ -102,6 +104,11 @@ message SequencerConnectionPoolDelays {
   // Duration after which a warning is issued if a started connection still fails validation.
   // This value must be non-negative.
   google.protobuf.Duration warn_validation_delay = 4;
+
+  // Minimum duration a sequencer connection must stay validated for its restart delay to go back to
+  // `min_restart_delay` when it fails. A connection that fails sooner keeps backing off.
+  // This value must be non-negative.
+  google.protobuf.Duration min_stable_duration = 5;
 }
 
 // Configuration to determine subscription liveness. Both limits must be exceeded for a subscription to be considered silent.

@@ -6,8 +6,8 @@ package com.digitalasset.canton.synchronizer.mediator.store
 import cats.Monad
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.config.{BatchAggregatorConfig, CachingConfigs}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
@@ -19,7 +19,11 @@ import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
-import com.digitalasset.canton.synchronizer.mediator.{FinalizedResponse, MediatorVerdict}
+import com.digitalasset.canton.synchronizer.mediator.{
+  FinalizedResponse,
+  MediatorCachingConfigs,
+  MediatorVerdict,
+}
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.tracing.TraceContext
@@ -30,7 +34,6 @@ import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
-import java.time.Duration
 import java.util.UUID
 
 trait FinalizedResponseStoreTest {
@@ -75,7 +78,7 @@ trait FinalizedResponseStoreTest {
       participantId,
       salt = s(6638),
       None,
-      DeduplicationPeriod.DeduplicationDuration(Duration.ZERO),
+      DeduplicationPeriod.DeduplicationDuration.Zero,
       CantonTimestamp.MaxValue,
       None,
       hashOps,
@@ -331,7 +334,7 @@ trait DbFinalizedResponseStoreTest
         storage,
         new SymbolicPureCrypto,
         testedProtocolVersion,
-        CachingConfigs.defaultFinalizedMediatorConfirmationRequestsCache,
+        MediatorCachingConfigs.defaultFinalizedMediatorConfirmationRequestsCache,
         BatchAggregatorConfig.defaultsForTesting,
         BatchAggregatorConfig.defaultsForTesting,
         timeouts,

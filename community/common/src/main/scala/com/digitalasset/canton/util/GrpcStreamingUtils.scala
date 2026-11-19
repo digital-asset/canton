@@ -130,7 +130,7 @@ object GrpcStreamingUtils {
       getGzippedBytes,
       parseMessage,
       decompressInput = true,
-    )(contextFromFirstRequest)(action)
+    )(Left(contextFromFirstRequest))(action)
 
   /** Same as [[streamGzippedChunksFromClient]], for uncompressed bytes. */
   def streamChunkedFromClient[Req, Resp, RequestContext, ParsedMessage](
@@ -150,8 +150,32 @@ object GrpcStreamingUtils {
       getBytes,
       parseMessage,
       decompressInput = false,
-    )(contextFromFirstRequest)(action)
+    )(Left(contextFromFirstRequest))(action)
 
+  /** Same as [[streamGzippedChunksFromClient]], for uncompressed bytes, and for extracting the
+    * context not from the first request, but the first parsed message.
+    */
+  def streamChunkedParsedFromClient[Req, Resp, RequestContext, ParsedMessage](
+      responseObserver: StreamObserver[Resp],
+      responseIfNoRequests: => Try[Resp],
+      getBytes: Req => ByteString,
+      parseMessage: InputStream => Option[ParsingResult[ParsedMessage]],
+  )(
+      contextFromFirstMessage: ParsedMessage => Try[RequestContext]
+  )(action: (RequestContext, Source[ParsedMessage, NotUsed]) => FutureUnlessShutdown[Resp])(implicit
+      ec: ExecutionContext,
+      elc: ErrorLoggingContext,
+  ): StreamObserver[Req] = streamChunksFromClientInternal(
+    responseObserver,
+    responseIfNoRequests,
+    getBytes,
+    parseMessage,
+    decompressInput = false,
+  )(Right(contextFromFirstMessage))(action)
+
+  /** Same as [[streamChunksFromClientInternal]], but for extracting the context from the first
+    * parsed message and not the first request.
+    */
   private def streamChunksFromClientInternal[Req, Resp, RequestContext, ParsedMessage](
       responseObserver: StreamObserver[Resp],
       responseIfNoRequests: => Try[Resp],
@@ -159,7 +183,7 @@ object GrpcStreamingUtils {
       parseMessage: InputStream => Option[ParsingResult[ParsedMessage]],
       decompressInput: Boolean,
   )(
-      contextFromFirstRequest: Req => Try[RequestContext]
+      extractContext: Either[Req => Try[RequestContext], ParsedMessage => Try[RequestContext]]
   )(action: (RequestContext, Source[ParsedMessage, NotUsed]) => FutureUnlessShutdown[Resp])(implicit
       ec: ExecutionContext,
       elc: ErrorLoggingContext,
@@ -170,12 +194,6 @@ object GrpcStreamingUtils {
     // with the pekko parsing source
     val output = new PipedOutputStream()
     val input = new PipedInputStream(output, defaultChunkSize)
-
-    // when reporting the error, also close the output stream, since there will be no more data to be processed
-    def reportError(err: Throwable): Unit = {
-      responseObserver.onError(err)
-      output.close()
-    }
 
     // blocking write the request bytes to the output stream
     def writeRequestBytes(request: Req): Unit = Try {
@@ -192,48 +210,97 @@ object GrpcStreamingUtils {
         // ensuring the client receives the actual application error instead of a broken pipe error.
         Try(output.close()).discard
       case err =>
-        reportError(err)
+        // when reporting the error, also close the output stream, since there will be no more data to be processed
+        responseObserver.onError(err)
+        output.close()
     }
 
     new StreamObserver[Req] {
-      override def onNext(value: Req): Unit =
+      override def onNext(value: Req): Unit = {
         if (isFirst.getAndSet(false)) {
-          // only extract the context from the first request
-          contextFromFirstRequest(value) match {
-            case Failure(exception) =>
-              reportError(exception)
+          // hold a lazy reference, because the constructor of GZIPInputStream immediately executes a blocking read
+          // No zip-bomb risk: messages are parsed and ingested one at a time, so only a single
+          // decompressed message is held in memory rather than the whole decompressed stream.
+          lazy val gunzip = if (decompressInput) new GzipCompressorInputStream(input) else input
 
-            case Success(context) =>
-              // hold a lazy reference, because the constructor of GZIPInputStream immediately executes a blocking read
-              // No zip-bomb risk: messages are parsed and ingested one at a time, so only a single
-              // decompressed message is held in memory rather than the whole decompressed stream.
-              lazy val gunzip = if (decompressInput) new GzipCompressorInputStream(input) else input
-              // construct the source by repeatedly reading from the gunzip input stream until there's no more data.
-              // we don't really have a "state", so we use Unit.
-              val parsedMessagesSource = PekkoSource.unfold(())(_ =>
-                blocking(parseMessage(gunzip))
-                  .map {
-                    case Left(err) =>
-                      // throw the parsing error to cancel the source
-                      throw ProtoDeserializationError.ProtoDeserializationFailure
-                        .Wrap(err)
-                        .asGrpcError
-                    case Right(value) =>
-                      () -> value
-                  }
-              )
-              // the main processing pipeline is also only triggered after the first request
-              val resultFUS = action(context, parsedMessagesSource)
-              GrpcStreamingUtils.futureUnlessShutdownToStreamObserver(
-                resultFUS.thereafter { _ =>
-                  // after the main processing pipeline is finished for whatever reason, we can safely close the input
-                  input.close()
-                },
-                responseObserver,
-              )
-              writeRequestBytes(value)
-          }
-        } else writeRequestBytes(value)
+          def readMessage() =
+            blocking(parseMessage(gunzip))
+              .map {
+                case Left(err) =>
+                  // throw the parsing error to cancel the source
+                  throw ProtoDeserializationError.ProtoDeserializationFailure
+                    .Wrap(err)
+                    .asGrpcError
+                case Right(value) =>
+                  value
+              }
+
+          def extractFromFirstRequest(
+              extract: Req => Try[RequestContext]
+          ): FutureUnlessShutdown[(RequestContext, PekkoSource[ParsedMessage, NotUsed])] =
+            // only extract the context from the first request
+            extract(value) match {
+              case Failure(exception) =>
+                FutureUnlessShutdown.failed(exception)
+              case Success(context) =>
+                // construct the source by repeatedly reading from the gunzip input stream until there's no more data.
+                // we don't really have a "state", so we use Unit.
+                val parsedMessagesSource = PekkoSource.unfold(())(_ => readMessage().map(() -> _))
+                FutureUnlessShutdown.pure((context, parsedMessagesSource))
+            }
+
+          def extractFromFirstMessage(
+              extract: ParsedMessage => Try[RequestContext]
+          ): FutureUnlessShutdown[(RequestContext, Source[ParsedMessage, NotUsed])] =
+            for {
+              firstMsgO <- FutureUnlessShutdown
+                .outcomeF(Future {
+                  // parsing the first message must be done in a Future, because the gzipped stream
+                  // blocks immediately upon first read and would deadlock the request handling
+                  readMessage()
+                })
+              (context, firstMsg) <- firstMsgO match {
+                case None =>
+                  FutureUnlessShutdown.failed(
+                    ProtoDeserializationError.ProtoDeserializationFailure
+                      .Wrap(
+                        ProtoDeserializationError.InvariantViolation(
+                          "context",
+                          "Unable to read the context from the first parsed message",
+                        )
+                      )
+                      .toGrpcError
+                  )
+                case Some(msg) =>
+                  // extract the context from the first message
+                  FutureUnlessShutdown.fromTry(extract(msg)).map((_, msg))
+              }
+              parsedMessagesSource = PekkoSource
+                .single(firstMsg)
+                .concat(
+                  // construct the source by repeatedly reading from the gunzip input stream until there's no more data.
+                  // we don't really have a "state", so we use Unit.
+                  PekkoSource.unfold(())(_ => readMessage().map(() -> _))
+                )
+            } yield (context, parsedMessagesSource)
+
+          // the main processing pipeline is also only triggered after the first request
+          val resultFUS =
+            extractContext.fold(extractFromFirstRequest, extractFromFirstMessage).flatMap {
+              case (context, source) => action(context, source)
+            }
+
+          GrpcStreamingUtils.futureUnlessShutdownToStreamObserver(
+            resultFUS.thereafter { _ =>
+              // after the main processing pipeline is finished for whatever reason, we can safely close the input
+              input.close()
+            },
+            responseObserver,
+          )
+        }
+
+        writeRequestBytes(value)
+      }
 
       override def onError(t: Throwable): Unit =
         // The gRPC framework invokes this requestObserver.onError exclusively when the inbound stream dies

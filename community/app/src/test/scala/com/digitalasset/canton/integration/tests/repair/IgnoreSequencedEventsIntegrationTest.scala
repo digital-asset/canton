@@ -26,7 +26,6 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as W
-import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisconnect
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError
 import com.digitalasset.canton.sequencing.protocol.{
@@ -377,13 +376,17 @@ final class IgnoreSequencedEventsIntegrationTest
 
             // Necessary synchronization because some of the errors are reported asynchronously.
             // Feel free to adjust if the number of errors has changed.
-            // Currently there is:
+            // The participant keeps retrying, and at each attempt there is:
             // * `SequencedEventValidatorImpl` logging an ERROR
-            // * `SequencerSubscriptionPoolImpl$SubscriptionManager` logging a WARN
-            // * `SynchronizerConnectionsManager` logging an ERROR
+            // * `SequencerSubscriptionPoolImpl$SubscriptionManager` logging a WARN, and the first time (the sole
+            //   sequencer reaches the trust threshold, and leaves no sequencer to reach it) the
+            //   `SEQUENCER_TRUST_ASSUMPTION_VIOLATED` and `SEQUENCER_CANNOT_REACH_TRUST_THRESHOLD` warnings
             eventually() {
-              loggerFactory.numberOfRecordedEntries should be >= 3
+              loggerFactory.numberOfRecordedEntries should be >= 2
             }
+
+            // The participant keeps retrying, which cannot succeed: disconnect it, so that the event can be ignored
+            participant1.synchronizers.disconnect(daName)
           },
           // The problem happens to be "ForkHappened" due to the order of checks carried out by the sequencer client.
           // Feel free to change, if another property is checked first, e.g., "SignatureInvalid".
@@ -391,14 +394,12 @@ final class IgnoreSequencedEventsIntegrationTest
             val requiredErrorMessages = Seq(
               SequencerSubscriptionError.ForkHappened.id,
               "ForkHappened",
-              SyncServiceSynchronizerDisconnect.id,
             )
             requiredErrorMessages.forall(errMsg =>
               entries.exists(_.message.contains(errMsg))
             ) shouldBe true
           },
         )
-
         eventually() {
           participant1.synchronizers.list_connected() shouldBe empty
         }

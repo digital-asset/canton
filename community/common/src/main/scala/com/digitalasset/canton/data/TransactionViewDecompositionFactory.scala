@@ -10,7 +10,6 @@ import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
-import com.digitalasset.canton.data.TransactionViewDecompositionFactory.RollbackState.firstChild
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.metrics.TransactionViewMetrics
@@ -52,33 +51,21 @@ case object TransactionViewDecompositionFactory {
   }
 
   object RollbackState {
-    private val firstChild: PositiveInt = PositiveInt.one
-    val empty: RollbackState = RollbackState(Vector.empty, firstChild)
+    val empty: RollbackState = RollbackState(0)
   }
 
-  final case class RollbackState(path: Vector[PositiveInt], nextChild: PositiveInt) {
+  final case class RollbackState(level: Int) {
 
-    def enterRollback: RollbackState = RollbackState(path :+ nextChild, firstChild)
+    def enterRollback: RollbackState = RollbackState(level + 1)
 
-    def tryExitRollback: RollbackState = {
-      val lastChild =
-        path.lastOption.getOrElse(
-          throw new IllegalStateException("Attempt to exit rollback on empty rollback context")
-        )
+    def tryExitRollback: RollbackState =
+      // TODO(i26565): Make sure that transaction views limits cover rollback sibling width as well
+      if (level > 0)
+        RollbackState(level - 1)
+      else
+        throw new IllegalStateException("Attempt to exit rollback on empty rollback context")
 
-      RollbackState(
-        path.dropRight(1),
-        lastChild.increment.getOrElse(
-          // It would take Int.Max sibling rollback nodes to reach this which will likely hit another limit before that
-          // TODO(i26565): Make sure that transaction views limits cover rollback sibling width as well
-          throw new IllegalStateException(
-            "Attempt to exit rollback with a last child at Int.MaxValue"
-          )
-        ),
-      )
-    }
-
-    def inRollback: Boolean = path.nonEmpty
+    def inRollback: Boolean = level > 0
   }
 
   /** Keeps track of the state of the transaction view tree.
@@ -134,7 +121,6 @@ case object TransactionViewDecompositionFactory {
   final private case class Builder(
       nodesM: Map[LfNodeId, LfNode],
       actionNodeInfoM: Map[LfNodeId, ActionNodeInfo],
-      factory: RollbackContextFactory,
   ) {
 
     private def node(nodeId: LfNodeId): LfNode = nodesM.getOrElse(
@@ -185,7 +171,7 @@ case object TransactionViewDecompositionFactory {
         info.seed,
         nodeId,
         childState.views.toList,
-        factory.fromRollbackState(state.rollbackState),
+        fromRollbackState(state.rollbackState),
       )
 
       state.withNewView(newView, childState.rollbackState)
@@ -214,7 +200,7 @@ case object TransactionViewDecompositionFactory {
             val sameView = SameView(
               LfTransactionUtil.lightWeight(actionNode),
               nodeId,
-              factory.fromRollbackState(state.rollbackState),
+              fromRollbackState(state.rollbackState),
             )
             val childState = info.children.foldLeft(state.childState) { (bs, nId) =>
               buildChildView(nId, currentParticipants, bs)
@@ -270,9 +256,8 @@ case object TransactionViewDecompositionFactory {
   def fromTransaction(
       topologySnapshot: TopologySnapshot,
       transaction: WellFormedTransaction[WithoutSuffixes],
-      viewRbContext: RollbackContext,
+      viewRbContext: RollbackScope,
       submittingAdminPartyO: Option[LfPartyId],
-      factory: RollbackContextFactory,
       limits: Option[TransactionProtocolLimits],
       metrics: TransactionViewMetrics,
   )(implicit
@@ -285,7 +270,6 @@ case object TransactionViewDecompositionFactory {
         transaction,
         viewRbContext,
         submittingAdminPartyO,
-        factory,
       )
         .map(checkTransactionViewLimits(_, limits, metrics))
     )
@@ -294,9 +278,8 @@ case object TransactionViewDecompositionFactory {
   private def unsafeFromTransaction(
       topologySnapshot: TopologySnapshot,
       transaction: WellFormedTransaction[WithoutSuffixes],
-      viewRbContext: RollbackContext,
+      viewRbContext: RollbackScope,
       submittingAdminPartyO: Option[LfPartyId],
-      factory: RollbackContextFactory,
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
@@ -304,7 +287,7 @@ case object TransactionViewDecompositionFactory {
 
     val tx: LfVersionedTransaction = transaction.unwrap
     val rootNodes = tx.roots.toSeq
-    val rollbackState = factory.toRollbackState(viewRbContext)
+    val rollbackState = toRollbackState(viewRbContext)
 
     val policyMapF: Iterable[FutureUnlessShutdown[(NodeId, ActionNodeInfo)]] =
       tx.nodes.collect { case (nodeId, node: LfActionNode) =>
@@ -328,7 +311,7 @@ case object TransactionViewDecompositionFactory {
       }
 
     FutureUnlessShutdown.sequence(policyMapF).map(_.toMap).map { policyMap =>
-      Builder(tx.nodes, policyMap, factory)
+      Builder(tx.nodes, policyMap)
         .builds(
           rootNodes,
           BuildState[NewView](rollbackState = rollbackState),
@@ -412,5 +395,11 @@ case object TransactionViewDecompositionFactory {
       )
       .map(informeesMap => (informeesMap, threshold))
   }
+
+  private def toRollbackState(context: RollbackScope): RollbackState =
+    if (context.inRollback) RollbackState.empty.enterRollback else RollbackState.empty
+
+  private def fromRollbackState(state: RollbackState): RollbackScope =
+    RollbackScope(state.inRollback)
 
 }

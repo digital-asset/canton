@@ -3,8 +3,8 @@
 
 package com.digitalasset.daml.lf.validation
 
-import com.digitalasset.canton.config.CachingConfigs
-import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.config.PackageUpgradeCacheConfig
 import com.digitalasset.canton.platform.apiserver.services.admin.PackageUpgradeValidator
 import com.digitalasset.canton.topology.TopologyManagerError
 import com.digitalasset.daml.lf.archive.{Dar, DarDecoder, Error as ArchiveError}
@@ -46,14 +46,17 @@ object DarDecodable {
   }
 }
 
-final case class UpgradeCheckMain(loggerFactory: NamedLoggerFactory) {
-  def logger = loggerFactory.getLogger(classOf[UpgradeCheckMain])
+final case class UpgradeCheckMain(
+    loggerFactory: NamedLoggerFactory
+) extends NamedLogging {
+
+  import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
 
   implicit val ec: ExecutionContext = ExecutionContext.global
   implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.empty
 
   val validator =
-    new PackageUpgradeValidator(CachingConfigs.defaultPackageUpgradeCache, loggerFactory)
+    new PackageUpgradeValidator(PackageUpgradeCacheConfig.defaultPackageUpgradeCache, loggerFactory)
 
   def check[A](paths: Array[A])(implicit darDecodable: DarDecodable[A]): Int = {
     // logger.debug(s"Called UpgradeCheckMain with paths: ${paths.toSeq.mkString("\n")}")

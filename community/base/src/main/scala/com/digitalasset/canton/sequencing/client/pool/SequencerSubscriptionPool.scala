@@ -150,5 +150,6 @@ trait SequencerSubscriptionPoolFactory {
       member: Member,
       initialSubscriptionEventO: Option[ProcessingSerializedEvent],
       subscriptionStartProvider: SubscriptionStartProvider,
+      useNewAggregator: Boolean,
   )(implicit ec: ExecutionContext): SequencerSubscriptionPool
 }

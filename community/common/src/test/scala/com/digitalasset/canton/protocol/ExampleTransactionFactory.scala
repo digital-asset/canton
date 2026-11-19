@@ -15,7 +15,6 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
-import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -532,7 +531,6 @@ class ExampleTransactionFactory(
 
   private val protocolVersion = versionOverride.getOrElse(BaseTest.testedProtocolVersion)
   private val pvv = ProtocolVersionValidation(protocolVersion)
-  private val rollbackContextFactory = RollbackContextFactory(protocolVersion)
   private val random = new Random(0)
 
   private def createNewView(
@@ -543,7 +541,7 @@ class ExampleTransactionFactory(
       isRoot: Boolean,
   ): FutureUnlessShutdown[NewView] = {
 
-    val rootRbContext = rollbackContextFactory.empty
+    val rootRbContext = RollbackScope.empty
 
     val submittingAdminPartyO =
       Option.when(isRoot)(submitterMetadata.submittingParticipant.adminParty.toLf)
@@ -795,7 +793,6 @@ class ExampleTransactionFactory(
       CreatedContract.tryCreate(
         contract,
         consumed.contains(coid),
-        rolledBack = false,
       )
     }
 
@@ -825,7 +822,7 @@ class ExampleTransactionFactory(
       createdInSubviewArchivedInCore = createdInSubviewArchivedInCore,
       keyResolution = keyResolution,
       actionDescription = actionDescription,
-      rollbackContext = rollbackContextFactory.empty,
+      rollbackContext = RollbackScope.empty,
       salt = participantDataSalt(viewIndex),
       externalCallResults = Seq.empty,
       protocolVersion = protocolVersion,
@@ -938,7 +935,7 @@ class ExampleTransactionFactory(
   }
 
   def mkMetadata(seeds: Map[LfNodeId, LfHash] = Map.empty): TransactionMetadata =
-    TransactionMetadata(ledgerTime, preparationTime, seeds)
+    TransactionMetadata(ledgerTime, preparationTime, seeds, Map.empty)
 
   def versionedTransactionWithSeeds(
       rootIndices: Seq[Int],
@@ -957,7 +954,7 @@ class ExampleTransactionFactory(
       submittingParticipant,
       Salt.tryDeriveSalt(transactionSeed, 0, cryptoOps),
       DefaultDamlValues.submissionId().some,
-      DeduplicationDuration(JDuration.ofSeconds(100)),
+      DeduplicationPeriod.DeduplicationDuration.create(JDuration.ofSeconds(100)).value,
       ledgerTime.plusSeconds(100),
       None,
       cryptoOps,
@@ -1942,13 +1939,13 @@ class ExampleTransactionFactory(
        * informee participants (i.e. party <<extra>> is hosted in the <<extraParticipant>>)
        */
       val v1TailNodes = Seq(
-        SameView(lfCreate10, LfNodeId(2), rollbackContextFactory.empty),
-        SameView(lfFetch11, LfNodeId(3), rollbackContextFactory.empty),
+        SameView(lfCreate10, LfNodeId(2), RollbackScope.empty),
+        SameView(lfFetch11, LfNodeId(3), RollbackScope.empty),
         v10,
         SameView(
           LfTransactionUtil.lightWeight(lfExercise13),
           LfNodeId(5),
-          rollbackContextFactory.empty,
+          RollbackScope.empty,
         ),
       )
 
@@ -2400,13 +2397,13 @@ class ExampleTransactionFactory(
       )
 
       val v1TailNodes = Seq(
-        SameView(lfCreate10, LfNodeId(2), rollbackContextFactory.empty),
-        SameView(lfFetch11, LfNodeId(3), rollbackContextFactory.empty),
-        SameView(lfCreate12, LfNodeId(4), rollbackContextFactory.empty),
+        SameView(lfCreate10, LfNodeId(2), RollbackScope.empty),
+        SameView(lfFetch11, LfNodeId(3), RollbackScope.empty),
+        SameView(lfCreate12, LfNodeId(4), RollbackScope.empty),
         SameView(
           LfTransactionUtil.lightWeight(lfExercise13),
           LfNodeId(5),
-          rollbackContextFactory.empty,
+          RollbackScope.empty,
         ),
         v10,
         v11,
@@ -2945,9 +2942,9 @@ class ExampleTransactionFactory(
         LfNodeId(1),
         Seq(
           v10,
-          SameView(lfCreate11, LfNodeId(4), rollbackContextFactory.empty),
+          SameView(lfCreate11, LfNodeId(4), RollbackScope.empty),
           v11,
-          SameView(lfCreate13, LfNodeId(7), rollbackContextFactory.empty),
+          SameView(lfCreate13, LfNodeId(7), RollbackScope.empty),
         ),
         isRoot = true,
       )
@@ -3492,7 +3489,7 @@ class ExampleTransactionFactory(
         LfTransactionUtil.lightWeight(lfExercise11),
         Some(exercise11seed),
         LfNodeId(3),
-        Seq(SameView(lfCreate110, LfNodeId(4), rollbackContextFactory.empty)),
+        Seq(SameView(lfCreate110, LfNodeId(4), RollbackScope.empty)),
         isRoot = false,
       )
 
@@ -3501,17 +3498,17 @@ class ExampleTransactionFactory(
         Some(exercise1seed),
         LfNodeId(1),
         Seq(
-          SameView(lfCreate10, LfNodeId(2), rollbackContextFactory.empty),
+          SameView(lfCreate10, LfNodeId(2), RollbackScope.empty),
           v10,
           SameView(
             LfTransactionUtil.lightWeight(lfExercise12),
             LfNodeId(5),
-            rollbackContextFactory.empty,
+            RollbackScope.empty,
           ),
           SameView(
             LfTransactionUtil.lightWeight(lfExercise13),
             LfNodeId(6),
-            rollbackContextFactory.empty,
+            RollbackScope.empty,
           ),
         ),
         isRoot = true,

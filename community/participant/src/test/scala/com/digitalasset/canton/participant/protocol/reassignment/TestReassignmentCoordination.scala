@@ -58,6 +58,7 @@ private[reassignment] object TestReassignmentCoordination {
       awaitTimestampOverride: Option[Option[Future[Unit]]] = None,
       loggerFactory: NamedLoggerFactory,
       packages: Seq[LfPackageId] = Seq.empty,
+      onStaticSynchronizerParameterLookup: () => Unit = () => (),
   )(implicit ec: ExecutionContext): ReassignmentCoordination = {
 
     val reassignmentStores =
@@ -113,6 +114,13 @@ private[reassignment] object TestReassignmentCoordination {
       ),
       loggerFactory,
     ) {
+
+      override private[reassignment] def getStaticSynchronizerParameter[T[_]: SingletonTraverse](
+          psid: T[PhysicalSynchronizerId]
+      ): Either[UnknownPhysicalSynchronizer, T[StaticSynchronizerParameters]] = {
+        onStaticSynchronizerParameterLookup()
+        super.getStaticSynchronizerParameter(psid)
+      }
 
       override def awaitTimestamp[T[X] <: ReassignmentTag[X]: SameReassignmentType](
           synchronizerId: T[PhysicalSynchronizerId],

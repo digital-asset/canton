@@ -34,6 +34,7 @@ import com.digitalasset.canton.performance.model.java.orchestration.partygrowth.
 import com.digitalasset.canton.performance.model.java.orchestration.runtype.DvpRun
 import com.digitalasset.canton.performance.model.java.orchestration.{Mode, PartyGrowth, TestRun}
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.util.ShowUtil.*
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.pekko.actor.ActorSystem
@@ -51,6 +52,7 @@ class TraderStats(metric: Gauge[Long]) extends LazyLogging {
   private val submitted_ = new AtomicInteger(0)
   private val observed_ = new AtomicInteger(0)
   private val reports = mutable.ListBuffer[(Int, Instant)]()
+  private val lock = new Mutex()
 
   def init(count: Int): Unit = {
     submitted_.set(count)
@@ -68,21 +70,26 @@ class TraderStats(metric: Gauge[Long]) extends LazyLogging {
 
   def updateObservedCount(count: Int): Unit = {
     metric.updateValue(_ + count)
-    val current = observed_.updateAndGet(_ + count)
-    // remember timestamps we need to report progress
-    reports.append((current, Instant.now))
+    lock.exclusive { // lock is needed as the value might be updated async on a failed submission
+      val current = observed_.updateAndGet(_ + count)
+      // remember timestamps we need to report progress
+      val up = (current, Instant.now)
+      reports.append(up).discard
+    }
   }
 
   def incrementObserved(): Unit = {
     metric.updateValue(_ + 1)
-    val current = observed_.incrementAndGet()
-    // remember timestamps we need to report progress
-    reports.append((current, Instant.now))
+    lock.exclusive {
+      val current = observed_.incrementAndGet()
+      // remember timestamps we need to report progress
+      reports.append((current, Instant.now)).discard
+    }
   }
 
-  def findTimestampAndCleanup(observation: Int): Instant = {
+  def findTimestampAndCleanup(observation: Int): Instant = lock.exclusive {
     // find our report timestamp
-    val idx = reports.indexWhere(_._1 == observation)
+    val idx = reports.indexWhere(_._1 >= observation)
     // drop old reporting timestamps (we keep the current if we need to resubmit the stats)
     if (idx > 0) {
       reports.remove(0, idx)
@@ -273,9 +280,9 @@ class TraderDriver(
   protected val shouldBeConsistent = new AtomicBoolean(false)
 
   override protected def masterCreated(master: TestRun.Contract): Unit = {
-    issuerBalancer.updateMembers(master.data.issuers.asScala.toSeq.map(new Party(_)))
+    issuerBalancer.updateMembers(master.data.providers.asScala.toSeq.map(new Party(_)))
     traderBalancer.updateMembers(
-      master.data.traders.asScala.toSeq.filter(_ != party.getValue).map(new Party(_))
+      master.data.users.asScala.toSeq.filter(_ != party.getValue).map(new Party(_))
     )
   }
 
@@ -311,7 +318,7 @@ class TraderDriver(
         if (res.data.flag == M.orchestration.ParticipantFlag.READY)
           true
         else if (res.data.flag == M.orchestration.ParticipantFlag.INITIALISING) {
-          val expected = synchronizers.size * numAssetsPerIssuer * master.data.issuers.size
+          val expected = synchronizers.size * numAssetsPerIssuer * master.data.providers.size
           val actual = assets.allAvailable.size + numInTransfer
           if (actual == expected) {
             // signal that we are ready if we have enough assets
@@ -335,7 +342,7 @@ class TraderDriver(
       .foreach { case (_, res) =>
         // if there is a new issuer that we haven't seen before
         val issuers =
-          master.data.issuers.asScala.toSeq.filterNot(res.data.processedIssuers.contains)
+          master.data.providers.asScala.toSeq.filterNot(res.data.processedIssuers.contains)
         if (issuers.nonEmpty) {
           sendAssetRequest(res, numAssetsPerIssuer, issuers, payloadSize)
           shouldBeConsistent.set(false)
@@ -365,8 +372,8 @@ class TraderDriver(
             traderBalancer.state(),
           )
           master.data.mode match {
-            case Mode.PREPAREISSUER => false
-            case Mode.PREPARETRADER =>
+            case Mode.PREPAREPROVIDER => false
+            case Mode.PREPAREUSER =>
               initExisting()
               acquireAssets(master, params.payloadSize, params.numAssetsPerIssuer)
               signalReadyIfWeAre(
@@ -382,7 +389,7 @@ class TraderDriver(
                 checkConsistency(master, params)
               rate.updateRate(CantonTimestamp.now())
               val freeAssets =
-                master.data.issuers.asScala.map(issuer => assets.num(new Party(issuer))).sum
+                master.data.providers.asScala.map(issuer => assets.num(new Party(issuer))).sum
 
               freeAssetsMetric.updateValue(freeAssets)
               val numOpenApprovals = proposals.num(false)
@@ -407,7 +414,7 @@ class TraderDriver(
                     .num(true)}, theirs ${proposals
                     .num(false)}, inventory $freeAssets of ${assets.totalNum}, rate $rate, pending: ${rate.pending}"
               )
-              val cmdsP = createProposals(maxNew, master.data.issuers.size, params)
+              val cmdsP = createProposals(maxNew, master.data.providers.size, params)
               val cmdsA = acceptProposals(maxAccept, params)
               // submit batches
               submitBatched(
@@ -521,13 +528,13 @@ class TraderDriver(
       // my proposals (as i already store that data)
       val numInTransfer = proposals.num(item = true)
       val assetsInconsistent =
-        assets.totalNum + numInTransfer != params.numAssetsPerIssuer * master.data.issuers.size
+        assets.totalNum + numInTransfer != params.numAssetsPerIssuer * master.data.providers.size
       if (shouldBeConsistent.get()) {
         if (assetsInconsistent) {
           if (!consistencyWarningIssued.getAndSet(true)) {
 
             logger.error(
-              s"Trader state appears to be inconsistent: assets=${assets.totalNum}, in-transfer=$numInTransfer, should be total=${params.numAssetsPerIssuer * master.data.issuers.size}" +
+              s"Trader state appears to be inconsistent: assets=${assets.totalNum}, in-transfer=$numInTransfer, should be total=${params.numAssetsPerIssuer * master.data.providers.size}" +
                 s"Transfered-in proposals ${proposals.find(item = true)}, all proposals ${proposals.allAvailable}, all assets ${assets.allAvailable}"
             )
           }

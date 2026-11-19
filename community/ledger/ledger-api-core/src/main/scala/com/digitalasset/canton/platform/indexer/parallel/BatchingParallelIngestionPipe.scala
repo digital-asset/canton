@@ -17,7 +17,7 @@ object BatchingParallelIngestionPipe {
       contractReInsertion: Iterable[In] => Future[Iterable[In]],
       inputMapper: Iterable[In] => Future[InBatch],
       seqMapperZero: InBatch,
-      seqMapper: (InBatch, InBatch) => InBatch,
+      seqMapper: (InBatch, InBatch) => Future[InBatch],
       dbPrepareParallelism: Int,
       dbPrepare: InBatch => Future[Vector[DbElem]],
       ingestionParallelism: Int,
@@ -26,8 +26,8 @@ object BatchingParallelIngestionPipe {
       batcher: Iterable[DbElem] => Future[DbBatch],
       batcherCostFn: DbElem => Long,
       ingester: DbBatch => Future[DbBatch],
-      tailConflateFlow: Flow[DbBatch, OutBatch, NotUsed],
-      ingestTail: OutBatch => Future[OutBatch],
+      tailConflateFlow: Flow[DbBatch, Vector[DbBatch], NotUsed],
+      ingestTail: Vector[DbBatch] => Future[OutBatch],
   ): Flow[In, OutBatch, NotUsed] =
     // The stream coming from ReadService, involves deserialization and translation to Update-s
     Flow[In]
@@ -41,7 +41,7 @@ object BatchingParallelIngestionPipe {
       .mapAsync(inputMappingParallelism)(contractReInsertion)
       .mapAsync(inputMappingParallelism)(inputMapper)
       // Encapsulates sequential/stateful computation (generation of sequential IDs for events)
-      .scan(seqMapperZero)(seqMapper)
+      .scanAsync(seqMapperZero)(seqMapper)
       .drop(1) // remove the zero element from the beginning of the stream
       .async
       .mapAsync(dbPrepareParallelism)(dbPrepare)

@@ -172,8 +172,6 @@ private[lf] object Speedy {
       private[speedy] var ptx: PartialTransaction,
       /* Committers of the action. */
       val committers: Set[Party],
-      /* Commit location, if a script commit is in progress. */
-      val commitLocation: Option[Location],
       val limits: interpretation.LimitConfig,
       costModel: CostModel,
       initialGasBudget: Option[CostModel.Cost],
@@ -486,6 +484,7 @@ private[lf] object Speedy {
         zipSameLength(seeds, ptx.actionNodeSeeds.toImmArray),
         ptx.csmJournal.keyInputs.transform((_, v) => v.queue),
         ptx.csmJournal.contractOrder,
+        keyMismatches,
       )
     }
 
@@ -544,6 +543,16 @@ private[lf] object Speedy {
       stringBuilder.result()
     }
 
+    private var keyMismatches =
+      Map.empty[V.ContractId, (Option[GlobalKeyWithMaintainers], Option[GlobalKeyWithMaintainers])]
+
+    private[speedy] def recordContractKeyMismatch(
+        coid: V.ContractId,
+        srcKey: Option[GlobalKeyWithMaintainers],
+        recomputedKey: Option[GlobalKeyWithMaintainers],
+    ): Unit =
+      keyMismatches = keyMismatches.updated(coid, (srcKey, recomputedKey))
+
   }
 
   object UpdateMachine {
@@ -565,7 +574,6 @@ private[lf] object Speedy {
         validating: Boolean = false,
         interpretationConfig: interpretation.InterpretationConfig,
         contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
-        commitLocation: Option[Location] = None,
         limits: interpretation.LimitConfig = interpretation.LimitConfig.Off,
         costModel: CostModel = CostModel.Empty,
         initialGasBudget: Option[CostModel.Cost] = None,
@@ -585,7 +593,6 @@ private[lf] object Speedy {
             authorizationChecker,
           ),
         committers = committers,
-        commitLocation = commitLocation,
         interpretationConfig = interpretationConfig,
         contractIdVersion = contractIdVersion,
         limits = limits,
@@ -607,6 +614,10 @@ private[lf] object Speedy {
         seeds: NodeSeeds,
         globalKeyMapping: Map[GlobalKey, Vector[V.ContractId]],
         contractOrder: List[V.ContractId],
+        contractKeyMismatches: Map[
+          V.ContractId,
+          (Option[GlobalKeyWithMaintainers], Option[GlobalKeyWithMaintainers]),
+        ],
     )
   }
 

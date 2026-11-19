@@ -30,6 +30,8 @@ final class GetAccountAuthIT extends SyncServiceCallAuthTests {
 
   override def serviceCallName: String = "TrafficService#GetAccount"
 
+  override def denyCallsWithParticipantAdmin: Boolean = false
+
   override def serviceCall(
       context: ServiceCallContext
   )(implicit env: TestConsoleEnvironment): Future[Any] =
@@ -87,6 +89,12 @@ final class GetAccountAuthIT extends SyncServiceCallAuthTests {
           ),
         )
       )
+    }
+    "allow calls with 'participant_admin' user token" taggedAs securityAsset.setHappyCase(
+      "Ledger API client can get account balance with a 'participant_admin' user token"
+    ) in { implicit env =>
+      import env.*
+      expectSuccess(serviceCall(canBeAnAdmin))
     }
   }
 }

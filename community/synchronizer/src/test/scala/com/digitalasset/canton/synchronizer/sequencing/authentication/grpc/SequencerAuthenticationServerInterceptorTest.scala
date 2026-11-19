@@ -4,8 +4,8 @@
 package com.digitalasset.canton.synchronizer.sequencing.authentication.grpc
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{BatchingConfig, DefaultProcessingTimeouts}
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -22,6 +22,7 @@ import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenManagerConfig,
 }
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth.TokenFetcher
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerBatchingConfig
 import com.digitalasset.canton.synchronizer.sequencing.authentication.{
   MemberAuthenticationService,
   MemberAuthenticationStore,
@@ -33,12 +34,21 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.grpc.stub.StreamObserver
-import io.grpc.{ManagedChannel, ServerInterceptors, Status}
+import io.grpc.{
+  ManagedChannel,
+  Metadata,
+  ServerCall,
+  ServerCallHandler,
+  ServerInterceptors,
+  ServerServiceDefinition,
+  Status,
+  StatusRuntimeException,
+}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.Duration as JDuration
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{RejectedExecutionException, TimeUnit}
 import scala.concurrent.Future
 
 @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
@@ -81,7 +91,7 @@ class SequencerAuthenticationServerInterceptorTest
       _ => (),
       FutureUnlessShutdown.unit,
       DefaultProcessingTimeouts.testing,
-      BatchingConfig(),
+      SequencerBatchingConfig(),
       loggerFactory,
     ) {
       override protected def isParticipantActive(participant: ParticipantId)(implicit
@@ -91,15 +101,13 @@ class SequencerAuthenticationServerInterceptorTest
     lazy val serverInterceptor =
       new SequencerAuthenticationServerInterceptor(authService, loggerFactory)
 
+    protected def serviceDefinition: ServerServiceDefinition =
+      HelloServiceGrpc.bindService(service, parallelExecutionContext)
+
     val channelName = InProcessServerBuilder.generateName()
     val server = InProcessServerBuilder
       .forName(channelName)
-      .addService(
-        ServerInterceptors.intercept(
-          HelloServiceGrpc.bindService(service, parallelExecutionContext),
-          serverInterceptor,
-        )
-      )
+      .addService(ServerInterceptors.intercept(serviceDefinition, serverInterceptor))
       .build()
       .start()
 
@@ -208,6 +216,60 @@ class SequencerAuthenticationServerInterceptorTest
         case status: io.grpc.StatusRuntimeException =>
           status.getStatus.getCode shouldBe io.grpc.Status.UNAUTHENTICATED.getCode
       }
+    }
+
+    "not warn if the server rejects the call after authentication because it is shutting down" in new GrpcContext {
+      // The transport throws this once its executor has been terminated by a shutdown.
+      // A def, because the server is built before the vals of this class are initialized.
+      def rejectingHandler = new ServerCallHandler[Hello.Request, Hello.Response] {
+        override def startCall(
+            call: ServerCall[Hello.Request, Hello.Response],
+            headers: Metadata,
+        ): ServerCall.Listener[Hello.Request] =
+          throw new RejectedExecutionException("event executor terminated")
+      }
+      override protected def serviceDefinition: ServerServiceDefinition =
+        ServerServiceDefinition
+          .builder(HelloServiceGrpc.SERVICE)
+          .addMethod(HelloServiceGrpc.METHOD_HELLO, rejectingHandler)
+          .addMethod(HelloServiceGrpc.METHOD_HELLO_STREAMED, rejectingHandler)
+          .build()
+
+      store
+        .saveToken(
+          StoredAuthenticationToken(
+            participantId,
+            neverExpire,
+            token.token,
+            Fingerprint.tryFromString("test-static-token-key-fingerprint"),
+          )
+        )
+
+      val tokenFetcher =
+        ((_: TraceContext) => EitherT.pure[FutureUnlessShutdown, Status](token)): TokenFetcher
+
+      val clientAuthentication =
+        SequencerClientTokenAuthentication(
+          synchronizerId,
+          participantId,
+          tokenFetcher,
+          isClosed = false,
+          AuthenticationTokenManagerConfig(),
+          AuthenticationTokenManagerTest.mockClock,
+          loggerFactory,
+        )
+      channel = InProcessChannelBuilder
+        .forName(channelName)
+        .build()
+      val client = clientAuthentication(HelloServiceGrpc.stub(channel))
+
+      // No warning or error may be logged
+      loggerFactory.assertLogs(
+        inside(client.hello(Hello.Request("hi")).failed.futureValue) {
+          case status: StatusRuntimeException =>
+            status.getStatus.getCode shouldBe Status.UNAUTHENTICATED.getCode
+        }
+      )
     }
   }
 }

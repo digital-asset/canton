@@ -91,10 +91,6 @@ final class HardMigrationOfflineRootKeyOnboardingIntegrationTest
         )
       }
       .addConfigTransforms(ConfigTransforms.enableDevVersionSupport*)
-      // TODO(#34818) Enable the new pipeline
-      // During the migration, the digest processor of the new pipeline fails to find an active
-      // connection to the target, and this failure can abort the shutdown of the environment.
-      .addConfigTransform(ConfigTransforms.disableNewAcsCommitmentProcessorPipeline)
       .addConfigTransform(
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.init.identity).replace(IdentityConfig.Manual)

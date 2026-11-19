@@ -261,6 +261,11 @@ ${onlyIf(LanguageVersion.featureChoiceFuncs.enabledIn(languageVersion))("""
              \ (p : Mod:Human) (i : Int64) -> choice_observer @Mod:Human HumanNap p i;
 """)}
 
+${onlyIf(LanguageVersion.featureUint256.enabledIn(languageVersion))("""
+           val aUint256: Uint256 = 0xFF;
+           val aUint256Add: Uint256 -> Uint256 -> Uint256 = ADD_UINT256;
+           val aUint256ToText: Uint256 -> Text = UINT256_TO_TEXT;
+""")}
            interface (this: Root) = {
              viewtype Mod:MyUnit;
            };

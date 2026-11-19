@@ -16,8 +16,8 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.math.Numeric.Implicits.*
 import scala.math.Ordering.Implicits.*
 
-/** This in-memory fan-out buffer allows a DatabaseSequencer.single(...) instance to fully bypass
-  * reading events back from the database, since there's only a single writer.
+/** This in-memory fan-out buffer allows a sequencer instance to fully bypass reading events back
+  * from the database, since there's only a single writer.
   *
   * Multiple readers may request an immutable snapshot of the buffer at any time. We use immutable
   * [[scala.collection.immutable.Vector]] to allow efficient random access to find the reading start

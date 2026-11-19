@@ -59,6 +59,8 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]])
     */
   lazy val leafRecipients: NonEmpty[Set[Recipient]] =
     trees.toNEF.reduceLeftTo(_.leafRecipients)(_ ++ _.leafRecipients)
+
+  def isLeafRecipient(recipient: Recipient): Boolean = trees.exists(_.isLeafRecipient(recipient))
 }
 
 object Recipients extends PrettyPrintingCompanion[Recipients] {

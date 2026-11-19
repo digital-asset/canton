@@ -31,6 +31,7 @@ import com.digitalasset.canton.util.retry.NoExceptionRetryPolicy
 import com.digitalasset.canton.util.{ErrorUtil, retry}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 
+import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.duration.*
 
 /** Some of the state of a participant that is not tied to a synchronizer and must survive restarts.
@@ -76,6 +77,7 @@ object ParticipantNodePersistentState extends HasLoggerName {
       ledgerApiServerConfig: LedgerApiServerConfig,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
+      schedulerOpt: Option[ScheduledExecutorService],
   )(implicit
       ec: ExecutionContextIdlenessExecutorService,
       traceContext: TraceContext,
@@ -108,8 +110,9 @@ object ParticipantNodePersistentState extends HasLoggerName {
       ContractStore.create(
         storage = storage,
         processingTimeouts = parameters.processingTimeouts,
-        cachingConfigs = parameters.cachingConfigs,
-        batchingConfig = parameters.batchingConfig,
+        cacheConfig = parameters.cachingConfigs.contractStore,
+        dbQueryBatcherConfig = parameters.batchingConfig.contractStoreAggregator,
+        insertBatchAggregatorConfig = parameters.batchingConfig.aggregator,
         loggerFactory = loggerFactory,
       )
 
@@ -179,6 +182,9 @@ object ParticipantNodePersistentState extends HasLoggerName {
         LedgerApiStore.initialize(
           storageConfig = storageConfig,
           storage = Some(storage),
+          storageMetricsOpt = Some(metrics.storageMetrics),
+          logQueryCostOpt = parameters.loggingConfig.queryCost,
+          schedulerOpt = schedulerOpt,
           ledgerParticipantId = ledgerParticipantId,
           ledgerApiDatabaseConnectionTimeout = ledgerApiServerConfig.databaseConnectionTimeout,
           ledgerApiPostgresDataSourceConfig = ledgerApiServerConfig.postgresDataSource,

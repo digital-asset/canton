@@ -286,6 +286,24 @@ class DecodeV2Spec
       }
     }
 
+    s"reject Uint256 type if version < ${LV.featureUint256}" in {
+      forEveryVersionSuchThat(!LV.featureUint256.enabledIn(_)) { version =>
+        val decoder = moduleDecoder(version)
+        an[Error.Parsing] shouldBe thrownBy(
+          decoder.uncheckedDecodeTypeForTest(buildPrimType(UINT256))
+        )
+      }
+    }
+
+    s"accept Uint256 type if version >= ${LV.featureUint256}" in {
+      forEveryVersionSuchThat(LV.featureUint256.enabledIn) { version =>
+        val decoder = moduleDecoder(version)
+        decoder.uncheckedDecodeTypeForTest(buildPrimType(UINT256)) shouldBe Ast.TBuiltin(
+          Ast.BTUint256
+        )
+      }
+    }
+
     "reject Struct with duplicate field names" in {
       val negativeTestCases =
         Table("field names", List("a", "b", "c"))
@@ -702,6 +720,80 @@ class DecodeV2Spec
         }
       }
 
+    }
+
+    s"translate Uint256 builtins iff version in ${LV.featureUint256}" in {
+      val uint256BuiltinCases = Table(
+        "uint256 builtins" -> "expected output",
+        DamlLf2.BuiltinFunction.ADD_UINT256 -> Ast.EBuiltinFun(Ast.BAddUint256),
+        DamlLf2.BuiltinFunction.SUB_UINT256 -> Ast.EBuiltinFun(Ast.BSubUint256),
+        DamlLf2.BuiltinFunction.MUL_UINT256 -> Ast.EBuiltinFun(Ast.BMulUint256),
+        DamlLf2.BuiltinFunction.DIV_UINT256 -> Ast.EBuiltinFun(Ast.BDivUint256),
+        DamlLf2.BuiltinFunction.MOD_UINT256 -> Ast.EBuiltinFun(Ast.BModUint256),
+        DamlLf2.BuiltinFunction.EXP_UINT256 -> Ast.EBuiltinFun(Ast.BExpUint256),
+        DamlLf2.BuiltinFunction.AND_UINT256 -> Ast.EBuiltinFun(Ast.BAndUint256),
+        DamlLf2.BuiltinFunction.OR_UINT256 -> Ast.EBuiltinFun(Ast.BOrUint256),
+        DamlLf2.BuiltinFunction.XOR_UINT256 -> Ast.EBuiltinFun(Ast.BXorUint256),
+        DamlLf2.BuiltinFunction.NOT_UINT256 -> Ast.EBuiltinFun(Ast.BNotUint256),
+        DamlLf2.BuiltinFunction.SHL_UINT256 -> Ast.EBuiltinFun(Ast.BShlUint256),
+        DamlLf2.BuiltinFunction.SHR_UINT256 -> Ast.EBuiltinFun(Ast.BShrUint256),
+        DamlLf2.BuiltinFunction.UINT256_TO_TEXT -> Ast.EBuiltinFun(Ast.BUint256ToText),
+        DamlLf2.BuiltinFunction.TEXT_TO_UINT256 -> Ast.EBuiltinFun(Ast.BTextToUint256),
+        DamlLf2.BuiltinFunction.INT64_TO_UINT256 -> Ast.EBuiltinFun(Ast.BInt64ToUint256),
+        DamlLf2.BuiltinFunction.UINT256_TO_INT64 -> Ast.EBuiltinFun(Ast.BUint256ToInt64),
+        DamlLf2.BuiltinFunction.ADDMOD_UINT256 -> Ast.EBuiltinFun(Ast.BAddModUint256),
+        DamlLf2.BuiltinFunction.MULMOD_UINT256 -> Ast.EBuiltinFun(Ast.BMulModUint256),
+        DamlLf2.BuiltinFunction.SDIV_UINT256 -> Ast.EBuiltinFun(Ast.BSDivUint256),
+        DamlLf2.BuiltinFunction.SMOD_UINT256 -> Ast.EBuiltinFun(Ast.BSModUint256),
+        DamlLf2.BuiltinFunction.SLT_UINT256 -> Ast.EBuiltinFun(Ast.BSltUint256),
+        DamlLf2.BuiltinFunction.SGT_UINT256 -> Ast.EBuiltinFun(Ast.BSgtUint256),
+        DamlLf2.BuiltinFunction.SAR_UINT256 -> Ast.EBuiltinFun(Ast.BSarUint256),
+        DamlLf2.BuiltinFunction.BYTE_UINT256 -> Ast.EBuiltinFun(Ast.BByteUint256),
+        DamlLf2.BuiltinFunction.SIGNEXTEND_UINT256 -> Ast.EBuiltinFun(Ast.BSignExtendUint256),
+      )
+
+      forEveryVersion { version =>
+        val decoder = moduleDecoder(version)
+        forEvery(uint256BuiltinCases) { (proto, scala) =>
+          val result = Try(decoder.decodeExprForTest(toProtoExpr(proto), "test"))
+
+          if (LV.featureUint256.enabledIn(version))
+            result shouldBe Success(scala)
+          else
+            inside(result) { case Failure(error) => error shouldBe an[Error.Parsing] }
+        }
+      }
+    }
+
+    s"translate Uint256 literal iff version >= ${LV.featureUint256}" in {
+      def uint256ToProtoExpr(value: com.digitalasset.daml.lf.data.Uint256.Uint256): DamlLf2.Expr =
+        DamlLf2.Expr
+          .newBuilder()
+          .setBuiltinLit(
+            DamlLf2.BuiltinLit
+              .newBuilder()
+              .setUint256(com.digitalasset.daml.lf.data.Uint256.toByteString(value))
+          )
+          .build()
+
+      val uint256LitCases = Table(
+        "uint256 value" -> "expected value",
+        com.digitalasset.daml.lf.data.Uint256.ZERO -> com.digitalasset.daml.lf.data.Uint256.ZERO,
+        com.digitalasset.daml.lf.data.Uint256.ONE -> com.digitalasset.daml.lf.data.Uint256.ONE,
+        com.digitalasset.daml.lf.data.Uint256.MaxValue -> com.digitalasset.daml.lf.data.Uint256.MaxValue,
+      )
+
+      forEveryVersion { version =>
+        val decoder = moduleDecoder(version)
+        forEvery(uint256LitCases) { (input, expectedValue) =>
+          val result = Try(decoder.decodeExprForTest(uint256ToProtoExpr(input), "test"))
+
+          if (LV.featureUint256.enabledIn(version))
+            result shouldBe Success(Ast.EBuiltinLit(Ast.BLUint256(expectedValue)))
+          else
+            inside(result) { case Failure(error) => error shouldBe an[Error.Parsing] }
+        }
+      }
     }
 
     s"translate exception primitive" in {

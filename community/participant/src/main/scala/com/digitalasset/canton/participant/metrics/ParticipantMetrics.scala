@@ -10,6 +10,7 @@ import com.daml.metrics.api.HistogramInventory.Item
 import com.daml.metrics.api.MetricHandle.*
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.metrics.api.noop.NoOpGauge
+import com.daml.metrics.grpc.DamlGrpcServerMetrics
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.TaskSchedulerMetrics
@@ -17,7 +18,6 @@ import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.environment.BaseMetrics
 import com.digitalasset.canton.http.metrics.{HttpApiHistograms, HttpApiMetrics}
 import com.digitalasset.canton.metrics.*
-import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.participant.metrics.PruningMetrics as ParticipantPruningMetrics
 import com.digitalasset.canton.platform.apiserver.services.metrics.{
   TrafficEnforcementInventory,
@@ -106,7 +106,7 @@ class ParticipantMetrics(
 
   override val declarativeApiMetrics: DeclarativeApiMetrics =
     new DeclarativeApiMetrics(prefix, openTelemetryMetricsFactory)
-  override def grpcMetrics: GrpcServerMetricsX = (ledgerApiServer.grpc, ledgerApiServer.requests)
+  override def grpcMetrics: DamlGrpcServerMetrics = ledgerApiServer.grpc
   override def healthMetrics: HealthMetrics = ledgerApiServer.health
   override def storageMetrics: DbStorageMetrics = dbStorage
 

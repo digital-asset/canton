@@ -69,7 +69,7 @@ object AcsReplicationSourceParticipantMessage
         for {
           acsDigest <- AcsDigest.fromByteString(expectedProtocolVersion, acsDigestByteString)
           signature <- ProtoConverter.parseRequired(
-            Signature.fromProtoV30,
+            Signature.fromProtoV30(ProtocolVersionValidation(expectedProtocolVersion), _),
             "signature",
             signatureP,
           )

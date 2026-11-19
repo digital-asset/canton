@@ -73,6 +73,10 @@ final case class RecipientsTree(
     case _ => recipientGroup.map(m => m: Recipient)
   }
 
+  def isLeafRecipient(recipient: Recipient): Boolean =
+    if (children.isEmpty) recipientGroup.contains(recipient)
+    else children.exists(_.isLeafRecipient(recipient))
+
   def toProtoV30: v30.RecipientsTree = {
     val recipientsP =
       recipientGroup.toSeq.map(_.toProtoPrimitive).sorted.map(_.toProtoUnvalidated)

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.crypto.store.db
 
-import com.digitalasset.canton.config.BatchingConfig
+import com.digitalasset.canton.config.TestBatchingConfig
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtendedTest
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.resource.DbStorage
@@ -35,7 +35,7 @@ trait DbCryptoPrivateStoreTest extends AsyncWordSpec with CryptoPrivateStoreExte
         storage,
         testedReleaseProtocolVersion,
         timeouts,
-        BatchingConfig(),
+        TestBatchingConfig(),
         loggerFactory,
       ),
       encrypted = false,

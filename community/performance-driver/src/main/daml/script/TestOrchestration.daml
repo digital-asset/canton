@@ -10,6 +10,6 @@ main = script do
   let testConfig = DvpRun with numAssetsPerIssuer = 5, withAcsGrowth = 0, payloadSize = 1, partyGrowth = NoPartyGrowth
   submit master do
     createAndExerciseCmd (TestRun with
-       mode = PrepareIssuer, issuers = [], traders =[], master = master, reportFrequency = 5, totalCycles = 100, runType = testConfig) $
-       AddParticipant with party = p1, role = Trader
+       mode = PrepareProvider, providers = [], users =[], master = master, reportFrequency = 5, totalCycles = 100, runType = testConfig) $
+       AddParticipant with party = p1, role = Orchestration.User
 

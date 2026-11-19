@@ -26,7 +26,7 @@ sealed trait AuthServiceConfig {
       jwksCacheConfig: JwksCacheConfig,
       jwtTimestampLeeway: Option[JwtTimestampLeeway],
       loggerFactory: NamedLoggerFactory,
-      warnOnJwtScopeUsage: Boolean,
+      enableScopeOnlyJwt: Boolean,
       maxTokenLife: NonNegativeDuration = NonNegativeDuration(Duration.Inf),
   ): AuthService
   def privileged: Boolean = false
@@ -46,7 +46,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
-        warnOnJwtScopeUsage: Boolean,
+        enableScopeOnlyJwt: Boolean,
         maxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceWildcard
@@ -80,7 +80,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
-        warnOnJwtScopeUsage: Boolean,
+        enableScopeOnlyJwt: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -94,7 +94,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
-        warnOnJwtScopeUsage,
+        enableScopeOnlyJwt,
       )
 
   }
@@ -125,7 +125,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
-        warnOnJwtScopeUsage: Boolean,
+        enableScopeOnlyJwt: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -139,7 +139,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
-        warnOnJwtScopeUsage,
+        enableScopeOnlyJwt,
       )
 
   }
@@ -171,7 +171,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
-        warnOnJwtScopeUsage: Boolean,
+        enableScopeOnlyJwt: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -185,7 +185,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
-        warnOnJwtScopeUsage,
+        enableScopeOnlyJwt,
       )
 
   }
@@ -217,7 +217,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
-        warnOnJwtScopeUsage: Boolean,
+        enableScopeOnlyJwt: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -231,7 +231,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
-        warnOnJwtScopeUsage,
+        enableScopeOnlyJwt,
       )
 
   }
@@ -252,22 +252,24 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         maxTokenLife: Option[Long],
+        loggerFactory: NamedLoggerFactory,
     ) =
       JwksVerifier(
-        url.unwrap,
-        jwksCacheConfig.cacheMaxSize,
-        jwksCacheConfig.cacheExpiration.underlying,
-        jwksCacheConfig.connectionTimeout.underlying,
-        jwksCacheConfig.readTimeout.underlying,
-        jwtTimestampLeeway,
-        maxTokenLife,
+        url = url.unwrap,
+        cacheExpiration = jwksCacheConfig.cacheExpiration.underlying,
+        connectionTimeout = jwksCacheConfig.connectionTimeout.underlying,
+        readTimeout = jwksCacheConfig.readTimeout.underlying,
+        minRefreshInterval = jwksCacheConfig.minRefreshInterval.underlying,
+        loggerFactory = loggerFactory,
+        jwtTimestampLeeway = jwtTimestampLeeway,
+        maxTokenLife = maxTokenLife,
       )
 
     override def create(
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
-        warnOnJwtScopeUsage: Boolean,
+        enableScopeOnlyJwt: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -275,6 +277,7 @@ object AuthServiceConfig {
           jwksCacheConfig,
           jwtTimestampLeeway,
           maxTokenLife.toMillisOrNone().orElse(globalMaxTokenLife.toMillisOrNone()),
+          loggerFactory,
         ),
         targetAudience,
         targetScope,
@@ -282,7 +285,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
-        warnOnJwtScopeUsage,
+        enableScopeOnlyJwt,
       )
   }
 
@@ -294,7 +297,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
-        warnOnJwtScopeUsage: Boolean,
+        enableScopeOnlyJwt: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       UninitializedPartyJWTAuthService(

@@ -17,27 +17,10 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.AtomicInteger
 
-class GeneratorTestPV35
-    extends GeneratorTest(
-      contractKeys = true,
-      readOnlyRollbacks = true,
-    )
-
-class GeneratorTestPV34
-    extends GeneratorTest(
-      contractKeys = false,
-      readOnlyRollbacks = false,
-    )
-
-abstract class GeneratorTest(
-    contractKeys: Boolean,
-    readOnlyRollbacks: Boolean,
-) extends AnyWordSpec
-    with Matchers
-    with PropertyCheckerResultAssertions {
+final class GeneratorTest extends AnyWordSpec with Matchers with PropertyCheckerResultAssertions {
 
   private val generators =
-    new ConcreteGenerators(contractKeys, readOnlyRollbacks)
+    new ConcreteGenerators(contractKeys = true)
 
   "The symbolic solver" should {
     "synthesize valid scenarios" in {

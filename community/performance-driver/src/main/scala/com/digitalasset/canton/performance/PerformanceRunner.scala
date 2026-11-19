@@ -23,7 +23,7 @@ import com.digitalasset.canton.performance.PartyRole.{
   DvpTrader,
   Master,
   Transfer,
-  TriPartyPassive,
+  TriPartyProvider,
   TriPartyUser,
 }
 import com.digitalasset.canton.performance.PerformanceRunner.prefix
@@ -36,6 +36,7 @@ import com.digitalasset.canton.performance.elements.triparty.{
   TriPartyUserDriver,
 }
 import com.digitalasset.canton.performance.model.java as M
+import com.digitalasset.canton.performance.model.java.orchestration.runtype.TriParty
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
@@ -151,7 +152,7 @@ object PartyRole {
       name: String,
       override val settings: RateSettings = RateSettings.defaults,
   ) extends ActivePartyRole {
-    override def role: M.orchestration.Role = M.orchestration.Role.TRADER
+    override def role: M.orchestration.Role = M.orchestration.Role.USER
     override def commandClientConfiguration: CommandClientConfiguration =
       settings.commandClientConfiguration
   }
@@ -171,7 +172,7 @@ object PartyRole {
       numPending: Int = 5,
       maxPerBatch: Int = 10000,
   ) extends ActivePartyRole {
-    override def role: M.orchestration.Role = M.orchestration.Role.ISSUER
+    override def role: M.orchestration.Role = M.orchestration.Role.PROVIDER
 
     override def commandClientConfiguration: CommandClientConfiguration =
       RateSettings.defaultCommandClientConfiguration
@@ -192,35 +193,35 @@ object PartyRole {
       balancingThreshold: Double = 0.5,
       issuers: Set[String] = Set.empty,
   ) extends ActivePartyRole {
-    override def role: M.orchestration.Role = M.orchestration.Role.TRADER
+    override def role: M.orchestration.Role = M.orchestration.Role.USER
     override def commandClientConfiguration: CommandClientConfiguration =
       RateSettings.defaultCommandClientConfiguration
   }
 
-  /** Passive role during tri-party
+  /** Provider role during tri-party
     *
-    * The tri-party test is driven by the "trader" side. Passive roles are not actively sending
-    * commands. Passive roles are agent, subregister, asset taker.
+    * The tri-party test is driven by the "trader" side. Provider roles are not actively sending
+    * commands. Provider roles are agent, subregister, asset taker.
     */
-  final case class TriPartyPassive(
+  final case class TriPartyProvider(
       name: String,
       override val settings: RateSettings,
   ) extends ActivePartyRole {
-    override def role: M.orchestration.Role = M.orchestration.Role.ISSUER
+    override def role: M.orchestration.Role = M.orchestration.Role.PROVIDER
     override def commandClientConfiguration: CommandClientConfiguration =
       RateSettings.defaultCommandClientConfiguration
   }
 
-  /** Tri party custodian
+  /** Tri party user
     *
-    * During the tri-party test, the custodian is driving the load by performing continuous asset
+    * During the tri-party test, the user is driving the load by performing continuous asset
     * substitutions.
     */
   final case class TriPartyUser(
       name: String,
       override val settings: RateSettings,
   ) extends ActivePartyRole {
-    override def role: M.orchestration.Role = M.orchestration.Role.TRADER
+    override def role: M.orchestration.Role = M.orchestration.Role.USER
     override def commandClientConfiguration: CommandClientConfiguration =
       RateSettings.defaultCommandClientConfiguration
   }
@@ -262,38 +263,39 @@ object PartyRole {
     *
     * @param name
     *   party name of master party
-    * @param quorumParticipants
+    * @param quorumUsers
     *   minimum number of participants when the test run should begin
-    * @param quorumIssuers
-    *   minimum number of issuers when the test run should begin
+    * @param quorumProviders
+    *   minimum number of providers when the test run should begin
     * @param amendments
     *   optional amendments to the configuration while the system is running
     */
   final case class Master(
       name: String,
-      quorumParticipants: Int = 2,
-      quorumIssuers: Int = 1,
+      quorumUsers: Int = 2,
+      quorumProviders: Int = 1,
       runConfig: MasterDynamicConfig,
       amendments: Seq[AmendMasterConfig] = Seq(),
       batchSize: Int = 100,
       maxPending: Int = 10,
+      averageTpsOverMs: Long = 30000, // 30 seconds
   ) extends PartyRole {
-    require(quorumIssuers > 0, s"quorumIssuers must be positive: $quorumIssuers.")
+    require(quorumProviders > 0, s"quorumProviders must be positive: $quorumProviders.")
     (runConfig.runType: @unchecked) match {
       case _: M.orchestration.runtype.DvpRun =>
         require(
-          quorumParticipants > 1,
-          s"quorumParticipants must be more than one: $quorumParticipants.",
+          quorumUsers > 1,
+          s"quorumUsers must be more than one: $quorumUsers.",
         )
       case _: M.orchestration.runtype.TransferRun =>
         require(
-          quorumParticipants > 1,
-          s"quorumParticipants must be more than one: $quorumParticipants.",
+          quorumUsers > 1,
+          s"quorumUsers must be more than one: $quorumUsers.",
         )
       case x: M.orchestration.runtype.TriParty =>
         require(
-          quorumIssuers >= 3 * x.numAgents + 2,
-          "quorum issuers must be at least 3 * numAgents + 2 (cash and asset issuer)",
+          quorumProviders >= 3 * x.numAgents + 2,
+          "quorum providers must be at least 3 * numAgents + 2 (cash and asset issuer)",
         )
     }
 
@@ -500,7 +502,7 @@ class PerformanceRunner(
                   baseSynchronizerId = config.baseSynchronizerId,
                   otherSynchronizers = config.otherSynchronizers,
                 )
-              case trp: TriPartyPassive =>
+              case trp: TriPartyProvider =>
                 new TriPartyPassiveDriver(
                   config.ledger,
                   party,
@@ -557,17 +559,31 @@ class PerformanceRunner(
       case Some(masterConfig) =>
         val labeledMetricsFactory =
           metricsRegistry.generateMetricsFactory(MetricsContext("role" -> "master"))
-        val driver =
-          new MasterDriver(
-            config.ledger,
-            masterParty,
-            masterConfig,
-            prefix :+ "master",
-            labeledMetricsFactory,
-            loggerFactory.appendUnnamedKey("driver", "master"),
-            this,
-            config.baseSynchronizerId,
-          )
+        val driver = masterConfig.runConfig.runType match {
+          case _: TriParty =>
+            new MasterDriverTriParty(
+              config.ledger,
+              masterParty,
+              masterConfig,
+              prefix :+ "master",
+              labeledMetricsFactory,
+              loggerFactory.appendUnnamedKey("driver", "master"),
+              this,
+              config.baseSynchronizerId,
+            )
+          case _ =>
+            new MasterDriver(
+              config.ledger,
+              masterParty,
+              masterConfig,
+              prefix :+ "master",
+              labeledMetricsFactory,
+              loggerFactory.appendUnnamedKey("driver", "master"),
+              this,
+              config.baseSynchronizerId,
+            )
+        }
+
         drivers.append(driver)
         EitherT(driver.start().flatMap {
           case Left(err) => Future.successful(Left(err))

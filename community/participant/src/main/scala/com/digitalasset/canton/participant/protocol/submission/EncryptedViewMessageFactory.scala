@@ -72,7 +72,7 @@ object EncryptedViewMessageFactory {
       protocolVersion,
     ).widen[EncryptedViewMessage[VT]]
 
-  /** Creates a single message with multiple views (for pv35+)
+  /** Creates a single message with multiple views
     *
     * This function assumes that:
     *   - all trees have the same hash signature and physical synchronizer id

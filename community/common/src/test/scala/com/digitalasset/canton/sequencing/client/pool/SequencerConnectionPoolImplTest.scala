@@ -7,11 +7,13 @@ import cats.syntax.functorFilter.*
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.testing.InMemoryMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.metrics.{SequencerClientHistograms, SequencerClientMetrics}
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.SequencerConnectionPoolError
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
 import com.digitalasset.canton.sequencing.{
   SequencerConnectionPenaltyConfig,
   SequencerConnectionPoolDelays,
@@ -70,7 +72,7 @@ class SequencerConnectionPoolImplTest
   private def increasePenalty(
       pool: SequencerConnectionPool,
       sequencerId: SequencerId,
-      amount: PositiveInt,
+      amount: Penalty,
       reason: String = "test",
   ): Unit = pool.contents(sequencerId).headOption.value.increasePenalty(amount, reason = reason)
 
@@ -185,7 +187,7 @@ class SequencerConnectionPoolImplTest
         _ => mkConnectionAttributes(synchronizerIndex = 1, sequencerIndex = 1),
       ) { (pool, _, listener, _) =>
         inside(pool.start().futureValueUS) {
-          case Left(SequencerConnectionPoolError.ThresholdUnreachableError(message)) =>
+          case Left(SequencerConnectionPoolError.ThresholdUnreachableError(message, _)) =>
             message shouldBe "Trust threshold of 2 is no longer reachable"
         }
         listener.shouldStabilizeOnState(ComponentHealthState.failed("Component is closed"))
@@ -219,7 +221,7 @@ class SequencerConnectionPoolImplTest
         createdConnections(1).fatal(reason = "test")
         clue("Threshold is no longer reachable") {
           inside(initializedF.futureValueUS) {
-            case Left(SequencerConnectionPoolError.ThresholdUnreachableError(message)) =>
+            case Left(SequencerConnectionPoolError.ThresholdUnreachableError(message, _)) =>
               message should (
                 include(s"Trust threshold of 2 is no longer reachable") and
                   include("test-0: test") and
@@ -265,20 +267,25 @@ class SequencerConnectionPoolImplTest
       // - getApi -> OK, performHandshake -> OK, getSynchronizerAndSequencerIds -> OK, getStaticSynchronizerParameters -> KO
       // - restart
       // - getApi -> OK, performHandshake -> OK, getSynchronizerAndSequencerIds -> OK, getStaticSynchronizerParameters -> OK
-      // - failure, triggering a restart
+      // - failure right after validation, triggering a restart
+      // - getApi -> OK, performHandshake -> OK, getSynchronizerAndSequencerIds -> OK, getStaticSynchronizerParameters -> OK
+      // - failure after the connection has been validated for longer than the minimum stable duration, triggering a restart
       // - getApi -> OK, performHandshake -> OK, getSynchronizerAndSequencerIds -> OK, getStaticSynchronizerParameters -> OK
       val testResponses = TestResponses(
-        apiResponses = failureUnavailable +: Seq.fill(5)(correctApiResponse),
-        handshakeResponses = failureUnavailable +: Seq.fill(4)(successfulHandshake),
+        apiResponses = failureUnavailable +: Seq.fill(6)(correctApiResponse),
+        handshakeResponses = failureUnavailable +: Seq.fill(5)(successfulHandshake),
         synchronizerAndSeqIdResponses =
-          failureUnavailable +: Seq.fill(3)(correctSynchronizerIdResponse1),
+          failureUnavailable +: Seq.fill(4)(correctSynchronizerIdResponse1),
         staticParametersResponses =
-          failureUnavailable +: Seq.fill(2)(correctStaticParametersResponse),
+          failureUnavailable +: Seq.fill(3)(correctStaticParametersResponse),
       )
 
       val poolDelays = SequencerConnectionPoolDelays.default.copy(
         minRestartDelay = NonNegativeFiniteDuration.tryOfMillis(100),
         maxRestartDelay = NonNegativeFiniteDuration.tryOfSeconds(10),
+        // Must be larger than the time the test takes between the validation and the failure of the connection.
+        // Smaller than `maxRestartDelay`, to check that the reset depends only on this duration.
+        minStableDuration = NonNegativeFiniteDuration.tryOfSeconds(5),
         warnValidationDelay = NonNegativeFiniteDuration.tryOfMillis(700), // 100 + 200 + 400 = 700
         subscriptionRequestDelay = NonNegativeFiniteDuration.tryOfSeconds(1),
       )
@@ -332,7 +339,7 @@ class SequencerConnectionPoolImplTest
         )
 
         loggerFactory.assertLogsSeq(
-          SuppressionRule.LevelAndAbove(INFO) && SuppressionRule.LoggerNameContains(
+          SuppressionRule.Level(INFO) && SuppressionRule.LoggerNameContains(
             "ConnectionHandler"
           )
         )(
@@ -341,14 +348,32 @@ class SequencerConnectionPoolImplTest
             listener.shouldStabilizeOnState(ComponentHealthState.Ok())
           },
           logEntries => {
-            // The retry delay is reset after the connection has been validated
+            // The connection failed shortly after having been validated: the exponential backoff continues
+            logEntries
+              .map(_.message)
+              .filter(_.contains("Scheduling restart after"))
+              .loneElement shouldBe retryLogEntry(minRestartConnectionDelay << 4)
+          },
+        )
+
+        // Let the connection stay validated for longer than the minimum stable duration
+        Threading.sleep(poolDelays.minStableDuration.duration.toMillis + 100)
+
+        loggerFactory.assertLogsSeq(
+          SuppressionRule.Level(INFO) && SuppressionRule.LoggerNameContains(
+            "ConnectionHandler"
+          )
+        )(
+          {
+            createdConnections(0).fail(reason = "test")
+            listener.shouldStabilizeOnState(ComponentHealthState.Ok())
+          },
+          logEntries => {
+            // The retry delay is reset after the connection has been validated for long enough
             logEntries
               .map(_.message)
               .filter(_.contains("Scheduling restart after"))
               .loneElement shouldBe retryLogEntry(minRestartConnectionDelay)
-
-            // There is no warning
-            logEntries.filter(_.level == WARN) shouldBe empty
           },
         )
 
@@ -777,7 +802,7 @@ class SequencerConnectionPoolImplTest
             }
           }
 
-          increasePenalty(pool, seq0, PositiveInt.one)
+          increasePenalty(pool, seq0, Penalty.tryCreate(1))
 
           {
             val metrics = getPenaltyMetrics(Set(seq0, seq1, seq2))
@@ -792,7 +817,7 @@ class SequencerConnectionPoolImplTest
             }
           }
 
-          increasePenalty(pool, seq1, PositiveInt.two)
+          increasePenalty(pool, seq1, Penalty.tryCreate(2))
 
           {
             val metrics = getPenaltyMetrics(Set(seq0, seq1, seq2))
@@ -817,7 +842,7 @@ class SequencerConnectionPoolImplTest
     "pick a sequencer again once its penalty has decayed" in {
       withValidatedPool(halfLife = fastDecay) { (pool, _, _) =>
         // 0.5^7 < 0.01, so the penalty goes back to 0 after 7 decays
-        increasePenalty(pool, seq0, PositiveInt.one)
+        increasePenalty(pool, seq0, Penalty.tryCreate(1))
         pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
 
         eventually() {
@@ -828,7 +853,7 @@ class SequencerConnectionPoolImplTest
 
     "apply a new half-life after a configuration update" in {
       withValidatedPool(halfLife = noDecay) { (pool, _, _) =>
-        increasePenalty(pool, seq0, PositiveInt.one)
+        increasePenalty(pool, seq0, Penalty.tryCreate(1))
         eventuallyForever(durationOfSuccess = 500.millis) {
           pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
         }
@@ -847,7 +872,7 @@ class SequencerConnectionPoolImplTest
 
     "keep the penalty of a sequencer across connection restarts" in {
       withValidatedPool(halfLife = noDecay) { (pool, createdConnections, _) =>
-        increasePenalty(pool, seq0, PositiveInt.one)
+        increasePenalty(pool, seq0, Penalty.tryCreate(1))
 
         val initialConnection = pool.contents(seq0).loneElement
         createdConnections(0).fail(reason = "test")
@@ -867,7 +892,7 @@ class SequencerConnectionPoolImplTest
     "not keep the penalty of a sequencer removed from and added back to the configuration" in {
       withValidatedPool(halfLife = noDecay, trustThreshold = PositiveInt.one) {
         (pool, _, getPenaltyMetrics) =>
-          increasePenalty(pool, seq0, PositiveInt.one)
+          increasePenalty(pool, seq0, Penalty.tryCreate(1))
           pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
 
           // Remove the only connection to `seq0`
@@ -913,7 +938,7 @@ class SequencerConnectionPoolImplTest
         halfLife = noDecay,
         trustThreshold = PositiveInt.one,
       ) { (pool, _, _) =>
-        increasePenalty(pool, seq0, PositiveInt.one)
+        increasePenalty(pool, seq0, Penalty.tryCreate(1))
         pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
 
         // Remove only one connection to `seq0`
@@ -932,7 +957,7 @@ class SequencerConnectionPoolImplTest
 
     "still track penalty increases while penalties are disabled, but ignore them for selection" in {
       withValidatedPool(halfLife = noDecay, penaltiesEnabled = false) { (pool, _, _) =>
-        increasePenalty(pool, seq0, PositiveInt.one)
+        increasePenalty(pool, seq0, Penalty.tryCreate(1))
 
         clue("we still track the penalties") {
           pool.connectionPenalties should contain key seq0
@@ -948,7 +973,7 @@ class SequencerConnectionPoolImplTest
 
     "use existing penalties for selection immediately after enabling penalties" in {
       withValidatedPool(halfLife = noDecay, penaltiesEnabled = false) { (pool, _, _) =>
-        increasePenalty(pool, seq0, PositiveInt.one)
+        increasePenalty(pool, seq0, Penalty.tryCreate(1))
         pool.connectionPenalties should contain key seq0
 
         pool

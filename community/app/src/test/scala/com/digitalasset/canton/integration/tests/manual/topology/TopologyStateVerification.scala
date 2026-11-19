@@ -288,7 +288,7 @@ class TopologyStateVerification(
         predecessor = None,
         staticSynchronizerParameters.protocolVersion,
         timeouts,
-        BatchingConfig(),
+        TestBatchingConfig(),
         replayLoggerFactory,
       )
       .futureValueUS
@@ -309,7 +309,7 @@ class TopologyStateVerification(
             CommonMockMetrics.cryptoMetrics,
             executionContext,
             timeouts,
-            BatchingConfig(),
+            TestBatchingConfig(),
             replayLoggerFactory,
             NoReportingTracerProvider,
             new ExecutorServiceMetrics(NoOpMetricsFactory),

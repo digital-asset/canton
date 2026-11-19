@@ -5,12 +5,7 @@ package com.digitalasset.canton.synchronizer.data.db
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.{
-  BatchingConfig,
-  CachingConfigs,
-  DefaultProcessingTimeouts,
-  PositiveFiniteDuration,
-}
+import com.digitalasset.canton.config.{DefaultProcessingTimeouts, PositiveFiniteDuration}
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -20,6 +15,10 @@ import com.digitalasset.canton.synchronizer.block.data.db.DbSequencerBlockStore
 import com.digitalasset.canton.synchronizer.data.SequencerBlockStoreTest
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SequencerWriterConfig
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerBatchingConfig,
+  SequencerCachingConfigs,
+}
 import com.digitalasset.canton.synchronizer.sequencer.store.DbSequencerStore
 import com.digitalasset.canton.synchronizer.sequencing.integrations.state.{
   DbSequencerStateManagerStore,
@@ -64,9 +63,8 @@ trait DbSequencerBlockStoreTest
           timeouts = DefaultProcessingTimeouts.testing,
           loggerFactory = loggerFactory,
           sequencerMember = SequencerId(DefaultTestIdentities.physicalSynchronizerId.uid),
-          blockSequencerMode = true,
-          cachingConfigs = CachingConfigs(),
-          batchingConfig = BatchingConfig(),
+          cachingConfigs = SequencerCachingConfigs(),
+          batchingConfig = SequencerBatchingConfig(),
           sequencerMetrics = SequencerMetrics.noop(getClass.getName),
         )
 
@@ -76,7 +74,7 @@ trait DbSequencerBlockStoreTest
             testedProtocolVersion,
             timeouts,
             loggerFactory,
-            batchingConfig = BatchingConfig(
+            batchingConfig = SequencerBatchingConfig(
               // Required to test the aggregation pruning query batching
               maxPruningTimeInterval = PositiveFiniteDuration.ofSeconds(1),
               inFlightAggregationsQueryInterval = inFlightAggregationsQueryInterval,
@@ -129,9 +127,8 @@ trait DbSequencerBlockStoreTest
         timeouts = timeouts,
         loggerFactory = loggerFactory,
         sequencerMember = sequencerId,
-        blockSequencerMode = true,
-        cachingConfigs = CachingConfigs(),
-        batchingConfig = BatchingConfig(),
+        cachingConfigs = SequencerCachingConfigs(),
+        batchingConfig = SequencerBatchingConfig(),
         sequencerMetrics = SequencerMetrics.noop("db-sequencer-block-store-test"),
       )
 
@@ -140,7 +137,7 @@ trait DbSequencerBlockStoreTest
         testedProtocolVersion,
         timeouts,
         loggerFactory,
-        batchingConfig = BatchingConfig(),
+        batchingConfig = SequencerBatchingConfig(),
         sequencerStore,
       )
       (sequencerStore, blockStore)

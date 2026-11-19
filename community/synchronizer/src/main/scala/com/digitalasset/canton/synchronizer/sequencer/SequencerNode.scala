@@ -104,7 +104,7 @@ import com.digitalasset.canton.topology.processing.{
   SequencedTime,
   TopologyTransactionProcessor,
 }
-import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
+import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.{
   StoreBasedTopologyStateForInitializationService,
@@ -116,12 +116,20 @@ import com.digitalasset.canton.topology.transaction.{
   SynchronizerTrustCertificate,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MaxBytesToDecompress, SingleUseCell}
+import com.digitalasset.canton.util.{
+  EitherTUtil,
+  ErrorUtil,
+  MaxBytesToDecompress,
+  MonadUtil,
+  SingleUseCell,
+}
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.ServerServiceDefinition
+import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
+import org.apache.pekko.stream.scaladsl.Source
 
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
@@ -267,15 +275,12 @@ class SequencerNodeBootstrap(
       val factory = SequencerMetaFactory.createFactory(
         protocolVersion,
         Some(config.health),
-        clock,
-        scheduler,
         arguments.metrics,
         arguments.executorServiceMetrics,
         storage,
         sequencerId,
         arguments.parameterConfig,
         config.publicApi,
-        arguments.futureSupervisor,
         loggerFactory,
       )(config.sequencer)
       addCloseable(factory)
@@ -329,10 +334,12 @@ class SequencerNodeBootstrap(
             topologyStore <- createSynchronizerTopologyStore(existing.synchronizerId)
           } yield Some(
             StageResult(
+              existing.synchronizerId.logical,
               existing.synchronizerParameters,
               createSequencerFactory(pv),
               topologyStore,
               topologyAndSequencerSnapshot = None,
+              ignoreLsuPsidCheck = false,
             )
           )
 
@@ -389,11 +396,13 @@ class SequencerNodeBootstrap(
           adminTokenDispenser,
           sequencerId,
           result.sequencerFactory,
+          result.synchronizerId,
           result.staticSynchronizerParameters,
           manager,
           result.synchronizerTopologyStore,
           nonInitializedSequencerNodeServer.getAndSet(None),
           result.topologyAndSequencerSnapshot,
+          result.ignoreLsuPsidCheck,
           () =>
             finalizeInitialization(
               result.synchronizerTopologyStore.storeId.psid,
@@ -430,29 +439,22 @@ class SequencerNodeBootstrap(
           )
           val sequencerFactory =
             createSequencerFactory(request.synchronizerParameters.protocolVersion)
-          val synchronizerIds = request.topologySnapshot.result
-            .map(_.mapping)
-            .collect { case SequencerSynchronizerState(synchronizer, _, _, _) => synchronizer }
-            .toSet
           for {
-            synchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
-              synchronizerIds.headOption.toRight(
-                "No synchronizer id within topology state defined!"
-              )
-            )
             topologyStore <- EitherT.right(
               createSynchronizerTopologyStore(
-                PhysicalSynchronizerId(synchronizerId, request.synchronizerParameters)
+                PhysicalSynchronizerId(request.synchronizerId, request.synchronizerParameters)
               )
             )
             _ <- CryptoHandshakeValidator
               .validate(request.synchronizerParameters, cryptoConfig)
               .toEitherT[FutureUnlessShutdown]
           } yield StageResult(
+            request.synchronizerId,
             request.synchronizerParameters,
             sequencerFactory,
             topologyStore,
             Some(request.topologySnapshot -> request.sequencerSnapshot),
+            ignoreLsuPsidCheck = request.ignoreLsuPsidCheck,
           )
         }.map { _ =>
           InitializeSequencerResponse(replicated = config.replication.exists(_.isEnabled))
@@ -468,13 +470,15 @@ class SequencerNodeBootstrap(
       adminTokenDispenser: CantonAdminTokenDispenser,
       sequencerId: SequencerId,
       sequencerFactory: SequencerFactory,
+      synchronizerId: SynchronizerId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
       authorizedTopologyManager: AuthorizedTopologyManager,
       synchronizerTopologyStore: TopologyStore[SynchronizerStore],
       preinitializedServer: Option[DynamicGrpcServer],
       topologyAndSequencerSnapshot: Option[
-        (GenericStoredTopologyTransactions, Option[SequencerSnapshot])
+        (Source[GenericStoredTopologyTransaction, NotUsed], Option[SequencerSnapshot])
       ],
+      ignoreLsuPsidCheck: Boolean,
       finalizeInitialization: () => EitherT[FutureUnlessShutdown, String, Unit],
       healthReporter: GrpcHealthReporter,
       healthService: DependenciesHealthService,
@@ -485,7 +489,7 @@ class SequencerNodeBootstrap(
       with HasCloseContext {
     override def getAdminToken: Option[String] = Some(adminTokenDispenser.getCurrentToken.secret)
     // save one argument and grab the synchronizerId from the store ...
-    private val psid = synchronizerTopologyStore.storeId.psid
+    private val psid = PhysicalSynchronizerId(synchronizerId, staticSynchronizerParameters)
     private val synchronizerLoggerFactory =
       loggerFactory.append("psid", psid.toString)
 
@@ -518,25 +522,58 @@ class SequencerNodeBootstrap(
                 )
                 for {
                   _ <- topologySnapshotValidator.validateAndApplyInitialTopologySnapshot(
-                    initialTopologyTransactions
+                    initialTopologyTransactions.map { stored =>
+                      stored.mapping.restrictedToSynchronizer.foreach(synchronizerIdFromMapping =>
+                        if (synchronizerIdFromMapping != synchronizerId) {
+                          throw TopologyManagerError.InvalidSynchronizer
+                            .Failure(synchronizerIdFromMapping)
+                            .asGrpcError
+                        }
+                      )
+                      stored
+                    }
                   )
+
+                  _ <- MonadUtil.when(config.topology.checkInitialTopologySnapshotConsistency)(
+                    synchronizerTopologyStore
+                      .checkConsistency(
+                        staticSynchronizerParameters,
+                        ignoreLsuPsidCheck = ignoreLsuPsidCheck,
+                      )
+                      .leftSemiflatMap(err => FutureUnlessShutdown.failed(err.asGrpcError))
+                  )
+                  topologyStoreMaxTimestamps <- EitherT
+                    .right(
+                      synchronizerTopologyStore
+                        .maxTimestamp(
+                          SequencedTime(CantonTimestamp.MaxValue),
+                          includeRejected = true,
+                        )
+                    )
+                    .map(_.map { case (sequenced, effective) =>
+                      (sequenced.value, effective.value)
+                    }.unzip)
+                  (latestSequencerEventTimestamp, initialTopologyEffectiveTimestamp) =
+                    topologyStoreMaxTimestamps
+                  latestPendingTopologyTransactionTimestamp = sequencerSnapshot.flatMap {
+                    snapshot =>
+                      val epsilon = crypto.staticSynchronizerParameters.topologyChangeDelay
+                      latestSequencerEventTimestamp.flatMap(latestSequencerEventTimestampValue =>
+                        Option.when(latestSequencerEventTimestampValue + epsilon > snapshot.lastTs)(
+                          latestSequencerEventTimestampValue
+                        )
+                      )
+                  }
                   _ <- sequencerSnapshot
                     .map { snapshot =>
                       logger.debug("Uploading sequencer snapshot to sequencer driver")
-                      logger.trace(
-                        s"Initial topology transactions used to establish last sequenced and effective time: ${initialTopologyTransactions.result}"
-                      )
-                      val epsilon = crypto.staticSynchronizerParameters.topologyChangeDelay
                       val initialState = SequencerInitialState(
                         psid,
                         snapshot,
-                        initialTopologyTransactions.result.view
-                          .map(tx => (tx.sequenced.value, tx.validFrom.value)),
+                        latestSequencerEventTimestamp = latestSequencerEventTimestamp,
+                        initialTopologyEffectiveTimestamp = initialTopologyEffectiveTimestamp,
                         latestPendingTopologyTransactionTimestamp =
-                          initialTopologyTransactions.result.view.collect {
-                            case tx if tx.sequenced.value + epsilon > snapshot.lastTs =>
-                              tx.sequenced.value
-                          }.lastOption,
+                          latestPendingTopologyTransactionTimestamp,
                       )
                       logger.debug(
                         s"last sequencer event timestamp = ${initialState.latestSequencerEventTimestamp}, initial topology effective timestamp = ${initialState.initialTopologyEffectiveTimestamp}"
@@ -645,8 +682,7 @@ class SequencerNodeBootstrap(
             loggerFactory,
           )
 
-          // TODO(#29474): Using the latest sequenced event for initializing the topology client's head is a BUG.
-          //  However, currently, BFT sequencers are getting stuck on restart without this, see the issue for details.
+          // TODO(#29474)
           _ <- sequencerFactory match {
             case _: BftSequencerFactory =>
               EitherT.right[String](
@@ -739,12 +775,13 @@ class SequencerNodeBootstrap(
               synchronizerLoggerFactory,
             )
 
-          sequencerChannelServiceO = parameters.alphaSequencerChannelSupport.map(_ =>
+          sequencerChannelServiceO = parameters.alphaSequencerChannelSupport.map(channelsConfig =>
             GrpcSequencerChannelService(
               authenticationConfig.check,
               clock,
               staticSynchronizerParameters.protocolVersion,
               parameters.processingTimeouts,
+              channelsConfig,
               loggerFactory,
             )
           )
@@ -1009,12 +1046,14 @@ class SequencerNodeBootstrap(
   }
 
   private case class StageResult(
+      synchronizerId: SynchronizerId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
       sequencerFactory: SequencerFactory,
       synchronizerTopologyStore: TopologyStore[SynchronizerStore],
       topologyAndSequencerSnapshot: Option[
-        (GenericStoredTopologyTransactions, Option[SequencerSnapshot])
+        (Source[GenericStoredTopologyTransaction, NotUsed], Option[SequencerSnapshot])
       ],
+      ignoreLsuPsidCheck: Boolean,
   )
 
   // Deferred health component for the sequencer health, created during initialization

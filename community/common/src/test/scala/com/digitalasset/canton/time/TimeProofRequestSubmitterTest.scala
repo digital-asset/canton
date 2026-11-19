@@ -12,10 +12,10 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{
+  AggregatedSignedContent,
   Batch,
   Deliver,
   MessageId,
-  SignedContent,
   TimeProof,
 }
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
@@ -81,7 +81,7 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
       val event =
         OrdinarySequencedEvent(
           counter = SequencerCounter(0),
-          signedEvent = SignedContent(
+          signedEvent = AggregatedSignedContent(
             Deliver.create(
               None,
               CantonTimestamp.ofEpochSecond(seconds.toLong),
@@ -92,7 +92,6 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
               testedProtocolVersion,
             ),
             SymbolicCrypto.emptySignature,
-            None,
             testedProtocolVersion,
           ),
         )(traceContext)

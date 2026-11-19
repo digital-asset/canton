@@ -5,8 +5,8 @@
 - **Who gets pinged, and why.** Two alerts @-mention people, both resolving the on-duty name from the rota Google sheet via `select_rota.py` and matching a Slack ID in `roster_people.json`:
   - **Flaky/nightly alert** (`alert_slack.py`), when the same test fails on several consecutive commits on a tracked branch:
     - a **flaky streak** and a **broken nightly** both ping the **Flaky Canton** rotation (three people), since fixing a broken test is theirs.
-  - **Red-main alert** (`slack_red_main_with_volunteer`), when a job fails on `main`: it pings the rota mapped to the failed job by `rotation_for_job` in `select_rota.py`. A red **blackduck** job pings the **Release & Blackduck** rota, test jobs (matched by `TEST_JOB_PREFIXES`) ping **Flaky Canton**, and everything else pings the **CI rota**.
-    - **GitHub Actions** alerts only on **build or infrastructure** jobs. Test-job failures are excluded, since the flaky/nightly alert above covers them. The one exception is `crash_recovery_test_36*`, an infra job that never reaches the flaky pipeline, which pings Flaky Canton as a test. Which jobs count as tests is set in [`notify_job_classification.yml`](notify_job_classification.yml), kept in sync with the workflow by `check_canton_build_required_gate.py`.
+  - **Red-main alert** (`slack_notify_failure_with_volunteer`), when a job fails on `main`: it pings the rota mapped to the failed job by `rotation_for_job` in `select_rota.py`. A red **blackduck** job pings the **Release & Blackduck** rota, test jobs (matched by `TEST_JOB_PREFIXES`) ping **Flaky Canton**, and everything else pings the **CI rota**.
+    - **GitHub Actions** alerts only on **build or infrastructure** jobs. Test-job failures are excluded, since the flaky/nightly alert above covers them. The one exception is `crash_recovery_test_37*`, an infra job that never reaches the flaky pipeline, which pings Flaky Canton as a test. Which jobs count as tests is set in [`notify_job_classification.yml`](notify_job_classification.yml), kept in sync with the workflow by `check_canton_build_required_gate.py`.
     - **CircleCI** has no test/infra split, so every failed job alerts and the prefixes decide who is pinged.
 - **Fallback when the lookup fails.** If the sheet cannot be read (`GCLOUD_SHEETS_SA_KEY` unset, the service account is not a Viewer), nobody is on rota that week, or the name has no Slack ID in `roster_people.json`, the alert @-mentions `fallback_pool` from `roster_people.json` instead of pinging no one.
 - **Weekly Slack topics.** A separate scheduled workflow, `update_rota_topics.yml`, runs every Monday and rewrites the team channel topics from the same rota sheet, so each channel topic always names the current on-duty person.
@@ -56,7 +56,9 @@ flowchart TD
 
     H1 --> J{"issue has an assignee?"}
     I -->|yes| J
-    J -->|no| K["streaks.json"]
+    J -->|no| J5{"nightly, or new commit at<br/>streak 3, 6, 9, …?<br/>past 30: first today?"}
+    J5 -->|no| J6["suppressed, already alerted"]
+    J5 -->|yes| K["streaks.json"]
     J -->|yes| J2{"within 24h of assignment?"}
     J2 -->|yes| J1["suppressed, grace period"]
     J2 -->|no| J3{"already failed today?"}
@@ -69,7 +71,7 @@ flowchart TD
     M -->|no| M2["Flaky test alert<br/>@ Flaky Canton rota"]
 ```
 
-The separate red-main alert (`slack_red_main_with_volunteer`) is not shown here. It pings per failing job rather than per streak, and covers build and infrastructure failures. See the TLDR for how the two alerts divide the work.
+The separate red-main alert (`slack_notify_failure_with_volunteer`) is not shown here. It pings per failing job rather than per streak, and covers build and infrastructure failures. See the TLDR for how the two alerts divide the work.
 
 ### What do we check?
 
@@ -102,13 +104,13 @@ The goals of the system are:
   Multi-shard failures or manual retries on the same commit collapse to one entry for this count.
   The threshold avoids noise from one-off failures or manual retries while ensuring that a genuinely broken test gets human attention quickly.
   The message @-mentions whoever is on the relevant rota shift that week, read from the [rota Google Sheet](https://docs.google.com/spreadsheets/d/1PEmLKqoB2DpokVhao5PNxznMI5ufZZbXgUju7Npn0BU) via `select_rota.py` (falling back to the roster pool in `roster_people.json` if the sheet is unreadable).
-  If the same alert keeps appearing, it means the test is still broken and has not been fixed yet, not that the notification system is misbehaving.
-  For the first 24 hours after an issue is assigned the alert is suppressed, to give whoever picked it up room to work without Slack noise. Past that window an assigned but still-failing test resumes alerting, capped to once per UTC calendar day rather than on every consecutive-failure streak, so a genuine breakage cannot stay silent for weeks just because someone is assigned, but a test that keeps streaking on every run does not re-page the assignee dozens of times a day either. The cap reuses the Date column already recorded in the issue's own history table, if a row from today is already there, the day's alert has already gone out. Unassigned issues are not rate-limited, they keep alerting on every streak until someone picks them up.
+  For an unassigned issue, an unbroken streak alerts on every threshold-th failing commit (3, 6, 9, …, or 10, 20, 30 for unstable jobs) rather than on every one, and each affected test shows its streak length ("failed on 6 consecutive commits"). A test left broken keeps resurfacing and reads as more urgent each time, without pinging the rota on every merge. Streaks are counted up to 30 commits (one GitHub API call per commit, cached for the run) and shown as "30+" beyond. If a GitHub API error cuts the count short, the alert is skipped and not sent later. The next one comes at the next alert point, the next threshold-th commit, or the next UTC day for a lower bound. An assigned issue still gets its daily alert, with the count so far as "4+". A streak that runs into rows trimmed from the history table shows the commits still in it as a lower bound ("12+"). With only a lower bound, the alert falls back to the first new failing commit of each UTC day. A rerun of a commit already in the history never alerts again.
+  For the first 24 hours after an issue is assigned the alert is suppressed, to give whoever picked it up room to work without Slack noise. Past that window an assigned but still-failing test resumes alerting, capped to once per UTC calendar day rather than on every consecutive-failure streak, so a genuine breakage cannot stay silent for weeks just because someone is assigned, but a test that keeps streaking on every run does not re-page the assignee dozens of times a day either. The cap reuses the Date column already recorded in the issue's own history table, if a row from today is already there, the day's alert has already gone out.
 
 ### Nightly tests
 
 Nightly jobs run once a night (CircleCI cron `0 22 * * 1-5`, Mon-Fri 22:00 UTC), days apart, so their failures land on non-adjacent commits and the 3-consecutive-commit check above can never fire for them.
-To still catch a genuinely broken nightly test, `manage_flaky_issues.py` uses a time-based equivalent for the jobs `is_nightly_job` recognises, meaning those whose name starts with `nightly_` plus any listed in `NIGHTLY_JOBS_WITHOUT_PREFIX` (currently just `toxiproxy_test_slow`, a nightly job that kept its historical name):
+To still catch a genuinely broken nightly test, `manage_flaky_issues.py` uses a time-based equivalent for the jobs `is_nightly_job` recognises, meaning those whose name starts with `nightly_` plus any listed in `NIGHTLY_JOBS_WITHOUT_PREFIX` in `flaky_common.py` (nightly jobs that kept their historical name, such as `toxiproxy_test_slow_36` and `protocol_continuity_test_all`):
 
 - `recent_nightly_commits()` reconstructs the commits of the last `NIGHTLY_CONSECUTIVE_FAILURES` (3) nightly cron slots by walking the schedule back from now and resolving `git rev-list -1 --before=<slot> origin/main` for each. The current run always counts as the most recent slot.
 - `nightly_streak()` returns true when the test has a failure row for each of those 3 nightly commits, read from the issue body (restricted to nightly jobs) plus the current commit.
@@ -118,7 +120,7 @@ When the streak fires, the issue is labelled `broken-nightly` and `alert_slack.p
 
 Two caveats:
 
-- Only jobs prefixed `nightly_`, or explicitly listed in `NIGHTLY_JOBS_WITHOUT_PREFIX` (currently just `toxiproxy_test_slow`), take this path. Other jobs that run solely in the nightly workflow but are neither prefixed nor listed (for example `postgres_conformance_test`, `test_with_java17`, `external_parties_test`, `protocol_continuity_test_all`) fall back to the consecutive-commit check, which effectively never fires at nightly cadence, so they get no confirmed broken-nightly signal. They still open a tracking issue and still trigger the per-run `slack_red_main_with_volunteer` ping on `main`, so their failures are not silent, they just miss the dedicated escalation. A prefix-less nightly job that should get the escalation needs adding to `NIGHTLY_JOBS_WITHOUT_PREFIX` in `flaky_common.py`.
+- Only jobs prefixed `nightly_`, or explicitly listed in `NIGHTLY_JOBS_WITHOUT_PREFIX`, take this path. A job that runs solely in the nightly workflow but is neither prefixed nor listed falls back to the consecutive-commit check, which effectively never fires at nightly cadence, so it gets no confirmed broken-nightly signal. It still opens a tracking issue, but its only Slack signal is the per-run `slack_notify_failure_with_volunteer` ping on `main`, and on CircleCI only if the job has that step. A prefix-less nightly job that should get the escalation needs adding to `NIGHTLY_JOBS_WITHOUT_PREFIX` in `flaky_common.py`.
 - On a very low-commit branch, where fewer than 3 distinct commits span the nightly window, `nightly_streak` cannot assemble 3 commits and does not fire.
 
 The label marks a test that is broken now, not one that ever was, so `update_issue` removes it once the test no longer fails in nightly runs, for example after a fix or a move to per-commit jobs.
@@ -142,7 +144,7 @@ Subsequent failures
   → gh issue reopen  (if closed, unless the failing commit predates the close)
   → gh issue comment (evidence comment, see Failure evidence)
   → gh issue edit    (new row appended to the table, linking the evidence comment)
-  → if 3 consecutive commits all fail AND (issue is unassigned OR (assigned more than 24h ago AND no row from today yet)): Slack alert sent
+  → if 3 consecutive commits all fail AND (issue is unassigned AND the streak is at a new 3rd, 6th, 9th, … commit OR (assigned more than 24h ago AND no row from today yet)): Slack alert sent
 
 OSS (digital-asset/canton) or other branches
   → Datadog metric only, no GitHub issue
@@ -152,6 +154,10 @@ The "Release Line" custom field on the kanban board is set to `main` or `main-2.
 If a new release line branch is added, append it to `branches_to_report` in the script and run `listReleaseLineFields.graphql` to find the field value ID.
 
 All `gh` API calls are wrapped in `run_gh_with_retries`, which retries up to 3 times with a 5-second delay on transient 5xx errors (502, 503, 504) before giving up.
+
+#### Linking to the delivery tracking issue
+
+Delivery reports on flaky tests through [DACH-NY/delivery#503](https://github.com/DACH-NY/delivery/issues/503). The **Link flaky issues to delivery** workflow (`link_flaky_issues_to_delivery.py`) attaches each flaky issue to a `Canton Flaky Tests YYYY-MM` issue for the month it was created in, and the monthly issues to #503, since GitHub allows at most 100 sub-issues per parent. A month with more than 100 continues in `Canton Flaky Tests YYYY-MM (2)`. It links every open flaky issue and every one created since the start of last month that has no parent yet, and creates a missing month. It is the only writer to the delivery repo and runs one at a time, so a month is never created twice. Run it manually with `dry_run` to see what it would do. It only runs on manual dispatch for now, its daily schedule is commented out until a manual dry run and a real run on main look right. It needs the `DELIVERY_ISSUES_TOKEN` secret (Issues read and write on `DACH-NY/delivery`, Issues read on `DACH-NY/canton`) and pages the CI rota when it fails.
 
 ### Failure evidence
 
@@ -230,13 +236,13 @@ Run the `/investigate-flaky-test` Claude Code skill on a downloaded investigatio
 |---|---|
 | `#team-canton` | L3 and L4 support duty |
 | `#team-canton-ci` | CI rota and Release & Blackduck rota |
-| `#team-canton-flaky-tests` | flaky rota (1 or 2 Canton people plus 1 SDK person) |
+| `#team-canton-flaky-tests` | flaky rota (up to 3 Canton people plus up to 2 SDK people) |
 
 The date in each topic is the current week's Monday. It is refreshed every week even when the person on duty is unchanged, so the topic always reflects the running week.
 
-By default the script is a **dry run**: it logs the topics it would set and writes nothing. Pass `--apply` to call `conversations.setTopic`. Any slot that cannot be resolved (unreadable sheet, missing header, unknown name, absent week) falls back to a `(nobody on rota)` placeholder, so a topic is always composed and set rather than skipped, and never renders as a broken mention. A run with any placeholder still exits non-zero so the degraded state is noticed.
+By default the script is a **dry run**: it logs the topics it would set and writes nothing. Pass `--apply` to call `conversations.setTopic`. Any slot that cannot be resolved (unreadable sheet, missing header, unknown name, absent week) falls back to a `(nobody on rota)` placeholder, so a topic is always composed and set rather than skipped, and never renders as a broken mention. A run with any placeholder still exits non-zero, and the log lists the rotations to fix in the sheet.
 
-Whenever a rotation cannot be resolved, the script also direct-messages the usual suspects (the roster's `fallback_pool`, override with the `ROTA_TOPICS_ADMIN_SLACK_ID` variable) asking them to fix the rota sheet. Like the topic writes, the DMs are only sent in apply mode.
+A failed run of either rota workflow (topics or reminders) on `main` posts the standard red-main alert to `#team-canton-internal`, pinging the CI rota, via `.github/workflows/_notify.yml`. The scripts post nothing else on failure. A manual topics dry run never alerts, and a run from another branch only shows red in Actions.
 
 It runs weekly via the `Update rota Slack topics` GitHub Actions workflow (`.github/workflows/update_rota_topics.yml`), scheduled every Monday at 04:00 UTC (06:00 CEST). The scheduled run writes topics for real. A manual dispatch defaults to a dry run so you can preview, tick the `apply` box to write from a manual run too.
 
@@ -262,11 +268,10 @@ To trigger a run off-schedule, for example to apply topics right after fixing th
 | Name | Kind | Used for |
 |---|---|---|
 | `GCLOUD_SHEETS_SA_KEY` | secret | Reading the rota sheet (SA must be a Viewer on it) |
-| `SLACK_BOT_QA_NOTIFICATIONS` | secret | Setting the topics and sending the fix-me DM (bot needs `channels:manage` for public channels or `groups:write` for private ones plus `chat:write`, and must be a member of each channel) |
+| `SLACK_BOT_QA_NOTIFICATIONS` | secret | Setting the topics (bot needs `channels:manage` for public channels or `groups:write` for private ones, and must be a member of each channel) |
 | `SLACK_CHANNEL_ID_TEAM_CANTON` | variable | Target channel id |
 | `SLACK_CHANNEL_ID_TEAM_CANTON_CI` | variable | Target channel id |
 | `SLACK_CHANNEL_ID_TEAM_CANTON_FLAKY_TESTS` | variable | Target channel id |
-| `ROTA_TOPICS_ADMIN_SLACK_ID` | variable | Optional comma-separated Slack ids to DM when a rotation cannot be resolved (defaults to the roster's `fallback_pool`, the usual suspects) |
 
 ## Rota upcoming-shift reminders
 
@@ -274,7 +279,7 @@ To trigger a run off-schedule, for example to apply topics right after fixing th
 
 For each rotation it looks at the week 28 days ahead and DMs whoever is **newly on duty** that week, meaning present in the target week but not in the week before it, so someone in the middle of a multi-week shift is not re-pinged. Because the target week is always exactly 28 days ahead and the job runs once a week, every future shift-start Monday is the target on exactly one run, so each newly-starting person is reminded once with no persistent state to dedupe against.
 
-Unlike the topics script, the reminder always sends. A missing `SLACK_BOT_QA_NOTIFICATIONS` token is a hard config error and the run fails fast before reading the sheet. A run that cannot read the sheet, or that hits a target-week name with no Slack ID, exits non-zero. On a total sheet-read failure it DMs the usual suspects (the roster's `fallback_pool`) so the sheet access gets fixed.
+Unlike the topics script, the reminder always sends. A missing `SLACK_BOT_QA_NOTIFICATIONS` token is a hard config error and the run fails fast before reading the sheet. A run that cannot read the sheet, or that hits a target-week name with no Slack ID, exits non-zero, as does a header or column-count mismatch in the target week. A failed run is reported by the workflow's failure alert (see above), the script sends no other failure message.
 
 It runs weekly via the `Remind upcoming rota` GitHub Actions workflow (`.github/workflows/remind_upcoming_rota.yml`), scheduled every Monday at 04:00 UTC (06:00 CEST), and can also be triggered off-schedule with `gh workflow run "Remind upcoming rota" --ref main` or **Run workflow** in the GitHub UI. The tool keeps no state, so a manual dispatch in a week whose scheduled run already fired re-sends that week's reminders.
 

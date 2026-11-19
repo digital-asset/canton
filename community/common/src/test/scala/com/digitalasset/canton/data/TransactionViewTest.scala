@@ -13,7 +13,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.v30.ActionDescription.FetchActionDescription
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.version.{DepthCounter, ProtocolVersion}
+import com.digitalasset.canton.version.DepthCounter
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
@@ -325,99 +325,95 @@ final class TransactionViewTest
 
       }
 
-      // Will be enabled from ProtocolVersion.v36
-      if (testedProtocolVersion >= ProtocolVersion.v36) {
+      "allow the parent view to reference input contracts from this view or any subview - same key" in {
 
-        "allow the parent view to reference input contracts from this view or any subview - same key" in {
+        val key: Option[LfGlobalKeyWithMaintainers] =
+          Some(ExampleContractFactory.buildKeyWithMaintainers())
 
-          val key: Option[LfGlobalKeyWithMaintainers] =
-            Some(ExampleContractFactory.buildKeyWithMaintainers())
+        val parentCoreInput = ExampleContractFactory.build(keyOpt = key)
+        val childCoreInput = ExampleContractFactory.build(keyOpt = key)
 
-          val parentCoreInput = ExampleContractFactory.build(keyOpt = key)
-          val childCoreInput = ExampleContractFactory.build(keyOpt = key)
+        keyTest(
+          Some(parentCoreInput),
+          Some(childCoreInput),
+        ) shouldBe Either.unit
+      }
 
-          keyTest(
-            Some(parentCoreInput),
-            Some(childCoreInput),
-          ) shouldBe Either.unit
-        }
+      "allow the parent view to reference input contracts from this view or any subview - different key" in {
 
-        "allow the parent view to reference input contracts from this view or any subview - different key" in {
+        def key(): Option[LfGlobalKeyWithMaintainers] =
+          Some(ExampleContractFactory.buildKeyWithMaintainers())
 
-          def key(): Option[LfGlobalKeyWithMaintainers] =
-            Some(ExampleContractFactory.buildKeyWithMaintainers())
+        val parentCoreInput = ExampleContractFactory.build(keyOpt = key())
+        val childCoreInput = ExampleContractFactory.build(keyOpt = key())
 
-          val parentCoreInput = ExampleContractFactory.build(keyOpt = key())
-          val childCoreInput = ExampleContractFactory.build(keyOpt = key())
-
-          keyTest(
-            Some(parentCoreInput),
-            Some(childCoreInput),
-          ) shouldBe Either.unit
-
-        }
-
-        "disallow the view if a referenced contract is not an input contract" in {
-
-          val expected = ExampleContractFactory.buildContractId()
-          val resolution = Map(
-            ExampleContractFactory.buildKeyWithMaintainers().globalKey ->
-              LfVersioned(
-                LfSerializationVersion.V2,
-                KeyResolutionWithMaintainers(
-                  contracts = Seq(expected),
-                  maintainers = Set(ExampleTransactionFactory.signatory),
-                ),
-              )
-          )
-          inside(keyTest(resolution = Some(resolution))) { case Left(error) =>
-            error should (include regex s"Failed to find key resolution contract.*${expected.coid}")
-          }
-        }
-
-        "disallow the view if the referenced contract does not have a key" in {
-
-          val parentCoreInput = ExampleContractFactory.build()
-          val key = ExampleTransactionFactory.globalKeyWithMaintainers().unversioned.globalKey
-          val resolution = Map(
-            key ->
-              LfVersioned(
-                LfSerializationVersion.V2,
-                KeyResolutionWithMaintainers(
-                  contracts = Seq(parentCoreInput.contractId),
-                  maintainers = Set(ExampleTransactionFactory.signatory),
-                ),
-              )
-          )
-          inside(keyTest(parentCoreInput = Some(parentCoreInput), resolution = Some(resolution))) {
-            case Left(error) =>
-              error should (include regex s"Contract ${parentCoreInput.contractId.coid} resolved for key.*does not have a matching key in the contract instance")
-          }
-        }
-
-        "disallow the view if the referenced contract has a mismatching key" in {
-
-          val resolutionKey = ExampleContractFactory.buildKeyWithMaintainers()
-          val contractKey = ExampleContractFactory.buildKeyWithMaintainers()
-          val parentCoreInput = ExampleContractFactory.build(keyOpt = Some(contractKey))
-
-          val resolution = Map(
-            resolutionKey.globalKey ->
-              LfVersioned(
-                LfSerializationVersion.V2,
-                KeyResolutionWithMaintainers(
-                  contracts = Seq(parentCoreInput.contractId),
-                  maintainers = Set(ExampleTransactionFactory.signatory),
-                ),
-              )
-          )
-          inside(keyTest(parentCoreInput = Some(parentCoreInput), resolution = Some(resolution))) {
-            case Left(error) =>
-              error should (include regex s"Contract ${parentCoreInput.contractId.coid} resolved for key.*does not have a matching key in the contract instance")
-          }
-        }
+        keyTest(
+          Some(parentCoreInput),
+          Some(childCoreInput),
+        ) shouldBe Either.unit
 
       }
+
+      "disallow the view if a referenced contract is not an input contract" in {
+
+        val expected = ExampleContractFactory.buildContractId()
+        val resolution = Map(
+          ExampleContractFactory.buildKeyWithMaintainers().globalKey ->
+            LfVersioned(
+              LfSerializationVersion.V2,
+              KeyResolutionWithMaintainers(
+                contracts = Seq(expected),
+                maintainers = Set(ExampleTransactionFactory.signatory),
+              ),
+            )
+        )
+        inside(keyTest(resolution = Some(resolution))) { case Left(error) =>
+          error should (include regex s"Failed to find key resolution contract.*${expected.coid}")
+        }
+      }
+
+      "disallow the view if the referenced contract does not have a key" in {
+
+        val parentCoreInput = ExampleContractFactory.build()
+        val key = ExampleTransactionFactory.globalKeyWithMaintainers().unversioned.globalKey
+        val resolution = Map(
+          key ->
+            LfVersioned(
+              LfSerializationVersion.V2,
+              KeyResolutionWithMaintainers(
+                contracts = Seq(parentCoreInput.contractId),
+                maintainers = Set(ExampleTransactionFactory.signatory),
+              ),
+            )
+        )
+        inside(keyTest(parentCoreInput = Some(parentCoreInput), resolution = Some(resolution))) {
+          case Left(error) =>
+            error should (include regex s"Contract ${parentCoreInput.contractId.coid} resolved for key.*does not have a matching key in the contract instance")
+        }
+      }
+
+      "disallow the view if the referenced contract has a mismatching key" in {
+
+        val resolutionKey = ExampleContractFactory.buildKeyWithMaintainers()
+        val contractKey = ExampleContractFactory.buildKeyWithMaintainers()
+        val parentCoreInput = ExampleContractFactory.build(keyOpt = Some(contractKey))
+
+        val resolution = Map(
+          resolutionKey.globalKey ->
+            LfVersioned(
+              LfSerializationVersion.V2,
+              KeyResolutionWithMaintainers(
+                contracts = Seq(parentCoreInput.contractId),
+                maintainers = Set(ExampleTransactionFactory.signatory),
+              ),
+            )
+        )
+        inside(keyTest(parentCoreInput = Some(parentCoreInput), resolution = Some(resolution))) {
+          case Left(error) =>
+            error should (include regex s"Contract ${parentCoreInput.contractId.coid} resolved for key.*does not have a matching key in the contract instance")
+        }
+      }
+
     }
 
   }
@@ -436,7 +432,7 @@ final class TransactionViewTest
 
       val created = createdIds.map { id =>
         val contract = ExampleContractFactory.build(overrideContractId = Some(id))
-        CreatedContract.tryCreate(contract, consumed.contains(id), rolledBack = false)
+        CreatedContract.tryCreate(contract, consumed.contains(id))
       }
       val coreInputs2 = coreInputs.transform { (id, contract) =>
         InputContract(contract, consumed.contains(id))
@@ -449,7 +445,7 @@ final class TransactionViewTest
           archivedInSubviews,
           keyResolution,
           actionDescription,
-          RollbackContextFactory(testedProtocolVersion).empty,
+          RollbackScope.empty,
           salt,
           externalCallResults,
           testedProtocolVersion,

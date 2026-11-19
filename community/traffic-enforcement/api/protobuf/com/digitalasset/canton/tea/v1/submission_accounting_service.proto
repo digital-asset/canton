@@ -5,6 +5,8 @@ syntax = "proto3";
 
 package com.digitalasset.canton.tea.v1;
 
+import "google/protobuf/timestamp.proto";
+
 // Records which traffic account a command submission is charged to.
 // Internal to the participant: not exposed through the Ledger API.
 service SubmissionAccountingService {
@@ -12,6 +14,10 @@ service SubmissionAccountingService {
   // Fails with TRAFFIC_ACCOUNT_VALIDATION_FAILED if the balance is below required_balance,
   // and with TRAFFIC_CORRELATION_CONFLICT if the submission is already registered.
   rpc RegisterSubmission(RegisterSubmissionRequest) returns (RegisterSubmissionResponse);
+
+  // Delete the correlation with this key and registration time.
+  // Does nothing if there is no such correlation.
+  rpc ReleaseSubmission(ReleaseSubmissionRequest) returns (ReleaseSubmissionResponse);
 }
 
 message RegisterSubmissionRequest {
@@ -41,4 +47,26 @@ message RegisterSubmissionRequest {
   ChargedAccount account = 3;
 }
 
-message RegisterSubmissionResponse {}
+message RegisterSubmissionResponse {
+  // When TEA stored the correlation.
+  //
+  // Required
+  google.protobuf.Timestamp registered_at = 1;
+}
+
+message ReleaseSubmissionRequest {
+  // Hex encoding of the submission's change id hash.
+  //
+  // Required
+  string change_id_hash = 1;
+
+  // Required
+  string submission_id = 2;
+
+  // The `registered_at` returned by `RegisterSubmission`.
+  //
+  // Required
+  google.protobuf.Timestamp registered_at = 3;
+}
+
+message ReleaseSubmissionResponse {}

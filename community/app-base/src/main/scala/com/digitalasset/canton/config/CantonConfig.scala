@@ -95,6 +95,8 @@ import com.digitalasset.canton.synchronizer.config.{DeclarativeSequencerConfig, 
 import com.digitalasset.canton.synchronizer.mediator.{
   DeduplicationStoreConfig,
   DelayedVerdictSenderConfig,
+  MediatorBatchingConfig,
+  MediatorCachingConfigs,
   MediatorConfig,
   MediatorNodeConfig,
   MediatorNodeParameterConfig,
@@ -103,10 +105,6 @@ import com.digitalasset.canton.synchronizer.mediator.{
   RemoteMediatorConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.*
-import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
-  DatabaseSequencerExclusiveStorageConfig,
-  SequencerHighAvailabilityConfig,
-}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.SequencerCoreSubscriptionConfig
@@ -125,6 +123,8 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
   LsuRepair,
   LsuSequencingBoundsOverride,
   RemoteSequencerConfig,
+  SequencerBatchingConfig,
+  SequencerCachingConfigs,
   SequencerLimits,
   SequencerLsuConfig,
   SequencerNodeConfig,
@@ -403,11 +403,14 @@ final case class CantonParameters(
   * @param enableRepairCommands
   *   Feature flag to enable the set of commands used by Canton operators for manual repair
   *   purposes.
+  * @param deprecated
+  *   Feature flags that control deprecated features until they are removed.
   */
 final case class CantonFeatures(
     enablePreviewCommands: Boolean = false,
     enableTestingCommands: Boolean = false,
     enableRepairCommands: Boolean = false,
+    deprecated: DeprecatedFeaturesConfig = DeprecatedFeaturesConfig(),
 ) {
   def featureFlags: Set[FeatureFlag] =
     (Seq(FeatureFlag.Stable)
@@ -535,6 +538,8 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
         enableRepairService = features.enableRepairCommands,
         damlTopUpEnabled = participantConfig.trafficAccounting.damlTopUpEnabled,
         alphaAcsReplicationSupport = participantParameters.alphaAcsReplicationSupport,
+        batchingConfig = participantParameters.batching,
+        cachingConfigs = participantParameters.caching,
       )
     }
 
@@ -574,6 +579,8 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
           sequencerNodeConfig.parameters.disableReleaseVersionHandshakeCheck,
         enablePrevalidation = sequencerNodeConfig.parameters.enablePrevalidation,
         enableAsyncSequencerLogging = sequencerNodeConfig.parameters.enableAsyncSequencerLogging,
+        batchingConfig = sequencerNodeConfig.parameters.batching,
+        cachingConfigs = sequencerNodeConfig.parameters.caching,
       )
 
     }
@@ -590,6 +597,8 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
         general = CantonNodeParameterConverter.general(this, mediatorNodeConfig),
         protocol = CantonNodeParameterConverter.protocol(this, mediatorNodeConfig.parameters),
         delayedVerdictSender = mediatorNodeConfig.parameters.delayedVerdictSender,
+        batchingConfig = mediatorNodeConfig.parameters.batching,
+        cachingConfigs = mediatorNodeConfig.parameters.caching,
       )
     }
 
@@ -768,10 +777,9 @@ private[canton] object CantonNodeParameterConverter {
       enablePreviewFeatures = parent.features.enablePreviewCommands,
       enableTestingFeatures = parent.features.enableTestingCommands,
       enableKeyDownload = parent.parameters.enableKeyDownload,
+      enableScopeOnlyJwt = parent.features.deprecated.enableScopeOnlyJwt,
       processingTimeouts = parent.parameters.timeouts.processing,
       sequencerClient = node.sequencerClient,
-      cachingConfigs = node.parameters.caching,
-      batchingConfig = node.parameters.batching,
       nonStandardConfig = parent.parameters.nonStandardConfig,
       dbMigrateAndStart = node.storage.parameters.migrateAndStart,
       exitOnFatalFailures = parent.parameters.exitOnFatalFailures,
@@ -1137,15 +1145,6 @@ object CantonConfig {
     lazy implicit final val topologyConfigReader: ConfigReader[TopologyConfig] =
       deriveReader[TopologyConfig]
 
-    lazy implicit val databaseSequencerExclusiveStorageConfigReader
-        : ConfigReader[DatabaseSequencerExclusiveStorageConfig] =
-      deriveReader[DatabaseSequencerExclusiveStorageConfig]
-    lazy implicit val sequencerHighAvailabilityConfigReader
-        : ConfigReader[SequencerHighAvailabilityConfig] =
-      deriveReader[SequencerHighAvailabilityConfig]
-    lazy implicit final val sequencerConfigDatabaseReader: ConfigReader[SequencerConfig.Database] =
-      deriveReader[SequencerConfig.Database]
-
     lazy implicit final val throughputCapConfigReader
         : ConfigReader[BlockSequencerConfig.ThroughputCapConfig] = {
       implicit val throughputCapByMessageTypeConfigReader
@@ -1306,11 +1305,9 @@ object CantonConfig {
           objCur <- cur.asObjectCursor
           sequencerType <- objCur.atKey("type").flatMap(_.asString)
           config <- (sequencerType match {
-            case "database" =>
-              sequencerConfigDatabaseReader.from(objCur.withoutKey("type"))
             case BftSequencerFactory.ShortName =>
               sequencerConfigBftSequencerReader.from(objCur.withoutKey("type"))
-            case "reference" =>
+            case "reference" | "database" =>
               Right(SequencerConfig.DeprecatedSequencerConfig(sequencerType))
             case _ =>
               Left(
@@ -1466,22 +1463,34 @@ object CantonConfig {
     lazy implicit final val sessionSigningKeysConfigReader: ConfigReader[SessionSigningKeysConfig] =
       deriveReader[SessionSigningKeysConfig]
 
-    lazy implicit final val cachingConfigsReader: ConfigReader[CachingConfigs] = {
-      implicit val cacheConfigWithTimeoutReader: ConfigReader[CacheConfigWithTimeout] =
-        deriveReader[CacheConfigWithTimeout]
-      implicit val cacheConfigWithMemoryBoundsReader: ConfigReader[CacheConfigWithMemoryBounds] =
-        deriveReader[CacheConfigWithMemoryBounds]
+    lazy implicit final val cacheConfigWithTimeoutReader: ConfigReader[CacheConfigWithTimeout] =
+      deriveReader[CacheConfigWithTimeout]
+    lazy implicit final val cacheConfigWithMemoryBoundsReader
+        : ConfigReader[CacheConfigWithMemoryBounds] =
+      deriveReader[CacheConfigWithMemoryBounds]
+    lazy implicit final val sessionEncryptionKeyCacheConfigReader
+        : ConfigReader[SessionEncryptionKeyCacheConfig] =
+      deriveReader[SessionEncryptionKeyCacheConfig]
+    lazy implicit final val cacheConfigReader: ConfigReader[CacheConfig] =
+      deriveReader[CacheConfig]
+    lazy implicit final val cacheConfigWithSizeOnlyReader: ConfigReader[CacheConfigWithSizeOnly] =
+      deriveReader[CacheConfigWithSizeOnly]
 
-      implicit val sessionEncryptionKeyCacheConfigReader
-          : ConfigReader[SessionEncryptionKeyCacheConfig] =
-        deriveReader[SessionEncryptionKeyCacheConfig]
-      implicit val cacheConfigReader: ConfigReader[CacheConfig] =
-        deriveReader[CacheConfig]
-      implicit val cacheConfigWithSizeOnlyReader: ConfigReader[CacheConfigWithSizeOnly] =
-        deriveReader[CacheConfigWithSizeOnly]
+    lazy implicit final val participantBatchingConfigReader
+        : ConfigReader[ParticipantBatchingConfig] =
+      deriveReader[ParticipantBatchingConfig].applyDeprecations
+    lazy implicit final val sequencerBatchingConfigReader: ConfigReader[SequencerBatchingConfig] =
+      deriveReader[SequencerBatchingConfig].applyDeprecations
+    lazy implicit final val mediatorBatchingConfigReader: ConfigReader[MediatorBatchingConfig] =
+      deriveReader[MediatorBatchingConfig].applyDeprecations
 
-      deriveReader[CachingConfigs].applyDeprecations
-    }
+    lazy implicit final val participantCachingConfigReader
+        : ConfigReader[ParticipantCachingConfigs] =
+      deriveReader[ParticipantCachingConfigs].applyDeprecations
+    lazy implicit final val mediatorCachingConfigReader: ConfigReader[MediatorCachingConfigs] =
+      deriveReader[MediatorCachingConfigs].applyDeprecations
+    lazy implicit final val sequencerCachingConfigReader: ConfigReader[SequencerCachingConfigs] =
+      deriveReader[SequencerCachingConfigs].applyDeprecations
 
     lazy implicit final val ledgerApiServerParametersConfigReader
         : ConfigReader[LedgerApiServerParametersConfig] = {
@@ -1511,10 +1520,10 @@ object CantonConfig {
 
       implicit val deprecatedFields: DeprecatedFieldsFor[LedgerApiServerParametersConfig] =
         new DeprecatedFieldsFor[LedgerApiServerParametersConfig] {
-          override def deprecatePath: List[DeprecatedConfigPath[?]] = List(
-            DeprecatedConfigPath[String]("contract-id-seeding", since = "3.6.0"),
-            DeprecatedConfigPath[String]("use-weighted-batching", since = "3.7.0"),
-            DeprecatedConfigPath[String]("batching-parallelism", since = "3.8.0"),
+          override def deprecatePath: List[DeprecatedConfigPath] = List(
+            DeprecatedConfigPath("contract-id-seeding", since = "3.6.0"),
+            DeprecatedConfigPath("use-weighted-batching", since = "3.7.0"),
+            DeprecatedConfigPath("batching-parallelism", since = "3.8.0"),
           )
         }
 
@@ -1570,6 +1579,7 @@ object CantonConfig {
         implicit val periodWriterConfigReader: ConfigReader[AcsCommitmentPeriodConfig] =
           deriveReader[AcsCommitmentPeriodConfig]
 
+        @nowarn("cat=deprecation")
         implicit val disableOldAcsCommitmentProcessorReader
             : ConfigReader[AcsCommitmentConfig.DisableOldAcsCommitmentProcessor] =
           deriveEnumerationReader[AcsCommitmentConfig.DisableOldAcsCommitmentProcessor]
@@ -1647,6 +1657,8 @@ object CantonConfig {
         deriveReader[ThreadingConfig]
       deriveReader[CantonParameters]
     }
+    lazy implicit final val deprecatedFeaturesConfigReader: ConfigReader[DeprecatedFeaturesConfig] =
+      deriveReader[DeprecatedFeaturesConfig]
     lazy implicit final val cantonFeaturesReader: ConfigReader[CantonFeatures] =
       deriveReader[CantonFeatures]
     lazy implicit final val cantonWatchdogConfigReader: ConfigReader[WatchdogConfig] =
@@ -2016,14 +2028,6 @@ object CantonConfig {
     lazy implicit final val topologyConfigWriter: ConfigWriter[TopologyConfig] =
       deriveWriter[TopologyConfig]
 
-    lazy implicit val databaseSequencerExclusiveStorageConfigWriter
-        : ConfigWriter[DatabaseSequencerExclusiveStorageConfig] =
-      deriveWriter[DatabaseSequencerExclusiveStorageConfig]
-    lazy implicit val sequencerHighAvailabilityConfigWriter
-        : ConfigWriter[SequencerHighAvailabilityConfig] =
-      deriveWriter[SequencerHighAvailabilityConfig]
-    lazy implicit final val sequencerConfigDatabaseWriter: ConfigWriter[SequencerConfig.Database] =
-      deriveWriter[SequencerConfig.Database]
     lazy implicit final val throughputCapConfigWriter
         : ConfigWriter[BlockSequencerConfig.ThroughputCapConfig] = {
       import BlockSequencerConfig.IndividualThroughputCapConfig.ConfigImplicits.individualCapConfigWriter
@@ -2181,19 +2185,10 @@ object CantonConfig {
       deriveWriter[DatabaseSequencerConfig.SequencerPruningConfig]
 
     implicit def sequencerConfigWriter[C]: ConfigWriter[SequencerConfig] = {
-      case dbSequencerConfig: SequencerConfig.Database =>
-        import pureconfig.syntax.*
-        Map("type" -> "database").toConfig
-          .withFallback(sequencerConfigDatabaseWriter.to(dbSequencerConfig))
-
       case bftSequencerConfig: SequencerConfig.BftSequencer =>
         import pureconfig.syntax.*
         Map("type" -> BftSequencerFactory.ShortName).toConfig
           .withFallback(sequencerConfigBftSequencerWriter.to(bftSequencerConfig))
-
-      case otherSequencerConfig: SequencerConfig.External =>
-        import pureconfig.syntax.*
-        Map("type" -> "reference").toConfig
 
       case deprecated: SequencerConfig.DeprecatedSequencerConfig =>
         import pureconfig.syntax.*
@@ -2324,20 +2319,34 @@ object CantonConfig {
     lazy implicit final val sessionSigningKeysConfigWriter: ConfigWriter[SessionSigningKeysConfig] =
       deriveWriter[SessionSigningKeysConfig]
 
-    lazy implicit final val cachingConfigsWriter: ConfigWriter[CachingConfigs] = {
-      implicit val cacheConfigWriter: ConfigWriter[CacheConfig] =
-        deriveWriter[CacheConfig]
-      implicit val cacheConfigWithTimeoutWriter: ConfigWriter[CacheConfigWithTimeout] =
-        deriveWriter[CacheConfigWithTimeout]
-      implicit val cacheConfigWithMemoryBoundsWriter: ConfigWriter[CacheConfigWithMemoryBounds] =
-        deriveWriter[CacheConfigWithMemoryBounds]
-      implicit val sessionEncryptionKeyCacheConfigWriter
-          : ConfigWriter[SessionEncryptionKeyCacheConfig] =
-        deriveWriter[SessionEncryptionKeyCacheConfig]
-      implicit val cacheConfigWithSizeOnlyWriter: ConfigWriter[CacheConfigWithSizeOnly] =
-        deriveWriter[CacheConfigWithSizeOnly]
-      deriveWriter[CachingConfigs]
-    }
+    lazy implicit final val cacheConfigWriter: ConfigWriter[CacheConfig] =
+      deriveWriter[CacheConfig]
+    lazy implicit final val cacheConfigWithTimeoutWriter: ConfigWriter[CacheConfigWithTimeout] =
+      deriveWriter[CacheConfigWithTimeout]
+    lazy implicit final val cacheConfigWithMemoryBoundsWriter
+        : ConfigWriter[CacheConfigWithMemoryBounds] =
+      deriveWriter[CacheConfigWithMemoryBounds]
+    lazy implicit final val sessionEncryptionKeyCacheConfigWriter
+        : ConfigWriter[SessionEncryptionKeyCacheConfig] =
+      deriveWriter[SessionEncryptionKeyCacheConfig]
+    lazy implicit final val cacheConfigWithSizeOnlyWriter: ConfigWriter[CacheConfigWithSizeOnly] =
+      deriveWriter[CacheConfigWithSizeOnly]
+
+    lazy implicit final val participantBatchingConfigWriter
+        : ConfigWriter[ParticipantBatchingConfig] =
+      deriveWriter[ParticipantBatchingConfig]
+    lazy implicit final val sequencerBatchingConfigWriter: ConfigWriter[SequencerBatchingConfig] =
+      deriveWriter[SequencerBatchingConfig]
+    lazy implicit final val mediatorBatchingConfigWriter: ConfigWriter[MediatorBatchingConfig] =
+      deriveWriter[MediatorBatchingConfig]
+
+    lazy implicit final val participantCachingConfigWriter
+        : ConfigWriter[ParticipantCachingConfigs] =
+      deriveWriter[ParticipantCachingConfigs]
+    lazy implicit final val mediatorCachingConfigWriter: ConfigWriter[MediatorCachingConfigs] =
+      deriveWriter[MediatorCachingConfigs]
+    lazy implicit final val sequencerCachingConfigWriter: ConfigWriter[SequencerCachingConfigs] =
+      deriveWriter[SequencerCachingConfigs]
 
     lazy implicit final val ledgerApiServerParametersConfigWriter
         : ConfigWriter[LedgerApiServerParametersConfig] = {
@@ -2395,6 +2404,7 @@ object CantonConfig {
         implicit val periodWriterConfigWriter: ConfigWriter[AcsCommitmentPeriodConfig] =
           deriveWriter[AcsCommitmentPeriodConfig]
 
+        @nowarn("cat=deprecation")
         implicit val disableOldAcsCommitmentProcessorWriter
             : ConfigWriter[AcsCommitmentConfig.DisableOldAcsCommitmentProcessor] =
           deriveEnumerationWriter[AcsCommitmentConfig.DisableOldAcsCommitmentProcessor]
@@ -2465,6 +2475,8 @@ object CantonConfig {
         deriveWriter[ThreadingConfig]
       deriveWriter[CantonParameters]
     }
+    lazy implicit final val deprecatedFeaturesConfigWriter: ConfigWriter[DeprecatedFeaturesConfig] =
+      deriveWriter[DeprecatedFeaturesConfig]
     lazy implicit final val cantonFeaturesWriter: ConfigWriter[CantonFeatures] =
       deriveWriter[CantonFeatures]
     lazy implicit final val cantonWatchdogConfigWriter: ConfigWriter[WatchdogConfig] =

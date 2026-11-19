@@ -29,6 +29,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.{DbStorageSingle, Storage}
@@ -170,7 +171,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
           predecessor = None,
           testedProtocolVersion,
           timeouts,
-          BatchingConfig(),
+          ParticipantBatchingConfig(),
           extendedLoggerFactory,
         )
         .futureValueUS
@@ -195,7 +196,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
           sequencerSnapshotTimestamp = None,
           cleanSynchronizerRecordTime = None,
           NoPackageDependencies,
-          CachingConfigs(),
+          TestCachingConfigs(),
           // turn off consistency checks for performance tests
           enableConsistencyChecks = false,
           TopologyConfig(),
@@ -272,7 +273,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
         CommonMockMetrics.cryptoMetrics,
         executionContext,
         timeouts,
-        BatchingConfig(),
+        ParticipantBatchingConfig(),
         loggerFactory,
         NoReportingTracerProvider,
         new ExecutorServiceMetrics(NoOpMetricsFactory),

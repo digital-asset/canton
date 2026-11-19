@@ -305,6 +305,18 @@ object StaticSynchronizerParameters
     TransactionProtocolLimits.default.maxQuorumSize,
   )
 
+  // Only v33 (and later) of the proto carries bft_orderer_limits
+  private[protocol] val defaultBftOrdererLimitsUntil = DefaultValueUntilExclusive[
+    StaticSynchronizerParameters,
+    StaticSynchronizerParameters.type,
+    BftOrdererLimits,
+  ](
+    _.synchronizerLimits.bftOrdererLimits,
+    "synchronizerLimits.bftOrdererLimits",
+    rpvForNextValidationBoundPV,
+    BftOrdererLimits.default,
+  )
+
   // Only v33 (and later) of the proto carries max_vetted_packages_per_participant
   private[protocol] val defaultMaxVettedPackagesPerParticipantUntil = DefaultValueUntilExclusive[
     StaticSynchronizerParameters,
@@ -397,6 +409,7 @@ object StaticSynchronizerParameters
     defaultAcsCommitmentLimitsUntil,
     defaultMaxSignaturesPerEnvelopeLimitUntil,
     defaultMaxQuorumSizeUntil,
+    defaultBftOrdererLimitsUntil,
     defaultMaxVettedPackagesPerParticipantUntil,
     defaultMaxSequencersPerSynchronizerUntil,
     defaultMaxMediatorsPerGroupUntil,

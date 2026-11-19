@@ -32,6 +32,7 @@ import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.{
   SequencerConnectionPoolError,
   SequencerConnectionPoolHealth,
 }
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
@@ -243,10 +244,14 @@ class SequencerConnectionPoolImpl private[sequencing] (
     )
   }
 
-  override def isThresholdStillReachable(
+  /** Determine whether the connection pool can still reach the given threshold, ignoring the
+    * `ignored` connections and considering an additional `extraUndecided` number of undecided
+    * connections.
+    */
+  private def isThresholdStillReachableInternal(
       threshold: PositiveInt,
-      ignored: Set[ConnectionConfig],
-      extraUndecided: NonNegativeInt,
+      ignored: Set[ConnectionConfig] = Set.empty,
+      extraUndecided: NonNegativeInt = NonNegativeInt.zero,
   )(implicit
       traceContext: TraceContext
   ): Either[SequencerConnectionPoolError.ThresholdUnreachableError, Unit] =
@@ -294,9 +299,29 @@ class SequencerConnectionPoolImpl private[sequencing] (
       Either.cond(
         isReachable,
         (),
-        SequencerConnectionPoolError.ThresholdUnreachableError(message),
+        SequencerConnectionPoolError.ThresholdUnreachableError(
+          message,
+          maxValidatedSequencerIds + undecided + extraUndecided.unwrap,
+        ),
       )
     }
+
+  override def isThresholdStillReachable(
+      threshold: PositiveInt,
+      ignored: Set[SequencerId],
+  )(implicit
+      traceContext: TraceContext
+  ): Either[SequencerConnectionPoolError.ThresholdUnreachableError, Unit] = {
+    import cats.syntax.functorFilter.*
+    lock.exclusive {
+      val connectionConfigs = trackedConnections.keys.toSeq.mapFilter(connection =>
+        connection.attributes.flatMap(attr =>
+          Option.when(ignored.contains(attr.sequencerId))(connection.config)
+        )
+      )
+      isThresholdStillReachableInternal(threshold, connectionConfigs.toSet)
+    }
+  }
 
   private def updateTrackedConnections(
       toBeAdded: immutable.Iterable[ConnectionConfig],
@@ -354,12 +379,18 @@ class SequencerConnectionPoolImpl private[sequencing] (
       *   Indicates that a restart has already been scheduled for this connection
       * @param delay
       *   Current restart delay. It grows exponentially at every restart, and is reset to the
-      *   minimum when a connection fails after having been validated.
+      *   minimum when a connection fails after having been validated for at least the minimum
+      *   stable duration (see [[updateRestartData]]).
+      * @param initialStartTimeO
+      *   Time at which the connection was first started after its last successful validation.
+      * @param validatedSinceO
+      *   Time at which the connection was last validated, if it is currently validated
       */
     private case class RestartData(
         scheduled: Boolean,
         delay: NonNegativeFiniteDuration,
         initialStartTimeO: Option[CantonTimestamp],
+        validatedSinceO: Option[CantonTimestamp],
     )
 
     private val restartDataRef = new AtomicReference[RestartData](
@@ -367,20 +398,42 @@ class SequencerConnectionPoolImpl private[sequencing] (
         scheduled = false,
         delay = config.minRestartConnectionDelay,
         initialStartTimeO = None,
+        validatedSinceO = None,
       )
     )
 
-    private def resetRestartDelay(): Unit = restartDataRef.getAndUpdate {
-      _.copy(
-        delay = config.minRestartConnectionDelay,
-        initialStartTimeO = None,
-      )
-    }.discard
+    private def markValidatedSince(): Unit = {
+      // Calling `clock.now` outside `getAndUpdate` to avoid any side effect the actual clock implementation may have
+      val now = wallClock.now
+
+      restartDataRef.getAndUpdate {
+        case current @ RestartData(_, _, _, None) =>
+          current.copy(validatedSinceO = Some(now))
+        case other => other
+      }.discard
+    }
+
+    /** Update the restart delay and clear the timings. The restart delay is reset only if the
+      * connection stayed validated for at least `minStableConnectionDuration`. Otherwise, we
+      * continue the backoff.
+      */
+    private def updateRestartData(): Unit = {
+      val now = wallClock.now
+      val currentConfig = config
+
+      restartDataRef.getAndUpdate { current =>
+        val isStable = current.validatedSinceO.forall(validatedSince =>
+          (now - validatedSince).compareTo(currentConfig.minStableConnectionDuration.duration) >= 0
+        )
+        val newDelay = if (isStable) currentConfig.minRestartConnectionDelay else current.delay
+        current.copy(delay = newDelay, initialStartTimeO = None, validatedSinceO = None)
+      }.discard
+    }
 
     private def scheduleRestart()(implicit traceContext: TraceContext): Unit = {
-      val RestartData(restartAlreadyScheduled, delay, initialStartTimeO) =
+      val RestartData(restartAlreadyScheduled, delay, initialStartTimeO, _) =
         restartDataRef.getAndUpdate {
-          case current @ RestartData(false, delay, _) =>
+          case current @ RestartData(false, delay, _, _) =>
             current.copy(
               scheduled = true,
               // Exponentially backoff the restart delay, bounded by the max
@@ -429,10 +482,13 @@ class SequencerConnectionPoolImpl private[sequencing] (
       }
 
     def startConnection()(implicit traceContext: TraceContext): Unit = {
+      // Calling `clock.now` outside `getAndUpdate` to avoid any side effect the actual clock implementation may have
+      val now = wallClock.now
+
       restartDataRef.getAndUpdate {
-        case current @ RestartData(_, _, None) =>
-          current.copy(initialStartTimeO = Some(wallClock.now))
-        case other => other
+        case current @ RestartData(_, _, initialStartTimeO, _) if initialStartTimeO.isEmpty =>
+          current.copy(initialStartTimeO = Some(now), validatedSinceO = None)
+        case other => other.copy(validatedSinceO = None)
       }.discard
 
       connection
@@ -456,10 +512,12 @@ class SequencerConnectionPoolImpl private[sequencing] (
             logger.debug(s"Poked with state $state")
 
             state match {
-              case SequencerConnectionState.Validated => processValidatedConnection(connection)
+              case SequencerConnectionState.Validated =>
+                markValidatedSince()
+                processValidatedConnection(connection)
 
               case SequencerConnectionState.Stopped(_) =>
-                removeConnectionFromPool(connection, actionIfPresent = resetRestartDelay())
+                removeConnectionFromPool(connection, actionIfPresent = updateRestartData())
                 if (!isClosing) scheduleRestart()
 
               // For any other state, ensure the connection is not in the pool
@@ -468,7 +526,7 @@ class SequencerConnectionPoolImpl private[sequencing] (
                   SequencerConnectionState.Stopping(_) =>
                 if (state.isFatal)
                   checkIfThresholdIsStillReachable(config.trustThreshold)
-                removeConnectionFromPool(connection, actionIfPresent = resetRestartDelay())
+                removeConnectionFromPool(connection, actionIfPresent = updateRestartData())
             }
           }
         })
@@ -501,7 +559,7 @@ class SequencerConnectionPoolImpl private[sequencing] (
 
         // Check whether the trust threshold is reachable with the new configuration
         _ <-
-          isThresholdStillReachable(
+          isThresholdStillReachableInternal(
             newThreshold,
             // The removed connections don't count
             ignored = changedConnections.removed,
@@ -549,11 +607,9 @@ class SequencerConnectionPoolImpl private[sequencing] (
   private def markValidated(
       connection: InternalSequencerConnection
   )(implicit traceContext: TraceContext): Unit = {
-    {
-      lock.exclusive {
-        require(trackedConnections.contains(connection))
-        trackedConnections.update(connection, true)
-      }
+    lock.exclusive {
+      require(trackedConnections.contains(connection))
+      trackedConnections.update(connection, true)
     }
     checkIfThresholdIsStillReachable(config.trustThreshold)
   }
@@ -562,7 +618,7 @@ class SequencerConnectionPoolImpl private[sequencing] (
       threshold: PositiveInt
   )(implicit traceContext: TraceContext): Unit =
     if (!isClosing) {
-      isThresholdStillReachable(threshold).leftMap { error =>
+      isThresholdStillReachableInternal(threshold).leftMap { error =>
         logger.info(error.error)
         if (initializedP.outcome(Left(error))) {
           // Close if we have not yet initialized
@@ -723,7 +779,7 @@ class SequencerConnectionPoolImpl private[sequencing] (
           synchronizerCrypto,
           clock,
           penaltyModifier = new SequencerPenaltyModifier {
-            override def increase(amount: PositiveInt, reason: String)(implicit
+            override def increase(amount: Penalty, reason: String)(implicit
                 traceContext: TraceContext
             ): Unit =
               penalties.increase(sequencerId, amount, reason)

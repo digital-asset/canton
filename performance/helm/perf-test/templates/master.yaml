@@ -1,0 +1,189 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "{{ $.Release.Name }}-perf-master"
+  labels:
+    app: perf-master
+spec:
+  serviceName: perf-master
+  replicas: 1
+  # tells k8s what to do with the auto-generated pvcs
+  persistentVolumeClaimRetentionPolicy:
+    # delete the pvc when 'helm uninstall' destroys the statefulset
+    whenDeleted: Delete
+    # keep the pvc if we just scale replicas down to 0 (safer for testing)
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app: perf-master
+  template:
+    metadata:
+      labels:
+        app: perf-master
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "10013"
+    spec:
+      containers:
+        - name: perf-master
+          resources:
+            limits:
+              cpu: {{ $.Values.master.resources.cpu | quote }}
+              memory: {{ $.Values.master.resources.memory | quote }}
+            requests:
+              cpu: {{ $.Values.master.resources.cpu | quote }}
+              memory: {{ $.Values.master.resources.memory | quote }}
+          image: "{{ $.Values.image.repo }}/canton-perf-master:{{ $.Values.image.tag }}"
+          env:
+            - name: JAVA_OPTS
+              value: -XX:MaxRAMPercentage=75.0
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.postgres.password | quote }}
+            - name: POSTGRES_HOST
+              value: "127.0.0.1"
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+            - name: POSTGRES_PORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: NUM_PARTICIPANTS_PER_POD
+              value: {{ .Values.participant.instancesPerPod | quote }}
+            - name: NUM_PARTICIPANT_PODS
+              value: {{ .Values.participant.podCount | quote }}
+            - name: NUM_SYNCHRONIZERS
+              value: {{ .Values.synchronizer.podCount | quote }}
+            - name: LOG_LEVEL_STDOUT
+              value: {{ $.Values.logLevelMaster | quote}}
+            - name: LOG_LEVEL_CANTON
+              value: {{ $.Values.logLevelMaster | quote}}
+            - name: TRANSFER_BATCH_SIZE
+              value: "150"
+            - name: STARTUP_PARALLELISM
+              value: "8"
+            - name: WAIT_UNTIL_READY_MINUTES
+              value: "30"
+            - name: NUM_ASSETS_PER_ISSUER
+              value: {{ $.Values.runConfig.numAssetsPerIssuer | quote }}
+            - name: RUN_TYPE
+              value: {{ $.Values.runConfig.runType | quote }}
+            - name: ISSUERS_PER_NODE
+              value: {{ $.Values.runConfig.numIssuersPerNode | quote }}
+            - name: NUM_ACCOUNTS_PER_ISSUER
+              value: {{ $.Values.runConfig.numAccountsPerIssuer | quote }}
+
+        # postgres container
+        - name: postgres
+          image: "{{ $.Values.postgres.image }}"
+          resources:
+            limits:
+              cpu: {{ $.Values.postgresSmall.resources.cpu | quote }}
+              memory: {{ $.Values.postgresSmall.resources.memory | quote }}
+            requests:
+              cpu: {{ $.Values.postgresSmall.resources.cpu | quote }}
+              memory: {{ $.Values.postgresSmall.resources.memory | quote }}
+          ports:
+            - name: postgres
+              # forcing to integer
+              containerPort: {{ $.Values.postgres.port | int }}
+          args:
+            - -c
+            - max_connections=200
+            - -c
+            - shared_buffers=3GB
+            - -c
+            - effective_cache_size=3GB
+            - -c
+            - maintenance_work_mem=256MB
+            - -c
+            - checkpoint_completion_target=0.9
+            - -c
+            - wal_buffers=16MB
+            - -c
+            - default_statistics_target=100
+            - -c
+            - random_page_cost=1.1
+            - -c
+            - effective_io_concurrency=200
+            - -c
+            - work_mem=5041kB
+            - -c
+            - huge_pages=off
+            - -c
+            - min_wal_size=2GB
+            - -c
+            - max_wal_size=8GB
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_HOST_AUTH_METHOD
+              value: trust
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.postgres.password | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+            - name: init-script
+              mountPath: /docker-entrypoint-initdb.d/init.sh
+              subPath: init.sh
+
+
+      volumes:
+        - name: init-script
+          configMap:
+            name: "{{ $.Release.Name }}-participant-init"
+  # auto-generate the pvc for the database
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        storageClassName: premium-rwo
+        resources:
+          requests:
+            storage: 500Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # static service name for routing
+  name: perf-master
+  labels:
+    app: perf-master
+spec:
+  type: ClusterIP
+  selector:
+    app: perf-master
+  ports:
+    # map the dynamic sync port
+    - name: perf-master-public-api
+      # forcing to integer
+      port: 5001
+      targetPort: ledger-api
+      protocol: TCP
+
+    - name: perf-master-admin-api
+      # forcing to integer
+      port: 5002
+      targetPort: admin-api
+      protocol: TCP
+
+    - name: perf-master-http-json-api
+      # forcing to integer
+      port: 7575
+      targetPort: http-api
+      protocol: TCP
+
+    # map the standard postgres port
+    - name: postgres
+      # forcing to integer
+      port: {{ $.Values.postgres.port | int }}
+      targetPort: postgres
+      protocol: TCP

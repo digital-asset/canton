@@ -419,10 +419,14 @@ class LifeCycleManagerTest extends AnyWordSpec with BaseTest with HasExecutionCo
     }
 
     "in a hierarchy" should {
+      // The closing in the test cases below is triggered by completing a promise, so this generous closingPatience doesn't
+      // actually extend the runtime of the test, but it merely avoids closingPatience warnings being logged due to thread scheduling
+      // hickups or stop-the-world GCs.
+      val closingPatience = 30.seconds
       "be closed by the parent" in {
-        val root = LifeCycleManager.root("root", 1.second, loggerFactory)
-        val child1 = LifeCycleManager.dependent("child1", root, 1.second, loggerFactory)
-        val child2 = LifeCycleManager.dependent("child2", root, 1.second, loggerFactory)
+        val root = LifeCycleManager.root("root", closingPatience, loggerFactory)
+        val child1 = LifeCycleManager.dependent("child1", root, closingPatience, loggerFactory)
+        val child2 = LifeCycleManager.dependent("child2", root, closingPatience, loggerFactory)
 
         val resource1 = new TestManagedResource("resource1")
         val resource2 = new TestManagedResource("resource2")
@@ -436,7 +440,7 @@ class LifeCycleManagerTest extends AnyWordSpec with BaseTest with HasExecutionCo
       }
 
       "respect priority order of children" in {
-        val root = LifeCycleManager.root("root", 1.second, loggerFactory)
+        val root = LifeCycleManager.root("root", closingPatience, loggerFactory)
         val child1 = LifeCycleManager.dependent(
           "child1",
           root,
@@ -473,9 +477,10 @@ class LifeCycleManagerTest extends AnyWordSpec with BaseTest with HasExecutionCo
       }
 
       "propagate the close signal immediately" in {
-        val root = LifeCycleManager.root("root", 1.second, loggerFactory)
-        val child = LifeCycleManager.dependent("child", root, 1.second, loggerFactory)
-        val grandchild = LifeCycleManager.dependent("grandchild", child, 1.second, loggerFactory)
+        val root = LifeCycleManager.root("root", closingPatience, loggerFactory)
+        val child = LifeCycleManager.dependent("child", root, closingPatience, loggerFactory)
+        val grandchild =
+          LifeCycleManager.dependent("grandchild", child, closingPatience, loggerFactory)
 
         val closingStateObservations =
           new AtomicReference[Seq[LifeCycleManagerObservationResult[Boolean]]](Seq.empty)
@@ -521,8 +526,8 @@ class LifeCycleManagerTest extends AnyWordSpec with BaseTest with HasExecutionCo
       }
 
       "have the parent wait for children's closing" in {
-        val root = LifeCycleManager.root("root", 1.second, loggerFactory)
-        val child = LifeCycleManager.dependent("child", root, 2.second, loggerFactory)
+        val root = LifeCycleManager.root("root", closingPatience, loggerFactory)
+        val child = LifeCycleManager.dependent("child", root, closingPatience, loggerFactory)
 
         val promise = Promise[Unit]()
         val compF =
@@ -538,8 +543,8 @@ class LifeCycleManagerTest extends AnyWordSpec with BaseTest with HasExecutionCo
       }
 
       "close the child independently from the parent" in {
-        val root = LifeCycleManager.root("root", 1.second, loggerFactory)
-        val child = LifeCycleManager.dependent("child", root, 2.second, loggerFactory)
+        val root = LifeCycleManager.root("root", closingPatience, loggerFactory)
+        val child = LifeCycleManager.dependent("child", root, closingPatience, loggerFactory)
 
         val promise = Promise[Unit]()
         val compF =
@@ -559,8 +564,8 @@ class LifeCycleManagerTest extends AnyWordSpec with BaseTest with HasExecutionCo
       }
 
       "synchronize with closing happens independently across managers" in {
-        val root = LifeCycleManager.root("root", 1.second, loggerFactory)
-        val child = LifeCycleManager.dependent("child", root, 2.second, loggerFactory)
+        val root = LifeCycleManager.root("root", closingPatience, loggerFactory)
+        val child = LifeCycleManager.dependent("child", root, closingPatience, loggerFactory)
 
         val promise = Promise[Unit]()
         val compF =
@@ -581,14 +586,14 @@ class LifeCycleManagerTest extends AnyWordSpec with BaseTest with HasExecutionCo
       }
 
       "runOnClose happens everywhere before synchronization" in {
-        val root = LifeCycleManager.root("root", 1.second, loggerFactory)
-        val child = LifeCycleManager.dependent("child", root, 2.second, loggerFactory)
+        val root = LifeCycleManager.root("root", closingPatience, loggerFactory)
+        val child = LifeCycleManager.dependent("child", root, closingPatience, loggerFactory)
 
         val promise = Promise[Unit]()
         val rootF =
           root.synchronizeWithClosingUS("root computation")(promise.future).failOnShutdown
         val childF =
-          root.synchronizeWithClosingUS("child computation")(promise.future).failOnShutdown
+          child.synchronizeWithClosingUS("child computation")(promise.future).failOnShutdown
 
         val rootHandle = root.runOnClose(new TestRunOnClosing("at root")).failOnShutdown
         val childHandle = child.runOnClose(new TestRunOnClosing("at child")).failOnShutdown
@@ -606,10 +611,10 @@ class LifeCycleManagerTest extends AnyWordSpec with BaseTest with HasExecutionCo
       }
 
       "close immediately if parent is closed" in {
-        val root = LifeCycleManager.root("root", 1.second, loggerFactory)
+        val root = LifeCycleManager.root("root", closingPatience, loggerFactory)
         root.closeAsync().futureValue
 
-        val child = LifeCycleManager.dependent("child", root, 2.second, loggerFactory)
+        val child = LifeCycleManager.dependent("child", root, closingPatience, loggerFactory)
         child.isClosing shouldBe true
         child.closeAsync().isCompleted shouldBe true
       }
@@ -639,7 +644,7 @@ class LifeCycleManagerTest extends AnyWordSpec with BaseTest with HasExecutionCo
             }
             root.runOnClose(registrationMonitor).failOnShutdown
 
-            val child = LifeCycleManager.dependent("child", root, 2.second, loggerFactory)
+            val child = LifeCycleManager.dependent("child", root, closingPatience, loggerFactory)
             child.isClosing shouldBe true
             root.closeAsync().futureValue
           }

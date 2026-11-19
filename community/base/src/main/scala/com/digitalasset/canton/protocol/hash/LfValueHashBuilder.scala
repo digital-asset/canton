@@ -76,6 +76,10 @@ private[hash] class LfValueHashBuilder(purpose: HashPurpose, hashTracer: HashTra
         addTypeTag(Int64Tag).addLong(v)
       case Value.ValueNumeric(v) =>
         addTypeTag(NumericTag).addNumeric(v)
+      case Value.ValueUint256(_) =>
+        throw TransactionHash.NodeHashingError.UnsupportedFeature(
+          "Uint256 values are not supported by the hashing scheme"
+        )
       case Value.ValueTimestamp(v) =>
         addTypeTag(TimestampTag).addLong(v.micros)
       case Value.ValueDate(v) =>

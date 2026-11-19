@@ -27,6 +27,7 @@ on:
 permissions:
   actions: write
   contents: read
+  id-token: write
   issues: write
 
 jobs:

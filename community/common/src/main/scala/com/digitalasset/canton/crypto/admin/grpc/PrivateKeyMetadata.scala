@@ -56,23 +56,26 @@ object PrivateKeyMetadata {
       Left(ProtoDeserializationError.InvariantViolation(field, s"empty or blank $field"))
     else String300.fromProtoPrimitive(keyId, field)
 
-  def fromProtoV30(key: v30.PrivateKeyMetadata): ParsingResult[PrivateKeyMetadata] =
+  def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      key: v30.PrivateKeyMetadata,
+  ): ParsingResult[PrivateKeyMetadata] =
     for {
       publicKeyWithName <- key.publicKeyWithName match {
         case v30.PrivateKeyMetadata.PublicKeyWithName.V30(pk) =>
-          PublicKeyWithName.fromProto30(pk)
+          PublicKeyWithName.fromProto30(pvv, pk)
         case v30.PrivateKeyMetadata.PublicKeyWithName.Empty =>
           ProtoConverter.required("public_key_with_name", None)
       }
       wrapperKeyId <- ProtoValidation.validateThen(
         key.wrapperKeyId,
         "wrapper_key_id",
-        ProtocolVersionValidation.AlwaysValidation,
+        pvv,
       )(parseKeyId)
       kmsKeyId <- ProtoValidation.validateThen(
         key.kmsKeyId,
         "kms_key_id",
-        ProtocolVersionValidation.AlwaysValidation,
+        pvv,
       )(parseKeyId)
     } yield PrivateKeyMetadata(
       publicKeyWithName,

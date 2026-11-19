@@ -81,6 +81,8 @@ object SerializationVersion {
   // keys were released as V2.
   private[lf] val minExternalCallResults: SerializationVersion = SerializationVersion.V3
 
+  private[lf] val minUint256: SerializationVersion = SerializationVersion.VDev
+
   private[lf] def txVersion(tx: Transaction): SerializationVersion = {
     import scala.Ordering.Implicits.*
     tx.nodes.valuesIterator.foldLeft(SerializationVersion.minVersion) {

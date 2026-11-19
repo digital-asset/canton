@@ -214,11 +214,12 @@ class BatchingParallelIngestionPipeSpec
             batch.map(value => SequencedItem(index = 0, value = value)).toList
           },
         seqMapperZero = List(SequencedItem(index = 0, value = 0)),
-        seqMapper = (previous, current) => {
-          seqMapperHook()
-          val lastIndex = previous.last.index
-          current.zipWithIndex.map { case (item, i) => item.copy(index = lastIndex + 1 + i) }
-        },
+        seqMapper = (previous, current) =>
+          Future {
+            seqMapperHook()
+            val lastIndex = previous.last.index
+            current.zipWithIndex.map { case (item, i) => item.copy(index = lastIndex + 1 + i) }
+          },
         dbPrepareParallelism = 2,
         dbPrepare = inBatch => {
           dbPrepareCalls.record(inBatch.toList)
@@ -245,9 +246,10 @@ class BatchingParallelIngestionPipeSpec
           ingesterHook(batch).map(_ => batch)
         },
         tailConflateFlow = Flow
-          .apply[List[BatchedItem]]
-          .map(b => b),
-        ingestTail = batch => {
+          .apply[DbBatch]
+          .map(Vector(_)),
+        ingestTail = batches => {
+          val batch = batches.flatten.toList
           ingestTailCalls.record(batch)
           ingestTailHook(batch).map(_ => batch)
         },

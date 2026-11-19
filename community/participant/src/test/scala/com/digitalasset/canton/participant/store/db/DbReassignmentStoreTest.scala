@@ -5,12 +5,12 @@ package com.digitalasset.canton.participant.store.db
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 import com.digitalasset.canton.data.CantonTimestamp.ofEpochSecond
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.data.UnassignmentData.UnassignmentGlobalOffset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.store.ReassignmentStoreTest
 import com.digitalasset.canton.participant.topology.{
   FailingOfflineTopologyLookup,
@@ -42,7 +42,7 @@ trait DbReassignmentStoreTest extends AsyncWordSpec with BaseTest with Reassignm
     def mkStore(
         synchronizerId: IndexedSynchronizer,
         offlineTopologyLookup: OfflineTopologyLookup,
-        batchingConfig: BatchingConfig = BatchingConfig(),
+        batchingConfig: ParticipantBatchingConfig = ParticipantBatchingConfig(),
     ): DbReassignmentStore =
       new DbReassignmentStore(
         storage,
@@ -65,7 +65,9 @@ trait DbReassignmentStoreTest extends AsyncWordSpec with BaseTest with Reassignm
         val store = mkStore(
           ReassignmentStoreTest.indexedTargetSynchronizer,
           new FailingOfflineTopologyLookup(),
-          batchingConfig = BatchingConfig(maxItemsInBatch = PositiveNumeric.tryCreate(pageSize)),
+          batchingConfig = ParticipantBatchingConfig(
+            maxItemsInBatch = PositiveNumeric.tryCreate(pageSize)
+          ),
         )
         val offset = Offset.tryFromLong(10L)
 

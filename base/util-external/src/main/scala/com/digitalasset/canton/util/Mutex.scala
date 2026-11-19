@@ -4,12 +4,13 @@
 package com.digitalasset.canton.util
 
 import com.digitalasset.canton.SynchronizedLikeMethod
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.util.Mutex.MutexBlocker
 
 import java.lang.Thread.onSpinWait
 import java.util.concurrent.ForkJoinPool
 import java.util.concurrent.ForkJoinPool.ManagedBlocker
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import java.util.concurrent.locks.ReentrantLock
 import scala.annotation.tailrec
 
@@ -52,6 +53,24 @@ class Mutex {
             retry(spins + 1)
           }
         } else {
+          if (Mutex.TrackContention.get()) {
+            // find call site
+            val cl = Thread
+              .currentThread()
+              .getStackTrace
+              .find { e =>
+                val className = e.getClassName
+                Mutex.ignore.forall(pack => !className.startsWith(pack))
+              }
+              .map(_.toString)
+              .getOrElse("<unknown>")
+            Mutex.metrics
+              .updateAndGet(_.updatedWith(cl) {
+                case None => Some(1)
+                case Some(n) => Some(n + 1)
+              })
+              .discard
+          }
           // 3. "Heavy Lock" (Inflation) - Trigger FJP compensation
           // Only at this point do we notify the ForkJoinPool.
           val blocker = new MutexBlocker(lock)
@@ -68,6 +87,32 @@ class Mutex {
 }
 
 object Mutex {
+
+  val TrackContention: AtomicBoolean = new AtomicBoolean(false)
+  val metrics = new AtomicReference[Map[String, Int]](Map.empty)
+  def sorted() = metrics.get().toSeq.sortBy(-_._2)
+
+  private val ignore =
+    Seq(
+      "com.digitalasset.canton.util.Mutex",
+      "slick",
+      "java.",
+      "scala.",
+      "cats.",
+      "com.daml.metrics",
+      "com.daml.executors",
+      "com.digitalasset.canton.resource",
+      "com.digitalasset.canton.util.retry",
+      "com.digitalasset.canton.util.TryUtil",
+      "com.digitalasset.canton.metrics",
+      "com.daml.executors",
+      "com.digitalasset.canton.store.db.DbBulkUpdateProcessor",
+      "com.digitalasset.canton.lifecycle",
+      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous",
+      "org.apache.pekko", // SlickProjection, RestartWithBackoffSource
+
+    )
+
   def apply(): Mutex = new Mutex
   val MaxSpins = new AtomicInteger(3000)
   // Inner class to handle the official FJP integration

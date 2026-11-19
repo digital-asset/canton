@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 import org.checkerframework.checker.nullness.qual.NonNull;
 
 /**
@@ -167,287 +168,79 @@ public final class UpdateSubmission<U> {
     return accountId;
   }
 
+  private UpdateSubmission<U> copy(Consumer<Fields<U>> change) {
+    Fields<U> fields = new Fields<>(this);
+    change.accept(fields);
+    return fields.build();
+  }
+
   public UpdateSubmission<U> withWorkflowId(String workflowId) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        Optional.of(workflowId),
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+    return copy(f -> f.workflowId = Optional.of(workflowId));
   }
 
   public UpdateSubmission<U> withActAs(String actAs) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        List.of(actAs),
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+    return copy(f -> f.actAs = List.of(actAs));
   }
 
   public UpdateSubmission<U> withActAs(List<@NonNull String> actAs) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+    return copy(f -> f.actAs = actAs);
   }
 
   public UpdateSubmission<U> withReadAs(List<@NonNull String> readAs) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+    return copy(f -> f.readAs = readAs);
   }
 
   public UpdateSubmission<U> withMinLedgerTimeAbs(Optional<Instant> minLedgerTimeAbs) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+    return copy(f -> f.minLedgerTimeAbs = minLedgerTimeAbs);
   }
 
   public UpdateSubmission<U> withMinLedgerTimeRel(Optional<Duration> minLedgerTimeRel) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+    return copy(f -> f.minLedgerTimeRel = minLedgerTimeRel);
   }
 
-  public UpdateSubmission<U> withDeduplicationDuration(Optional<Duration> deduplicationDuration) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+  public UpdateSubmission<U> withDeduplicationDuration(Optional<Duration> deduplicationDuration)
+      throws CommandsSubmission.RedundantDeduplicationSpecification {
+    if (deduplicationDuration.isPresent() && deduplicationOffset.isPresent()) {
+      throw new CommandsSubmission.RedundantDeduplicationSpecification(
+          deduplicationDuration.get(), deduplicationOffset.get());
+    }
+    return copy(f -> f.deduplicationDuration = deduplicationDuration);
   }
 
-  public UpdateSubmission<U> withDeduplicationOffset(Optional<Long> deduplicationOffset) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+  public UpdateSubmission<U> withDeduplicationOffset(Optional<Long> deduplicationOffset)
+      throws CommandsSubmission.RedundantDeduplicationSpecification {
+    if (deduplicationOffset.isPresent() && deduplicationDuration.isPresent()) {
+      throw new CommandsSubmission.RedundantDeduplicationSpecification(
+          deduplicationDuration.get(), deduplicationOffset.get());
+    }
+    return copy(f -> f.deduplicationOffset = deduplicationOffset);
   }
 
   public UpdateSubmission<U> withAccessToken(Optional<String> accessToken) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+    return copy(f -> f.accessToken = accessToken);
   }
 
   public UpdateSubmission<U> withSynchronizerId(String synchronizerId) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        Optional.of(synchronizerId),
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+    return copy(f -> f.synchronizerId = Optional.of(synchronizerId));
   }
 
   public UpdateSubmission<U> withDisclosedContracts(
       List<@NonNull DisclosedContract> disclosedContracts) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+    return copy(f -> f.disclosedContracts = disclosedContracts);
   }
 
   public UpdateSubmission<U> withPackageIdSelectionPreference(
       List<@NonNull String> packageIdSelectionPreference) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+    return copy(f -> f.packageIdSelectionPreference = packageIdSelectionPreference);
   }
 
   public UpdateSubmission<U> withPrefetchContractKeys(
       List<PrefetchContractKey> prefetchContractKeys) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        accountId);
+    return copy(f -> f.prefetchContractKeys = prefetchContractKeys);
   }
 
   public UpdateSubmission<U> withAccountId(@NonNull String accountId) {
-    return new UpdateSubmission<U>(
-        userId,
-        commandId,
-        update,
-        actAs,
-        readAs,
-        workflowId,
-        minLedgerTimeAbs,
-        minLedgerTimeRel,
-        deduplicationDuration,
-        deduplicationOffset,
-        accessToken,
-        synchronizerId,
-        disclosedContracts,
-        packageIdSelectionPreference,
-        prefetchContractKeys,
-        Optional.of(accountId).filter(id -> !id.isEmpty()));
+    return copy(f -> f.accountId = Utils.optionalNonEmpty(accountId));
   }
 
   public CommandsSubmission toCommandsSubmission() {
@@ -469,5 +262,63 @@ public final class UpdateSubmission<U> {
         packageIdSelectionPreference,
         prefetchContractKeys,
         accountId);
+  }
+
+  private static final class Fields<U> {
+    String userId;
+    String commandId;
+    Update<U> update;
+    List<String> actAs;
+    List<String> readAs;
+    Optional<String> workflowId;
+    Optional<Instant> minLedgerTimeAbs;
+    Optional<Duration> minLedgerTimeRel;
+    Optional<Duration> deduplicationDuration;
+    Optional<Long> deduplicationOffset;
+    Optional<String> accessToken;
+    Optional<String> synchronizerId;
+    List<DisclosedContract> disclosedContracts;
+    List<String> packageIdSelectionPreference;
+    List<PrefetchContractKey> prefetchContractKeys;
+    Optional<String> accountId;
+
+    Fields(UpdateSubmission<U> s) {
+      userId = s.userId;
+      commandId = s.commandId;
+      update = s.update;
+      actAs = s.actAs;
+      readAs = s.readAs;
+      workflowId = s.workflowId;
+      minLedgerTimeAbs = s.minLedgerTimeAbs;
+      minLedgerTimeRel = s.minLedgerTimeRel;
+      deduplicationDuration = s.deduplicationDuration;
+      deduplicationOffset = s.deduplicationOffset;
+      accessToken = s.accessToken;
+      synchronizerId = s.synchronizerId;
+      disclosedContracts = s.disclosedContracts;
+      packageIdSelectionPreference = s.packageIdSelectionPreference;
+      prefetchContractKeys = s.prefetchContractKeys;
+      accountId = s.accountId;
+    }
+
+    UpdateSubmission<U> build() {
+      return new UpdateSubmission<>(
+          userId,
+          commandId,
+          update,
+          actAs,
+          readAs,
+          workflowId,
+          minLedgerTimeAbs,
+          minLedgerTimeRel,
+          deduplicationDuration,
+          deduplicationOffset,
+          accessToken,
+          synchronizerId,
+          disclosedContracts,
+          packageIdSelectionPreference,
+          prefetchContractKeys,
+          accountId);
+    }
   }
 }

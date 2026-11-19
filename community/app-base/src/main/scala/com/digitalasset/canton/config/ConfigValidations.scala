@@ -39,8 +39,6 @@ object ConfigValidations extends NamedLogging {
 
   type Validation = CantonConfig => Validated[NonEmpty[Seq[String]], Unit]
 
-  private val Valid: Validated[NonEmpty[Seq[String]], Unit] = Validated.valid(())
-
   private def toValidated(errors: Seq[String]): Validated[NonEmpty[Seq[String]], Unit] = NonEmpty
     .from(errors)
     .map(Validated.invalid[NonEmpty[Seq[String]], Unit])
@@ -82,7 +80,6 @@ object ConfigValidations extends NamedLogging {
     List[Validation](
       devProtocolVersionRequiresNonStandard,
       alphaProtocolVersionRequiresNonStandard,
-      dbSequencerRequiresNonStandard,
       bftBlockOrderingStandaloneModeRequiresNonStandard,
       snapshotDirRequiresNonStandard,
       warnIfUnsafeMinProtocolVersion,
@@ -97,9 +94,9 @@ object ConfigValidations extends NamedLogging {
       sessionSigningKeysOnlyWithKmsAndSchemesAreSupported,
       sessionSigningKeysParamsValidation,
       distinctScopesAndAudiencesOnAuthServices,
+      scopeOnlyJwtRequiresDeprecatedFeatureFlag,
       engineExperimentalExecutionConductorParticipants,
       dbLockFeaturesRequireUsingLockSupportingStorage,
-      highlyAvailableSequencerTotalNodeCount,
       noDuplicateStorageUnlessReplicated,
       atLeastOneNode,
       sequencerClientRetryDelays,
@@ -109,6 +106,7 @@ object ConfigValidations extends NamedLogging {
       defaultAcsPageSizeMustBeLeqMaxPageSize,
       validateLegacyContractsV11Enabled,
       serverConfigOnlyOneGrpcControlFlowMode,
+      jwksCacheMinRefreshInterval,
       clientChannelParamsOnlyOneGrpcControlFlowMode,
       sequencerChannelsRequireNonStandardConfig,
       enforceAcsReplicationSupportConstraints,
@@ -333,24 +331,6 @@ object ConfigValidations extends NamedLogging {
 
     toValidated(errors)
   }
-
-  private def dbSequencerRequiresNonStandard(
-      config: CantonConfig
-  ): Validated[NonEmpty[Seq[String]], Unit] = {
-    val errors = if (!config.parameters.nonStandardConfig) {
-      config.sequencers.toSeq.mapFilter { case (name, config) =>
-        config.sequencer match {
-          case _: SequencerConfig.Database => Some(dbSequencerRequiresNonStandardError(name.unwrap))
-          case _ => None
-        }
-      }
-    } else Nil
-
-    toValidated(errors)
-  }
-
-  def dbSequencerRequiresNonStandardError(nodeName: String): String =
-    s"Using DB sequencer config for sequencer $nodeName requires you to explicitly set canton.parameters.non-standard-config = yes"
 
   private def bftBlockOrderingStandaloneModeRequiresNonStandard(
       config: CantonConfig
@@ -809,12 +789,34 @@ object ConfigValidations extends NamedLogging {
       .getOrElse(Validated.Valid(()))
   }
 
-  private def isUsingHaSequencer(config: SequencerConfig): Boolean =
-    PartialFunction.cond(config) {
-      // needs to be using both a database sequencer config with that set to use HA
-      case dbConfig: SequencerConfig.Database =>
-        dbConfig.highAvailabilityEnabled
-    }
+  // TODO (i#33090): reject scope-only auth services unconditionally once the token format is removed
+  private def scopeOnlyJwtRequiresDeprecatedFeatureFlag(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    def isScopeOnly(authService: AuthServiceConfig): Boolean =
+      authService.targetScope.isDefined && authService.targetAudience.isEmpty
+
+    def scopeOnlyJwtDisabledError(nodeType: String, nodeName: String, api: String): String =
+      s"canton.${nodeType}s.$nodeName.$api.auth-services configures a target-scope without a target-audience, " +
+        s"which only scope-only JWTs can satisfy. ${DeprecatedFeaturesConfig.ScopeOnlyJwtDisabledMessage}"
+
+    val errors =
+      if (config.features.deprecated.enableScopeOnlyJwt) Nil
+      else
+        config.allLocalNodes.toSeq.flatMap { case (name, nodeConfig) =>
+          val apis = Seq("admin-api" -> nodeConfig.adminApi.authServices) ++ (nodeConfig match {
+            case participant: ParticipantNodeConfig =>
+              Seq("ledger-api" -> participant.ledgerApi.authServices)
+            case _ => Nil
+          })
+          apis.collect {
+            case (api, authServices) if authServices.exists(isScopeOnly) =>
+              scopeOnlyJwtDisabledError(nodeConfig.nodeTypeName, name.unwrap, api)
+          }
+        }
+
+    toValidated(errors)
+  }
 
   private def sequencerClientRetryDelays(
       config: CantonConfig
@@ -842,50 +844,12 @@ object ConfigValidations extends NamedLogging {
     }
   }
 
-  private def highlyAvailableSequencerTotalNodeCount(
-      config: CantonConfig
-  ): Validated[NonEmpty[Seq[String]], Unit] = {
-    def validate(
-        nodeType: String,
-        name: String,
-        sequencerConfig: SequencerConfig,
-    ): Validated[NonEmpty[Seq[String]], Unit] =
-      Option(sequencerConfig)
-        .collect { case dbConfig: SequencerConfig.Database => dbConfig }
-        .filter(_.highAvailabilityEnabled)
-        .map(
-          _.highAvailability
-            .getOrElse(throw new IllegalStateException("HA not set despite being enabled"))
-            .totalNodeCount
-            .unwrap
-        )
-        .fold(Valid) { totalNodeCount =>
-          Validated.cond(
-            totalNodeCount < DbLockConfig.MAX_SEQUENCER_WRITERS_AVAILABLE,
-            (),
-            NonEmpty(
-              Seq,
-              s"$nodeType node $name sets sequencer HA total node count to $totalNodeCount. Must be less than ${DbLockConfig.MAX_SEQUENCER_WRITERS_AVAILABLE}.",
-            ),
-          )
-        }
-
-    config.sequencersByString
-      .map { case (name, config) =>
-        validate("Sequencer", name, config.sequencer)
-      }
-      .toList
-      .sequence_
-  }
-
-  /** If a participant is using replicated storage or the database sequencer is configured to use
-    * its high availability support then it requires using a database that supports locking.
+  /** If a participant is using replicated storage then it requires using a database that supports
+    * locking.
     */
   private def dbLockFeaturesRequireUsingLockSupportingStorage(
       config: CantonConfig
   ): Validated[NonEmpty[Seq[String]], Unit] = {
-    val sequencerHaFeature = "the highly available database sequencer"
-
     def verifySupportedStorage(
         nodeType: String,
         nodeName: String,
@@ -896,15 +860,6 @@ object ConfigValidations extends NamedLogging {
         s"$nodeType node $nodeName must be configured to use Postgres for storage to use $feature"
       )
 
-    val sequencerNodeValidationErrors = config.sequencersByString
-      .filter { case (_, sequencerNodeConfig) =>
-        isUsingHaSequencer(sequencerNodeConfig.sequencer)
-      }
-      .toSeq
-      .mapFilter { case (name, node) =>
-        verifySupportedStorage("Sequencer", name, sequencerHaFeature, node)
-      }
-
     val participantNodeValidations = config.participantsByString
       .filter(
         _._2.replication.exists(_.isEnabled)
@@ -914,7 +869,7 @@ object ConfigValidations extends NamedLogging {
         verifySupportedStorage("Participant", name, "replication", node)
       }
 
-    toValidated(sequencerNodeValidationErrors ++ participantNodeValidations)
+    toValidated(participantNodeValidations)
   }
 
   /** Validate the config that the storage configuration is not shared between nodes unless for
@@ -930,13 +885,6 @@ object ConfigValidations extends NamedLogging {
           cfg.replication.exists(_.isEnabled)
         })
 
-    def allHighlyAvailableSequencers(nodes: List[(String, LocalNodeConfig)]): Boolean =
-      nodes
-        .map(_._2)
-        .forall(PartialFunction.cond(_) { case cfg: SequencerNodeConfig =>
-          isUsingHaSequencer(cfg.sequencer)
-        })
-
     def allHighlyAvailableMediators(nodes: List[(String, LocalNodeConfig)]): Boolean =
       nodes
         .map(_._2)
@@ -945,9 +893,7 @@ object ConfigValidations extends NamedLogging {
         })
 
     def requiresSharedStorage(nodes: List[(String, LocalNodeConfig)]): Boolean =
-      allReplicatedParticipants(nodes) || allHighlyAvailableSequencers(
-        nodes
-      ) || allHighlyAvailableMediators(nodes)
+      allReplicatedParticipants(nodes) || allHighlyAvailableMediators(nodes)
 
     val dbAccessToNodes = ConfigValidations.extractNormalizedDbAccess(
       config.participantsByString,
@@ -1048,44 +994,59 @@ object ConfigValidations extends NamedLogging {
       errors.result()
     }
 
+  /** The gRPC server configs of all local nodes. Note that their may be multiple configs per node.
+    */
+  private def serverConfigs(config: CantonConfig): Seq[(InstanceName, ServerConfig)] =
+    config.allLocalNodes.toSeq.flatMap { case (nodeName, nodeConfig) =>
+      (
+        Seq[ServerConfig](nodeConfig.adminApi) ++
+          (nodeConfig match {
+            case sequencer: SequencerNodeConfig =>
+              val bftEndpoints = sequencer.sequencer match {
+                case sequencerConfig: SequencerConfig.BftSequencer =>
+                  sequencerConfig.config.initialNetwork.map(_.serverEndpoint).toList
+                case _ => Nil
+              }
+              sequencer.publicApi +: bftEndpoints
+            case participant: ParticipantNodeConfig => Seq(participant.ledgerApi)
+            case _: MediatorNodeConfig => Nil // No public API
+            case _ => Nil // Tests
+          })
+      ).map(nodeName -> _)
+    }
+
   private def serverConfigOnlyOneGrpcControlFlowMode(
       config: CantonConfig
   ): Validated[NonEmpty[Seq[String]], Unit] =
-    toValidated {
-      val errors = Seq.newBuilder[String]
+    toValidated(serverConfigs(config).collect {
+      case (nodeName, serverConfig)
+          if serverConfig.flowControlWindow.isDefined && serverConfig.initialFlowControlWindow.isDefined =>
+        s"gRPC server config ('$nodeName', ${serverConfig.name}) has both " +
+          "flow-control-window and initial-flow-control-window set, " +
+          "but at most one of them should be set."
+    })
 
-      def validateServerConfig(serverConfig: ServerConfig, nodeName: InstanceName): Unit =
-        if (
-          serverConfig.flowControlWindow.isDefined && serverConfig.initialFlowControlWindow.isDefined
-        )
-          errors.addOne(
-            s"gRPC server config ('$nodeName', ${serverConfig.name}) has both " +
-              "flow-control-window and initial-flow-control-window set, " +
-              "but at most one of them should be set."
-          )
-
-      config.allLocalNodes.foreach { case (nodeName, nodeConfig) =>
-        validateServerConfig(nodeConfig.adminApi, nodeName)
-
-        nodeConfig match {
-          case sequencer: SequencerNodeConfig =>
-            validateServerConfig(sequencer.publicApi, nodeName)
-            sequencer.sequencer match {
-              case sequencerConfig: SequencerConfig.BftSequencer =>
-                sequencerConfig.config.initialNetwork.foreach(initialNetwork =>
-                  validateServerConfig(initialNetwork.serverEndpoint, nodeName)
-                )
-              case _ => ()
-            }
-          case participant: ParticipantNodeConfig =>
-            validateServerConfig(participant.ledgerApi, nodeName)
-          case _: MediatorNodeConfig => () // No public API
-          case _ => () // Tests
-        }
-      }
-
-      errors.result()
-    }
+  private def jwksCacheMinRefreshInterval(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] =
+    toValidated(serverConfigs(config).flatMap { case (nodeName, serverConfig) =>
+      val cacheConfig = serverConfig.jwksCacheConfig
+      val minRefreshInterval = cacheConfig.minRefreshInterval.underlying
+      val cacheExpiration = cacheConfig.cacheExpiration.underlying
+      val autoRefreshAfter = cacheConfig.autoRefreshAfter.underlying
+      val prefix = s"gRPC server config ('$nodeName', ${serverConfig.name}) has jwks-cache-config"
+      Seq(
+        Option.when(minRefreshInterval >= cacheExpiration)(
+          s"$prefix.min-refresh-interval ($minRefreshInterval) not less than " +
+            s"cache-expiration ($cacheExpiration), so keys expire before they can be refetched."
+        ),
+        Option.when(autoRefreshAfter > Duration.Zero && autoRefreshAfter < minRefreshInterval)(
+          s"$prefix.auto-refresh-after ($autoRefreshAfter) less than " +
+            s"min-refresh-interval ($minRefreshInterval), so background refreshes would only " +
+            "happen every min-refresh-interval."
+        ),
+      ).flatten
+    })
 
   def clientChannelParamsOnlyOneGrpcControlFlowMode(
       config: CantonConfig

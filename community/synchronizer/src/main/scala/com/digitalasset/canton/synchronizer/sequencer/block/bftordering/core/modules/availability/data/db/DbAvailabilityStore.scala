@@ -7,11 +7,12 @@ import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.caching.{CaffeineCache, ConcurrentCache}
 import com.digitalasset.canton.config.CantonRequireTypes.String68
-import com.digitalasset.canton.config.{BatchAggregatorConfig, CachingConfigs, ProcessingTimeout}
+import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Postgres}
 import com.digitalasset.canton.resource.{DbStorage, DbStore, ToDbPrimitive}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -27,9 +28,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.BatchId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.updateBulk
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerCachingConfigs
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.BatchAggregator
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.nonempty.NonEmpty
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -38,7 +41,7 @@ import scala.concurrent.ExecutionContext
 
 class DbAvailabilityStore(
     batchAggregatorConfig: BatchAggregatorConfig,
-    cachingConfigs: CachingConfigs,
+    cachingConfigs: SequencerCachingConfigs,
     bftOrderingMetrics: BftOrderingMetrics,
     override protected val storage: DbStorage,
     override protected val timeouts: ProcessingTimeout,
@@ -116,13 +119,20 @@ class DbAvailabilityStore(
       metrics = Some(bftOrderingMetrics.availability.dissemination.batchCache),
     )
 
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   private implicit def readOrderingRequestBatch: GetResult[OrderingRequestBatch] =
     converters.getResultByteArray.andThen { bytes =>
       ProtoConverter.protoParserArray(v30.Batch.parseFrom)(bytes) match {
         case Left(error) =>
           throw new DbDeserializationException(s"Could not deserialize proto request batch: $error")
         case Right(value) =>
-          OrderingRequestBatch.fromProtoV30(value) match {
+          OrderingRequestBatch.fromProtoV30(
+            // Trusted path from DB: data was already validated when it was written.
+            // Without validation, the limits are not read.
+            ProtocolVersionValidation.NoValidation,
+            BftOrdererLimits.default,
+            value,
+          ) match {
             case Left(error) =>
               throw new DbDeserializationException(s"Could not parse batch: $error")
             case Right(value) => value

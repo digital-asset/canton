@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
+import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -10,6 +11,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
+import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllButNamespaceDelegations
 import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerToKeyMapping}
 
 /** Checks onboarding with onboarding transactions that are prepared outside the participant's
@@ -72,6 +74,49 @@ final class ParticipantOfflineOnboardingTransactionsIntegrationTestH2
 
       participant1.synchronizers.active(daName) shouldBe true
       participant1.health.ping(participant1)
+    }
+
+    "generate the onboarding transactions from the given temporary store" in { implicit env =>
+      import env.*
+
+      // A temporary store with the root certificate and a delegation to an intermediate key, as
+      // used when the root key is offline. The authorized store also holds identity transactions,
+      // which must not take precedence.
+      val intermediate = participant1.keys.secret.generate_signing_key(
+        name = "participant1-intermediate",
+        usage = SigningKeyUsage.NamespaceOnly,
+      )
+      val store = participant1.topology.stores
+        .create_temporary_topology_store("intermediate-onboarding", testedProtocolVersion)
+      participant1.topology.transactions.load(
+        reSignTopologyStoredTransactionsOf(
+          participant1,
+          Seq(NamespaceDelegation.code),
+          testedProtocolVersion,
+        ),
+        store,
+      )
+      participant1.topology.namespace_delegations.propose_delegation(
+        participant1.namespace,
+        intermediate,
+        CanSignAllButNamespaceDelegations,
+        store = store,
+        synchronize = None,
+      )
+
+      val onboardingTransactions = participant1.topology.transactions
+        .generate_onboarding_transactions(testedProtocolVersion, temporaryStore = Some(store))
+      participant1.topology.stores.drop_temporary_topology_store(store)
+
+      onboardingTransactions.map(_.mapping).collect { case nd: NamespaceDelegation =>
+        nd.target.fingerprint
+      } should contain(intermediate.fingerprint)
+      onboardingTransactions
+        .find(_.mapping.code == OwnerToKeyMapping.code)
+        .value
+        .signatures
+        .forgetNE
+        .map(_.authorizingLongTermKey) should contain(intermediate.fingerprint)
     }
   }
 }

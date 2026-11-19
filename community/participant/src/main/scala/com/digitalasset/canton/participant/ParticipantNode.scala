@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant
 
 import cats.Eval
 import cats.data.EitherT
-import cats.syntax.foldable.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
@@ -22,12 +21,11 @@ import com.digitalasset.canton.crypto.{
   SyncCryptoApiParticipantProvider,
   SynchronizerCrypto,
 }
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.error.FatalError
 import com.digitalasset.canton.health.*
-import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
@@ -64,7 +62,6 @@ import com.digitalasset.canton.participant.scheduler.{
   ParticipantPurgeStoresAfterLsuScheduler,
 }
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.store.AcsDigestStore.allCheckpointsFilter
 import com.digitalasset.canton.participant.store.memory.MutablePackageMetadataViewImpl
 import com.digitalasset.canton.participant.sync.*
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.SubmissionReady
@@ -242,7 +239,7 @@ class ParticipantNodeBootstrap(
       loggerFactory,
     )
     val packageUpgradeValidator = new PackageUpgradeValidator(
-      arguments.parameterConfig.general.cachingConfigs.packageUpgradeCache,
+      parameters.cachingConfigs.packageUpgradeCache,
       loggerFactory,
     )
 
@@ -492,6 +489,7 @@ class ParticipantNodeBootstrap(
               config.ledgerApi,
               futureSupervisor,
               loggerFactory,
+              Some(scheduler),
             ),
           loggerFactory = loggerFactory,
         )
@@ -581,6 +579,7 @@ class ParticipantNodeBootstrap(
               parameters.commandProgressTracking,
               clock,
               metrics.phase,
+              metrics.ledgerApiServer.commands.completion,
               loggerFactory,
             )
           else CommandProgressTracker.NoOp
@@ -830,8 +829,6 @@ class ParticipantNodeBootstrap(
           persistentState.map(_.settingsStore)
         )
 
-        acsDigestProcessorEnabled = parameters.acsCommitments.enableNewAcsCommitmentProcessor
-
         pruningProcessor = new PruningProcessor(
           persistentState,
           syncPersistentStateManager,
@@ -840,8 +837,7 @@ class ParticipantNodeBootstrap(
           exitOnFatalFailures = arguments.parameterConfig.exitOnFatalFailures,
           synchronizerConnectionConfigStore,
           legacyAcsCommitmentProcessorDisabled =
-            parameters.acsCommitments.disableOldAcsCommitmentProcessor,
-          acsDigestProcessorEnabled = acsDigestProcessorEnabled,
+            parameters.acsCommitments.doDisableOldAcsCommitmentProcessor,
           parameters.processingTimeouts,
           futureSupervisor,
           loggerFactory,
@@ -874,7 +870,6 @@ class ParticipantNodeBootstrap(
                 synchronizerConnectionConfigStore,
                 syncPersistentStateManager,
                 parameters.batchingConfig,
-                acsDigestProcessorEnabled = acsDigestProcessorEnabled,
                 timeouts,
                 loggerFactory,
               )
@@ -1109,7 +1104,6 @@ class ParticipantNodeBootstrap(
                 trafficEnforcementBackendO =
                   trafficEnforcementBackendContainerO.map(_.asEval.value),
                 pruningConfig = parameters.stores,
-                warnOnJwtScopeUsage = arguments.testingConfig.warnOnJwtScopeUsage,
                 extensionServiceManagerO = extensionServiceManagerO,
               )
             ),
@@ -1120,106 +1114,81 @@ class ParticipantNodeBootstrap(
           if (activeAtStartup) EitherT.right[String](ledgerApiServerContainer.initializeNext())
           else EitherT.right[String](FutureUnlessShutdown.unit)
 
-        acsDigestProcessorManagerO =
-          if (acsDigestProcessorEnabled) {
-            val container = new LifeCycleContainer[AcsCommitmentProcessorManager](
-              "ACS commitment processor manager",
-              create = () => {
-                val ledgerApiStore =
-                  ledgerApiIndexerContainer.asEval.value.ledgerApiStore
+        acsDigestProcessorManager =
+          new LifeCycleContainer[AcsCommitmentProcessorManager](
+            "ACS commitment processor manager",
+            create = () => {
+              val ledgerApiStore =
+                ledgerApiIndexerContainer.asEval.value.ledgerApiStore
 
-                val digestProcessorFactory = new DigestProcessorFactoryImpl(
-                  participantId,
-                  syncPersistentStateManager.acsDigestStore,
-                  syncPersistentStateManager.acsCommitmentPeriodStore,
-                  new DigestProcessorTopologyLookupImpl(
-                    ledgerApiStore,
-                    sync,
-                    parameters.cachingConfigs,
-                    futureSupervisor,
-                    loggerFactory,
-                  ),
-                  ledgerApiIndexServiceContainer.asEval.value.internalIndexService,
+              val digestProcessorFactory = new DigestProcessorFactoryImpl(
+                participantId,
+                syncPersistentStateManager.acsDigestStore,
+                syncPersistentStateManager.acsCommitmentPeriodStore,
+                new DigestProcessorTopologyLookupImpl(
                   ledgerApiStore,
-                  ledgerApiStore.stringInterningView,
-                  parameters.acsCommitments,
+                  sync,
+                  parameters.cachingConfigs,
+                  futureSupervisor,
+                  loggerFactory,
+                ),
+                ledgerApiIndexServiceContainer.asEval.value.internalIndexService,
+                ledgerApiStore,
+                ledgerApiStore.stringInterningView,
+                parameters.acsCommitments,
+                alias => metrics.connectedSynchronizerMetrics(alias, participantId).commitments,
+                enableAdditionalConsistencyChecks = parameters.enableAdditionalConsistencyChecks,
+                timeouts,
+                loggerFactory,
+              )
+
+              val matcherFactory = new ReceivedAcsCommitmentMatcherFactoryImpl(
+                syncPersistentStateManager.acsCommitmentPeriodStore,
+                syncPersistentStateManager.acsDigestStore,
+                ledgerApiIndexServiceContainer.asEval.value.internalIndexService,
+                ledgerApiStore.stringInterningView,
+                parameters.acsCommitments.matchingParallelism,
+                alias => metrics.connectedSynchronizerMetrics(alias, participantId).commitments,
+                loggerFactory,
+              )
+
+              val manager =
+                new AcsCommitmentProcessorManager(
+                  digestProcessorFactory,
+                  matcherFactory,
+                  syncPersistentStateManager.aliasForSynchronizerId,
                   alias => metrics.connectedSynchronizerMetrics(alias, participantId).commitments,
-                  enableAdditionalConsistencyChecks = parameters.enableAdditionalConsistencyChecks,
+                  parameters.exitOnFatalFailures,
+                  futureSupervisor,
                   timeouts,
                   loggerFactory,
                 )
 
-                val matcherFactory = new ReceivedAcsCommitmentMatcherFactoryImpl(
-                  syncPersistentStateManager.acsCommitmentPeriodStore,
-                  syncPersistentStateManager.acsDigestStore,
-                  ledgerApiIndexServiceContainer.asEval.value.internalIndexService,
-                  ledgerApiStore.stringInterningView,
-                  parameters.acsCommitments.matchingParallelism,
-                  alias => metrics.connectedSynchronizerMetrics(alias, participantId).commitments,
-                  loggerFactory,
+              acsCommitmentProcessorPipelineHealth.set(manager.health)
+
+              manager.subscribeToSynchronizerConnections(sync)
+
+              // start digest processors for all known logical synchronizers
+              val startProcessorsF =
+                MonadUtil.sequentialTraverse_(syncPersistentStateManager.getAllLogical.keys)(
+                  synchronizerId =>
+                    manager
+                      .getOrCreate(synchronizerId)
+                      .digestProcessorManager
+                      .reinitializeIfEmptyAndStartRunningDigestProcessor()
                 )
+              FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+                startProcessorsF,
+                "Failed to start running digest processors for all known logical synchronizers",
+              )
 
-                val manager =
-                  new AcsCommitmentProcessorManager(
-                    digestProcessorFactory,
-                    matcherFactory,
-                    syncPersistentStateManager.aliasForSynchronizerId,
-                    alias => metrics.connectedSynchronizerMetrics(alias, participantId).commitments,
-                    parameters.exitOnFatalFailures,
-                    futureSupervisor,
-                    timeouts,
-                    loggerFactory,
-                  )
-
-                acsCommitmentProcessorPipelineHealth.set(manager.health)
-
-                manager.subscribeToSynchronizerConnections(sync)
-
-                // start digest processors for all known logical synchronizers
-                val startProcessorsF =
-                  MonadUtil.sequentialTraverse_(syncPersistentStateManager.getAllLogical.keys)(
-                    synchronizerId =>
-                      manager
-                        .getOrCreate(synchronizerId)
-                        .digestProcessorManager
-                        .reinitializeIfEmptyAndStartRunningDigestProcessor()
-                  )
-                FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-                  startProcessorsF,
-                  "Failed to start running digest processors for all known logical synchronizers",
-                )
-
-                FutureUnlessShutdown.pure(manager)
-              },
-              loggerFactory,
-            )
-            Some(container)
-          } else {
-            acsCommitmentProcessorPipelineHealth.set(
-              new AlwaysHealthyComponent(AcsCommitmentProcessorManager.healthName, logger)
-            )
-            None
-          }
-        // If the new pipeline does not run now, it could have run before restart.
-        // So we delete all digests to prevent problems later when the pipeline is re-enabled
-        // (e.g., the last checkpoint offset having already been pruned).
-        cleanDigestStore = !parameters.acsCommitments.enableNewAcsCommitmentProcessor
-        _ <- EitherT.right(MonadUtil.when(cleanDigestStore) {
-          MonadUtil
-            .sequentialTraverse_(syncPersistentStateManager.getAllLogical.values) { state =>
-              // Check whether there are any checkpoints to avoid calling the possibly blocking truncation
-              // only when there actually is something to be truncated.
-              state.acsDigestStore
-                .latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter)
-                .flatMap {
-                  case None => FutureUnlessShutdown.unit
-                  case Some(_) => state.acsDigestStore.truncateAllBlocking()
-                }
-            }
-        })
+              FutureUnlessShutdown.pure(manager)
+            },
+            loggerFactory,
+          )
 
         _ <- MonadUtil.when(activeAtStartup)(
-          EitherT.right[String](acsDigestProcessorManagerO.traverse_(_.initializeNext()))
+          EitherT.right[String](acsDigestProcessorManager.initializeNext())
         )
       } yield {
         val ledgerApiDependentServices =
@@ -1305,7 +1274,7 @@ class ParticipantNodeBootstrap(
               v30.ParticipantRepairServiceGrpc.bindService(
                 new GrpcParticipantRepairService(
                   sync,
-                  acsDigestProcessorManagerO.map(_.asEval),
+                  acsDigestProcessorManager.asEval,
                   ledgerApiIndexServiceContainer.asEval.map(_.internalIndexService),
                   parameters,
                   loggerFactory,
@@ -1339,7 +1308,7 @@ class ParticipantNodeBootstrap(
         partyReplicatorContainerO.foreach(repl => addCloseable(repl.currentAutoCloseable()))
         acsReplicatorContainerO.foreach(repl => addCloseable(repl.currentAutoCloseable()))
         addCloseable(ledgerApiServerContainer.currentAutoCloseable())
-        acsDigestProcessorManagerO.foreach(mgr => addCloseable(mgr.currentAutoCloseable()))
+        addCloseable(acsDigestProcessorManager.currentAutoCloseable())
         addCloseable(ledgerApiDependentServices)
         addCloseable(mutablePackageMetadataView)
         // Health components owned by the bootstrap, not closed by the health service.
@@ -1360,7 +1329,7 @@ class ParticipantNodeBootstrap(
           participantTopologyDispatcher = topologyDispatcher,
           trafficEnforcementBackendContainerO = trafficEnforcementBackendContainerO,
           trafficEnforcementAppContainerO = trafficEnforcementAppContainerO,
-          acsCommitmentProcessorManagerO = acsDigestProcessorManagerO,
+          acsCommitmentProcessorManager = acsDigestProcessorManager,
         )
       }
     }
@@ -1452,7 +1421,7 @@ object ParticipantNodeBootstrap {
       ledgerApiServerContainer: LifeCycleContainer[LedgerApiServer],
       startableStoppableLedgerApiDependentServices: StartableStoppableLedgerApiDependentServices,
       participantTopologyDispatcher: ParticipantTopologyDispatcher,
-      acsCommitmentProcessorManagerO: Option[LifeCycleContainer[AcsCommitmentProcessorManager]],
+      acsCommitmentProcessorManager: LifeCycleContainer[AcsCommitmentProcessorManager],
   )
 }
 

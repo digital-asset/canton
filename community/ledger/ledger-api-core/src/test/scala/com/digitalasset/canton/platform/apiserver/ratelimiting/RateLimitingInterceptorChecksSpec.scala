@@ -203,7 +203,7 @@ final class RateLimitingInterceptorChecksSpec
     )
       .use { channel =>
         val (activeGauge, limitGauge) =
-          metrics.requests.getActiveAndLimitGauge(testApiName, testStreamName)
+          metrics.grpc.getActiveAndLimitGauge(testApiName, testStreamName)
         for {
           fStatus1 <- streamHello(channel) // Ok
           fStatus2 <- streamHello(channel) // Ok
@@ -235,9 +235,9 @@ final class RateLimitingInterceptorChecksSpec
 
     val waitService = new WaitService()
     val (activeRpcGauge, _) =
-      metrics.requests.getActiveAndLimitGauge(testApiName, testRpcName)
+      metrics.grpc.getActiveAndLimitGauge(testApiName, testRpcName)
     val (activeStreamGauge, _) =
-      metrics.requests.getActiveAndLimitGauge(testApiName, testStreamName)
+      metrics.grpc.getActiveAndLimitGauge(testApiName, testStreamName)
     withChannel(
       metrics,
       waitService,
@@ -332,9 +332,9 @@ final class RateLimitingInterceptorChecksSpec
 
     val waitService = new WaitService()
     val (activeRpcGauge, _) =
-      metrics.requests.getActiveAndLimitGauge(testApiName, testRpcName)
+      metrics.grpc.getActiveAndLimitGauge(testApiName, testRpcName)
     val (activeStreamGauge, _) =
-      metrics.requests.getActiveAndLimitGauge(testApiName, testStreamName)
+      metrics.grpc.getActiveAndLimitGauge(testApiName, testStreamName)
     withChannel(
       metrics,
       waitService,
@@ -359,7 +359,7 @@ final class RateLimitingInterceptorChecksSpec
 
     val waitService = new WaitService()
     val (activeGauge, _) =
-      metrics.requests.getActiveAndLimitGauge(testApiName, testStreamName)
+      metrics.grpc.getActiveAndLimitGauge(testApiName, testStreamName)
     withChannel(
       metrics,
       waitService,
@@ -432,7 +432,7 @@ final class RateLimitingInterceptorChecksSpec
 
     val waitService = new WaitService()
     val (activeGauge, _) =
-      metrics.requests.getActiveAndLimitGauge(testApiName, testStreamName)
+      metrics.grpc.getActiveAndLimitGauge(testApiName, testStreamName)
     withChannel(
       metrics,
       waitService,
@@ -577,7 +577,7 @@ object RateLimitingInterceptorChecksSpec extends MockitoSugar {
       requestLimits.map { case (k, v) => (k, NonNegativeInt.tryCreate(v)) },
       warnOnUnconfiguredLimits = false,
       maxLoggingRatePerSecond = NonNegativeInt.tryCreate(10),
-      metrics = metrics.requests,
+      metrics = metrics.grpc,
       loggerFactory = loggerFactory,
     )
     for {

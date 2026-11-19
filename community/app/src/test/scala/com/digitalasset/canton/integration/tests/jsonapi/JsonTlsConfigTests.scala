@@ -4,10 +4,16 @@
 package com.digitalasset.canton.integration.tests.jsonapi
 
 import com.daml.tls.ServerAuthRequirementConfig.Require
-import com.daml.tls.{TlsClientCertificate, TlsClientConfig, TlsServerConfig}
+import com.daml.tls.{
+  ServerAuthRequirementConfig,
+  TlsClientCertificate,
+  TlsClientConfig,
+  TlsServerConfig,
+}
 import com.digitalasset.canton.config.PemFile
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.http.HttpService
+import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.{
   clientTlsConfig,
@@ -48,7 +54,7 @@ class JsonTlsConfigTests
     ),
     (
       "participant2",
-      "regular TLS with required with wrong client cert should fail",
+      "regular TLS with required but wrong client cert should fail",
       Some(
         generateTLSServerConfig("ledger-api")
       ),
@@ -65,6 +71,28 @@ class JsonTlsConfigTests
       ),
       false,
     ),
+    (
+      "participant4",
+      "server-only TLS without trust collection should work",
+      Some(
+        serverTlsConfig.copy(
+          trustCollectionFile = None,
+          clientAuth = ServerAuthRequirementConfig.None,
+        )
+      ),
+      true,
+    ),
+    (
+      "participant5",
+      "optional client auth without trust collection should work for a client without a trusted cert",
+      Some(
+        serverTlsConfig.copy(
+          trustCollectionFile = None,
+          clientAuth = ServerAuthRequirementConfig.Optional,
+        )
+      ),
+      true,
+    ),
   )
 
   "http service" should {
@@ -76,11 +104,19 @@ class JsonTlsConfigTests
   }
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1
+    EnvironmentDefinition
+      .buildBaseEnvironmentDefinition(
+        numParticipants = testCases.size,
+        numSequencers = 1,
+        numMediators = 1,
+      )
+      .withNetworkBootstrap { implicit env =>
+        new NetworkBootstrapper(EnvironmentDefinition.S1M1)
+      }
       .withSetup { implicit env =>
         import env.*
-        Seq(participant1, participant2, participant3).foreach { p =>
-          p.synchronizers.connect_local(sequencer1, alias = daName)
+        testCases.foreach { case (participantName, _, _, _) =>
+          lp(participantName).synchronizers.connect_local(sequencer1, alias = daName)
         }
         createChannel(participant1)
       }

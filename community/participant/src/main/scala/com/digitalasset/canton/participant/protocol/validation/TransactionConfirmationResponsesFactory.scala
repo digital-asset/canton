@@ -154,6 +154,15 @@ class TransactionConfirmationResponsesFactory(
             )
           )
 
+        contractKeyHashMismatchError = modelConformanceResultE.toOption.flatMap {
+          _.contractKeyHashMismatch.map { error =>
+            logged(
+              requestId,
+              LocalRejectError.MalformedRejects.ModelConformance.Reject(error.toString),
+            ).toLocalReject(protocolVersion)
+          }
+        }
+
         // TODO(#33650) - replace with unboundedTraverseFilter; safe because the number of views is bounded by the transaction's maximum payload size (at worst views are in the hundreds).
         responses <- transactionValidationResult.viewValidationResults.toSeq
           .parTraverseFilter { case (viewPosition, viewValidationResult) =>
@@ -283,7 +292,7 @@ class TransactionConfirmationResponsesFactory(
                 consistencyVerdicts.toList ++ timeValidationRejections ++ contractConsistencyRejections ++
                   externalCallVerdicts ++ authenticationRejections ++ authorizationRejections ++
                   modelConformanceRejections ++ internalConsistencyRejections ++
-                  replayRejections
+                  replayRejections ++ contractKeyHashMismatchError.toList
 
               // Any rejection, wherever it ranks in the verdicts, takes precedence over the
               // abstention.

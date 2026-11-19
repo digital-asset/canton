@@ -19,6 +19,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors
+import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.FutureUtil
@@ -45,10 +46,7 @@ sealed trait OfflinePartyMigrationAcsCommitmentIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
-        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
-        // TODO(#35107) Upon disabling the old ACS commitment processor
-        //  this test fails: (enable the new pipeline) and make the fix
-        ConfigTransforms.enableOldAcsCommitmentProcessor,
+        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair)
       )
       // do no delay sending commitments
       .updateTestingConfig(
@@ -162,14 +160,30 @@ sealed trait OfflinePartyMigrationAcsCommitmentIntegrationTest
 
         val afterMigration = env.environment.clock.now
 
-        // We check that the ACS commitment processor recovers by looking at the safe-to-prune point
+        // We check that the ACS commitment processor recovers
         eventually() {
           // Trigger time progression
           participant1.health.ping(participant2).discard
-          val outstandingCommitment =
-            participant2.underlying.value.sync.stateInspection
-              .noOutstandingCommitmentsTs(daName, CantonTimestamp.MaxValue)
-          assert(outstandingCommitment.exists(_ >= afterMigration))
+
+          val period = CommitmentPeriod.tryCreate(afterMigration, CantonTimestamp.MaxValue)
+          // TODO(#35265) switch to the new macros
+          val stringInterning2 = participant2.underlying.value.sync
+            .connectedSynchronizerForAlias(daName)
+            .value
+            .ephemeral
+            .ledgerApiIndexer
+            .ledgerApiStore
+            .stringInterningView
+          val internedPid1 = stringInterning2.participantId.internalize(participant1.id.toLf)
+          val toLookup2 = Seq(internedPid1 -> period)
+          val matched = participant2.underlying.value.sync.syncPersistentStateManager
+            .get(daId)
+            .value
+            .acsCommitmentPeriodStore
+            .lookupMatched(toLookup2)
+            .futureValueUS
+
+          matched.map(_.participant).toSet shouldBe Set(internedPid1)
         }
 
         // Now make sure that we haven't gobbled other errors

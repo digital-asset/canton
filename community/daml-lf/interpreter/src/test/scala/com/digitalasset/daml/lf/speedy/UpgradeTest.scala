@@ -27,7 +27,10 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.collection.immutable.ArraySeq
 
-class UpgradeTest
+class UpgradeTest_KeyHashMismatchIgnored extends UpgradeTest(errorOnContractKeyHashMismatch = false)
+class UpgradeTest_KeyHashMismatchError extends UpgradeTest(errorOnContractKeyHashMismatch = true)
+
+class UpgradeTest(errorOnContractKeyHashMismatch: Boolean)
     extends AnyFreeSpec
     with Matchers
     with TableDrivenPropertyChecks
@@ -479,7 +482,9 @@ class UpgradeTest
       sexprToEval,
       Set(alice, bob),
       MachineLogger(),
-      interpretationConfig = InterpretationConfig.DefaultForTesting,
+      interpretationConfig = InterpretationConfig.DefaultForTesting.copy(
+        errorOnContractKeyHashMismatch = errorOnContractKeyHashMismatch
+      ),
     )
 
     val contract = TransactionBuilder
@@ -517,11 +522,11 @@ class UpgradeTest
     val sexprToEval: SExpr = pkgs.compiler.unsafeCompile(e)
     val seed = crypto.Hash.hashPrivateKey("seed")
     Speedy.Machine.fromUpdateSExpr(
-      pkgs,
-      seed,
-      sexprToEval,
-      Set(alice, bob),
-      MachineLogger(),
+      compiledPackages = pkgs,
+      transactionSeed = seed,
+      updateSE = sexprToEval,
+      committers = Set(alice, bob),
+      logger = MachineLogger(),
       packageResolution = packageResolution,
       interpretationConfig = InterpretationConfig.DefaultForTesting,
     )

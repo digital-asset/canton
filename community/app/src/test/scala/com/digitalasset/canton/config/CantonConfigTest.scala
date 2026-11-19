@@ -458,6 +458,83 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
     }
   }
 
+  // TODO (i#33090): remove together with the scope-only token format
+  "the scope-only JWT feature flag" should {
+    def loadWith(extraConfig: String): Either[CantonConfigError, CantonConfig] =
+      CantonConfig.loadAndValidate(
+        ConfigFactory
+          .parseString(extraConfig)
+          .withFallback(ConfigFactory.parseFile(simpleConf.toJava))
+          .withFallback(ConfigFactory.load()),
+        Some(DefaultPorts.create()),
+      )
+
+    val scopeOnlyLedgerApi =
+      """canton.participants.participant1.ledger-api.auth-services = [{
+        |  type = unsafe-jwt-hmac-256
+        |  secret = "not-safe-for-production"
+        |  target-scope = "my-scope"
+        |}]
+        |""".stripMargin
+    val scopeOnlyAdminApi =
+      """canton.sequencers.sequencer1.admin-api.auth-services = [{
+        |  type = unsafe-jwt-hmac-256
+        |  secret = "not-safe-for-production"
+        |  target-scope = "my-scope"
+        |}]
+        |""".stripMargin
+    val flagOn = s"${DeprecatedFeaturesConfig.EnableScopeOnlyJwtKey} = true\n"
+
+    "be disabled by default" in {
+      val config = loadWith("").valueOrFail("config should load")
+      config.features.deprecated.enableScopeOnlyJwt shouldBe false
+      config.participantNodeParametersByString("participant1").enableScopeOnlyJwt shouldBe false
+      config.sequencerNodeParametersByString("sequencer1").enableScopeOnlyJwt shouldBe false
+    }
+
+    "reach the node parameters of every node when enabled" in {
+      val config = loadWith(flagOn).valueOrFail("config should load")
+      config.features.deprecated.enableScopeOnlyJwt shouldBe true
+      config.participantNodeParametersByString("participant1").enableScopeOnlyJwt shouldBe true
+      config.sequencerNodeParametersByString("sequencer1").enableScopeOnlyJwt shouldBe true
+      config.mediatorNodeParametersByString("mediator1").enableScopeOnlyJwt shouldBe true
+    }
+
+    "reject a scope-only auth service on the ledger API when disabled" in {
+      val result = loggerFactory.assertLogs(
+        loadWith(scopeOnlyLedgerApi),
+        _.errorMessage should (include("Failed to validate the configuration")
+          and include("canton.participants.participant1.ledger-api.auth-services")
+          and include(DeprecatedFeaturesConfig.EnableScopeOnlyJwtKey)),
+      )
+      result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
+    }
+
+    "reject a scope-only auth service on an admin API when disabled" in {
+      val result = loggerFactory.assertLogs(
+        loadWith(scopeOnlyAdminApi),
+        _.errorMessage should (include("Failed to validate the configuration")
+          and include("canton.sequencers.sequencer1.admin-api.auth-services")
+          and include(DeprecatedFeaturesConfig.EnableScopeOnlyJwtKey)),
+      )
+      result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
+    }
+
+    "accept a scope-only auth service when enabled" in {
+      loadWith(flagOn + scopeOnlyLedgerApi + scopeOnlyAdminApi)
+        .valueOrFail("config should load")
+        .discard
+    }
+
+    "accept an auth service with both a target scope and a target audience when disabled" in {
+      val withAudience = scopeOnlyLedgerApi.replace(
+        "target-scope = \"my-scope\"",
+        "target-scope = \"my-scope\"\n  target-audience = \"my-audience\"",
+      )
+      loadWith(withAudience).valueOrFail("config should load").discard
+    }
+  }
+
   // Parse validation and content assertions for example configs that do not start a live Canton
   // environment (e.g. Docker-Compose-only examples). Integration tests that actually boot Canton
   // live in ExampleIntegrationTest subclasses co-located with those tests.
@@ -934,14 +1011,7 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
     }
 
     "tolerate and log removed fields" in {
-      val deprecatedConfigLogs = Seq[(LogEntry => Assertion, String)](
-        (
-          _.message should include(
-            "Config path 'package-dependency-cache' is deprecated since 3.5.0"
-          ),
-          "deprecated path",
-        )
-      ) ++ Seq(
+      val deprecatedConfigLogs = Seq(
         "enable-deprecated-endpoints-34",
         "enable-deprecated-parameters-34",
         "enable-deprecated-endpoints-35",

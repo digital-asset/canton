@@ -23,13 +23,20 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.ledger.participant.state.{SynchronizerUpdate, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  RunOnClosing,
+  UnlessShutdown,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.{
   OnboardingClearanceScheduler,
   PartyReplicationTriggers,
 }
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
+import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing.{
   EventInfo,
@@ -40,17 +47,28 @@ import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOpe
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.StoredTopologyTransaction.PositiveStoredTopologyTransaction
 import com.digitalasset.canton.topology.store.TopologyStore.EffectiveStateChange
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
+import com.digitalasset.canton.topology.store.{
+  StoredTopologyTransactions,
+  TopologyStore,
+  TopologyStoreId,
+}
 import com.digitalasset.canton.topology.transaction.TopologyMapping
 import com.digitalasset.canton.topology.{ConfiguredPhysicalSynchronizerId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.PekkoUtil.syntax.*
+import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, SequencerCounter, topology}
 import com.digitalasset.nonempty.NonEmpty
+import org.apache.pekko.stream.scaladsl.{Keep, Sink}
+import org.apache.pekko.stream.{KillSwitches, Materializer}
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.*
+import scala.concurrent.{ExecutionContext, Future}
+import scala.math.Ordering.Implicits.*
+import scala.util.{Failure, Success}
 
 object ParticipantTopologyTerminateProcessing {
 
@@ -59,26 +77,21 @@ object ParticipantTopologyTerminateProcessing {
       event: Update.TopologyTransactionEffective,
       onboardingLocallyHostedParty: Boolean,
       clearingOnboardingLocallyHostedParty: Boolean,
-      abortingOnboardingLocallyHostedParty: Boolean,
+      revokingLocallyHostedParty: Boolean,
   )
 
-  def relevantMappingsForEffectiveStateChanges(pv: ProtocolVersion): Seq[TopologyMapping.Code] =
-    if (pv >= ProtocolVersion.v36)
-      Seq(
-        TopologyMapping.Code.PartyToParticipant,
-        TopologyMapping.Code.SynchronizerTrustCertificate,
-        TopologyMapping.Code.SynchronizerParametersState,
-      )
-    else
-      Seq(
-        TopologyMapping.Code.PartyToParticipant,
-        TopologyMapping.Code.SynchronizerTrustCertificate,
-      )
-
+  lazy val relevantMappingsForEffectiveStateChanges: NonEmpty[Seq[TopologyMapping.Code]] =
+    NonEmpty(
+      Seq,
+      TopologyMapping.Code.PartyToParticipant,
+      TopologyMapping.Code.SynchronizerTrustCertificate,
+      TopologyMapping.Code.SynchronizerParametersState,
+    )
 }
 
 class ParticipantTopologyTerminateProcessing(
     recordOrderPublisher: RecordOrderPublisher,
+    ledgerApiIndexer: LedgerApiIndexer,
     store: TopologyStore[TopologyStoreId.SynchronizerStore],
     initialRecordTime: CantonTimestamp,
     participantId: ParticipantId,
@@ -95,10 +108,6 @@ class ParticipantTopologyTerminateProcessing(
     with NamedLogging {
 
   private val psid = store.storeId.psid
-
-  private val mappingsForEffectiveStateChanges = relevantMappingsForEffectiveStateChanges(
-    store.protocolVersion
-  )
 
   override def terminate(
       sc: SequencerCounter,
@@ -117,7 +126,7 @@ class ParticipantTopologyTerminateProcessing(
         effectiveStateChanges <- store.findEffectiveStateChanges(
           fromEffectiveInclusive = effectiveTime.value,
           onlyAtEffective = true,
-          filterTypes = Some(mappingsForEffectiveStateChanges),
+          filterTypes = Some(relevantMappingsForEffectiveStateChanges),
         )
         _ = if (effectiveStateChanges.sizeIs > 1)
           logger.error(
@@ -148,7 +157,9 @@ class ParticipantTopologyTerminateProcessing(
     *
     * When a party is onboarded, it records a pending operation and schedules a clearance task. When
     * the party is finally added (onboarding flag cleared), it removes the pending operation from
-    * the store. When a party is revoked (offboarded), it cleans up any aborted operations.
+    * the store. When a party is revoked (offboarded), it removes any pending operation, also one
+    * that `clear_party_onboarding_flag` records after the flag is cleared, so that a later import
+    * of the party can record its own.
     */
   private def processPartyHostingEvents(eventInfo: EventInfo)(implicit
       traceContext: TraceContext,
@@ -157,7 +168,7 @@ class ParticipantTopologyTerminateProcessing(
 
     val requiresProcessing = eventInfo.onboardingLocallyHostedParty ||
       eventInfo.clearingOnboardingLocallyHostedParty ||
-      eventInfo.abortingOnboardingLocallyHostedParty
+      eventInfo.revokingLocallyHostedParty
 
     if (requiresProcessing) {
       // Pre-filter: We only care about PartyToParticipantAuthorization on the local participant
@@ -391,54 +402,166 @@ class ParticipantTopologyTerminateProcessing(
       topologyEventPublishedOnInitialRecordTime: Boolean,
       traceContextForSequencedEvent: CantonTimestamp => FutureUnlessShutdown[Option[TraceContext]],
       parallelism: PositiveInt,
+      flagCloseable: FlagCloseable,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
+      materializer: Materializer,
   ): FutureUnlessShutdown[Unit] = {
     logger.info(
       s"Fetching effective state changes after initial record time $initialRecordTime at synchronizer-startup for topology event recovery."
     )
+    val initialEffectiveTime = EffectiveTime(initialRecordTime)
     for {
       trustCertificateEffectiveTime <- store
         .findFirstTrustCertificateForParticipant(participantId)
         .map {
-          case Some(trustCertTx) => trustCertTx.validFrom.value
+          case Some(trustCertTx) => trustCertTx.validFrom
           case None =>
             ErrorUtil.invalidState(
               "Missing Trust Certificate topology transaction at initialization."
             )
         }
+      _ <-
+        if (initialEffectiveTime <= trustCertificateEffectiveTime) {
+          streamedSynchronizerOnboardingRecovery(
+            trustCertificateEffectiveTime = trustCertificateEffectiveTime,
+            parallelism = parallelism,
+            flagCloseable = flagCloseable,
+          ).flatMap(_ =>
+            protocolProcessingRecovery(
+              fromEffectiveInclusive = trustCertificateEffectiveTime.immediateSuccessor,
+              trustCertificateEffectiveTime = trustCertificateEffectiveTime,
+              // always publish as preceded by onboarding recovery - events fromEffectiveInclusive = trustCertificateEffectiveTime.immediateSuccessor must be unseen
+              topologyEventPublishedOnInitialRecordTime = false,
+              traceContextForSequencedEvent = traceContextForSequencedEvent,
+              parallelism = parallelism,
+            )
+          )
+        } else {
+          protocolProcessingRecovery(
+            fromEffectiveInclusive = initialEffectiveTime,
+            trustCertificateEffectiveTime = trustCertificateEffectiveTime,
+            topologyEventPublishedOnInitialRecordTime = topologyEventPublishedOnInitialRecordTime,
+            traceContextForSequencedEvent = traceContextForSequencedEvent,
+            parallelism = parallelism,
+          )
+        }
+    } yield ()
+  }
+
+  private def streamedSynchronizerOnboardingRecovery(
+      trustCertificateEffectiveTime: EffectiveTime,
+      parallelism: PositiveInt,
+      flagCloseable: FlagCloseable,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+      materializer: Materializer,
+  ): FutureUnlessShutdown[Unit] = {
+    logger.info(
+      s"Start streamed topology recovery for synchronizer onboarding from record time $initialRecordTime to record time $trustCertificateEffectiveTime"
+    )
+    val (ks, doneF) = store
+      .findEffectiveStateChangesAtTopologyInit(
+        // invariant: the first effective time is bigger than Genesis
+        fromExclusive = EffectiveTime(initialRecordTime),
+        toInclusive = trustCertificateEffectiveTime,
+        filterTypes = Some(relevantMappingsForEffectiveStateChanges),
+      )
+      .groupedAdjacentBy(_.sequenced)
+      .mapAsync(parallelism.value)(toTopologyUpdateForOnboardingTransactions)
+      .mapConcat(identity)
+      .statefulMapAsync(System.nanoTime()) { case (previousLogTime, topologyUpdate) =>
+        val now = System.nanoTime()
+        val newLogTime = if ((now - previousLogTime).nanos >= 10.seconds) {
+          logger.info(
+            s"Streaming topology recovery for synchronizer onboarding from:$initialRecordTime current:${topologyUpdate.recordTime} to:$trustCertificateEffectiveTime"
+          )
+          now
+        } else {
+          previousLogTime
+        }
+        ledgerApiIndexer
+          .enqueue(topologyUpdate)
+          .map(newLogTime -> _)
+          .failOnShutdownToAbortException("enqueue topology update to the indexer")
+      }
+      // the kill switch is triggered with abort, so it is placed at the end of the pipeline,
+      // to reflect that there is no intention to orderly "drain" the source.
+      .viaMat(KillSwitches.single)(Keep.right)
+      .toMat(Sink.ignore)(Keep.both)
+      .run()
+
+    val killSwitchHandle = flagCloseable.runOnOrAfterClose(new RunOnClosing {
+      override def name: String = "pull-streaming-onboarding-killswitch-on-close"
+      override def done: Boolean = false
+      override def run()(implicit traceContext: TraceContext): Unit =
+        UnlessShutdown.failOnShutdownToAbortException(Success(AbortedDueToShutdown), name) match {
+          case Failure(exception) => ks.abort(exception)
+          case Success(_) => ErrorUtil.invalidArgument("Unable to extract AbortException")
+        }
+    })
+
+    FutureUnlessShutdown
+      // recover the AbortedDueToShutdown exception thrown in findEffectiveStateChangesAtTopologyInit
+      .recoverFromAbortException(doneF)
+      .map(_ => ())
+      .thereafter { _ =>
+        killSwitchHandle.cancel().discard
+      }
+  }
+
+  private def toTopologyUpdateForOnboardingTransactions(
+      txBatch: Seq[PositiveStoredTopologyTransaction]
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): Future[Option[Update.TopologyTransactionEffective]] =
+    Future {
+      for {
+        effectiveTime <- txBatch.lastOption.map(_.validFrom)
+        sequencedTime <- txBatch.lastOption.map(_.sequenced)
+        eventInfo <- getNewEvents(
+          EffectiveStateChange(
+            effectiveTime = effectiveTime,
+            sequencedTime = sequencedTime,
+            before = StoredTopologyTransactions.empty,
+            after = StoredTopologyTransactions(txBatch),
+          )
+        )
+      } yield eventInfo.event
+    }
+
+  private def protocolProcessingRecovery(
+      fromEffectiveInclusive: EffectiveTime,
+      trustCertificateEffectiveTime: EffectiveTime,
+      topologyEventPublishedOnInitialRecordTime: Boolean,
+      traceContextForSequencedEvent: CantonTimestamp => FutureUnlessShutdown[Option[TraceContext]],
+      parallelism: PositiveInt,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[Unit] =
+    for {
       outstandingEffectiveChanges <- store.findEffectiveStateChanges(
-        fromEffectiveInclusive = initialRecordTime,
+        fromEffectiveInclusive = fromEffectiveInclusive.value,
         onlyAtEffective = false,
-        filterTypes = Some(mappingsForEffectiveStateChanges),
+        filterTypes = Some(relevantMappingsForEffectiveStateChanges),
       )
       eventFromEffectiveChangeWithInitializationTraceContext =
         (effectiveChange: EffectiveStateChange) =>
           getNewEvents(effectiveChange)
             .map(eventInfo => eventInfo.event -> effectiveChange.sequencedTime.value)
-      eventsFromBootstrapping = outstandingEffectiveChanges.view
-        .filter(change =>
-          // changes coming from bootstrapping (not a mistake, topology state initialization is happening for this bound - topology transaction will be emitted to new member which are sequenced after the trustCertificateEffectiveTime)
-          change.sequencedTime.value <= trustCertificateEffectiveTime &&
-            LogicalUpgradeTime
-              .canProcessKnowingPredecessor(synchronizerPredecessor, change.sequencedTime)
-        )
-        .flatMap(eventFromEffectiveChangeWithInitializationTraceContext)
-        .toVector
       eventsFromProcessingWithoutTraceContext = outstandingEffectiveChanges.view
         .filter(
-          // changes coming from topology processing
-          _.sequencedTime.value > trustCertificateEffectiveTime
-        )
-        .filter(
-          // all sequenced above initialRecordTime (if any) will be re-processed
-          _.sequencedTime.value <= initialRecordTime
+          // all sequenced above fromEffectiveInclusive (if any) will be re-processed
+          _.sequencedTime.value <= fromEffectiveInclusive.value
         )
         .flatMap(eventFromEffectiveChangeWithInitializationTraceContext)
         .toVector
       _ = logger.info(
-        s"Found ${eventsFromBootstrapping.size} outstanding events from synchronizer bootstrapping and ${eventsFromProcessingWithoutTraceContext.size} outstanding events from topology processing to process."
+        s"Found ${eventsFromProcessingWithoutTraceContext.size} outstanding events from topology processing to process."
       )
       _ = logger.info(
         s"Fetching trace-contexts for ${eventsFromProcessingWithoutTraceContext.size} topology-updates for topology event recovery."
@@ -451,22 +574,23 @@ class ParticipantTopologyTerminateProcessing(
             event.copy(traceContext = sourceEventTraceContext) -> sequencedTime
 
           case None =>
-            logger.warn(
-              s"Cannot find trace context for sequenced time: $sequencedTime, using initialization trace context to schedule this event."
-            )
+            // for the events related to onboarding it is normal not to have the event in the SequencedEventStore
+            if (sequencedTime > trustCertificateEffectiveTime.value) {
+              logger.warn(
+                s"Cannot find trace context for sequenced time: $sequencedTime, using initialization trace context to schedule this event."
+              )
+            }
             event -> sequencedTime
         }
       }
-      allEvents = eventsFromBootstrapping ++ eventsFromProcessing
     } yield {
       logger.info(
-        s"Scheduling ${allEvents.size} topology events at synchronizer-startup."
+        s"Scheduling ${eventsFromProcessing.size} topology events at synchronizer-startup."
       )
-      allEvents.foreach(
+      eventsFromProcessing.foreach(
         scheduleEventAtRecovery(topologyEventPublishedOnInitialRecordTime)
       )
     }
-  }
 
   private def scheduleEventAtRecovery(
       topologyEventPublishedOnInitialRecordTime: Boolean
@@ -538,7 +662,7 @@ class ParticipantTopologyTerminateProcessing(
           ),
           onboardingLocallyHostedParty = onboardingLocalParty,
           clearingOnboardingLocallyHostedParty = clearingOnboardingLocalParty,
-          abortingOnboardingLocallyHostedParty = revokingLocalParty,
+          revokingLocallyHostedParty = revokingLocalParty,
         )
     }
 }

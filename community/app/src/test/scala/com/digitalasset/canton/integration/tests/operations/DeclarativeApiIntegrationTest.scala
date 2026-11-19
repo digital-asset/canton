@@ -72,11 +72,11 @@ final class DeclarativeApiIntegrationTest
         _.focus(_.parameters.enableAlphaStateViaConfig).replace(true),
         ConfigTransforms.updateAllSequencerConfigs_ { config =>
           config.sequencer match {
-            case external: SequencerConfig.External =>
+            case cfg: SequencerConfig.BftSequencer =>
               config
                 .focus(_.sequencer)
                 .replace(
-                  external
+                  cfg
                     .focus(_.block.throughputCap.strict)
                     .replace(true)
                     .focus(_.block.throughputCap.enabled)

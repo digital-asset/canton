@@ -169,7 +169,7 @@ trait DbKmsMetadataStoreTest extends AsyncWordSpec with BaseTest with KmsMetadat
     behave like kmsMetadataStore(() =>
       new DbKmsMetadataStore(
         storage,
-        CachingConfigs.testing.kmsMetadataCache,
+        CachingConfigs.defaultKmsMetadataCache,
         timeouts,
         loggerFactory,
       )

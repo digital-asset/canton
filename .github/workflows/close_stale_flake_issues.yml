@@ -43,3 +43,17 @@ jobs:
         uses: ./.github/actions/nix/nix_run
         with:
           command: python3 scripts/ci/close_stale_flake_issues.py ${{ inputs.dry_run == true && '--dry-run' || '' }}
+
+  # A failed or cancelled scheduled run pings the CI rota in #team-canton-internal, so it is not
+  # left red in the Actions tab with nobody looking. A manual run has someone watching it.
+  notify:
+    name: Notify on Failure
+    needs: [pick_runner, close-stale-flake-issues]
+    if: >-
+      always() &&
+      github.event_name == 'schedule' &&
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    uses: ./.github/workflows/_notify.yml
+    secrets: inherit
+    with:
+      needs_json: ${{ toJSON(needs) }}

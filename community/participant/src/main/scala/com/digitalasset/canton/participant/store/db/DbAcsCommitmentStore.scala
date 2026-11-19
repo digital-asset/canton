@@ -7,7 +7,7 @@ import cats.syntax.traverse.*
 import cats.{Eval, Monad}
 import com.daml.nameof.NameOf
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.{BufferedAcsCommitment, CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -19,6 +19,7 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.config.ParticipantBatchingConfig
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.{
   ParticipantCommitmentData,
@@ -78,7 +79,7 @@ class DbAcsCommitmentStore(
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
     stringInterningEval: Eval[StringInterning],
-    batchingConfig: BatchingConfig,
+    batchingConfig: ParticipantBatchingConfig,
 )(implicit val ec: ExecutionContext)
     extends AcsCommitmentStore
     with DbPrunableByTimeSynchronizer[IndexedSynchronizer]
@@ -544,7 +545,7 @@ class DbIncrementalCommitmentStore(
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
     stringInterningEval: Eval[StringInterning],
-    batchingConfig: BatchingConfig,
+    batchingConfig: ParticipantBatchingConfig,
 )(implicit val ec: ExecutionContext)
     extends IncrementalCommitmentStore
     with DbStore {

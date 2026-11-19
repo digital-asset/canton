@@ -26,6 +26,24 @@ Common GitHub Actions job results:
 
 ---
 
+# Docs-only pull requests
+
+A pull request that changes only the files below skips Static Tests, Compile, and every test,
+and `Canton Build Required` still passes. This is expected.
+
+- `UNRELEASED.md` and `CONTRIBUTING.md` at the repository root
+- `release-notes/*.md`
+- `contributing/*.md` and `contributing/*.png`
+
+The source of truth is the `git diff-tree` path list in the
+`Detect release notes and contributor docs-only changes` step of
+[`_setup_and_validation.yml`](../.github/workflows/_setup_and_validation.yml).
+The same check applies to the merge queue, against the whole queue candidate.
+Any other changed file, or a failed comparison, runs full CI.
+Pushes to `main`, release lines, and tags always run full CI.
+
+---
+
 ## How to trigger manually
 
 1. Open repository `Actions`.

@@ -91,7 +91,9 @@ else
 
   release_failed=0
 
-  if [[ -z "$private_github_token" ]]; then
+  if [[ "${GITHUB_REPOSITORY:-}" == "digital-asset/canton" ]]; then
+    info "Releasing from the public repository, skipping the private release"
+  elif [[ -z "$private_github_token" ]]; then
     warn "Missing private GitHub token for release publishing"
     release_failed=1
   else

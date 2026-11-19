@@ -1,6 +1,8 @@
 Add a new protocol version
 ==========================
 
+For the example, suppose we are removing protocol version 35.
+
 # Code and testing
 - Remove coverage for the protocol version in CI files.
 - Mark the protocol version as deleted (`ProtocolVersion.deleted`).
@@ -9,7 +11,6 @@ Add a new protocol version
 
 # Protobuf
 
-For the example, suppose we are removing protocol version 35.
 Consider the versioning tables (`VersioningTable` and `SupportedProtoVersions`):
 
 - If it contains a single entry, bump 35 to 37.
@@ -22,3 +23,7 @@ About the removal of protobuf:
 - Protocol messages are usually fine to remove.
 - Be careful when removing a message and ensure it will not be needed.
 - If removing a version allows to do clean up (e.g., merging a class into the parent trait), do it.
+
+# Clean up
+
+- Search for `>= ProtocolVersion.v36` (always true)

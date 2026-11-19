@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.jsonapi
 
-import com.daml.jwt.{Jwt, StandardJWTPayload, StandardJWTTokenFormat}
+import com.daml.jwt.Jwt
 import com.daml.ledger.api.v2.admin.{identity_provider_config_service, user_management_service}
 import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.canton.config.{AuthServiceConfig, CantonConfig}
@@ -11,11 +11,7 @@ import com.digitalasset.canton.http.json.v2.JsIdentityProviderCodecs.*
 import com.digitalasset.canton.http.json.v2.JsUserManagementCodecs.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.jsonapi.AbstractHttpServiceIntegrationTestFuns.HttpServiceTestFixtureData
-import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
-  ApiUserManagementServiceSuppressionRule,
-  AuthStartupConfigSuppressionRule,
-}
-import com.digitalasset.canton.integration.tests.ledgerapi.auth.ServiceCallContext
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import com.digitalasset.canton.integration.tests.ledgerapi.services.TestCommands
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentSetupPlugin}
@@ -27,8 +23,7 @@ import org.apache.pekko.http.scaladsl.model.Uri.Query
 import org.apache.pekko.http.scaladsl.model.{HttpHeader, StatusCodes, Uri}
 import org.scalatest.Assertion
 
-import java.time.Instant
-import java.time.temporal.ChronoUnit
+import java.time.Duration
 import java.util.UUID
 import scala.concurrent.Future
 
@@ -39,33 +34,12 @@ class JsonUserApiTest
     with HttpServiceUserFixture.UserToken
     with ErrorsAssertions {
 
-  registerPlugin(ExpectedScopeOverrideConfig(loggerFactory))
+  registerPlugin(ExpectedAudienceOverrideConfig(loggerFactory))
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
-  override val defaultScope: String = ExpectedScope
-
-  // TODO (i#33090): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
-  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
-  override def beforeAll(): Unit =
-    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
-      super.beforeAll()
-    }
-
-  def generateScopeBaseToken: StandardJWTPayload = StandardJWTPayload(
-    issuer = None,
-    participantId = None,
-    userId = "",
-    exp = Some(Instant.now().plus(2, ChronoUnit.MINUTES)),
-    format = StandardJWTTokenFormat.Scope,
-    audiences = List.empty,
-    scope = Some(defaultScope),
-  )
-
   lazy val adminHeaders: List[HttpHeader] =
-    HttpServiceTestFixture.authorizationHeader(
-      Jwt(toScopeContext(adminToken).token.getOrElse(""))
-    )
+    HttpServiceTestFixture.authorizationHeader(Jwt(toHeader(adminToken)))
 
   "Json api" should {
     "return current user using data from token" in httpTestFixture { fixture =>
@@ -147,7 +121,8 @@ class JsonUserApiTest
     }
   }
 
-  case class ExpectedScopeOverrideConfig(
+  //  plugin to override the configuration and use authorization with audience
+  case class ExpectedAudienceOverrideConfig(
       protected val loggerFactory: NamedLoggerFactory
   ) extends EnvironmentSetupPlugin {
     override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig =
@@ -158,8 +133,8 @@ class JsonUserApiTest
               AuthServiceConfig
                 .UnsafeJwtHmac256(
                   secret = jwtSecret,
-                  targetAudience = None,
-                  targetScope = Some(ExpectedScope),
+                  targetAudience = Some(ExpectedAudience),
+                  targetScope = None,
                 )
             )
           )
@@ -171,10 +146,8 @@ class JsonUserApiTest
   )(test: (String, List[HttpHeader]) => Future[Assertion]) = {
 
     val randomUser: String = "randomUser-" + UUID.randomUUID.toString
-    val userToken = generateScopeBaseToken.copy(userId = randomUser)
-    val userHeaders = HttpServiceTestFixture.authorizationHeader(
-      Jwt(toScopeContext(userToken).token.getOrElse(""))
-    )
+    val userToken = standardToken(randomUser, expiresIn = Some(Duration.ofMinutes(2)))
+    val userHeaders = HttpServiceTestFixture.authorizationHeader(Jwt(toHeader(userToken)))
     for {
       _ <- fixture
         .postJsonRequest(
@@ -193,16 +166,4 @@ class JsonUserApiTest
       result <- test(randomUser, userHeaders)
     } yield result
   }
-
-  private def toScopeContext(
-      payload: StandardJWTPayload
-  ): ServiceCallContext = ServiceCallContext(
-    token = Some(
-      toHeader(
-        payload = payload,
-        enforceFormat = Some(StandardJWTTokenFormat.Scope),
-        secret = jwtSecret.unwrap,
-      )
-    )
-  )
 }

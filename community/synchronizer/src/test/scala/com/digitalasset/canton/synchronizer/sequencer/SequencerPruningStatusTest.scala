@@ -128,7 +128,9 @@ class SequencerPruningStatusTest extends BaseTestWordSpec {
 
       status.toProtoV30.left.value should include("Cannot serialize")
       val statusP = status.withoutUnregisteredMembers.toProtoV30.value
-      SequencerPruningStatus.fromProtoV30(statusP).value shouldBe status.copy(
+      SequencerPruningStatus
+        .fromProtoV30(testedProtocolVersionValidation, statusP)
+        .value shouldBe status.copy(
         members = Set(active, disabled)
       )
     }

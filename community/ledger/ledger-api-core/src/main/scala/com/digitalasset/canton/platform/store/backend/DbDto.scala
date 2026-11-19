@@ -51,6 +51,7 @@ object DbDto {
       reassignment_counter: Option[Long],
       reassignment_id: Option[Array[Byte]],
       representative_package_id: PackageId,
+      participant_event_category: Option[Int],
 
       // contract related columns
       notPersistedContractId: ContractId, // just needed for processing
@@ -100,6 +101,7 @@ object DbDto {
       assignment_exclusivity: Option[Long],
       target_synchronizer_id: Option[SynchronizerId],
       reassignment_counter: Option[Long],
+      participant_event_category: Option[Int],
 
       // contract related columns
       contract_id: ContractId,
@@ -366,6 +368,7 @@ object DbDto {
         reassignment_counter = None,
         reassignment_id = None,
         representative_package_id = representative_package_id,
+        participant_event_category = None,
         // contract related columns
         notPersistedContractId = notPersistedContractId,
         internal_contract_id = internal_contract_id,
@@ -430,6 +433,7 @@ object DbDto {
         reassignment_counter = Some(reassignment_counter),
         reassignment_id = Some(reassignment_id),
         representative_package_id = representative_package_id,
+        participant_event_category = None,
         // contract related columns
         notPersistedContractId = notPersistedContractId,
         internal_contract_id = internal_contract_id,
@@ -440,6 +444,63 @@ object DbDto {
       event_sequential_id = event_sequential_id,
       template_id = template_id,
       party_ids = stakeholders.iterator,
+    )(_.activateStakeholder)
+
+  def addedEventDbDtos(
+      // update related columns
+      event_offset: Long,
+      update_id: Array[Byte],
+      workflow_id: Option[String],
+      record_time: Long,
+      synchronizer_id: SynchronizerId,
+      trace_context: Array[Byte],
+
+      // event related columns
+      event_sequential_id: Long,
+      node_id: Int,
+      reassignment_counter: Long,
+      representative_package_id: PackageId,
+      participant_event_category: Int,
+
+      // contract related columns
+      notPersistedContractId: ContractId,
+      internal_contract_id: Long,
+      create_key_hash: Option[String],
+      notPersistedContractKey: Option[GlobalKey],
+  )(party_ids: Set[Party], template_id: NameTypeConRef): Iterator[DbDto] =
+    Iterator(
+      EventActivate(
+        // update related columns
+        event_offset = event_offset,
+        update_id = update_id,
+        workflow_id = workflow_id,
+        command_id = None,
+        submitters = None,
+        record_time = record_time,
+        synchronizer_id = synchronizer_id,
+        trace_context = trace_context,
+        external_transaction_hash = None,
+        traffic_cost = None,
+        // event related columns
+        event_type = PersistentEventType.Add.asInt,
+        event_sequential_id = event_sequential_id,
+        node_id = node_id,
+        additional_witnesses = None,
+        source_synchronizer_id = None,
+        reassignment_counter = Some(reassignment_counter),
+        reassignment_id = None,
+        representative_package_id = representative_package_id,
+        participant_event_category = Some(participant_event_category),
+        // contract related columns
+        notPersistedContractId = notPersistedContractId,
+        internal_contract_id = internal_contract_id,
+        create_key_hash = create_key_hash,
+        notPersistedContractKey = notPersistedContractKey,
+      )
+    ) ++ idFilters(
+      event_sequential_id = event_sequential_id,
+      template_id = template_id,
+      party_ids = party_ids.iterator,
     )(_.activateStakeholder)
 
   def consumingExerciseDbDtos(
@@ -509,6 +570,7 @@ object DbDto {
         assignment_exclusivity = None,
         target_synchronizer_id = None,
         reassignment_counter = None,
+        participant_event_category = None,
         // contract related columns
         contract_id = contract_id,
         internal_contract_id = internal_contract_id,
@@ -588,6 +650,79 @@ object DbDto {
         assignment_exclusivity = assignment_exclusivity,
         target_synchronizer_id = Some(target_synchronizer_id),
         reassignment_counter = Some(reassignment_counter),
+        participant_event_category = None,
+        // contract related columns
+        contract_id = contract_id,
+        internal_contract_id = internal_contract_id,
+        template_id = template_id,
+        package_id = package_id,
+        stakeholders = stakeholders,
+        ledger_effective_time = None,
+        notPersistedContractKey = notPersistedContractKey,
+      )
+    ) ++ idFilters(
+      event_sequential_id = event_sequential_id,
+      template_id = template_id,
+      party_ids = stakeholders.iterator,
+    )(_.deactivateStakeholder)
+
+  def removedEventDbDtos(
+      // update related columns
+      event_offset: Long,
+      update_id: Array[Byte],
+      workflow_id: Option[String],
+      record_time: Long,
+      synchronizer_id: SynchronizerId,
+      trace_context: Array[Byte],
+
+      // event related columns
+      event_sequential_id: Long,
+      node_id: Int,
+      deactivated_event_sequential_id: Option[Long],
+      exercise_actors: Option[Set[Party]],
+      reassignment_counter: Long,
+      participant_event_category: Int,
+
+      // contract related columns
+      contract_id: ContractId,
+      internal_contract_id: Option[Long],
+      template_id: NameTypeConRef,
+      package_id: PackageId,
+      stakeholders: Set[Party],
+      notPersistedContractKey: Option[GlobalKey],
+  ): Iterator[DbDto] =
+    Iterator(
+      EventDeactivate(
+        // update related columns
+        event_offset = event_offset,
+        update_id = update_id,
+        workflow_id = workflow_id,
+        command_id = None,
+        submitters = None,
+        record_time = record_time,
+        synchronizer_id = synchronizer_id,
+        trace_context = trace_context,
+        external_transaction_hash = None,
+        traffic_cost = None,
+        // event related columns
+        event_type = PersistentEventType.Remove.asInt,
+        event_sequential_id = event_sequential_id,
+        node_id = node_id,
+        deactivated_event_sequential_id = deactivated_event_sequential_id,
+        additional_witnesses = None,
+        exercise_choice = None,
+        exercise_choice_interface_id = None,
+        exercise_argument = None,
+        exercise_result = None,
+        exercise_actors = exercise_actors,
+        exercise_last_descendant_node_id = None,
+        exercise_argument_compression = None,
+        exercise_result_compression = None,
+        reassignment_id = None,
+        assignment_exclusivity = None,
+        target_synchronizer_id = None,
+        reassignment_counter = Some(reassignment_counter),
+        participant_event_category = Some(participant_event_category),
         // contract related columns
         contract_id = contract_id,
         internal_contract_id = internal_contract_id,

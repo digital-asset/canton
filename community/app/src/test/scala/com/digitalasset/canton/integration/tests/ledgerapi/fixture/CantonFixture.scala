@@ -62,12 +62,24 @@ trait CantonFixtureAbstract
         ConfigTransforms.updateParticipantConfig("participant1") {
           _.focus(_.ledgerApi.authServices).replace(
             Seq(
+              // Most suites mint their tokens for the fixed `ExpectedAudience`, which needs no
+              // participant id, and the suites that test the participant-specific audience mint
+              // tokens for `https://daml.com/jwt/aud/participant/<participantId>`. The two formats
+              // need two services: any other audience is rejected by the fixed-audience service,
+              // and the participant id is extracted only by the general parser of a service without
+              // targets, to be checked by the authorizer.
+              AuthServiceConfig
+                .UnsafeJwtHmac256(
+                  secret = jwtSecret,
+                  targetAudience = Some(ExpectedAudience),
+                  targetScope = None,
+                ),
               AuthServiceConfig
                 .UnsafeJwtHmac256(
                   secret = jwtSecret,
                   targetAudience = None,
                   targetScope = None,
-                )
+                ),
             )
           )
         },

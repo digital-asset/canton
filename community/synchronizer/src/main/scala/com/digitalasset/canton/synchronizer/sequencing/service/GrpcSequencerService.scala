@@ -37,7 +37,7 @@ import com.digitalasset.canton.sequencer.api.v30.{
   GetTimeRequest,
   GetTimeResponse,
 }
-import com.digitalasset.canton.sequencing.SequencedSerializedEvent
+import com.digitalasset.canton.sequencing.ConnectionSerializedEvent
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.block.update.InFlightAggregationHandler
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -270,7 +270,9 @@ class GrpcSequencerService(
       for {
         signedContent <- EitherT.fromEither[FutureUnlessShutdown](
           SignedContent
-            .fromByteString(protocolVersion, requestP.signedSubmissionRequest)
+            .fromByteString(protocolVersion, SignatureCountCheck.Strict)(
+              requestP.signedSubmissionRequest
+            )
             .leftMap(requestDeserializationError(_, maxRequestSize))
         )
         _ = if (logEventDetails) {
@@ -546,7 +548,7 @@ class GrpcSequencerService(
     }
   }
 
-  private def toVersionSubscriptionResponseV0(event: SequencedSerializedEvent) =
+  private def toVersionSubscriptionResponseV0(event: ConnectionSerializedEvent) =
     v30.SubscriptionResponse(
       signedSequencedEvent = event.signedEvent.toByteString,
       Some(SerializableTraceContext(event.traceContext).toProtoV30),
@@ -565,7 +567,7 @@ class GrpcSequencerService(
   private def subscribeInternal[T](
       request: v30.SubscriptionRequest,
       responseObserver: StreamObserver[T],
-      toSubscriptionResponse: SequencedSerializedEvent => T,
+      toSubscriptionResponse: ConnectionSerializedEvent => T,
   ): Unit = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     withServerCallStreamObserver(responseObserver) { observer =>
@@ -735,7 +737,9 @@ class GrpcSequencerService(
       request: v30.AcknowledgeSignedRequest
   ): Future[v30.AcknowledgeSignedResponse] = {
     val acknowledgeRequestE = SignedContent
-      .fromByteString(protocolVersion, request.signedAcknowledgeRequest)
+      .fromByteString(protocolVersion, SignatureCountCheck.Strict)(
+        request.signedAcknowledgeRequest
+      )
       .flatMap(_.deserializeContent(AcknowledgeRequest.fromByteString(protocolVersion, _)))
     performAcknowledge(acknowledgeRequestE.map(SignedAcknowledgeRequest.apply))
   }
@@ -797,7 +801,7 @@ class GrpcSequencerService(
       expireAt: Option[CantonTimestamp],
       timestamp: Option[CantonTimestamp],
       grpcObserverHandle: GrpcObserverHandle[T],
-      toSubscriptionResponse: SequencedSerializedEvent => T,
+      toSubscriptionResponse: ConnectionSerializedEvent => T,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GrpcManagedSubscription[T]] = {

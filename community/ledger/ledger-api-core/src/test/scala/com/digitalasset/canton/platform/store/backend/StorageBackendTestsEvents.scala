@@ -9,11 +9,14 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   CommonEventProperties,
   CommonUpdateProperties,
   FatCreatedEventProperties,
+  ParticipantEventProperties,
   RawArchivedEvent,
   RawExercisedEvent,
   RawFatCreatedEvent,
+  RawRemoveEvent,
   RawThinAcsDeltaEvent,
   RawThinActiveContract,
+  RawThinAddEvent,
   RawThinAssignEvent,
   RawThinCreatedEvent,
   RawThinLedgerEffectsEvent,
@@ -127,11 +130,16 @@ private[backend] trait StorageBackendTestsEvents
       )(
         stakeholders = Set(partySignatory, partyObserver2)
       ),
+      dtosAdd(
+        event_offset = 3,
+        event_sequential_id = 3L,
+        notPersistedContractId = hashCid("#3"),
+      )(party_ids = Set(partySignatory, partyObserver1)),
     ).flatten
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
-    executeSql(updateLedgerEnd(offset(2), 2L))
+    executeSql(updateLedgerEnd(offset(3), 3L))
     testBidirectionalFetchPage("signatory")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
@@ -140,8 +148,8 @@ private[backend] trait StorageBackendTestsEvents
           templateIdO = None,
         )
         .fetchPage,
-      ascendingExpected = IdPage(Vector(1L, 2L), lastPage = true),
-      descendingExpected = IdPage(Vector(2L, 1L), lastPage = true),
+      ascendingExpected = IdPage(Vector(1L, 2L, 3L), lastPage = true),
+      descendingExpected = IdPage(Vector(3L, 2L, 1L), lastPage = true),
     )
     testBidirectionalFetchPage("observer1")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
@@ -151,8 +159,8 @@ private[backend] trait StorageBackendTestsEvents
           templateIdO = None,
         )
         .fetchPage,
-      ascendingExpected = IdPage(Vector(1L), lastPage = true),
-      descendingExpected = IdPage(Vector(1L), lastPage = true),
+      ascendingExpected = IdPage(Vector(1L, 3L), lastPage = true),
+      descendingExpected = IdPage(Vector(3L, 1L), lastPage = true),
     )
     testBidirectionalFetchPage("observer2")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
@@ -173,8 +181,8 @@ private[backend] trait StorageBackendTestsEvents
           templateIdO = None,
         )
         .fetchPage,
-      ascendingExpected = IdPage(Vector(1L, 2L), lastPage = true),
-      descendingExpected = IdPage(Vector(2L, 1L), lastPage = true),
+      ascendingExpected = IdPage(Vector(1L, 2L, 3L), lastPage = true),
+      descendingExpected = IdPage(Vector(3L, 2L, 1L), lastPage = true),
     )
   }
 
@@ -198,11 +206,16 @@ private[backend] trait StorageBackendTestsEvents
       )(
         stakeholders = Set(partySignatory, partyObserver2)
       ),
+      dtosAdd(
+        event_offset = 6,
+        event_sequential_id = 6L,
+        notPersistedContractId = hashCid("#6"),
+      )(party_ids = Set(partySignatory, partyObserver1)),
     ).flatten
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
-    executeSql(updateLedgerEnd(offset(6), 6L))
+    executeSql(updateLedgerEnd(offset(7), 7L))
     testBidirectionalFetchPageFiltered("signatory Create")(
       input = PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)),
       query = backend.event.updateStreamingQueries
@@ -226,6 +239,18 @@ private[backend] trait StorageBackendTestsEvents
         .fetchPage,
       ascendingExpected = Vector(5L),
       descendingExpected = Vector(5L),
+    )
+    testBidirectionalFetchPageFiltered("signatory Add")(
+      input = PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)),
+      query = backend.event.updateStreamingQueries
+        .activateStakeholderIds(
+          witnessO = Some(partySignatory),
+          templateIdO = None,
+        )
+        .filteredForEventTypes(Set(PersistentEventType.Add))
+        .fetchPage,
+      ascendingExpected = Vector(6L),
+      descendingExpected = Vector(6L),
     )
     testBidirectionalFetchPageFiltered("signatory Create and Assign")(
       input = PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)),
@@ -259,8 +284,8 @@ private[backend] trait StorageBackendTestsEvents
           templateIdO = None,
         )
         .fetchPage,
-      ascendingExpected = IdPage(Vector(1L, 5L), lastPage = true),
-      descendingExpected = IdPage(Vector(5L, 1L), lastPage = true),
+      ascendingExpected = IdPage(Vector(1L, 5L, 6L), lastPage = true),
+      descendingExpected = IdPage(Vector(6L, 5L, 1L), lastPage = true),
     )
 
     testBidirectionalFetchBounds("bounds assign and create")(
@@ -314,12 +339,12 @@ private[backend] trait StorageBackendTestsEvents
       ascendingExpected =
         Some(IdPageBounds(PaginationFromTo.ascending(EventSeqIdRange(1L, 4L)), lastPage = false)),
       descendingExpected =
-        Some(IdPageBounds(PaginationFromTo.descending(EventSeqIdRange(2L, 10L)), lastPage = false)),
+        Some(IdPageBounds(PaginationFromTo.descending(EventSeqIdRange(6L, 10L)), lastPage = false)),
     )
     testBidirectionalFetchBounds("bounds only create, last page detected with right on the limit")(
       input = PaginationInput(
         PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1L, endInclusive = 10L)),
-        limit = 2,
+        limit = 3,
       ),
       query = backend.event.updateStreamingQueries
         .activateStakeholderIds(
@@ -1481,6 +1506,10 @@ private[backend] trait StorageBackendTestsEvents
       dtosWitnessedCreate(event_sequential_id = 5L)(),
       dtosWitnessedExercised(event_sequential_id = 6L),
       dtosWitnessedExercised(event_sequential_id = 7L, consuming = false),
+      dtosAdd(event_sequential_id = 8L)(),
+      dtosRemove(event_sequential_id = 9L),
+      dtosAdd(event_sequential_id = 10L, reassignment_counter = 0)(),
+      dtosRemove(event_sequential_id = 11L, reassignment_counter = 0),
     ).flatten
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams))
@@ -1555,6 +1584,62 @@ private[backend] trait StorageBackendTestsEvents
         ),
         sourceSynchronizerId = someSynchronizerId2.toProtoPrimitive,
       ),
+      RawThinAddEvent(
+        participantEventProperties = ParticipantEventProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 8L,
+            offset = 10L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          reassignmentCounter = 345,
+          category = PersistentParticipantEventUpdateCategory.AcsImport,
+        ),
+        thinCreatedEventProperties = ThinCreatedEventProperties(
+          representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
+          filteredAdditionalWitnessParties = Set.empty,
+          internalContractId = 10L,
+          requestingParties = Some(Set("witness2", "stakeholder2", "submitter1", "actor2")),
+          reassignmentCounter = 345,
+          acsDeltaForParticipant = true,
+        ),
+      ),
+      RawThinAddEvent(
+        participantEventProperties = ParticipantEventProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 10L,
+            offset = 10L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          reassignmentCounter = 0,
+          category = PersistentParticipantEventUpdateCategory.AcsImportTxStyle,
+        ),
+        thinCreatedEventProperties = ThinCreatedEventProperties(
+          representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
+          filteredAdditionalWitnessParties = Set.empty,
+          internalContractId = 10L,
+          requestingParties = Some(Set("witness1", "stakeholder1", "submitter1", "actor1")),
+          reassignmentCounter = 0,
+          acsDeltaForParticipant = true,
+        ),
+      ),
     )
     executeSql(
       backend.event.fetchEventPayloadsAcsDelta(EventPayloadSourceForUpdatesAcsDelta.Deactivate)(
@@ -1618,6 +1703,60 @@ private[backend] trait StorageBackendTestsEvents
         filteredStakeholderParties = Set("stakeholder2"),
         assignmentExclusivity = Some(Timestamp.assertFromLong(111333)),
         targetSynchronizerId = someSynchronizerId2.toProtoPrimitive,
+        deactivatedEventSeqId = Some(67),
+      ),
+      RawRemoveEvent(
+        participantEventProperties = ParticipantEventProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 9L,
+            offset = 10L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          reassignmentCounter = 345,
+          category = PersistentParticipantEventUpdateCategory.Purge,
+        ),
+        contractId = hashCid("c1"),
+        templateId = Identifier
+          .assertFromString("package:pl:ate")
+          .toFullIdentifier(PackageName.assertFromString("tem")),
+        filteredStakeholderParties = Set("stakeholder2"),
+        exerciseActors = Set("stakeholder1", "stakeholder2"),
+        deactivatedEventSeqId = Some(67),
+      ),
+      RawRemoveEvent(
+        participantEventProperties = ParticipantEventProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 11L,
+            offset = 10L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          reassignmentCounter = 0,
+          category = PersistentParticipantEventUpdateCategory.PurgeTxStyle,
+        ),
+        contractId = hashCid("c1"),
+        templateId = Identifier
+          .assertFromString("package:pl:ate")
+          .toFullIdentifier(PackageName.assertFromString("tem")),
+        filteredStakeholderParties = Set("stakeholder1"),
+        exerciseActors = Set("stakeholder1", "stakeholder2"),
         deactivatedEventSeqId = Some(67),
       ),
     )
@@ -1689,6 +1828,62 @@ private[backend] trait StorageBackendTestsEvents
           acsDeltaForParticipant = true,
         ),
         sourceSynchronizerId = someSynchronizerId2.toProtoPrimitive,
+      ),
+      RawThinAddEvent(
+        participantEventProperties = ParticipantEventProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 8L,
+            offset = 10L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          reassignmentCounter = 345,
+          category = PersistentParticipantEventUpdateCategory.AcsImport,
+        ),
+        thinCreatedEventProperties = ThinCreatedEventProperties(
+          representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
+          filteredAdditionalWitnessParties = Set.empty,
+          internalContractId = 10L,
+          requestingParties = Some(Set("witness2", "stakeholder2", "submitter1", "actor2")),
+          reassignmentCounter = 345,
+          acsDeltaForParticipant = true,
+        ),
+      ),
+      RawThinAddEvent(
+        participantEventProperties = ParticipantEventProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 10L,
+            offset = 10L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          reassignmentCounter = 0,
+          category = PersistentParticipantEventUpdateCategory.AcsImportTxStyle,
+        ),
+        thinCreatedEventProperties = ThinCreatedEventProperties(
+          representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
+          filteredAdditionalWitnessParties = Set.empty,
+          internalContractId = 10L,
+          requestingParties = Some(Set("witness1", "stakeholder1", "submitter1", "actor1")),
+          reassignmentCounter = 0,
+          acsDeltaForParticipant = true,
+        ),
       ),
     )
     val testThinCreatedEvent = RawThinCreatedEvent(
@@ -1832,6 +2027,60 @@ private[backend] trait StorageBackendTestsEvents
         targetSynchronizerId = someSynchronizerId2.toProtoPrimitive,
         deactivatedEventSeqId = Some(67),
       ),
+      RawRemoveEvent(
+        participantEventProperties = ParticipantEventProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 9L,
+            offset = 10L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          reassignmentCounter = 345,
+          category = PersistentParticipantEventUpdateCategory.Purge,
+        ),
+        contractId = hashCid("c1"),
+        templateId = Identifier
+          .assertFromString("package:pl:ate")
+          .toFullIdentifier(PackageName.assertFromString("tem")),
+        filteredStakeholderParties = Set("stakeholder2"),
+        exerciseActors = Set("stakeholder1", "stakeholder2"),
+        deactivatedEventSeqId = Some(67),
+      ),
+      RawRemoveEvent(
+        participantEventProperties = ParticipantEventProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 11L,
+            offset = 10L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          reassignmentCounter = 0,
+          category = PersistentParticipantEventUpdateCategory.PurgeTxStyle,
+        ),
+        contractId = hashCid("c1"),
+        templateId = Identifier
+          .assertFromString("package:pl:ate")
+          .toFullIdentifier(PackageName.assertFromString("tem")),
+        filteredStakeholderParties = Set("stakeholder1"),
+        exerciseActors = Set("stakeholder1", "stakeholder2"),
+        deactivatedEventSeqId = Some(67),
+      ),
     )
     executeSql(
       backend.event.fetchEventPayloadsLedgerEffects(
@@ -1908,6 +2157,60 @@ private[backend] trait StorageBackendTestsEvents
         filteredStakeholderParties = Set("stakeholder2"),
         assignmentExclusivity = Some(Timestamp.assertFromLong(111333)),
         targetSynchronizerId = someSynchronizerId2.toProtoPrimitive,
+        deactivatedEventSeqId = Some(67),
+      ),
+      RawRemoveEvent(
+        participantEventProperties = ParticipantEventProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 9L,
+            offset = 10L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          reassignmentCounter = 345,
+          category = PersistentParticipantEventUpdateCategory.Purge,
+        ),
+        contractId = hashCid("c1"),
+        templateId = Identifier
+          .assertFromString("package:pl:ate")
+          .toFullIdentifier(PackageName.assertFromString("tem")),
+        filteredStakeholderParties = Set("stakeholder2"),
+        exerciseActors = Set("stakeholder1", "stakeholder2"),
+        deactivatedEventSeqId = Some(67),
+      ),
+      RawRemoveEvent(
+        participantEventProperties = ParticipantEventProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 11L,
+            offset = 10L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          reassignmentCounter = 0,
+          category = PersistentParticipantEventUpdateCategory.PurgeTxStyle,
+        ),
+        contractId = hashCid("c1"),
+        templateId = Identifier
+          .assertFromString("package:pl:ate")
+          .toFullIdentifier(PackageName.assertFromString("tem")),
+        filteredStakeholderParties = Set(),
+        exerciseActors = Set("stakeholder1", "stakeholder2"),
         deactivatedEventSeqId = Some(67),
       ),
     )
@@ -2034,6 +2337,8 @@ private[backend] trait StorageBackendTestsEvents
     val createAndArchiveInternalContractId = 11L
     val transientInternalContractId = 12L
     val divulgedInternalContractId = 13L
+    val addTxStyleInternalContractId = 14L
+    val addAndRemoveTxStyleInternalContractId = 16L
 
     val dbDtos = Vector(
       dtosCreate(
@@ -2066,6 +2371,24 @@ private[backend] trait StorageBackendTestsEvents
         internal_contract_id = divulgedInternalContractId,
         event_offset = 160,
       )(),
+      dtosAdd(
+        event_sequential_id = 7L,
+        internal_contract_id = addTxStyleInternalContractId,
+        event_offset = 161,
+        reassignment_counter = 0L,
+      )(),
+      dtosAdd(
+        event_sequential_id = 8L,
+        internal_contract_id = addAndRemoveTxStyleInternalContractId,
+        event_offset = 162,
+        reassignment_counter = 0L,
+      )(),
+      dtosRemove(
+        event_sequential_id = 9L,
+        internal_contract_id = Some(addAndRemoveTxStyleInternalContractId),
+        event_offset = 163,
+        reassignment_counter = 0L,
+      ),
     ).flatten
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams))
@@ -2254,6 +2577,111 @@ private[backend] trait StorageBackendTestsEvents
       )
     )
     divulged shouldBe (None -> None)
+
+    val addTxStyle = executeSql(
+      backend.event.eventReaderQueries.fetchContractIdEvents(
+        internalContractId = addTxStyleInternalContractId,
+        requestingParties =
+          Some(Set("witness1", "stakeholder1", "submitter1", "actor1").map(Party.assertFromString)),
+        endEventSequentialId = 10000L,
+      )
+    )
+    addTxStyle._1.value should equal(
+      RawThinCreatedEvent(
+        transactionProperties = TransactionProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 7L,
+            offset = 161L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          transactionHash = None,
+        ),
+        thinCreatedEventProperties = ThinCreatedEventProperties(
+          representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
+          filteredAdditionalWitnessParties = Set.empty,
+          internalContractId = addTxStyleInternalContractId,
+          requestingParties = Some(Set("witness1", "stakeholder1", "submitter1", "actor1")),
+          reassignmentCounter = 0L,
+          acsDeltaForParticipant = true,
+        ),
+      )
+    )
+    addTxStyle._2 shouldBe None
+
+    val addAndRemoveTxStyle = executeSql(
+      backend.event.eventReaderQueries.fetchContractIdEvents(
+        internalContractId = addAndRemoveTxStyleInternalContractId,
+        requestingParties =
+          Some(Set("witness1", "stakeholder1", "submitter1", "actor1").map(Party.assertFromString)),
+        endEventSequentialId = 10000L,
+      )
+    )
+    addAndRemoveTxStyle._1.value should equal(
+      RawThinCreatedEvent(
+        transactionProperties = TransactionProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 8L,
+            offset = 162L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          transactionHash = None,
+        ),
+        thinCreatedEventProperties = ThinCreatedEventProperties(
+          representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
+          filteredAdditionalWitnessParties = Set.empty,
+          internalContractId = addAndRemoveTxStyleInternalContractId,
+          requestingParties = Some(Set("witness1", "stakeholder1", "submitter1", "actor1")),
+          reassignmentCounter = 0L,
+          acsDeltaForParticipant = true,
+        ),
+      )
+    )
+    addAndRemoveTxStyle._2.value should equal(
+      RawArchivedEvent(
+        transactionProperties = TransactionProperties(
+          commonEventProperties = CommonEventProperties(
+            eventSequentialId = 9L,
+            offset = 163L,
+            nodeId = 15,
+            workflowId = Some("workflow-id"),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          ),
+          commonUpdateProperties = CommonUpdateProperties(
+            updateId = TestUpdateId("update").toHexString,
+            commandId = None,
+            traceContext = serializableTraceContext,
+            recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
+          ),
+          transactionHash = None,
+        ),
+        contractId = hashCid("c1"),
+        templateId = Identifier
+          .assertFromString("package:pl:ate")
+          .toFullIdentifier(PackageName.assertFromString("tem")),
+        filteredStakeholderParties = Set("stakeholder1"),
+        ledgerEffectiveTime = Timestamp.assertFromLong(100L),
+        deactivatedEventSeqId = Some(67),
+      )
+    )
   }
 
   it should "fetch correctly the stream contents for acs" in {
@@ -2270,6 +2698,10 @@ private[backend] trait StorageBackendTestsEvents
         event_sequential_id = 7L,
         consuming = false,
       ),
+      dtosAdd(event_sequential_id = 8L, reassignment_counter = 0L)(),
+      dtosAdd(event_sequential_id = 9L, reassignment_counter = 345)(),
+      dtosRemove(event_sequential_id = 10L, reassignment_counter = 0L),
+      dtosRemove(event_sequential_id = 11L, reassignment_counter = 345L),
     ).flatten
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams))
@@ -2318,6 +2750,40 @@ private[backend] trait StorageBackendTestsEvents
           internalContractId = 10L,
           requestingParties = Some(Set("witness1", "stakeholder1", "submitter1", "actor1")),
           reassignmentCounter = 345,
+          acsDeltaForParticipant = true,
+        ),
+      ),
+      RawThinActiveContract(
+        commonEventProperties = CommonEventProperties(
+          eventSequentialId = 8L,
+          offset = 10L,
+          nodeId = 15,
+          workflowId = Some("workflow-id"),
+          synchronizerId = someSynchronizerId.toProtoPrimitive,
+        ),
+        thinCreatedEventProperties = ThinCreatedEventProperties(
+          representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
+          filteredAdditionalWitnessParties = Set.empty,
+          internalContractId = 10L,
+          requestingParties = Some(Set("witness1", "stakeholder1", "submitter1", "actor1")),
+          reassignmentCounter = 0L,
+          acsDeltaForParticipant = true,
+        ),
+      ),
+      RawThinActiveContract(
+        commonEventProperties = CommonEventProperties(
+          eventSequentialId = 9L,
+          offset = 10L,
+          nodeId = 15,
+          workflowId = Some("workflow-id"),
+          synchronizerId = someSynchronizerId.toProtoPrimitive,
+        ),
+        thinCreatedEventProperties = ThinCreatedEventProperties(
+          representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
+          filteredAdditionalWitnessParties = Set.empty,
+          internalContractId = 10L,
+          requestingParties = Some(Set("witness1", "stakeholder1", "submitter1", "actor1")),
+          reassignmentCounter = 345L,
           acsDeltaForParticipant = true,
         ),
       ),

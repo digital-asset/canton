@@ -217,6 +217,7 @@ trait ConnectionPoolTestHelpers extends MetricValues {
       trustThreshold = trustThreshold,
       minRestartConnectionDelay = poolDelays.minRestartDelay,
       maxRestartConnectionDelay = poolDelays.maxRestartDelay,
+      minStableConnectionDuration = poolDelays.minStableDuration,
       warnConnectionValidationDelay = poolDelays.warnValidationDelay,
       sequencerConnectionPenaltyConfig = poolPenaltyConfig,
       expectedPsidO = expectedSynchronizerIdO,
@@ -318,6 +319,7 @@ trait ConnectionPoolTestHelpers extends MetricValues {
       member = testMember,
       initialSubscriptionEventO = None,
       subscriptionStartProvider,
+      useNewAggregator = true,
     )
 
     val listener = new TestHealthListener(subscriptionPool.health)

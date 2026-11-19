@@ -83,7 +83,10 @@ object LedgerApiBenchTool {
   def apply(config: Config): LedgerApiBenchTool =
     new LedgerApiBenchTool(
       names = new Names,
-      authorizationHelper = config.authorizationTokenSecret.map(new AuthorizationHelper(_)),
+      authorizationHelper = for {
+        secret <- config.authorizationTokenSecret
+        audience <- config.authorizationTokenAudience
+      } yield new AuthorizationHelper(secret, audience),
       config = config,
     )
 

@@ -56,7 +56,7 @@ class SequencerRateLimitManagerImpl(
     batchingConfig: BatchingConfig,
     metrics: SequencerMetrics,
     synchronizerSyncCryptoApi: SynchronizerCryptoClient,
-    protocolVersion: ProtocolVersion,
+    private val protocolVersion: ProtocolVersion,
     trafficConfig: SequencerTrafficConfig,
     sequencerMemberRateLimiterFactory: TrafficConsumedManagerFactory =
       DefaultTrafficConsumedManagerFactory,
@@ -359,6 +359,7 @@ class SequencerRateLimitManagerImpl(
         parameters.readVsWriteScalingFactor,
         groupToMembers,
         parameters.baseEventCost,
+        protocolVersion,
       )
     } yield ValidCostWithDetails(
       parameters,

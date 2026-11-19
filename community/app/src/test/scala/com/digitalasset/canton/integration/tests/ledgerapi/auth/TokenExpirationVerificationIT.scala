@@ -20,10 +20,7 @@ import com.digitalasset.canton.integration.tests.jsonapi.{
   HttpServiceUserFixture,
   HttpTestFuns,
 }
-import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
-  AuthServiceJWTSuppressionRule,
-  AuthStartupConfigSuppressionRule,
-}
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthServiceJWTSuppressionRule
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import com.digitalasset.canton.integration.tests.ledgerapi.services.TestCommands
 import com.digitalasset.canton.integration.{
@@ -51,14 +48,7 @@ class TokenExpirationVerificationIT
     with HttpServiceUserFixture.UserToken
     with ErrorsAssertions {
 
-  // TODO (i#33090): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
-  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
-  override def beforeAll(): Unit =
-    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
-      super.beforeAll()
-    }
-
-  registerPlugin(ExpectedScopeOverrideConfig(loggerFactory))
+  registerPlugin(ExpectedAudienceOverrideConfig(loggerFactory))
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
@@ -125,13 +115,13 @@ class TokenExpirationVerificationIT
       party = getPartyId(randomParty),
     )
 
-  private def toScopeContext(
+  private def toAudienceContext(
       payload: StandardJWTPayload
   ): ServiceCallContext = ServiceCallContext(
     token = Some(
       toHeader(
         payload = payload,
-        enforceFormat = Some(StandardJWTTokenFormat.Scope),
+        enforceFormat = Some(StandardJWTTokenFormat.Audience),
         secret = jwtSecret.unwrap,
       )
     )
@@ -139,53 +129,37 @@ class TokenExpirationVerificationIT
 
   private val fallbackToken = CantonAdminToken.create(new SymbolicPureCrypto())
 
-  override val defaultScope: String = ExpectedScope
+  private val noLifetimeCheckAudience = "noLifetimeCheckAudience"
 
-  private val nolifetimeCheckScope = "nolifetimeCheckScope"
+  private val maxLifeZeroAudience = "maxLifeZeroAudience"
 
-  private val maxlifeZeroScope = "maxlifeZeroScope"
-
-  val scopeBaseToken: StandardJWTPayload = StandardJWTPayload(
+  val audienceBaseToken: StandardJWTPayload = StandardJWTPayload(
     issuer = None,
     participantId = None,
     userId = participantAdmin,
     exp = None,
-    format = StandardJWTTokenFormat.Scope,
-    audiences = List.empty,
-    scope = Some(defaultScope),
+    format = StandardJWTTokenFormat.Audience,
+    audiences = List(ExpectedAudience),
+    scope = None,
   )
 
-  val noLifetimeCheckScopeToken: StandardJWTPayload = StandardJWTPayload(
-    issuer = None,
-    participantId = None,
-    userId = participantAdmin,
-    exp = None,
-    format = StandardJWTTokenFormat.Scope,
-    audiences = List.empty,
-    scope = Some(nolifetimeCheckScope),
-  )
+  val noLifetimeCheckAudienceToken: StandardJWTPayload =
+    audienceBaseToken.copy(audiences = List(noLifetimeCheckAudience))
 
-  val maxlife0ScopeToken: StandardJWTPayload = StandardJWTPayload(
-    issuer = None,
-    participantId = None,
-    userId = participantAdmin,
-    exp = None,
-    format = StandardJWTTokenFormat.Scope,
-    audiences = List.empty,
-    scope = Some(maxlifeZeroScope),
-  )
+  val maxLife0AudienceToken: StandardJWTPayload =
+    audienceBaseToken.copy(audiences = List(maxLifeZeroAudience))
 
-  val userTokenWithoutExpiration = scopeBaseToken.copy(userId = randomPartyActUser)
+  val userTokenWithoutExpiration = audienceBaseToken.copy(userId = randomPartyActUser)
   def generateUserTokenWithShortExpiration =
     userTokenWithoutExpiration.copy(exp = Some(Instant.now().plus(2, ChronoUnit.MINUTES)))
   def generateUserTokenWithLongExpiration =
     userTokenWithoutExpiration.copy(exp = Some(Instant.now().plus(200, ChronoUnit.MINUTES)))
 
-  val userTokenWithNolifetimeCheckScope = noLifetimeCheckScopeToken.copy(
+  val userTokenWithNoLifetimeCheckAudience = noLifetimeCheckAudienceToken.copy(
     userId = randomPartyActUser
   )
 
-  val userTokenWithMax0LifeScope = maxlife0ScopeToken.copy(
+  val userTokenWithMax0LifeAudience = maxLife0AudienceToken.copy(
     userId = randomPartyActUser
   )
 
@@ -197,13 +171,13 @@ class TokenExpirationVerificationIT
     loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
       for {
         _ <- expect(StatusCodes.OK)(
-          partyCall(fixture, toScopeContext(generateUserTokenWithShortExpiration))
+          partyCall(fixture, toAudienceContext(generateUserTokenWithShortExpiration))
         )
       } yield ()
     }
   }
 
-  "allow access to alternative Scope with no expiration restrictions" taggedAs securityAsset
+  "allow access to alternative audience with no expiration restrictions" taggedAs securityAsset
     .setHappyCase(
       "Ledger API client can make a call requiring party rights with a user token with no expiration set when there are no restrictions configured"
     ) in httpTestFixture { fixture =>
@@ -211,7 +185,7 @@ class TokenExpirationVerificationIT
     loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
       for {
         _ <- expect(StatusCodes.OK)(
-          partyCall(fixture, toScopeContext(userTokenWithNolifetimeCheckScope))
+          partyCall(fixture, toAudienceContext(userTokenWithNoLifetimeCheckAudience))
         )
       } yield ()
     }
@@ -225,7 +199,7 @@ class TokenExpirationVerificationIT
     loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
       for {
         _ <- expect(StatusCodes.Unauthorized)(
-          partyCall(fixture, toScopeContext(userTokenWithoutExpiration))
+          partyCall(fixture, toAudienceContext(userTokenWithoutExpiration))
         )
       } yield ()
     }
@@ -236,7 +210,7 @@ class TokenExpirationVerificationIT
     loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
       for {
         _ <- expect(StatusCodes.Unauthorized)(
-          partyCall(fixture, toScopeContext(userTokenWithMax0LifeScope))
+          partyCall(fixture, toAudienceContext(userTokenWithMax0LifeAudience))
         )
       } yield ()
     }
@@ -254,14 +228,14 @@ class TokenExpirationVerificationIT
     loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
       for {
         _ <- expect(StatusCodes.Unauthorized)(
-          partyCall(fixture, toScopeContext(generateUserTokenWithLongExpiration))
+          partyCall(fixture, toAudienceContext(generateUserTokenWithLongExpiration))
         )
       } yield ()
     }
   }
 
-  //  plugin to override the configuration and use authorization with scope
-  case class ExpectedScopeOverrideConfig(
+  //  plugin to override the configuration and use authorization with audience
+  case class ExpectedAudienceOverrideConfig(
       protected val loggerFactory: NamedLoggerFactory
   ) extends EnvironmentSetupPlugin {
     override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig =
@@ -272,8 +246,8 @@ class TokenExpirationVerificationIT
               AuthServiceConfig
                 .UnsafeJwtHmac256(
                   secret = jwtSecret,
-                  targetAudience = None,
-                  targetScope = Some(ExpectedScope),
+                  targetAudience = Some(ExpectedAudience),
+                  targetScope = None,
                   maxTokenLife = canton.config.NonNegativeDuration(
                     FiniteDuration(2, scala.concurrent.duration.MINUTES)
                   ),
@@ -281,8 +255,8 @@ class TokenExpirationVerificationIT
               AuthServiceConfig
                 .UnsafeJwtHmac256(
                   secret = jwtSecret,
-                  targetAudience = None,
-                  targetScope = Some(maxlifeZeroScope),
+                  targetAudience = Some(maxLifeZeroAudience),
+                  targetScope = None,
                   maxTokenLife = canton.config.NonNegativeDuration(
                     FiniteDuration(0, scala.concurrent.duration.MINUTES)
                   ),
@@ -290,8 +264,8 @@ class TokenExpirationVerificationIT
               AuthServiceConfig
                 .UnsafeJwtHmac256(
                   secret = jwtSecret,
-                  targetAudience = None,
-                  targetScope = Some(nolifetimeCheckScope),
+                  targetAudience = Some(noLifetimeCheckAudience),
+                  targetScope = None,
                 ),
             )
           )

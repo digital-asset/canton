@@ -85,7 +85,6 @@ class PruningProcessor(
     exitOnFatalFailures: Boolean,
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     legacyAcsCommitmentProcessorDisabled: AcsCommitmentConfig.DisableOldAcsCommitmentProcessor,
-    acsDigestProcessorEnabled: Boolean,
     override protected val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -109,7 +108,6 @@ class PruningProcessor(
     participantNodePersistentState,
     synchronizerConnectionConfigStore,
     syncPersistentStateManager,
-    acsDigestProcessorEnabled = acsDigestProcessorEnabled,
     legacyDigestProcessorDisabled = legacyAcsCommitmentProcessorDisabled,
     timeouts,
     loggerFactory,
@@ -366,12 +364,8 @@ class PruningProcessor(
         case Some(state) =>
           for {
             _ <- state.acsCommitmentStore.prune(lastRecordTime)
-            _ <- MonadUtil.when(acsDigestProcessorEnabled) {
-              for {
-                _ <- state.acsDigestStore.deleteUpTo(offset)
-                _ <- state.acsCommitmentPeriodStore.prune(lastRecordTime)
-              } yield ()
-            }
+            _ <- state.acsDigestStore.deleteUpTo(offset)
+            _ <- state.acsCommitmentPeriodStore.prune(lastRecordTime)
             // TODO(#2600) Prune the reassignment store
           } yield ()
         case None =>
@@ -406,12 +400,8 @@ class PruningProcessor(
         case Some(state) =>
           for {
             _ <- state.activeContractStore.purge()
-            _ <- MonadUtil.when(acsDigestProcessorEnabled) {
-              for {
-                _ <- state.acsDigestStore.purge()
-                _ <- state.acsCommitmentPeriodStore.purge()
-              } yield ()
-            }
+            _ <- state.acsDigestStore.purge()
+            _ <- state.acsCommitmentPeriodStore.purge()
             // TODO(#2600) Purge the reassignment store
           } yield ()
         case None =>

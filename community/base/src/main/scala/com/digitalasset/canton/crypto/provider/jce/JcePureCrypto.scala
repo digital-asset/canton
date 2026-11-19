@@ -35,8 +35,6 @@ import com.github.blemale.scaffeine.Cache
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import org.bouncycastle.crypto.DataLengthException
-import org.bouncycastle.crypto.generators.Argon2BytesGenerator
-import org.bouncycastle.crypto.params.Argon2Parameters
 import org.bouncycastle.jcajce.provider.asymmetric.edec.{BCEdDSAPrivateKey, BCEdDSAPublicKey}
 import org.bouncycastle.jcajce.provider.asymmetric.mldsa.{BCMLDSAPrivateKey, BCMLDSAPublicKey}
 import org.bouncycastle.jce.spec.IESParameterSpec
@@ -44,15 +42,13 @@ import org.bouncycastle.jce.spec.IESParameterSpec
 import java.security.interfaces.*
 import java.security.{
   GeneralSecurityException,
-  InvalidKeyException,
-  NoSuchAlgorithmException,
   SecureRandom,
   Security,
   PrivateKey as JPrivateKey,
   PublicKey as JPublicKey,
   Signature as JSignature,
 }
-import javax.crypto.spec.{GCMParameterSpec, SecretKeySpec}
+import javax.crypto.spec.SecretKeySpec
 import javax.crypto.{Cipher, Mac}
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
@@ -98,6 +94,8 @@ class JcePureCrypto(
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends CryptoPureApi
+    with JceSymmetricEncryption
+    with JcePasswordBasedEncryption
     with ShowUtil
     with NamedLogging {
 
@@ -132,22 +130,11 @@ class JcePureCrypto(
   private[crypto] def isJavaPrivateKeyInCache(keyId: Fingerprint): Boolean =
     javaPrivateKeyCache.getIfPresent(keyId).exists(_.isRight)
 
-  // security parameters for Aes128Gcm symmetric encryption scheme.
-  private object Aes128GcmParams {
-    // the internal jce designation for this scheme
-    val jceInternalName: String = "AES/GCM/NoPadding"
-    // the raw algorithm name for SecretKeySpec (must be "AES", not the full transformation string)
-    val jceKeyAlgorithm: String = "AES"
-    // the IV for AES-128-GCM is 12 bytes
-    val ivSizeForAesGcmInBytes: Int = 12
-    // the authentication tag for AES-128-GCM is recommended to be 128bits
-    val gcmTagBits: Int = 128
-  }
-
   /* security parameters for EciesP256HmacSha256Aes128Cbc encryption scheme,
     in particular for the HMAC and symmetric crypto algorithms.
    */
-  private object EciesHmacSha256Aes128CbcParams {
+  @VisibleForTesting
+  private[jce] object EciesHmacSha256Aes128CbcParams {
     // the internal jce designation for this scheme
     val jceInternalName: String = "ECIESwithSHA256andAES-CBC"
     // the key size in bits for HMACSHA256 is 64bytes (recommended)
@@ -242,82 +229,6 @@ class JcePureCrypto(
       )
     } yield checkedPrivateKey
 
-  private def encryptAes128Gcm(
-      plaintext: ByteString,
-      symmetricKey: ByteString,
-  ): Either[EncryptionError, ByteString] =
-    for {
-      _ <- EitherUtil.condUnit(
-        symmetricKey.size() == SymmetricKeyScheme.Aes128Gcm.keySizeInBytes,
-        EncryptionError.InvalidSymmetricKey(
-          s"AES-128 key must be ${SymmetricKeyScheme.Aes128Gcm.keySizeInBytes} bytes, " +
-            s"but got ${symmetricKey.size()} bytes."
-        ),
-      )
-      // this encryption scheme AES-128-GCM requires an IV/nonce of 12bytes.
-      iv = JceSecureRandom.generateRandomBytes(Aes128GcmParams.ivSizeForAesGcmInBytes)
-      encrypter <- Either
-        .catchOnly[GeneralSecurityException] {
-          val keySpec = new SecretKeySpec(symmetricKey.toByteArray, Aes128GcmParams.jceKeyAlgorithm)
-          val cipher = Cipher.getInstance(
-            Aes128GcmParams.jceInternalName,
-            JceSecurityProvider.bouncyCastleProvider,
-          )
-          cipher.init(
-            Cipher.ENCRYPT_MODE,
-            keySpec,
-            new GCMParameterSpec(Aes128GcmParams.gcmTagBits, iv),
-          )
-          cipher
-        }
-        .leftMap(err => EncryptionError.InvalidSymmetricKey(err.toString))
-      ciphertext <- Either
-        .catchOnly[GeneralSecurityException](
-          encrypter.doFinal(plaintext.toByteArray)
-        )
-        .leftMap(err => EncryptionError.FailedToEncrypt(err.toString))
-
-      /* Prepend our IV to the ciphertext. BouncyCastle's AES-GCM encryption does not deal with the AES IV by itself,
-       * and we have to randomly generate it and manually prepend it to the ciphertext.
-       */
-    } yield ByteString.copyFrom(iv ++ ciphertext)
-
-  private def decryptAes128Gcm(
-      ciphertext: ByteString,
-      symmetricKey: ByteString,
-  ): Either[DecryptionError, ByteString] =
-    for {
-      _ <- EitherUtil.condUnit(
-        symmetricKey.size() == SymmetricKeyScheme.Aes128Gcm.keySizeInBytes,
-        DecryptionError.InvalidSymmetricKey(
-          s"AES-128 key must be ${SymmetricKeyScheme.Aes128Gcm.keySizeInBytes} bytes, " +
-            s"but got ${symmetricKey.size()} bytes."
-        ),
-      )
-      iv = ciphertext.toByteArray.take(Aes128GcmParams.ivSizeForAesGcmInBytes)
-      rawCiphertext = ciphertext.toByteArray.drop(Aes128GcmParams.ivSizeForAesGcmInBytes)
-      decrypter <- Either
-        .catchOnly[GeneralSecurityException] {
-          val keySpec = new SecretKeySpec(symmetricKey.toByteArray, Aes128GcmParams.jceKeyAlgorithm)
-          val cipher = Cipher.getInstance(
-            Aes128GcmParams.jceInternalName,
-            JceSecurityProvider.bouncyCastleProvider,
-          )
-          cipher.init(
-            Cipher.DECRYPT_MODE,
-            keySpec,
-            new GCMParameterSpec(Aes128GcmParams.gcmTagBits, iv),
-          )
-          cipher
-        }
-        .leftMap(err => DecryptionError.InvalidSymmetricKey(err.toString))
-      plaintext <- Either
-        .catchOnly[GeneralSecurityException](
-          decrypter.doFinal(rawCiphertext)
-        )
-        .leftMap(err => DecryptionError.FailedToDecrypt(err.toString))
-    } yield ByteString.copyFrom(plaintext)
-
   override def generateSymmetricKey(
       scheme: SymmetricKeyScheme
   ): Either[EncryptionKeyGenerationError, SymmetricKey] =
@@ -378,7 +289,7 @@ class JcePureCrypto(
         signature <- signingMetrics.signingLatency
           .time(
             Either
-              .catchOnly[GeneralSecurityException] {
+              .catchNonFatal {
                 val signer = JSignature.getInstance(
                   signingAlgorithmSpec.jcaAlgorithmName,
                   JceSecurityProvider.bouncyCastleProvider,
@@ -456,7 +367,7 @@ class JcePureCrypto(
             )
         }
         _ <- Either
-          .catchOnly[GeneralSecurityException] {
+          .catchNonFatal {
             val signatureBytes = signature.unwrap.toByteArray
             val verifier = JSignature.getInstance(
               signingAlgorithmSpec.jcaAlgorithmName,
@@ -548,7 +459,7 @@ class JcePureCrypto(
       iv = new Array[Byte](EciesHmacSha256Aes128CbcParams.ivSizeForAesCbcInBytes)
       _ = random.nextBytes(iv)
       encrypter <- Either
-        .catchOnly[GeneralSecurityException] {
+        .catchNonFatal {
           val cipher = Cipher
             .getInstance(
               EciesHmacSha256Aes128CbcParams.jceInternalName,
@@ -566,7 +477,7 @@ class JcePureCrypto(
           EncryptionError.InvalidEncryptionKey(ThrowableUtil.messageWithStacktrace(err))
         )
       ciphertext <- Either
-        .catchOnly[GeneralSecurityException](
+        .catchNonFatal(
           encrypter.doFinal(message.toByteString.toByteArray)
         )
         .leftMap(err => EncryptionError.FailedToEncrypt(ThrowableUtil.messageWithStacktrace(err)))
@@ -591,7 +502,7 @@ class JcePureCrypto(
         EncryptionError.InvalidEncryptionKey.apply,
       )
       encrypter <- Either
-        .catchOnly[GeneralSecurityException] {
+        .catchNonFatal {
           val cipher = Cipher
             .getInstance(
               RsaOaepSha256Params.jceInternalName,
@@ -604,7 +515,7 @@ class JcePureCrypto(
           EncryptionError.InvalidEncryptionKey(ThrowableUtil.messageWithStacktrace(err))
         )
       ciphertext <- Either
-        .catchOnly[GeneralSecurityException](
+        .catchNonFatal(
           encrypter.doFinal(message.toByteString.toByteArray)
         )
         .leftMap(err => EncryptionError.FailedToEncrypt(ThrowableUtil.messageWithStacktrace(err)))
@@ -734,7 +645,7 @@ class JcePureCrypto(
               plaintext <- decryptionMetrics.decryptLatency.time(
                 for {
                   decrypter <- Either
-                    .catchOnly[GeneralSecurityException] {
+                    .catchNonFatal {
                       val cipher = Cipher.getInstance(
                         EciesHmacSha256Aes128CbcParams.jceInternalName,
                         JceSecurityProvider.bouncyCastleProvider,
@@ -750,7 +661,7 @@ class JcePureCrypto(
                       DecryptionError.InvalidEncryptionKey(ThrowableUtil.messageWithStacktrace(err))
                     )
                   plaintext <- Either
-                    .catchOnly[GeneralSecurityException](
+                    .catchNonFatal(
                       decrypter.doFinal(ciphertext.toByteArray)
                     )
                     .leftMap(err =>
@@ -771,7 +682,7 @@ class JcePureCrypto(
               plaintext <- decryptionMetrics.decryptLatency.time(
                 for {
                   decrypter <- Either
-                    .catchOnly[GeneralSecurityException] {
+                    .catchNonFatal {
                       val cipher = Cipher
                         .getInstance(
                           RsaOaepSha256Params.jceInternalName,
@@ -803,26 +714,6 @@ class JcePureCrypto(
         }
     } yield plaintext
 
-  override private[crypto] def encryptSymmetricWith(
-      data: ByteString,
-      symmetricKey: SymmetricKey,
-  ): Either[EncryptionError, ByteString] =
-    symmetricKey.scheme match {
-      case SymmetricKeyScheme.Aes128Gcm =>
-        encryptAes128Gcm(data, symmetricKey.key)
-    }
-
-  override def decryptWith[M](encrypted: Encrypted[M], symmetricKey: SymmetricKey)(
-      deserialize: ByteString => Either[DeserializationError, M]
-  ): Either[DecryptionError, M] =
-    symmetricKey.scheme match {
-      case SymmetricKeyScheme.Aes128Gcm =>
-        for {
-          plaintext <- decryptAes128Gcm(encrypted.ciphertext, symmetricKey.key)
-          message <- deserialize(plaintext).leftMap(DecryptionError.FailedToDeserialize.apply)
-        } yield message
-    }
-
   override protected[crypto] def generateRandomBytes(length: Int): Array[Byte] =
     JceSecureRandom.generateRandomBytes(length)
 
@@ -833,56 +724,18 @@ class JcePureCrypto(
   ): Either[HmacError, Hmac] =
     for {
       mac <- Either
-        .catchOnly[NoSuchAlgorithmException](
+        .catchNonFatal(
           Mac.getInstance(algorithm.name, JceSecurityProvider.bouncyCastleProvider)
         )
         .leftMap(ex => UnknownHmacAlgorithm(algorithm, ex))
-      key = new SecretKeySpec(secret.toByteArray, algorithm.name)
-      _ <- Either.catchOnly[InvalidKeyException](mac.init(key)).leftMap(ex => InvalidHmacSecret(ex))
+      _ <- Either
+        .catchNonFatal(mac.init(new SecretKeySpec(secret.toByteArray, algorithm.name)))
+        .leftMap(ex => InvalidHmacSecret(ex))
       hmacBytes <- Either
-        .catchOnly[IllegalStateException](mac.doFinal(message.toByteArray))
+        .catchNonFatal(mac.doFinal(message.toByteArray))
         .leftMap(ex => FailedToComputeHmac(ex))
       hmac <- Hmac.create(ByteString.copyFrom(hmacBytes), algorithm)
     } yield hmac
-
-  override def deriveSymmetricKey(
-      password: String,
-      symmetricKeyScheme: SymmetricKeyScheme,
-      pbkdfScheme: PbkdfScheme,
-      saltO: Option[SecureRandomness],
-  ): Either[PasswordBasedEncryptionError, PasswordBasedEncryptionKey] =
-    pbkdfScheme match {
-      case mode: PbkdfScheme.Argon2idMode1.type =>
-        val salt = saltO.getOrElse(generateSecureRandomness(pbkdfScheme.defaultSaltLengthInBytes))
-
-        val params = new Argon2Parameters.Builder(Argon2Parameters.ARGON2_id)
-          .withIterations(mode.iterations)
-          .withMemoryAsKB(mode.memoryInKb)
-          .withParallelism(mode.parallelism)
-          .withSalt(salt.unwrap.toByteArray)
-          .build()
-
-        val argon2 = new Argon2BytesGenerator()
-        argon2.init(params)
-
-        val keyLength = symmetricKeyScheme.keySizeInBytes
-        val keyBytes = new Array[Byte](keyLength)
-        val keyLen = argon2.generateBytes(password.toCharArray, keyBytes)
-
-        SymmetricKey
-          .create(CryptoKeyFormat.Raw, ByteString.copyFrom(keyBytes), symmetricKeyScheme)
-          .leftMap(PasswordBasedEncryptionError.KeyCreationError.apply)
-          .flatMap { key =>
-            Either.cond(
-              keyLen == keyLength,
-              PasswordBasedEncryptionKey(key = key, salt = salt),
-              PasswordBasedEncryptionError.PbkdfOutputLengthInvalid(
-                expectedLength = keyLength,
-                actualLength = keyLen,
-              ),
-            )
-          }
-    }
 
   override def toJwk(publicKey: SigningPublicKey): Either[JwksError, Jwk] =
     JceJwks.toJwk(publicKey)

@@ -91,8 +91,8 @@ sealed trait SequencerChannelProtocolIntegrationTest
       )
 
       clue("Both sequencer channel clients can ping the sequencer") {
-        asyncExec("ping1")(client1.ping(sequencer1.id))
-        asyncExec("ping2")(client2.ping(sequencer1.id))
+        asyncExec("ping1")(client1.ping(sequencer1.id, ignorePoolCapacityExhaustion = false))
+        asyncExec("ping2")(client2.ping(sequencer1.id, ignorePoolCapacityExhaustion = false))
       }
 
       val channelId = SequencerChannelId("empty channel")

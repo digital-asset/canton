@@ -1394,12 +1394,15 @@ class GrpcTopologyManagerReadService(
           ProtocolVersion.fromProtoPrimitive(request.protocolVersion)
         )
 
-        retrieved <- retrieveFromAuthorizedStore(protocolVersion)
+        // A temporary store is passed when the authorized store can't be used, e.g. because the
+        // root key is offline, so it takes precedence over the authorized store.
         transactions <-
-          if (retrieved.isEmpty)
-            generate(protocolVersion)
+          if (request.temporaryStore.isDefined) generate(protocolVersion)
           else
-            EitherT.pure[FutureUnlessShutdown, RpcError](retrieved)
+            retrieveFromAuthorizedStore(protocolVersion).flatMap { retrieved =>
+              if (retrieved.isEmpty) generate(protocolVersion)
+              else EitherT.pure[FutureUnlessShutdown, RpcError](retrieved)
+            }
 
       } yield GenerateOnboardingTopologyTransactionsResponse(
         result = Some(

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.mediator
 
 import com.daml.metrics.api.MetricHandle.Meter
-import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -40,7 +39,6 @@ import com.digitalasset.canton.{
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 
-import java.time.Duration
 import java.util.UUID
 
 class MediatorStateTest
@@ -84,7 +82,7 @@ class MediatorStateTest
         participantId,
         salt = s(6638),
         None,
-        DeduplicationPeriod.DeduplicationDuration(Duration.ZERO),
+        DeduplicationPeriod.DeduplicationDuration.Zero,
         CantonTimestamp.MaxValue,
         None,
         hashOps,
@@ -135,7 +133,7 @@ class MediatorStateTest
           requestId.unwrap.plusSeconds(300),
           requestId.unwrap.plusSeconds(600),
           mockTopologySnapshot,
-          BatchingConfig(),
+          MediatorBatchingConfig(),
           participantResponseDeadlineTick = None,
           PromiseUnlessShutdown.unit,
         )(traceContext, executorService)
@@ -220,7 +218,7 @@ class MediatorStateTest
             req1.unwrap.plusSeconds(300),
             req1.unwrap.plusSeconds(600),
             mockTopologySnapshot,
-            BatchingConfig(),
+            MediatorBatchingConfig(),
             participantResponseDeadlineTick = None,
             promise1,
           )

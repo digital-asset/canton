@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules
 
+import com.digitalasset.canton.protocol.BftOrdererLimits
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftBlockOrderer
@@ -13,7 +14,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingRequestBatch,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced, W3CTraceContext}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -66,7 +67,11 @@ class BatchIdValidationTest extends AnyWordSpec with BftSequencerBaseTest {
           val serializedBatch = batch.toProtoV30
           val deserializedBatch =
             OrderingRequestBatch
-              .fromProtoV30(serializedBatch)
+              .fromProtoV30(
+                ProtocolVersionValidation.PV(synchronizerProtocolVersion),
+                BftOrdererLimits.default,
+                serializedBatch,
+              )
               .getOrElse(fail("Failed to deserialize batch"))
           val batchIdAfterDeserialization =
             BatchId.from(deserializedBatch, logger)(implicitly, TraceContext.empty)

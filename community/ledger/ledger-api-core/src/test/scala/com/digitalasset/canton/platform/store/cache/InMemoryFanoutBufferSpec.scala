@@ -1237,6 +1237,8 @@ class InMemoryFanoutBufferSpec
         topologyTransaction.updateId
       case _: TransactionLogUpdate.ReceivedAcsCommitment =>
         throw new RuntimeException("did not expect a ReceivedAcsCommitment")
+      case participantEventUpdate: TransactionLogUpdate.ParticipantEventUpdate =>
+        participantEventUpdate.update.updateId.toHexString
     }
     UpdateId.fromLedgerString(updateStr).valueOrFail("invalid update id")
   }

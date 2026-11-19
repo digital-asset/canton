@@ -12,10 +12,10 @@ import com.digitalasset.canton.sequencing.protocol.{
   SequencerDeliverError,
   SignedContent,
 }
-import com.digitalasset.canton.synchronizer.block.{RawLedgerBlock, SequencerDriverHealthStatus}
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.google.protobuf.ByteString
 import io.grpc.ServerServiceDefinition
 import org.apache.pekko.stream.KillSwitch
 import org.apache.pekko.stream.scaladsl.Source
@@ -96,7 +96,7 @@ trait BlockOrderer extends AutoCloseable {
 
   def health(implicit
       traceContext: TraceContext
-  ): Future[SequencerDriverHealthStatus]
+  ): Future[BlockOrdererHealthStatus]
 
   def adminServices: Seq[ServerServiceDefinition] = Seq.empty
 
@@ -115,3 +115,75 @@ trait BlockOrderer extends AutoCloseable {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[CantonTimestamp]]
 }
+
+object BlockOrderer {
+  val DefaultInitialBlockHeight: Long = -1L
+}
+
+/** A block that a [[BlockOrderer]] delivers to the sequencer node.
+  *
+  * NOTE that the timestamps in the block or in the events of a block maybe be rewritten by the
+  * block post-processing stage (OrderingTimeFixMode) and as such, are not guaranteed to be
+  * preserved. This is necessary because some drivers may assign invalid timestamps to events.
+  *
+  * In addition, during block post-processing, events may be reordered and injected with additional
+  * events such as time ticks. Therefore, the order of events in a block is not guaranteed to be
+  * preserved either.
+  *
+  * @param blockHeight
+  *   The height of the block. Block heights must be consecutive.
+  * @param baseSequencingTimeMicrosFromEpoch
+  *   - if the block is not empty, it will be the sequencing timestamp of the first event in the
+  *     block
+  *   - if the block is empty, it will be the sequencing timestamp of the block itself. It is
+  *     guaranteed that future blocks won't move this time back. Also guaranteed that this time will
+  *     move forward.
+  * @param events
+  *   The events in the given block, which may be reordered in the post-processing stage.
+  * @param tickTopologyAtMicrosFromEpoch
+  *   Set by the block orderer whenever it assesses that it may need to retrieve an up-to-date
+  *   topology; it is set to the sequencing instant being used to query the topology snapshot. A
+  *   non-byzantine block orderer will set it to a sequencing time later than or equal to all
+  *   already ordered requests and earlier than 1 time tick before all future ordered requests. It
+  *   will also set it as sporadically as possible to reduce sequencer storage consumption. The
+  *   extra time tick reserved between blocks is for the sequencer to use, typically to inject an
+  *   event that will update the topology processor's latest known time, so that the block orderer
+  *   can successfully retrieve an up-to-date topology at [[tickTopologyAtMicrosFromEpoch]]. The
+  *   block orderer needs to communicate this timestamp to the sequencer because the sequencer
+  *   cannot possibly guess it, as some requests in ordered blocks may fail to be validated and be
+  *   dropped by the sequencer after the blocks are ordered.
+  */
+final case class RawLedgerBlock(
+    blockHeight: Long,
+    baseSequencingTimeMicrosFromEpoch: Long,
+    events: Seq[Traced[RawLedgerBlock.RawBlockEvent]],
+    tickTopologyAtMicrosFromEpoch: Option[Long] = None,
+)
+
+object RawLedgerBlock {
+  sealed trait RawBlockEvent extends Product with Serializable {
+    val microsecondsSinceEpoch: Long
+  }
+
+  object RawBlockEvent {
+
+    /** Individual send event
+      *
+      * @param microsecondsSinceEpoch
+      *   note that this timestamp may be rewritten by the block post-processing stage.
+      */
+    final case class Send(
+        request: ByteString,
+        microsecondsSinceEpoch: Long,
+        orderingSequencerId: String,
+    ) extends RawBlockEvent
+
+    final case class Acknowledgment(acknowledgement: ByteString, microsecondsSinceEpoch: Long)
+        extends RawBlockEvent
+  }
+}
+
+final case class BlockOrdererHealthStatus(
+    isActive: Boolean,
+    description: Option[String],
+)

@@ -27,6 +27,7 @@ object ValidationPackage {
       overrideValidationPackageIds: T[Map[LfContractId, LfPackageId]],
       snapshot: T[TopologySnapshot],
       packageMetadata: PackageMetadata,
+      validatedContractPackageIds: Map[LfContractId, Set[LfPackageId]],
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -44,11 +45,13 @@ object ValidationPackage {
               .map(_.values.flatten.toSet)
           )
           vettedPackages <- EitherT.right(snapshot.unwrap.vettedPackages(participants))
+          validatedPackages = validatedContractPackageIds.getOrElse(contract.contractId, Set.empty)
           packageIdO = findHighestCommonPackage(
             packageName,
             participants,
             packageMetadata,
             vettedPackages,
+            validatedPackages,
             snapshot.unwrap.timestamp,
           )
           packageId <- EitherT.fromOption[FutureUnlessShutdown](
@@ -68,6 +71,7 @@ object ValidationPackage {
       participants: Set[ParticipantId],
       packageMetadata: PackageMetadata,
       vettedPackages: Map[ParticipantId, Set[VettedPackage]],
+      validatedPackages: Set[LfPackageId],
       timestamp: CantonTimestamp,
   ): Option[LfPackageId] = {
 
@@ -77,7 +81,7 @@ object ValidationPackage {
         .map(_.allPackageIdsForName.forgetNE)
         .getOrElse(Set.empty)
 
-    participants.toSeq
+    val vettedPackage = participants.toSeq
       .map(
         vettedPackages
           .getOrElse(_, Set.empty)
@@ -87,6 +91,13 @@ object ValidationPackage {
           }
       )
       .foldLeft(packageNamePackageIds)(_ intersect _)
+
+    val vettedValidatedPackages = vettedPackage intersect validatedPackages
+
+    val candidates =
+      if (vettedValidatedPackages.nonEmpty) vettedValidatedPackages else vettedPackage
+
+    candidates
       .flatMap(id => packageMetadata.packageIdVersionMap.get(id).map(v => (id, v)))
       .maxByOption(_._2)
       .map(_._1)
