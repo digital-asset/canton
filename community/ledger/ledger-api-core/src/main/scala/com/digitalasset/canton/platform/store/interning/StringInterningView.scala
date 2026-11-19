@@ -8,6 +8,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 import com.digitalasset.daml.lf.data.Ref.{
   ChoiceName,
@@ -220,6 +221,19 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
       )
     }
   })
+
+  override def externalize(providers: Iterable[StringExternalizingProvider])(implicit
+      traceContext: TraceContext
+  ): Future[ExternalStringLookup] =
+    // TODO(#37258) will be implemented later
+    throw new UnsupportedOperationException()
+
+  override def internalize(providers: Iterable[StringInternalizingProvider])(implicit
+      traceContext: TraceContext
+  ): Future[InternalIdLookup] =
+    // TODO(#37258) will be implemented later
+    throw new UnsupportedOperationException()
+
 }
 
 object StringInterningView {

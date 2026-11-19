@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.apiserver.services.admin
 
 import com.digitalasset.canton.auth.ClaimSet.Claims
-import com.digitalasset.canton.auth.{AuthInterceptor, ClaimAdmin, ClaimIdentityProviderAdmin}
+import com.digitalasset.canton.auth.{AuthInterceptor, ClaimAdmin}
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
 
@@ -43,7 +43,5 @@ object AuthenticatedUserContextResolver {
   final case class AuthenticatedUserContext(claims: Claims) {
     def userId: Option[String] = if (claims.resolvedFromUser) claims.userId else None
     def isParticipantAdmin: Boolean = claims.claims.contains(ClaimAdmin)
-    def isIdpAdmin: Boolean = claims.claims.contains(ClaimIdentityProviderAdmin)
-    def isRegularUser: Boolean = claims.resolvedFromUser && !isParticipantAdmin && !isIdpAdmin
   }
 }

@@ -486,7 +486,7 @@ class BftOrderingBenchmark
     maybeLatency.foreach { latency =>
       // Use only upstream (client -> server) latencies to try to avoid issues related to directions in which connections
       //  are established, i.e., we want connections to use Toxiproxy addresses before non-Toxiproxy addresses are used.
-      // TODO(#28117) support two-way latencies
+      //  Consider supporting two-way latencies in the future.
       proxy
         .toxics()
         .latency(s"upstream-latency-$proxyName", ToxicDirection.UPSTREAM, latency.value)

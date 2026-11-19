@@ -300,11 +300,13 @@ trait IndexComponentTest
     ),
     filtersForAnyParty = None,
     verbose = false,
+    filtersByContractId = Seq.empty,
   )
   protected val allPartyEventFormat = EventFormat(
     filtersByParty = Map.empty,
     filtersForAnyParty = Some(wildcardTemplates),
     verbose = false,
+    filtersByContractId = Seq.empty,
   )
 
   private val indexComponentTestDbMetrics = DatabaseMetrics.ForTesting("index-component-test")

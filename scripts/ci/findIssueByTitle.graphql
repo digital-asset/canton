@@ -24,6 +24,11 @@ search(query: $searchstr, type: ISSUE, first: 10) {
                 nodes {
                     id
                     isArchived
+                    status: fieldValueByName(name: "Status") {
+                        ... on ProjectV2ItemFieldSingleSelectValue {
+                            optionId
+                        }
+                    }
                     releaseLine: fieldValueByName(name: "Release Line") {
                         ... on ProjectV2ItemFieldSingleSelectValue {
                             name

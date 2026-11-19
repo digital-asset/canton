@@ -1,17 +1,25 @@
 name: Canton Nightly Workflow
 on:
-  # TODO(#34877): Re-enable workflow_dispatch and the separate nightly scheduler
-  # after the CircleCI migration is complete. Until then, keep this workflow
-  # limited to temporary gha-migration/* push testing.
-  # workflow_dispatch:
-  # Optional parity/testing trigger while migrating from CircleCI.
-  push:
-    branches:
-      - 'gha-migration/*'
+  # TODO(#34877): Re-enable the separate nightly scheduler after the CircleCI
+  # migration is complete. Until then, this workflow only runs when dispatched on
+  # a gha-migration/* branch (see pick_runner).
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: >-
+          Comma-separated job ids to run, without spaces (e.g.
+          toxiproxy_test_slow_36,unstable_test_slow_36). Empty runs the whole
+          nightly. pick_runner, compile and package_community always run; a
+          job's other needs must be selected too.
+        type: string
+        default: ''
 
 jobs:
   pick_runner:
     name: Pick runner
+    # Every other job needs this one, so skipping it skips the whole run and keeps
+    # main and release lines (and their publish jobs) out of reach until TODO(#34877).
+    if: startsWith(github.ref, 'refs/heads/gha-migration/')
     runs-on: ubuntu-latest
     outputs:
       runner: ${{ steps.pick_runner.outputs.runner }}
@@ -23,10 +31,40 @@ jobs:
       - id: pick_runner
         uses: ./.github/actions/utils/pick_runner
 
+  # Fails a dispatch with unknown job ids, or with a job whose needs are not selected
+  # (which would otherwise skip it and leave a green run where nothing executed),
+  # before compile spends any time.
+  validate_jobs:
+    name: Validate selected jobs
+    needs: pick_runner
+    if: inputs.jobs != ''
+    runs-on: ${{ needs.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            .github
+            .ci
+            shell.nix
+            nix
+            scripts/ci
+          sparse-checkout-cone-mode: false
+      - name: Validate selected jobs
+        uses: ./.github/actions/nix/nix_run
+        env:
+          JOBS: ${{ inputs.jobs }}
+        with:
+          command: python3 scripts/ci/check_canton_nightly_dispatch_filter.py --validate "$JOBS"
+
   compile:
     name: Compile
     uses: ./.github/workflows/_compile.yml
-    needs: pick_runner
+    needs: [pick_runner, validate_jobs]
+    # validate_jobs is skipped for a full run.
+    if: >-
+      !cancelled() && needs.pick_runner.result == 'success' &&
+      needs.validate_jobs.result != 'failure'
     secrets: inherit
     with:
       # The compile job opts into a cold rebuild, which reset_compile_cache.sh
@@ -49,6 +87,7 @@ jobs:
   package_kms_driver:
     name: Package KMS Driver
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',package_kms_driver,')
     uses: ./.github/workflows/_package_kms_driver.yml
     secrets: inherit
     with:
@@ -59,6 +98,7 @@ jobs:
   build_scaladoc:
     name: Build Scaladoc
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',build_scaladoc,')
     uses: ./.github/workflows/_build_scaladoc.yml
     secrets: inherit
     with:
@@ -67,6 +107,7 @@ jobs:
   build_docs_snippets:
     name: Build Docs Snippets
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',build_docs_snippets,')
     uses: ./.github/workflows/_build_docs_snippets.yml
     permissions:
       actions: write
@@ -84,6 +125,7 @@ jobs:
       - build_scaladoc
       - package_community
       - pick_runner
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',build_docs,')
     uses: ./.github/workflows/_build_docs.yml
     secrets: inherit
     with:
@@ -92,6 +134,7 @@ jobs:
   unstable_test_36:
     name: Unstable Test 36
     needs: [pick_runner, package_community]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',unstable_test_36,')
     uses: ./.github/workflows/_unstable_test.yml
     permissions:
       actions: write
@@ -103,9 +146,34 @@ jobs:
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
 
+  unstable_test_slow_36:
+    name: Unstable Test Slow 36
+    needs: [pick_runner, compile, toxiproxy_test_slow_36]
+    # A full run keeps the CircleCI ordering (skipped when toxiproxy fails); when
+    # dispatched without toxiproxy it runs right after compile.
+    # needs.compile.result is what guarantees a built tree here: whether a skipped need
+    # counts as 'failure' in contains() is undocumented (see run 44377549900).
+    if: >-
+      (inputs.jobs == '' && success()) ||
+      (!cancelled() && needs.compile.result == 'success' &&
+       !contains(needs.*.result, 'failure') &&
+       contains(format(',{0},', inputs.jobs), ',unstable_test_slow_36,'))
+    uses: ./.github/workflows/_unstable_test_slow.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+      job_name: unstable_test_slow_36
+
   test_36_with_java17:
     name: Test 36 With Java 17
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',test_36_with_java17,')
     uses: ./.github/workflows/_test.yml
     permissions:
       actions: write
@@ -119,9 +187,27 @@ jobs:
       job_name: test_36_with_java17
       runner: ${{ needs.pick_runner.outputs.runner }}
 
+  test_37_with_expensive_checks:
+    name: Test 37 With Expensive Checks
+    needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',test_37_with_expensive_checks,')
+    uses: ./.github/workflows/_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      protocol_version: "37"
+      job_name: test_37_with_expensive_checks
+      enable_expensive_checks: true
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
   ledger_api_compatibility_tests_37:
     name: Ledger API Compatibility Tests
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',ledger_api_compatibility_tests_37,')
     uses: ./.github/workflows/_ledger_api_compatibility_tests.yml
     permissions:
       actions: write
@@ -137,14 +223,27 @@ jobs:
   protocol_continuity_test_all:
     name: Protocol Continuity Test All
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',protocol_continuity_test_all,')
     uses: ./.github/workflows/_protocol_continuity_test_all.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
+  toxiproxy_test_slow_36:
+    name: Toxiproxy Test Slow 36
+    needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',toxiproxy_test_slow_36,')
+    uses: ./.github/workflows/_toxiproxy_test_slow.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+      job_name: toxiproxy_test_slow_36
+
   stability_crash_recovery_test_36:
     name: Stability Crash Recovery Test
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',stability_crash_recovery_test_36,')
     uses: ./.github/workflows/_stability_crash_recovery_test.yml
     permissions:
       actions: write
@@ -160,6 +259,7 @@ jobs:
   package_jsonapi:
     name: Package JSON API
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',package_jsonapi,')
     uses: ./.github/workflows/_package_jsonapi.yml
     secrets: inherit
     with:
@@ -170,6 +270,7 @@ jobs:
   assembly_ledger_api_test_tool:
     name: Assembly Ledger API Test Tool
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',assembly_ledger_api_test_tool,')
     uses: ./.github/workflows/_assembly_ledger_api_test_tool.yml
     secrets: inherit
     with:
@@ -180,6 +281,7 @@ jobs:
   external_parties_test_36:
     name: External Parties Test 36
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',external_parties_test_36,')
     uses: ./.github/workflows/_external_parties_test.yml
     permissions:
       actions: write
@@ -196,6 +298,7 @@ jobs:
   nightly_integration_test_36:
     name: Nightly Integration Test 36
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',nightly_integration_test_36,')
     uses: ./.github/workflows/_nightly_integration_test.yml
     permissions:
       actions: write
@@ -207,9 +310,73 @@ jobs:
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
 
+  # One version at a time, as on CircleCI, to cap the leg at 12 runners.
+  postgres_conformance_test_15:
+    name: Postgres Conformance Test 15
+    needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',postgres_conformance_test_15,')
+    uses: ./.github/workflows/_postgres_conformance_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      postgres_version: '15'
+      job_name: postgres_conformance_test_15
+
+  postgres_conformance_test_16:
+    name: Postgres Conformance Test 16
+    needs: [pick_runner, compile, postgres_conformance_test_15]
+    # Ordered after 15 in a full run; can be dispatched alone.
+    # needs.compile.result is what guarantees a built tree here: whether a skipped need
+    # counts as 'failure' in contains() is undocumented (see run 44377549900).
+    if: >-
+      (inputs.jobs == '' && success()) ||
+      (!cancelled() && needs.compile.result == 'success' &&
+       !contains(needs.*.result, 'failure') &&
+       contains(format(',{0},', inputs.jobs), ',postgres_conformance_test_16,'))
+    uses: ./.github/workflows/_postgres_conformance_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      postgres_version: '16'
+      job_name: postgres_conformance_test_16
+
+  postgres_conformance_test_17:
+    name: Postgres Conformance Test 17
+    needs: [pick_runner, compile, postgres_conformance_test_16]
+    # Ordered after 16 in a full run; can be dispatched alone.
+    # needs.compile.result is what guarantees a built tree here: whether a skipped need
+    # counts as 'failure' in contains() is undocumented (see run 44377549900).
+    if: >-
+      (inputs.jobs == '' && success()) ||
+      (!cancelled() && needs.compile.result == 'success' &&
+       !contains(needs.*.result, 'failure') &&
+       contains(format(',{0},', inputs.jobs), ',postgres_conformance_test_17,'))
+    uses: ./.github/workflows/_postgres_conformance_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      postgres_version: '17'
+      job_name: postgres_conformance_test_17
+
   model_based_test_36:
     name: Model Based Test 36
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',model_based_test_36,')
     uses: ./.github/workflows/_model_based_test.yml
     secrets: inherit
     with:
@@ -219,6 +386,7 @@ jobs:
   build_and_publish_docker:
     name: Build and Publish Docker
     needs: [pick_runner, package_community, nightly_integration_test_36]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',build_and_publish_docker,')
     uses: ./.github/workflows/_build_and_publish_docker.yml
     permissions:
       actions: read
@@ -233,6 +401,7 @@ jobs:
   publish_libraries:
     name: Publish Libraries
     needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',publish_libraries,')
     uses: ./.github/workflows/_publish_libraries.yml
     secrets: inherit
     permissions:
@@ -253,6 +422,7 @@ jobs:
       - package_jsonapi
       - package_kms_driver
       - compile
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',publish_release,')
     uses: ./.github/workflows/_publish_release.yml
     permissions:
       actions: read
@@ -263,6 +433,31 @@ jobs:
       runner: ${{ needs.pick_runner.outputs.runner }}
       is_nightly_workflow: true
       is_manual: false
+
+  test_scala3:
+    name: Test Scala 3
+    needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',test_scala3,')
+    uses: ./.github/workflows/_test_scala3.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  crash_recovery_test_37:
+    name: Crash Recovery Test 37
+    needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',crash_recovery_test_37,')
+    uses: ./.github/workflows/_crash_recovery_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '37'
+      job_name: crash_recovery_test_37
 
   notify:
     name: Notify on Failure
@@ -275,18 +470,26 @@ jobs:
       - build_docs_snippets
       - build_docs
       - unstable_test_36
+      - unstable_test_slow_36
       - test_36_with_java17
+      - test_37_with_expensive_checks
       - ledger_api_compatibility_tests_37
       - protocol_continuity_test_all
+      - toxiproxy_test_slow_36
       - stability_crash_recovery_test_36
       - package_jsonapi
       - assembly_ledger_api_test_tool
       - external_parties_test_36
       - nightly_integration_test_36
       - model_based_test_36
+      - postgres_conformance_test_15
+      - postgres_conformance_test_16
+      - postgres_conformance_test_17
       - build_and_publish_docker
       - publish_libraries
       - publish_release
+      - test_scala3
+      - crash_recovery_test_37
     if: |
       always() &&
       (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))

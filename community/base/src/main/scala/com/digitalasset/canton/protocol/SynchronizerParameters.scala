@@ -403,6 +403,18 @@ object StaticSynchronizerParameters
       TopologyLimits.default.maxEndpointsPerSequencerConnection,
     )
 
+  // Only v33 (and later) of the proto carries max_views_per_message
+  private[protocol] val defaultMaxViewsPerMessageUntil = DefaultValueUntilExclusive[
+    StaticSynchronizerParameters,
+    StaticSynchronizerParameters.type,
+    PositiveInt,
+  ](
+    _.synchronizerLimits.transactionProtocolLimits.maxViewsPerMessage,
+    "synchronizerLimits.transactionProtocolLimits.maxViewsPerMessage",
+    rpvForNextValidationBoundPV,
+    TransactionProtocolLimits.default.maxViewsPerMessage,
+  )
+
   override val invariants = Seq(
     defaultSynchronizerLimitsUntil,
     defaultTopologyLimitsUntil,
@@ -417,6 +429,7 @@ object StaticSynchronizerParameters
     defaultMaxTransactionHashesPerMultiSignatureUntil,
     defaultMaxTransactionsPerBroadcastUntil,
     defaultMaxEndpointsPerSequencerConnectionUntil,
+    defaultMaxViewsPerMessageUntil,
   )
 
   override def name: String = "static synchronizer parameters"
@@ -976,7 +989,7 @@ object DynamicSynchronizerParameters
     )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(
       v30.DynamicSynchronizerParameters
     )(
       supportedProtoVersion(_)(fromProtoV30),

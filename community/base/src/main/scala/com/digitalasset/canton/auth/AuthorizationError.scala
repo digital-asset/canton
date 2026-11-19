@@ -30,10 +30,6 @@ object AuthorizationError {
       s"Claims are only valid for userId '$authorized', actual userId is '$actual'"
   }
 
-  case object MissingPublicClaim extends AuthorizationError {
-    override val reason = "Claims do not authorize the use of public services"
-  }
-
   case object MissingAdminClaim extends AuthorizationError {
     override val reason = "Claims do not authorize the use of administrative services."
   }
@@ -84,10 +80,21 @@ object AuthorizationError {
       s"identity_provider_id from the request `$identityProviderId` does not match the one provided in the authorization claims"
   }
 
-  final case class MissingAdminOrIdpAdminOrOperationClaim(party: String)
+  final case class MissingPartiesReadOrOperateAsPartyClaim(party: String)
       extends AuthorizationError {
     override val reason =
-      s"Claims do not authorize the use of administrative services nor authorize to operate for party '$party'"
+      s"Claims do not authorize the use of parties:read nor authorize to operate for party '$party'"
+  }
+
+  // Once we add restrictions beyond API areas, the `claim` below could be
+  // updated to an Either type, or just a string.
+  final case class InvalidScopeRestriction(claim: ClaimApiArea.Area) extends AuthorizationError {
+    override val reason =
+      s"The scope of this token includes ${claim.toJwtScope}, but the caller is not authorized to access that."
+  }
+
+  final case class MissingLedgerApiClaim(claim: ClaimApiArea.Area) extends AuthorizationError {
+    override val reason = s"Claims do not authorize ${claim.toJwtScope} methods of the Ledger API."
   }
 
   final case class InvalidField(fieldName: String, reason: String) extends AuthorizationError

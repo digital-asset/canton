@@ -253,7 +253,7 @@ object SequencerConnections
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v36,
+      ProtocolVersion.minimum,
       supportedProtoVersion(v30.SequencerConnections)(fromProtoV30),
       _.toProtoV30,
     )

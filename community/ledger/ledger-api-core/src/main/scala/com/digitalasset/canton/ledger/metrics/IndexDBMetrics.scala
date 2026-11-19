@@ -540,6 +540,11 @@ class MainIndexDBMetrics(
   val getEventSeqIdRange: DatabaseMetrics = createDbMetrics("get_event_sequential_id_range")
   val getAcsEventSeqIdRange: DatabaseMetrics =
     createDbMetrics("get_acs_event_sequential_id_range")
+  val getHostedPartiesEventSeqId: DatabaseMetrics =
+    createDbMetrics("get_hosted_parties_event_sequential_id")
+  val getHostedPartyIdRanges: DatabaseMetrics = createDbMetrics("get_hosted_party_id_ranges")
+  val getHostedPartyIds: DatabaseMetrics = createDbMetrics("get_hosted_party_ids")
+  val getHostedPartyBatch: DatabaseMetrics = createDbMetrics("get_hosted_party_batch")
   val loadStringInterningEntries: DatabaseMetrics = createDbMetrics(
     "load_string_interning_entries"
   )

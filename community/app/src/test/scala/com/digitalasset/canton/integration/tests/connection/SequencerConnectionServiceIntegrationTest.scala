@@ -79,6 +79,7 @@ sealed trait SequencerConnectionServiceIntegrationTest
         .map(s =>
           s.config.publicApi.clientConfig
             .asSequencerConnection(SequencerAlias.tryCreate(s.name), sequencerId = None)
+            .value
         )
         .map(SequencerConnection.fromInternal)
 

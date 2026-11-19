@@ -43,6 +43,9 @@ class DelayLogger(
     val thresholdDuration = threshold.unwrap
     if (delta.compareTo(thresholdDuration) > 0) {
       if (caughtUp.compareAndSet(true, false)) {
+        // note if you amend the string you also need to amend the
+        // rewrite-appender to suppress this log during tests and as well
+        // update the SuppressingLogger discard rules
         logger.warn(
           s"Detected late processing (or clock skew) of batch with timestamp = $ts; delta = $delta " +
             s"after sequencing (> threshold = $thresholdDuration)"

@@ -32,6 +32,7 @@ trait UpdateFormatAuthTestCases {
         filtersByParty = parties.map(_ -> Filters(Nil)).toMap,
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     )
 
@@ -41,6 +42,7 @@ trait UpdateFormatAuthTestCases {
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(Filters(Nil)),
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     )
 
@@ -231,6 +233,7 @@ trait UpdateFormatAuthTestCases {
                         filtersByParty = Map.empty,
                         filtersForAnyParty = Some(Filters(Nil)),
                         verbose = false,
+                        filtersByContractId = Seq.empty,
                       )
                     ),
                     transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
@@ -265,6 +268,7 @@ trait UpdateFormatAuthTestCases {
                         filtersByParty = Map.empty,
                         filtersForAnyParty = Some(Filters(Nil)),
                         verbose = false,
+                        filtersByContractId = Seq.empty,
                       )
                     ),
                     transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
@@ -298,6 +302,7 @@ trait UpdateFormatAuthTestCases {
                     filtersByParty = Map.empty,
                     filtersForAnyParty = Some(Filters(Nil)),
                     verbose = false,
+                    filtersByContractId = Seq.empty,
                   )
                 ),
                 includeTopologyEvents = None,

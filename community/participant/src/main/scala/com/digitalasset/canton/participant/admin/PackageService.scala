@@ -49,7 +49,7 @@ import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, PhysicalSynchron
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
-import com.digitalasset.canton.{LedgerSubmissionId, LfPackageId, ProtoDeserializationError, config}
+import com.digitalasset.canton.{LedgerSubmissionId, LfPackageId, ProtoDeserializationError}
 import com.digitalasset.daml.lf.archive
 import com.digitalasset.daml.lf.archive.{DamlLf, DarDecoder, DarParser, Error as LfArchiveError}
 import com.digitalasset.daml.lf.data.Ref.PackageId
@@ -195,20 +195,29 @@ class PackageService(
         .leftWiden[RpcError]
     }(ifNotExistsOperationFailed = "DAR archive vetting")
 
-  def unvetDar(mainPackageId: DarMainPackageId, psid: PhysicalSynchronizerId)(implicit
+  def unvetDar(
+      mainPackageId: DarMainPackageId,
+      psid: PhysicalSynchronizerId,
+      unvetDarDependencies: Boolean,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
     ifDarExists(mainPackageId) { (descriptor, lfArchive) =>
-      val packages = lfArchive.all.map(readPackageId)
-      val mainPkg = readPackageId(lfArchive.main)
-      revokeVettingForDar(
-        mainPkg,
-        packages,
-        descriptor,
-        psid,
-        waitToBecomeEffective =
-          None, // Hardcoded for simplicity. Can be exposed to the operator at some point
-      )
+      val packagesToBeUnvetted =
+        if (unvetDarDependencies) lfArchive.all.map(readPackageId)
+        else Seq(readPackageId(lfArchive.main))
+      packageOps
+        .revokeVettingForPackages(
+          packages = packagesToBeUnvetted,
+          darDescriptor = descriptor,
+          psid = psid,
+          forceFlags =
+            if (unvetDarDependencies) ForceFlags(ForceFlag.AllowUnvettedDependencies)
+            else ForceFlags.none,
+          waitToBecomeEffective =
+            None, // Hardcoded for simplicity. Can be exposed to the operator at some point
+        )
+        .leftWiden
     }(ifNotExistsOperationFailed = "DAR archive unvetting")
 
   def resolveTargetVettingReferences(
@@ -423,13 +432,15 @@ class PackageService(
       packagesThatCanBeRemoved = packagesThatCanBeRemoved_.toList
 
       _ <- MonadUtil.sequentialTraverse(connectedSynchronizers.toSeq)(psid =>
-        revokeVettingForDar(
-          mainPkg,
-          packagesThatCanBeRemoved,
-          darDescriptor,
-          psid,
-          Some(timeouts.network.asNonNegativeFiniteApproximation),
-        )
+        packageOps
+          .revokeVettingForPackages(
+            packages = packagesThatCanBeRemoved,
+            darDescriptor = darDescriptor,
+            psid = psid,
+            forceFlags = ForceFlags(ForceFlag.AllowUnvettedDependencies),
+            waitToBecomeEffective = Some(timeouts.network.asNonNegativeFiniteApproximation),
+          )
+          .leftWiden
       )
 
       // Bail out if a package is still vetted somewhere.
@@ -450,39 +461,6 @@ class PackageService(
       }
     } yield ()
   }
-
-  private def revokeVettingForDar(
-      mainPkg: PackageId,
-      packages: List[PackageId],
-      darDescriptor: DarDescription,
-      psid: PhysicalSynchronizerId,
-      waitToBecomeEffective: Option[config.NonNegativeFiniteDuration],
-  )(implicit
-      tc: TraceContext
-  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
-    packageOps
-      .synchronizersWithVettedPackageEntry(packages.toSet)
-      .flatMap { psIds =>
-        if (psIds.isEmpty)
-          EitherT.pure[FutureUnlessShutdown, RpcError](
-            logger.info(
-              s"Package with id $mainPkg is already unvetted. Doing nothing for the unvet operation"
-            )
-          )
-        else
-          packageOps
-            .revokeVettingForPackages(
-              packages,
-              darDescriptor,
-              psid,
-              // Unvetting a DAR requires AllowUnvettedDependencies because it is going to unvet all
-              // packages from the DAR, even the utility packages. UnvetDar is an experimental
-              // operation that requires expert-level knowledge.
-              ForceFlags(ForceFlag.AllowUnvettedDependencies),
-              waitToBecomeEffective,
-            )
-            .leftWiden
-      }
 
   /** Performs the upload DAR flow:
     *   1. Decodes the provided DAR payload

@@ -79,6 +79,7 @@ final case class TransactionProtocolLimits(
     maxTransactionTreeDepth: PositiveInt,
     maxSignaturesPerEnvelope: PositiveInt,
     maxQuorumSize: PositiveInt,
+    maxViewsPerMessage: PositiveInt,
 ) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[TransactionProtocolLimits] =
     TransactionProtocolLimits
@@ -102,6 +103,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
     param("max transaction tree depth", _.maxTransactionTreeDepth),
     param("max signatures per envelope", _.maxSignaturesPerEnvelope),
     param("max quorum size", _.maxTransactionTreeDepth),
+    param("max views per message", _.maxViewsPerMessage),
   )
 
   lazy val default: TransactionProtocolLimits =

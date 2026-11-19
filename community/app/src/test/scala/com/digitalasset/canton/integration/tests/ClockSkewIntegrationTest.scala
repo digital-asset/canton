@@ -95,11 +95,6 @@ abstract class ClockSkewIntegrationTest(skews: Map[String, FiniteDuration])
         LogEntryOptionality.OptionalMany,
         _.warningMessage should include("Waiting for transaction"),
       ),
-      // because of the clock skew, we may get delay warnings
-      (
-        LogEntryOptionality.OptionalMany,
-        _.warningMessage should include("Detected late processing (or clock skew)"),
-      ),
     )
   }
 

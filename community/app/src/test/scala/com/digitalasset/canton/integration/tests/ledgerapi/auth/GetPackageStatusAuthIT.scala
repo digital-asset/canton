@@ -8,16 +8,25 @@ import com.daml.ledger.api.v2.package_service.{
   ListPackagesRequest,
   PackageServiceGrpc,
 }
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 
 import scala.concurrent.Future
 
-final class GetPackageStatusAuthIT extends PublicServiceCallAuthTests {
+final class GetPackageStatusAuthIT
+    extends PublicServiceCallAuthTests
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "PackageService#GetPackageStatus"
+
+  override def apiAreaScopeBaseToken = standardToken(randomPartyReadUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerRead.area) -> true,
+    List(ClaimApiArea.partiesAllocate.area) -> false,
+  )
 
   private def loadPackages(token: Option[String]) =
     stub(PackageServiceGrpc.stub(channel), token)

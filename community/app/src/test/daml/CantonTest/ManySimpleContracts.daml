@@ -20,6 +20,17 @@ template Creator
         do
           mapA_ (\_ -> create TwoParty with sig, obs) [1..count]
 
+    choice SpawnPlusOne: ()
+      with
+        multi: Party
+        single: Party
+        count: Int
+      controller sig
+        do
+          mapA_ (\_ -> create TwoParty with sig, obs = multi) [1..count]
+          create TwoParty with sig, obs = single
+          pure ()
+
 template TwoParty
   with
     sig: Party

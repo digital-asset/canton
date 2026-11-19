@@ -59,6 +59,7 @@ class LedgerApiStreamingTest extends CommunityIntegrationTest with SharedEnviron
             filtersByParty = Map(party -> Filters(Nil)),
             filtersForAnyParty = None,
             verbose = false,
+            filtersByContractId = Seq.empty,
           )
         ),
         transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
@@ -287,6 +288,7 @@ class LedgerApiStreamingTest extends CommunityIntegrationTest with SharedEnviron
                                 ),
                                 filtersForAnyParty = None,
                                 verbose = false,
+                                filtersByContractId = Seq.empty,
                               )
                             ),
                             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

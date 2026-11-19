@@ -724,6 +724,7 @@ class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest 
       filtersByParty = partyIds.map(_.toLf -> Filters(Nil)).toMap,
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
     UpdateFormat(
       includeTransactions = Some(
@@ -2611,6 +2612,7 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
               filtersByParty = Map(participant1.adminParty.toLf -> Filters(Nil)),
               filtersForAnyParty = None,
               verbose = false,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

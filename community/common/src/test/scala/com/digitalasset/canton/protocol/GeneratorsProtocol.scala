@@ -64,9 +64,13 @@ final class GeneratorsProtocol(
       maxQuorumSize =
         StaticSynchronizerParameters.defaultMaxQuorumSizeUntil
           .orValue(allLimits.transactionProtocolLimits.maxQuorumSize, protocolVersion)
+      maxViewsPerMessage =
+        StaticSynchronizerParameters.defaultMaxViewsPerMessageUntil
+          .orValue(allLimits.transactionProtocolLimits.maxViewsPerMessage, protocolVersion)
       transactionProtocolLimits = allLimits.transactionProtocolLimits.copy(
         maxSignaturesPerEnvelope = maxSignaturesPerEnvelope,
         maxQuorumSize = maxQuorumSize,
+        maxViewsPerMessage = maxViewsPerMessage,
       )
       topologyLimitsV32 = StaticSynchronizerParameters.defaultTopologyLimitsUntil
         .orValue(allLimits.topologyLimits, protocolVersion)

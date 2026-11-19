@@ -334,6 +334,7 @@ class RecordTimeToOffsetIT
               )
             ),
             verbose = false,
+            filtersByContractId = Seq.empty,
           )
         ),
         transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
@@ -354,6 +355,7 @@ class RecordTimeToOffsetIT
           )
         ),
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ),
     includeTopologyEvents = None,

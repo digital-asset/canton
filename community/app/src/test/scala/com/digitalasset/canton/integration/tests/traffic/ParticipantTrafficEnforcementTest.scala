@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.traffic
 
 import anorm.SqlStringInterpolation
+import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.CostEstimationHints
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters}
 import com.digitalasset.base.error.ErrorCode
@@ -33,6 +34,7 @@ import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.ledger.api.JwtTokenUtilities
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
+import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
 import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.config.{
   TrafficAccountingConfig,
@@ -1002,6 +1004,7 @@ final class ParticipantTrafficEnforcementWithAuthTest extends ParticipantTraffic
             filtersByParty = Map(alice -> Filters(Nil)),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
           val transaction = client.ledger_api.javaapi.commands.submit(
             Seq(aliceE),
@@ -1216,6 +1219,16 @@ final class ParticipantTrafficEnforcementReassignmentTest
     LfContractId.assertFromString(iou.id.contractId)
   }
 
+  private def completionAfter(offset: Long, party: PartyId, commandId: String)(implicit
+      env: TestConsoleEnvironment
+  ): Completion =
+    env.participant1.ledger_api.completions
+      .list(party, 1, offset, filter = _.commandId == commandId)
+      .loneElement
+
+  private def rejectionOf(completion: Completion): DecodedCantonError =
+    DecodedCantonError.fromGrpcStatus(completion.status.value).value
+
   "Participant" when {
     "traffic enforcement is enabled" should {
       "charge client reassignments to their account_id or the submitter and pass TEA rejections through" in {
@@ -1246,12 +1259,8 @@ final class ParticipantTrafficEnforcementReassignmentTest
             if (testedProtocolVersion >= ProtocolVersion.v38) {
               val ledgerEnd = participant1.ledger_api.state.end()
               submit()
-              val status = participant1.ledger_api.completions
-                .list(submitter, 1, ledgerEnd, filter = _.commandId == commandId)
-                .loneElement
-                .status
-                .value
-              DecodedCantonError.fromGrpcStatus(status).value.code.id shouldBe errorCode.id
+              rejectionOf(completionAfter(ledgerEnd, submitter, commandId)).code.id shouldBe
+                errorCode.id
             } else
               assertThrowsAndLogsCommandFailures(submit(), _.shouldBeCantonErrorCode(errorCode))
           }
@@ -1287,15 +1296,16 @@ final class ParticipantTrafficEnforcementReassignmentTest
             .update_account(dan.toProtoPrimitive, balanceDelta = Some(1_000_000L))
           val danBalance = balance(participant1, dan)
           val assignCommandId = UUID.randomUUID().toString
-          val assignSubmissionId = UUID.randomUUID().toString
-          def submitAssign(): Unit = participant1.ledger_api.commands.submit_assign_async(
-            dan,
-            unassigned.reassignmentId,
-            daId,
-            acmeId,
-            commandId = assignCommandId,
-            submissionId = assignSubmissionId,
-          )
+          def submitAssign(submissionId: String): Unit =
+            participant1.ledger_api.commands.submit_assign_async(
+              dan,
+              unassigned.reassignmentId,
+              daId,
+              acmeId,
+              commandId = assignCommandId,
+              submissionId = submissionId,
+            )
+          val refusedSubmissionId = UUID.randomUUID().toString
           val ledgerEnd = participant1.ledger_api.state.end()
           getProgrammableSequencer(sequencer2.name).withSendPolicy_(
             "refuse the assignment",
@@ -1305,20 +1315,41 @@ final class ParticipantTrafficEnforcementReassignmentTest
               case _ => SendDecision.Process
             },
           ) {
-            loggerFactory.assertThrowsAndLogsUnordered[CommandFailure](
-              submitAssign(),
-              _.warningMessage should include("Failed to submit submission due to"),
-              _.commandFailureMessage should include("Message rejected by send policy"),
-            )
+            // Starting with protocol version 38, the refusal is a completion, like above.
+            if (testedProtocolVersion >= ProtocolVersion.v38) {
+              val refusal = loggerFactory.assertLogs(
+                {
+                  submitAssign(refusedSubmissionId)
+                  completionAfter(ledgerEnd, dan, assignCommandId)
+                },
+                _.warningMessage should include("Failed to submit assignment due to"),
+              )
+              val rejection = rejectionOf(refusal)
+              rejection.code.id shouldBe SubmissionErrors.SequencerRequest.id
+              rejection.context.get("sendError").value should include(
+                "Message rejected by send policy"
+              )
+            } else
+              loggerFactory.assertThrowsAndLogsUnordered[CommandFailure](
+                submitAssign(refusedSubmissionId),
+                _.warningMessage should include("Failed to submit submission due to"),
+                _.commandFailureMessage should include("Message rejected by send policy"),
+              )
           }
-          // Without the release, this fails with TRAFFIC_CORRELATION_CONFLICT.
-          submitAssign()
+          // The lookup of the assignment's completion starts here, so that it skips the refusal.
+          val ledgerEndAfterRefusal = participant1.ledger_api.state.end()
+          // Before protocol version 38, we reuse the id to check that the release worked.
+          // Without the release, TEA returns TRAFFIC_CORRELATION_CONFLICT. From version 38,
+          // we use a fresh id because accounting for the refusal could delete the old correlation.
+          submitAssign(
+            if (testedProtocolVersion >= ProtocolVersion.v38) UUID.randomUUID().toString
+            else refusedSubmissionId
+          )
 
           awaitCharged(participant1, unassigned.reassignment.commandId, Set(dan))
           awaitCharged(participant1, assignCommandId, Set(dan))
-          val assignCompletion = participant1.ledger_api.completions
-            .list(dan, 1, ledgerEnd, filter = _.commandId == assignCommandId)
-            .loneElement
+          val assignCompletion = completionAfter(ledgerEndAfterRefusal, dan, assignCommandId)
+          assignCompletion.status.value.code shouldBe Status.OK.getCode.value()
           balance(participant1, accountId) shouldBe accountBalance -
             unassigned.reassignment.paidTrafficCost.value
           balance(participant1, dan) shouldBe danBalance - assignCompletion.paidTrafficCost

@@ -16,6 +16,10 @@ import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReferenc
 import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
+import com.digitalasset.canton.integration.bootstrap.{
+  NetworkBootstrapper,
+  NetworkTopologyDescription,
+}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -32,6 +36,7 @@ import com.digitalasset.canton.topology.TopologyManagerError.{
   NoLsuAnnounced,
 }
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.topology.{
   KnownPhysicalSynchronizerId,
   OpaquePhysicalSynchronizerId,
@@ -41,7 +46,6 @@ import com.digitalasset.canton.topology.{
   UnknownPhysicalSynchronizerId,
 }
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 import monocle.syntax.all.*
 import org.scalatest.Assertion
 
@@ -56,7 +60,24 @@ final class LsuAnnouncementTopologyIntegrationTest
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S2M2
+    EnvironmentDefinition
+      .buildBaseEnvironmentDefinition(
+        numParticipants = 3,
+        numSequencers = 3,
+        numMediators = 3,
+      )
+      .withNetworkBootstrap { implicit env =>
+        import env.*
+        new NetworkBootstrapper(
+          NetworkTopologyDescription(
+            daName,
+            synchronizerOwners = Seq(sequencer1, sequencer2, sequencer3),
+            synchronizerThreshold = PositiveInt.one,
+            sequencers = Seq(sequencer1, sequencer2, sequencer3),
+            mediators = Seq(mediator1, mediator2, mediator3),
+          )
+        )
+      }
       .addConfigTransform(
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.lsu.automaticallyPerformLsu).replace(false)
@@ -155,7 +176,7 @@ final class LsuAnnouncementTopologyIntegrationTest
 
     // participant2 is connected to two sequencers
     participant2.synchronizers.connect_local_bft(
-      sequencers = Seq(sequencer1, sequencer2),
+      sequencers = Seq(sequencer1, sequencer2, sequencer3),
       synchronizerAlias = daName,
       sequencerTrustThreshold = PositiveInt.two,
     )
@@ -174,7 +195,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       sequencer1.id,
       endpoints = NonEmpty(Set, new URI("https://localhost:5000")),
       successorSynchronizerId = successorPsid,
-      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      customTrustCertificates = None,
     )
     // check that participant1 automatically created a synchronizer config for the successor synchronizer
     // with a connection to the same sequencer alias/id
@@ -213,12 +234,43 @@ final class LsuAnnouncementTopologyIntegrationTest
     // for sequencer2
     checkUpgradedSequencerConfig(participant2, sequencer1.id -> 5000, sequencer2.id -> 6001)
 
+    sequencer3.topology.lsu.sequencer_successors.propose_successor(
+      sequencer3.id,
+      endpoints = NonEmpty(Set, new URI("http://localhost:6002")),
+      successorSynchronizerId = successorPsid,
+    )
+    // check that participant2 updated the synchronizer config for the successor synchronizer
+    // for sequencer3
+    checkUpgradedSequencerConfig(
+      participant2,
+      sequencer1.id -> 5000,
+      sequencer2.id -> 6001,
+      sequencer3.id -> 6002,
+    )
+
+    // check that a revocation removes the entry
+    // for sequencer3
+    val currentSuccessor = sequencer3.topology.lsu.sequencer_successors
+      .list(filterSequencerId = sequencer3.id.filterString)
+      .loneElement
+      .item
+    sequencer3.topology.transactions.propose(
+      currentSuccessor,
+      daId,
+      change = TopologyChangeOp.Remove,
+    )
+    eventually() {
+      sequencer3.topology.lsu.sequencer_successors
+        .list(filterSequencerId = sequencer3.id.filterString) shouldBe empty
+    }
+    checkUpgradedSequencerConfig(participant2, sequencer1.id -> 5000, sequencer2.id -> 6001)
+
     // sequencer1 changes its connection details for the successor synchronizer
     sequencer1.topology.lsu.sequencer_successors.propose_successor(
       sequencer1.id,
       endpoints = NonEmpty(Set, new URI("https://localhost:5005")),
       successorSynchronizerId = successorPsid,
-      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      customTrustCertificates = None,
     )
 
     // check that the participants automatically modified their synchronizer configs for the successor synchronizer
@@ -379,7 +431,7 @@ final class LsuAnnouncementTopologyIntegrationTest
         sequencer1.id,
         endpoints = NonEmpty(Set, new URI("https://localhost:5001")),
         successorSynchronizerId = successor2,
-        customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+        customTrustCertificates = None,
       ),
       _.errorMessage should include(
         LsuSequencerSuccessorInvalidSuccessorPsid
@@ -396,7 +448,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       sequencer1.id,
       endpoints = NonEmpty(Set, new URI("https://localhost:5001")),
       successorSynchronizerId = successor1,
-      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      customTrustCertificates = None,
     )
     listKnownSuccessors() shouldBe (sequencer1.id, successor1.opaque, 5001)
 
@@ -413,7 +465,7 @@ final class LsuAnnouncementTopologyIntegrationTest
         sequencer1.id,
         endpoints = NonEmpty(Set, new URI("https://localhost:5002")),
         successorSynchronizerId = successor2,
-        customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+        customTrustCertificates = None,
       ),
       _.errorMessage should include(NoLsuAnnounced.Failure().cause),
     )
@@ -429,7 +481,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       sequencer1.id,
       endpoints = NonEmpty(Set, new URI("https://localhost:5002")),
       successorSynchronizerId = successor2,
-      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      customTrustCertificates = None,
     )
     listKnownSuccessors() shouldBe (sequencer1.id, successor2.opaque, 5002)
 
@@ -438,7 +490,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       sequencer1.id,
       endpoints = NonEmpty(Set, new URI("https://localhost:5003")),
       successorSynchronizerId = successor2,
-      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      customTrustCertificates = None,
     )
     listKnownSuccessors() shouldBe (sequencer1.id, successor2.opaque, 5003)
 
@@ -453,7 +505,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       sequencer1.id,
       endpoints = NonEmpty(Set, new URI("https://localhost:5004")),
       successorSynchronizerId = successor3,
-      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      customTrustCertificates = None,
     )
     listKnownSuccessors() shouldBe (sequencer1.id, successor3.opaque, 5004)
   }
@@ -466,7 +518,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       expectedSequencerPorts: (SequencerId, Int)*
   )(implicit env: TestConsoleEnvironment): Assertion = {
     import env.*
-    val portMap = expectedSequencerPorts.groupBy(_._1).view.mapValues(_.map(_._2)).toMap
+    val expectedPortMap = expectedSequencerPorts.groupBy(_._1).view.mapValues(_.map(_._2)).toMap
     eventually() {
       val configStore = connectionConfigStore(participant)
       val currentConfig =
@@ -480,14 +532,20 @@ final class LsuAnnouncementTopologyIntegrationTest
         case (seqAlias, conn) =>
           seqAlias -> conn.sequencerId.value
       }
+      successorConfig.config.sequencerConnections.aliasToConnection.size shouldBe expectedSequencerPorts.size
       forAll(currentSequencers.forgetNE) { case (seqAlias, seqId) =>
-        val successorSequencerConfig = successorConfig.config.sequencerConnections.aliasToConnection
-          .get(seqAlias)
-          .value
-          .asInstanceOf[GrpcSequencerConnection]
-        successorSequencerConfig.sequencerId.value shouldBe seqId
-        successorSequencerConfig.endpoints.forgetNE
-          .map(_.port.unwrap) should contain theSameElementsAs (portMap(seqId))
+        val successorSequencerConfigO =
+          successorConfig.config.sequencerConnections.aliasToConnection
+            .get(seqAlias)
+            .map(_.asInstanceOf[GrpcSequencerConnection])
+
+        successorSequencerConfigO match {
+          case None => expectedPortMap.get(seqId) shouldBe empty
+          case Some(successorSequencerConfig) =>
+            successorSequencerConfig.sequencerId.value shouldBe seqId
+            successorSequencerConfig.endpoints.forgetNE
+              .map(_.port.unwrap) should contain theSameElementsAs (expectedPortMap(seqId))
+        }
       }
     }
   }

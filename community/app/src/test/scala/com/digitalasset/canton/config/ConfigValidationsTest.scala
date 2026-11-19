@@ -1547,8 +1547,8 @@ class ConfigValidationsTest extends BaseTestWordSpec {
     }
   }
 
-  "sequencer channels in standard config" should {
-    "sequencer nodes reject sequencer channels config" in {
+  "sequencer channels and ACS replication" should {
+    "sequencer nodes reject sequencer channels in standard config" in {
       val config = CantonConfig(
         sequencers = Map(
           InstanceName.tryCreate("s1") -> SequencerNodeConfig(
@@ -1564,7 +1564,7 @@ class ConfigValidationsTest extends BaseTestWordSpec {
       )
     }
 
-    "participant nodes reject ACS replication config" in {
+    "participant nodes reject ACS replication in standard config" in {
       val config = CantonConfig(
         participants = Map(
           InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
@@ -1577,23 +1577,6 @@ class ConfigValidationsTest extends BaseTestWordSpec {
 
       assertErrors(config)(
         s"Participant node p1 can only enable ACS replication in non-standard config"
-      )
-    }
-
-    "online party replication rejected without ACS replication config" in {
-      val config = CantonConfig(
-        participants = Map(
-          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
-            parameters = ParticipantNodeParameterConfig(
-              alphaOnlinePartyReplicationSupport = Some(AlphaOnlinePartyReplicationConfig()),
-              alphaAcsReplicationSupport = None,
-            )
-          )
-        )
-      )
-
-      assertErrors(config)(
-        s"Participant node p1 can only enable online party replication along with ACS replication"
       )
     }
 
@@ -1618,6 +1601,43 @@ class ConfigValidationsTest extends BaseTestWordSpec {
 
       assertErrors(config)(
         "Participant node p1 ACS replication source ACS reader max queue size must be at least the ACS batch size"
+      )
+    }
+  }
+
+  "online party replication" should {
+    "participant nodes reject online party replication in standard config" in {
+      val config = CantonConfig(
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            parameters = ParticipantNodeParameterConfig(alphaOnlinePartyReplicationSupport =
+              Some(AlphaOnlinePartyReplicationConfig())
+            )
+          )
+        )
+      )
+
+      assertErrors(config)(
+        s"Participant node p1 can only enable online party replication in non-standard config",
+        s"Participant node p1 can only enable online party replication along with ACS replication",
+      )
+    }
+
+    "online party replication rejected without ACS replication config" in {
+      val config = CantonConfig(
+        parameters = CantonParameters(nonStandardConfig = true),
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            parameters = ParticipantNodeParameterConfig(
+              alphaOnlinePartyReplicationSupport = Some(AlphaOnlinePartyReplicationConfig()),
+              alphaAcsReplicationSupport = None,
+            )
+          )
+        ),
+      )
+
+      assertErrors(config)(
+        s"Participant node p1 can only enable online party replication along with ACS replication"
       )
     }
   }

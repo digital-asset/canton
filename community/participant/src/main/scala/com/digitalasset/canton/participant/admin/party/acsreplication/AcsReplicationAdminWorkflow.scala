@@ -257,12 +257,18 @@ class AcsReplicationAdminWorkflow(
       )
     }
 
-    acsReplicationTransactionHandler.get.foreach(
-      _.processAcsReplicationProposalAtSourceParticipant(
-        proposalOrError,
-        respondToProposal,
-      ).discard
-    )
+    acsReplicationTransactionHandler.get match {
+      case Some(handler) =>
+        handler
+          .processAcsReplicationProposalAtSourceParticipant(proposalOrError, respondToProposal)
+          .discard
+      case None =>
+        respondToProposal(
+          Left(
+            s"Participant $participantId does not support ACS replication via sequencer channels"
+          )
+        )
+    }
   }
 
   // TODO(#35267) Add more parameters: (synchronizerId, contract, sourceParticipant, targetParticipant, partyId...) for client verifications

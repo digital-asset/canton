@@ -352,8 +352,15 @@ trait AuthenticationTokenIntegrationTest
 
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
-            participant1.synchronizers.logout(daName)
-            mediator1.sequencer_connection.logout()
+            // When a member logs out, the sequencer does two things before it replies:
+            // - revokes the member's tokens
+            // - closes the member's subscription
+            // When the member sees its subscription closed, it rebuilds its sequencer connection,
+            // which ALSO CLOSES the channel the logout reply should arrive on. If that happens before
+            // the reply is processed, the logout fails with ABORTED_DUE_TO_SHUTDOWN
+            // even though it worked, so we retry it.
+            eventually(retryOnTestFailuresOnly = false)(participant1.synchronizers.logout(daName))
+            eventually(retryOnTestFailuresOnly = false)(mediator1.sequencer_connection.logout())
 
             assertPingSucceeds(participant1, participant1)
           },
@@ -365,6 +372,11 @@ trait AuthenticationTokenIntegrationTest
               // The ping will eventually work because pings have an implicit retry mechanism that works even with sim clock.
               _.warningMessage should include("No connection available"),
               _.warningMessage should include("Failed to establish subscription for"),
+              // Logouts aborted by the connection restart, see the retries above
+              entry => {
+                entry.errorMessage should include("ABORTED_DUE_TO_SHUTDOWN")
+                entry.errorMessage should include("Request: Logout(")
+              },
             ),
           ),
         )
@@ -600,6 +612,9 @@ trait AuthenticationTokenIntegrationTest
         val token1 = requestToken(daId, med1Id, crypto1).futureValueUS.value
         val token2 = requestToken(daId, med2Id, crypto2).futureValueUS.value
 
+        // Stop mediator2, so that it does not emit warnings once its group is removed
+        mediator2.stop()
+
         //  Remove Group 1 entirely to trigger case 5 on observed
         judge.topology.mediators.remove_group(
           synchronizerId = daId.logical,
@@ -731,6 +746,24 @@ trait AuthenticationTokenIntegrationTest
     test
     participant1.synchronizers.reconnect_all()
 
+    def waitForParticipant1TopologyCatchUp() =
+      eventually() {
+        val participantTopology = participant1.topology.transactions
+          .list(store = daId)
+          .result
+          .map(_.transaction.hash)
+          .toSet
+
+        val sequencerTopology = sequencer1.topology.transactions
+          .list(store = daId)
+          .result
+          .map(_.transaction.hash)
+          .toSet
+
+        participantTopology shouldBe sequencerTopology
+      }
+
+    waitForParticipant1TopologyCatchUp()
     assertPingSucceeds(participant1, participant1)
   }
 
@@ -809,7 +842,7 @@ trait AuthenticationTokenIntegrationTest
           _.warningMessage should include("PERMISSION_DENIED"),
           // The leaver may re-subscribe while its removal is being processed and get permission denied
           _.warningMessage should include(
-            "Permanently closing sequencer subscription due to permission denied"
+            "Closing sequencer subscription due to permission denied"
           ),
         ),
       ),

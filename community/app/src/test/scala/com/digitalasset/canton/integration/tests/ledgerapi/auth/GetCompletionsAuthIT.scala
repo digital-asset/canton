@@ -10,6 +10,7 @@ import com.daml.ledger.api.v2.command_completion_service.{
   GetCompletionsRequest,
 }
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.services.SubmitAndWaitDummyCommand
@@ -19,11 +20,18 @@ import scala.concurrent.Future
 
 final class GetCompletionsAuthIT
     extends ExpiringStreamServiceCallAuthTests[CompletionStreamResponse]
-    with SubmitAndWaitDummyCommand {
+    with SubmitAndWaitDummyCommand
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "CommandCompletionService#GetCompletions"
+
+  override def apiAreaScopeBaseToken = standardToken(mainActorReadUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerRead.area) -> true,
+    List(ClaimApiArea.partiesAllocate.area) -> false,
+  )
 
   override protected def stream(
       context: ServiceCallContext,

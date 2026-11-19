@@ -116,7 +116,7 @@ trait AdminServiceCallAuthTests
       ) in { implicit env =>
       import env.*
       loggerFactory.suppress(AuthInterceptorSuppressionRule) {
-        expectPermissionDenied(serviceCall(canReadAsUnknownUserStandardJWT))
+        expectUnauthenticated(serviceCall(canReadAsUnknownUserStandardJWT))
       }
     }
     "deny calls with user token for '!!invalid_user!!' without expiration" taggedAs adminSecurityAsset

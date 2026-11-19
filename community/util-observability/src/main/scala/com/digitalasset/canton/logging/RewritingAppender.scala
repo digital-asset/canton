@@ -3,18 +3,19 @@
 
 package com.digitalasset.canton.logging
 
-import cats.syntax.functorFilter.*
 import ch.qos.logback.classic
+import ch.qos.logback.classic.LoggerContext
 import ch.qos.logback.classic.spi.{ILoggingEvent, IThrowableProxy, LoggerContextVO}
 import ch.qos.logback.core.spi.AppenderAttachable
 import ch.qos.logback.core.{Appender, AppenderBase}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import org.slf4j.Marker
 import org.slf4j.event.KeyValuePair
+import org.slf4j.{LoggerFactory, Marker}
 
 import java.util
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.collection.mutable.ListBuffer
+import scala.jdk.CollectionConverters.*
 
 /** Rewrite object used for logback.xml */
 final class Rewrite {
@@ -25,6 +26,7 @@ final class Rewrite {
   val contains = new AtomicReference[Seq[String]](Seq())
   val exceptionMessage = new AtomicReference[String]("")
   val isTesting = new AtomicBoolean(false)
+  val skipInSuppression = new AtomicBoolean(false)
 
   def setMaxLevel(levelStr: String): Unit = level.set(classic.Level.toLevel(levelStr))
   def setLogger(loggerStr: String): Unit = logger.set(loggerStr)
@@ -33,6 +35,7 @@ final class Rewrite {
   def setExceptionMessage(exceptionMessageStr: String): Unit =
     exceptionMessage.set(exceptionMessageStr)
   def setTesting(isTesting: Boolean): Unit = this.isTesting.set(isTesting)
+  def setSkipInSuppression(skip: Boolean): Unit = this.skipInSuppression.set(skip)
 }
 
 /** Rewriting log appender
@@ -64,6 +67,11 @@ final class Rewrite {
   * Note that the logger name can be specific, including test names and other context info separated
   * using colons or slashes, but can also just be the base logger name which then applies to all
   * tests.
+  *
+  * A rule marked with `<skipInSuppression>true</skipInSuppression>` additionally makes the
+  * `SuppressingLogger` in tests drop matching log entries from the recorded entries, so tests don't
+  * need to account for them in their log assertions. Use this only for messages that no test needs
+  * to assert on.
   */
 class RewritingAppender()
     extends AppenderBase[ILoggingEvent]
@@ -73,7 +81,17 @@ class RewritingAppender()
       maxLevel: classic.Level,
       contains: Seq[String],
       exceptionMessage: String,
-  )
+      skipInSuppression: Boolean,
+  ) {
+    def matches(
+        level: classic.Level,
+        formattedMessage: String,
+        throwableMessage: => Option[String],
+    ): Boolean =
+      !maxLevel.isGreaterOrEqual(level) &&
+        contains.forall(formattedMessage.contains) &&
+        (exceptionMessage.isEmpty || throwableMessage.exists(_.contains(exceptionMessage)))
+  }
 
   private val appenders = ListBuffer[Appender[ILoggingEvent]]()
   private val rules = new AtomicReference[Map[String, Seq[MyRule]]](Map())
@@ -114,34 +132,46 @@ class RewritingAppender()
       rules.updateAndGet { map =>
         val loggerName = rule.logger.get()
         val current = map.getOrElse(loggerName, Seq())
-        val myRule = MyRule(rule.level.get(), rule.contains.get(), rule.exceptionMessage.get())
+        val myRule = MyRule(
+          rule.level.get(),
+          rule.contains.get(),
+          rule.exceptionMessage.get(),
+          rule.skipInSuppression.get(),
+        )
         map + (loggerName -> (current :+ myRule))
       }.discard
     }
 
   override def append(event: ILoggingEvent): Unit = {
-
-    def evalRule(rule: MyRule): Option[classic.Level] =
-      for {
-        _ <- if (rule.maxLevel.isGreaterOrEqual(event.getLevel)) None else Some(())
-        _ <-
-          if (rule.contains.forall(r => event.getFormattedMessage.contains(r))) Some(())
-          else None
-        _ <-
-          if (
-            rule.exceptionMessage.isEmpty ||
-            Option(event.getThrowableProxy).exists(_.getMessage.contains(rule.exceptionMessage))
-          ) {
-            Some(())
-          } else None
-      } yield rule.maxLevel
     val forward = (for {
       loggerRules <- getRules(event.getLoggerName)
-      maxLevel <- loggerRules.mapFilter(evalRule).headOption
-    } yield new ReLog(event, maxLevel)).getOrElse(event)
+      rule <- loggerRules.find(
+        _.matches(
+          event.getLevel,
+          event.getFormattedMessage,
+          Option(event.getThrowableProxy).flatMap(p => Option(p.getMessage)),
+        )
+      )
+    } yield new ReLog(event, rule.maxLevel)).getOrElse(event)
 
     appenders.foreach(_.doAppend(forward))
   }
+
+  /** Whether a log entry matches a rule marked with `skipInSuppression`. Used by the
+    * `SuppressingLogger` in tests.
+    */
+  def isSkippedInSuppression(
+      level: classic.Level,
+      loggerName: String,
+      formattedMessage: String,
+      throwable: Option[Throwable],
+  ): Boolean =
+    getRules(loggerName).exists(
+      _.exists(rule =>
+        rule.skipInSuppression &&
+          rule.matches(level, formattedMessage, throwable.flatMap(t => Option(t.getMessage)))
+      )
+    )
 
   private def getRules(loggerName: String): Option[Seq[MyRule]] = {
     def stripAfter(chr: Char): List[String] = {
@@ -189,4 +219,21 @@ class RewritingAppender()
   }
 
   override def detachAppender(name: String): Boolean = throw new NotImplementedError()
+}
+
+object RewritingAppender {
+
+  /** The rewriting appender attached to the root logger of the current logback configuration, if
+    * any.
+    */
+  def configured(): Option[RewritingAppender] =
+    LoggerFactory.getILoggerFactory match {
+      case context: LoggerContext =>
+        context
+          .getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)
+          .iteratorForAppenders()
+          .asScala
+          .collectFirst { case appender: RewritingAppender => appender }
+      case _ => None
+    }
 }

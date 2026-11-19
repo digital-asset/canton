@@ -1232,7 +1232,7 @@ class ApiPartyManagementServiceSpec
               otherConfirmingParticipantUids = Seq(),
               confirmationThreshold = 1,
               observingParticipantUids = Seq(),
-              protocolVersion = Some(ProtocolVersion.v36.toProtoPrimitive),
+              protocolVersion = Some(testedProtocolVersion.toProtoPrimitive),
             )
           )
         } yield {
@@ -1241,8 +1241,9 @@ class ApiPartyManagementServiceSpec
               response.topologyTransactions.loneElement
             )
             .valueOrFail("unable to parse topology transaction")
+
           transaction.representativeProtocolVersion shouldBe TopologyTransaction
-            .protocolVersionRepresentativeFor(ProtocolVersion.v36)
+            .protocolVersionRepresentativeFor(testedProtocolVersion)
         }
       }
       "reject an invalid protocol version" in {

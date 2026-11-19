@@ -338,9 +338,7 @@ final class AssignmentProcessingStepsTest
         persistentState: SyncPersistentState,
     ): FutureUnlessShutdown[Unit] =
       for {
-        _ <- valueOrFail(persistentState.reassignmentStore.addUnassignmentData(reassignmentData))(
-          "add reassignment data failed"
-        )
+        _ <- persistentState.reassignmentStore.addUnassignmentData(reassignmentData)
       } yield ()
 
     val submissionParam = SubmissionParam(
@@ -670,11 +668,7 @@ final class AssignmentProcessingStepsTest
         deps <- statefulDependencies
         (persistentState, ephemeralState) = deps
 
-        _ <- valueOrFail(
-          persistentState.reassignmentStore.addUnassignmentData(unassignmentData)
-        )(
-          "add reassignment data failed"
-        ).failOnShutdown
+        _ <- persistentState.reassignmentStore.addUnassignmentData(unassignmentData).failOnShutdown
 
         fullAssignmentTree = fullAssignmentTreeFromUnassignmentData(unassignmentData)
 
@@ -890,11 +884,9 @@ final class AssignmentProcessingStepsTest
           deps <- statefulDependencies
           (persistentState, ephemeralState) = deps
 
-          _ <- valueOrFail(
-            persistentState.reassignmentStore.addUnassignmentData(unassignmentData)
-          )(
-            "add reassignment data failed"
-          ).failOnShutdown
+          _ <- persistentState.reassignmentStore
+            .addUnassignmentData(unassignmentData)
+            .failOnShutdown
 
           result <-
             valueOrFail(

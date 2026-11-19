@@ -102,9 +102,9 @@ class BatchIdValidationTest extends AnyWordSpec with BftSequencerBaseTest {
       ProtocolVersion.supported.foreach { protocolVersion =>
         BatchId.from(batch, logger)(protocolVersion, traceContext).hash.toHexString shouldBe
           (protocolVersion match {
-            case pv if pv <= ProtocolVersion.v36 =>
+            case pv if pv == ProtocolVersion.v36 =>
               "1220adaf0c41ab56b822d643fc006ba8aae59efc9cc79d5c1604600d5b560bc80cd2"
-            case pv =>
+            case _ =>
               "122081e19cab056cf75722b0b8822e0b8feeec486fae8b7b4a0a83294736bd7b9684"
           })
       }

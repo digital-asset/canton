@@ -18,7 +18,7 @@ import com.daml.tls.{
   TlsServerConfig,
   TlsVersion,
 }
-import com.digitalasset.canton.auth.AuthInterceptor
+import com.digitalasset.canton.auth.{AuthInterceptor, Authorizer}
 import com.digitalasset.canton.config.{ApiLoggingConfig, ServerConfig}
 import com.digitalasset.canton.http.HttpService.HttpServiceHandle
 import com.digitalasset.canton.http.json.v2.V2Routes
@@ -72,6 +72,7 @@ class HttpService(
     lc: LoggingContextOf[InstanceUUID],
     metrics: HttpApiMetrics,
     authInterceptor: AuthInterceptor,
+    authorizer: Authorizer,
 ) extends ResourceOwner[HttpServiceHandle]
     with NamedLogging
     with NoTracing {
@@ -111,19 +112,20 @@ class HttpService(
       ledgerClient: DamlLedgerClient,
       healthService: HealthService,
   )(implicit context: ResourceContext): Future[ServerBinding] = {
+    // Bounds both HTTP request bodies and every single inbound websocket message
+    val maxInboundMessageSize: Long = startSettings.maxInboundMessageSize
+      .getOrElse(ServerConfig.defaultMaxInboundMessageSize)
+      .unwrap
+      .toLong
     val settings: ServerSettings = ServerSettings(asys)
       .withTransparentHeadRequests(true)
       .mapTimeouts(_.withRequestTimeout(startSettings.requestTimeout))
-      .mapParserSettings(
-        _.withMaxContentLength(
-          startSettings.maxInboundMessageSize
-            .getOrElse(ServerConfig.defaultMaxInboundMessageSize)
-            .unwrap
-            .toLong
-        )
-      )
+      .mapParserSettings(_.withMaxContentLength(maxInboundMessageSize))
 
     implicit val wsConfig = startSettings.websocketConfig.getOrElse(WebsocketConfig())
+    implicit val serverRequestTimeout: ServerRequestTimeout = ServerRequestTimeout(
+      startSettings.requestTimeout
+    )
 
     val bindingEt: EitherT[Future, HttpService.Error, ServerBinding] =
       for {
@@ -159,7 +161,7 @@ class HttpService(
           .getOrElse(allEndpoints)
 
         timeoutAwareEndpoints = RequestTimeoutDirective(
-          prefixedEndpoints,
+          WebSocketMessageSizeLimit(maxInboundMessageSize)(prefixedEndpoints),
           startSettings.clientRequestTimeout.lowerBound,
           startSettings.clientRequestTimeout.upperBound,
         )

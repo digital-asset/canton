@@ -7,6 +7,7 @@ import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.messages.state.{AcsContinuationToken, AcsRangeInfo}
+import com.digitalasset.canton.ledger.api.util.PageTokenUtils
 import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.ledger.api.{CumulativeFilter, EventFormat}
 import com.digitalasset.canton.ledger.participant.state.{
@@ -140,6 +141,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
     val allContracts = getAcsF(eventFormat, None).futureValue
@@ -162,6 +164,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
     val allContracts = getAcsF(eventFormat, None).futureValue
@@ -192,6 +195,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
     val allEntries = getAcsF(eventFormat, None).futureValue
@@ -256,6 +260,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
         filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       continuationToken = None,
       limit = None,
@@ -304,6 +309,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       filtersByParty = Map(party4 -> CumulativeFilter.templateWildcardFilter()),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
     val allContracts = getAcsF(eventFormat, None).futureValue
@@ -335,6 +341,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
     val allContracts = getAcsF(eventFormat, None).futureValue
@@ -387,7 +394,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
   ) =
     continuationToken.traverse(token =>
       AcsContinuationToken.decodeAndValidate(
-        expectedChecksum = AcsContinuationToken.emptyChecksum,
+        expectedChecksum = PageTokenUtils.emptyChecksum,
         token = token,
         fieldName = "stream_continuation_token",
         limit =
@@ -404,7 +411,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
             activeAt = ledgerEnd.map(_.lastOffset),
             rangeInfo = AcsRangeInfo(
               continuationPointer = continuationPointer,
-              requestChecksum = AcsContinuationToken.emptyChecksum,
+              requestChecksum = PageTokenUtils.emptyChecksum,
               limit = limit.map(_.toLong),
             ),
             configOverrides = None,

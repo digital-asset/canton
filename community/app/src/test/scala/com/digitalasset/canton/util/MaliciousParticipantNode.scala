@@ -464,14 +464,21 @@ class MaliciousParticipantNode(
     )
   }
 
-  def submitJavaApiCommand(actAs: Seq[Party], commands: Seq[javab.data.Command])(implicit
+  def submitJavaApiCommand(
+      actAs: Seq[Party],
+      commands: Seq[javab.data.Command],
+      transactionInterceptor: (SubmittedTransaction, Transaction.Metadata) => (
+          SubmittedTransaction,
+          Transaction.Metadata,
+      ) = (tx, metadata) => tx -> metadata,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, SendResult.Success] = {
     val commandsWithMetadata = CommandsWithMetadata(
       commands = commands.map(c => Command.fromJavaProto(c.toProtoCommand)),
       actAs = actAs.map(_.partyId),
     )
-    submitCommand(commandsWithMetadata)
+    submitCommand(commandsWithMetadata, transactionInterceptor = transactionInterceptor)
   }
 
   def submitCommand(

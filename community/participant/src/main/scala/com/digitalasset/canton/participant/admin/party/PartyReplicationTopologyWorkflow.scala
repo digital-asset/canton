@@ -27,6 +27,7 @@ import com.digitalasset.canton.participant.sync.ConnectedSynchronizer
 import com.digitalasset.canton.protocol.DynamicSynchronizerParametersHistory
 import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.TopologyManagerError.{
+  MappingAlreadyExists,
   NoAppropriateSigningKeyInStore,
   SerialMismatch,
 }
@@ -643,11 +644,17 @@ class PartyReplicationTopologyWorkflow(
                     waitToBecomeEffective = None,
                   )
                   .map(_ => ())
-                  .recover { case err @ NoAppropriateSigningKeyInStore.Failure(_, _) =>
-                    // See the note above on the possible race condition between the existingProposal and the topology manager call.
-                    logger.info(
-                      s"${requestIdLogPart}No appropriate key response to proposing topology change for $partyId indicates race with proposal authorization: $err"
-                    )
+                  .recover {
+                    case err @ NoAppropriateSigningKeyInStore.Failure(_, _) =>
+                      // See the note above on the possible race condition between the existingProposal and the topology manager call.
+                      logger.info(
+                        s"${requestIdLogPart}No appropriate key response to proposing topology change for $partyId indicates race with proposal authorization: $err"
+                      )
+                    case err @ MappingAlreadyExists.Failure(_, _) =>
+                      // See the note above on the possible race condition between the existingProposal and the topology manager call.
+                      logger.info(
+                        s"${requestIdLogPart}Mapping already exists response to proposing topology change for $partyId indicates race with proposal authorization: $err"
+                      )
                   }
                   .leftMap { err =>
                     val exception = err.asGrpcError

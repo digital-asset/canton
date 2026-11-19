@@ -65,8 +65,8 @@ trait PartyReplicationIndexingStore {
     *   protocol and with a deterministically ordered ACS contract counter. The timestamp is used to
     *   order contract activation changes in a causality order allowing to index activations before
     *   deactivations and to batch indexing into separate
-    *   [[com.digitalasset.canton.ledger.participant.state.Update.OnPRReassignmentAccepted]] indexer
-    *   events
+    *   [[com.digitalasset.canton.ledger.participant.state.Update.OnlinePartyReplicationParticipantEventUpdate]]
+    *   indexer events
     * @param contractActivationsToIndex
     *   contract activations
     */
@@ -114,8 +114,8 @@ trait PartyReplicationIndexingStore {
   ): FutureUnlessShutdown[Option[ContractActivationChangeBatch]]
 
   /** Indexer confirms an
-    * [[com.digitalasset.canton.ledger.participant.state.Update.OnPRReassignmentAccepted]] has been
-    * indexed
+    * [[com.digitalasset.canton.ledger.participant.state.Update.OnlinePartyReplicationParticipantEventUpdate]]
+    * has been indexed
     *
     * @param watermark
     *   watermark of the update that has been indexed

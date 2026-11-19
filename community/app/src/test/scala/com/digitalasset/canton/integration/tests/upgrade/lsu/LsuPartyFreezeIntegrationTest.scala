@@ -227,13 +227,18 @@ final class LsuPartyFreezePendingMoveIntegrationTest extends LsuPartyFreezeInteg
         expectFrozen()
         scenario.importPartyAcs(da, scenario.readAcs(frozenAt)) {
           performSynchronizerNodesLsu(fixture)
-          // Time passes before DA reconnects. DA's move waits until DA has caught up to the current
-          // time, and so has seen the announcement.
+          // Time passes before DA reconnects. DA's move waits until DA has seen the announcement.
           environment.simClock.value.advance(Duration.ofSeconds(1))
         }
 
         clue("DA is still Freezing after it has caught up with the announcement") {
-          da.testing.await_synchronizer_time(daId, sp.testing.fetch_synchronizer_time(daId))
+          eventually() {
+            da.topology.lsu.announcement
+              .list(store = fixture.currentPsid)
+              .loneElement
+              .item
+              .successor shouldBe fixture.synchronizerSuccessor
+          }
           expectFrozen()
         }
 

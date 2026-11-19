@@ -10,8 +10,12 @@ import com.digitalasset.canton.ledger.api.{
   TemplateFilter,
   TemplateWildcardFilter,
 }
-import com.digitalasset.canton.platform.store.dao.EventProjectionProperties.Projection
+import com.digitalasset.canton.platform.store.dao.EventProjectionProperties.{
+  ContractIdProjections,
+  Projection,
+}
 import com.digitalasset.canton.platform.store.dao.EventProjectionPropertiesSpec.Scope
+import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{
   FullIdentifier,
@@ -20,6 +24,7 @@ import com.digitalasset.daml.lf.data.Ref.{
   NameTypeConRef,
   Party,
 }
+import com.digitalasset.daml.lf.value.Value.ContractId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -99,6 +104,7 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
       ),
       filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter(true)),
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
     val testee = EventProjectionProperties(
       eventFormat = transactionFilter,
@@ -141,6 +147,7 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
           filtersByParty = Map(party -> templateFilters),
           filtersForAnyParty = Some(interfaceFilters),
           verbose = true,
+          filtersByContractId = Seq.empty,
         )
 
       private val eventProjectionProperties = EventProjectionProperties(
@@ -193,6 +200,7 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
           filtersByParty = Map(party -> interfaceFilters),
           filtersForAnyParty = Some(templateFilters),
           verbose = true,
+          filtersByContractId = Seq.empty,
         )
 
       private val eventProjectionProperties = EventProjectionProperties(
@@ -244,12 +252,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
         filtersByParty = Map(party -> templateFilters),
         filtersForAnyParty = Some(interfaceFilters),
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
     private val transactionFilterSwapped =
       EventFormat(
         filtersByParty = Map(party -> interfaceFilters),
         filtersForAnyParty = Some(templateFilters),
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
 
     private val eventProjectionProperties = EventProjectionProperties(
@@ -270,6 +280,85 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
     eventProjectionPropertiesSwapped.render(Set(party), template1) shouldBe Projection(
       interfaces = Set(iface1),
       createdEventBlob = true,
+    )
+  }
+
+  behavior of "ContractIdProjections"
+
+  it should "compute interface implementors for interfaces referenced in projections" in new Scope {
+    contractIdProjections.interfaceImplementors shouldBe Map(
+      iface1 -> Set(template1),
+      iface2 -> Set(template1, template2, template3),
+    )
+  }
+
+  it should "not compute any implementors if no interfaces are referenced" in new Scope {
+    ContractIdProjections
+      .withImplementors(
+        projections = Map(cid1 -> Projection(createdEventBlob = true)),
+        interfaceImplementedBy = _ => fail("should not be called"),
+      )
+      .interfaceImplementors shouldBe Map.empty
+  }
+
+  it should "render nothing for a contract id without projection" in new Scope {
+    contractIdProjections.render(template1, cid4) shouldBe None
+  }
+
+  it should "render the projection of the contract id" in new Scope {
+    contractIdProjections.render(template1, cid3) shouldBe Some(
+      Projection(Set.empty, createdEventBlob = true)
+    )
+    contractIdProjections.render(template1, cid2) shouldBe Some(
+      Projection(Set(iface1, iface2), createdEventBlob = true)
+    )
+  }
+
+  it should "only render the interfaces implemented by the template" in new Scope {
+    contractIdProjections.render(template3, cid1) shouldBe Some(
+      Projection(Set.empty, createdEventBlob = false)
+    )
+    contractIdProjections.render(template3, cid2) shouldBe Some(
+      Projection(Set(iface2), createdEventBlob = true)
+    )
+    contractIdProjections.render(id, cid2) shouldBe Some(
+      Projection(Set.empty, createdEventBlob = true)
+    )
+  }
+
+  behavior of "projecting by contract id"
+
+  it should "render the same as without contract id if there are no contract id projections" in new Scope {
+    private val eventProjectionProperties = EventProjectionProperties(
+      eventFormat = templateWildcardFilter(includeCreatedEventBlob = true),
+      interfaceImplementedBy = interfaceImpl,
+      resolveTypeConRef = noTemplatesForPackageName,
+    )
+    eventProjectionProperties.render(Set(party), template1, cid1) shouldBe
+      eventProjectionProperties.render(Set(party), template1)
+    eventProjectionProperties.render(Set(party), template1, cid1) shouldBe Projection(
+      Set.empty,
+      createdEventBlob = true,
+    )
+  }
+
+  it should "render the contract id projection when there are no party filters" in new Scope {
+    private val eventProjectionProperties = EventProjectionProperties(
+      verbose = true,
+      contractIdProjections = contractIdProjections,
+    )(EventProjectionProperties.UseOriginalViewPackageId)
+
+    eventProjectionProperties.render(Set(party), template1, cid2) shouldBe Projection(
+      Set(iface1, iface2),
+      createdEventBlob = true,
+    )
+    eventProjectionProperties.render(Set(party), template3, cid2) shouldBe Projection(
+      Set(iface2),
+      createdEventBlob = true,
+    )
+    eventProjectionProperties.render(Set(party), template1, cid4) shouldBe Projection(
+      Set.empty,
+      createdEventBlob = false,
     )
   }
 
@@ -296,12 +385,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -339,12 +430,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -382,12 +475,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       EventProjectionProperties(
@@ -420,12 +515,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       EventProjectionProperties(
@@ -458,12 +555,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       EventProjectionProperties(
@@ -501,12 +600,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
 
@@ -552,7 +653,7 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             templateWildcardFilter = None,
           )
         private val transactionFilter =
-          EventFormat(Map(party -> filter1), Some(filter2), verbose = true)
+          EventFormat(Map(party -> filter1), Some(filter2), verbose = true, Seq.empty)
         private val eventProjectionProperties = EventProjectionProperties(
           eventFormat = transactionFilter,
           interfaceImplementedBy = interfaceImpl,
@@ -613,6 +714,7 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             ),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
@@ -621,6 +723,7 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             ),
             filtersForAnyParty = Some(filter1),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
 
@@ -660,12 +763,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -709,12 +814,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -761,12 +868,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -804,12 +913,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -859,12 +970,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
 
@@ -902,12 +1015,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
               filtersByParty = Map(party -> filters),
               filtersForAnyParty = None,
               verbose = true,
+              filtersByContractId = Seq.empty,
             )
           case true =>
             EventFormat(
               filtersByParty = Map.empty,
               filtersForAnyParty = Some(filters),
               verbose = true,
+              filtersByContractId = Seq.empty,
             )
         }
 
@@ -962,12 +1077,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       EventProjectionProperties(
@@ -1009,12 +1126,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
 
@@ -1050,12 +1169,14 @@ class EventProjectionPropertiesSpec extends AnyFlatSpec with Matchers {
             filtersByParty = Map(party -> filters),
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         case true =>
           EventFormat(
             filtersByParty = Map.empty,
             filtersForAnyParty = Some(filters),
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
       }
       private val eventProjectionProperties = EventProjectionProperties(
@@ -1142,10 +1263,23 @@ object EventProjectionPropertiesSpec {
     val party: Party = Party.assertFromString("party")
     val party2: Party = Party.assertFromString("party2")
     val party3: Party = Party.assertFromString("party3")
+    val cid1: ContractId = ContractId.V1(Hash.hashPrivateKey("cid1"))
+    val cid2: ContractId = ContractId.V1(Hash.hashPrivateKey("cid2"))
+    val cid3: ContractId = ContractId.V1(Hash.hashPrivateKey("cid3"))
+    val cid4: ContractId = ContractId.V1(Hash.hashPrivateKey("cid4"))
+    lazy val contractIdProjections: ContractIdProjections = ContractIdProjections.withImplementors(
+      projections = Map(
+        cid1 -> Projection(interfaces = Set(iface1)),
+        cid2 -> Projection(interfaces = Set(iface1, iface2), createdEventBlob = true),
+        cid3 -> Projection(createdEventBlob = true),
+      ),
+      interfaceImplementedBy = interfaceImpl,
+    )
     val noFilter = EventFormat(
       filtersByParty = Map(),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
     def templateWildcardFilter(includeCreatedEventBlob: Boolean = false) = EventFormat(
       filtersByParty = Map(
@@ -1158,6 +1292,7 @@ object EventProjectionPropertiesSpec {
       ),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
     def templateWildcardPartyWildcardFilter(includeCreatedEventBlob: Boolean = false) =
       EventFormat(
@@ -1171,6 +1306,7 @@ object EventProjectionPropertiesSpec {
           )
         ),
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
     val emptyCumulativeFilters = EventFormat(
       filtersByParty = Map(
@@ -1183,6 +1319,7 @@ object EventProjectionPropertiesSpec {
       ),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
     val emptyCumulativePartyWildcardFilters = EventFormat(
       filtersByParty = Map.empty,
@@ -1194,6 +1331,7 @@ object EventProjectionPropertiesSpec {
         )
       ),
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
   }
 }

@@ -98,7 +98,7 @@ object UnassignmentData
   override def name: String = "UnassignmentData"
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec
-      .storage(ReleaseProtocolVersion(ProtocolVersion.v36), v30.UnassignmentData)(
+      .storage(ReleaseProtocolVersion(ProtocolVersion.minimum), v30.UnassignmentData)(
         supportedProtoVersionPVV(_)(fromProtoV30),
         _.toProtoV30,
       ),

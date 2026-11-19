@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.services.SubmitDummyReassignment
@@ -13,6 +14,7 @@ import scala.concurrent.{ExecutionContext, Future}
 final class SubmitReassignmentAuthIT
     extends SyncServiceCallAuthTests
     with SubmitDummyReassignment
+    with ApiAreaScopeServiceCallAuthTests
     with DebitTrafficFromAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
@@ -21,6 +23,12 @@ final class SubmitReassignmentAuthIT
     expectInvalidArgument(f)
 
   override def serviceCallName: String = "CommandSubmissionService#SubmitReassignment"
+
+  override def apiAreaScopeBaseToken = standardToken(mainActorActUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerAct.area) -> true,
+    List(ClaimApiArea.ledgerRead.area) -> false,
+  )
 
   override def serviceCall(context: ServiceCallContext)(implicit
       env: TestConsoleEnvironment

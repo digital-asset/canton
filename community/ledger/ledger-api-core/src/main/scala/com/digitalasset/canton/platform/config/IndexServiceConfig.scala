@@ -38,6 +38,8 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   *   configurations pertaining to the ledger api server's "active contracts service"
   * @param updatesStreams
   *   configurations pertaining to the ledger api server's streams of updates
+  * @param hostedPartiesStreams
+  *   configurations pertaining to the ledger api server's streams of hosted parties
   * @param globalMaxEventIdQueries
   *   maximum number of concurrent event id queries across all stream types
   * @param globalMaxEventPayloadQueries
@@ -81,6 +83,7 @@ final case class IndexServiceConfig(
     activeContractsServiceStreams: ActiveContractsServiceStreamsConfig =
       ActiveContractsServiceStreamsConfig.default,
     updatesStreams: UpdatesStreamsConfig = UpdatesStreamsConfig.default,
+    hostedPartiesStreams: HostedPartiesStreamsConfig = HostedPartiesStreamsConfig.default,
     globalMaxEventIdQueries: Int = 20,
     globalMaxEventPayloadQueries: Int = 10,
     offsetCheckpointCacheUpdateInterval: NonNegativeFiniteDuration =
@@ -249,4 +252,33 @@ final case class UpdatesStreamsConfig(
 )
 object UpdatesStreamsConfig {
   val default: UpdatesStreamsConfig = UpdatesStreamsConfig()
+}
+
+/** Hosted parties stream configuration.
+  *
+  * @param maxIdsPerIdPage
+  *   Maximum number of candidate hosting triplets matching the party and participant filters in a
+  *   page, including revoked triplets and all synchronizers. Independent of the requested limit on
+  *   matching parties.
+  * @param maxPagesPerIdPagesBuffer
+  *   Number of filtered event id pages to store in a buffer. Per single stream.
+  * @param maxPayloadsPerPayloadsPage
+  *   Maximum number of hosting relationships retrieved in a single payload query.
+  * @param maxParallelPayloadQueries
+  *   Number of parallel queries that fetch hosting payloads. Per single stream.
+  * @param idFilterQueryParallelism
+  *   Number of parallel queries that filter bounded triplet ranges for live event ids.
+  * @param hostedPartiesProcessingParallelism
+  *   Number of hosted parties to process in parallel. Per single stream.
+  */
+final case class HostedPartiesStreamsConfig(
+    maxIdsPerIdPage: PositiveInt = PositiveInt.tryCreate(10000),
+    maxPagesPerIdPagesBuffer: PositiveInt = PositiveInt.one,
+    maxPayloadsPerPayloadsPage: PositiveInt = PositiveInt.tryCreate(5000),
+    maxParallelPayloadQueries: PositiveInt = PositiveInt.tryCreate(2),
+    idFilterQueryParallelism: PositiveInt = PositiveInt.tryCreate(2),
+    hostedPartiesProcessingParallelism: PositiveInt = PositiveInt.tryCreate(8),
+)
+object HostedPartiesStreamsConfig {
+  val default: HostedPartiesStreamsConfig = HostedPartiesStreamsConfig()
 }

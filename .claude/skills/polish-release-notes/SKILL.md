@@ -35,6 +35,11 @@ If the previous tag does not exist yet (e.g. `v3.7.0` not cut), ask the user whi
   are not there (see step 4).
 - Never push, open PRs, or post on GitHub. Commit locally; the user reviews and pushes.
 - No em or en dashes anywhere in the notes, and avoid semicolons: split into sentences or use parentheses.
+- Never remove an entry on your own. Collect the entries you would remove in a list, ask the user to review it
+  (step 3), and remove only the entries the user agrees to.
+- Keep every entry marked as breaking, including the removal of a feature deprecated in an earlier release. The
+  only exception is a clear duplicate from a forward port (already announced by a release of the baseline): add it
+  to the list of items to remove (step 3).
 
 ## 1. Gather inputs
 
@@ -73,7 +78,7 @@ candidate, and leave out any security fix that is not yet on MainNet. Report the
 Write each advisory with the heading `### (<id>, <severity>): <title>` and the sections of the template
 (Issue Description, Affected Deployments, Affected Versions, Impact, Symptom, Workaround, Likeliness,
 Recommendation), as in `release-notes/3.4.9.md` on `release-line-3.6` (`25-012, Low` and `25-013, Critical`).
-Place them at the top of "Security and Bug Fixes", before the other fixes.
+Place them at the top of "Security Fixes", before the other security fixes.
 
 ### Patch release
 
@@ -92,11 +97,16 @@ A patch release is about stability, performance and reliability. Patch notes are
   `#### Background`, `#### Specific Changes` and `#### Impact and Migration` when it needs explanation), small
   ones as a bullet list. Say what gets better for the reader (e.g. faster reconnects, lower memory use, recovery
   after a crash).
-- **Security and Bug Fixes**: advisories first, then the other fixes as a bullet list.
+- **Security Fixes**: advisories first, then the other security fixes as a bullet list. Remove the section if
+  there are none.
+- **Bug Fixes**: the other fixes as a bullet list.
 - **Compatibility**: unchanged template.
 
 Group What's New entries by audience (application developers, all node operators, participant node operators,
-synchronizer operators) only if there are many. Drop the summary of breaking changes and the Breaking changes section.
+synchronizer operators) only if there are many. Drop the summary of breaking changes (the table) and the Breaking
+changes section only if the release has no breaking changes. If the user decides to keep a breaking change, keep
+both: the Breaking changes section with the entry, and the summary of breaking changes table in Summary with its
+columns set to match the entries. Never drop the table on your own while a breaking change remains.
 A patch release should not contain new functionality, breaking changes or deprecations:
 
 - **New functionality** (new endpoints, commands, config keys, metrics, features): flag each item to the user with
@@ -127,29 +137,43 @@ Follow the model's sections, split by audience:
   "Participant node operators" (Canton naming, not "validator"), and "Synchronizer operators". Mark experimental
   features "(experimental)" in the heading, and put a warning in bold when a feature must not be used yet.
 - **Breaking changes**: "Ledger API (application developers)", "All node operators", "Participant node
-  operators", "Synchronizer operators". Every entry says what changed, who is affected, and how to migrate; the summary
-  bullets match these entries one to one.
+  operators", "Synchronizer operators", then "Removal of deprecated features" for features deprecated in an earlier
+  release that this release removes (the feature, the release that deprecated it, and its replacement), then
+  "Removal of protocol versions" for protocol versions no longer supported (the versions, and how to upgrade
+  synchronizers still on them). Every entry
+  says what changed, who is affected, and how to migrate; the summary bullets match these entries one to one.
 - **Deprecations**: the deprecated item, its replacement, and the removal plan with any flag to disable it early.
-  Leave out removals of features deprecated in an earlier release.
+  A removal of a feature deprecated in an earlier release is not a deprecation: keep it under Breaking changes,
+  "Removal of deprecated features", when its entry is marked as breaking, otherwise add it to the list of items to remove (step 3).
 - **Minor Improvements**: the same audience split as What's New, for improvements that are not fixes.
-- **Security and Bug Fixes**: advisories first, then the other bug fixes, security hardening and dependency updates
-  for security vulnerabilities as one bullet list, not split by audience.
-- **Compatibility**: the template, plus a note on protocol versions no longer supported and how to upgrade
-  synchronizers still on them. End of support for a protocol version is not a breaking change.
+- **Security Fixes**: advisories first, then the other security fixes and dependency updates for security
+  vulnerabilities as one bullet list. Remove the section if there are none.
+- **Bug Fixes**: the other bug fixes as one bullet list, not split by audience.
+- **Compatibility**: the template, plus the supported protocol versions. Refer to "Removal of protocol versions"
+  for protocol versions no longer supported.
 
-Not breaking changes: new error codes, removals of features deprecated in an earlier release, end of support for
-protocol versions. Ask the user when unsure.
+Not breaking changes: new error codes. An entry marked as breaking stays a breaking change, even when it removes a
+feature deprecated in an earlier release. End of support for a protocol version is always called out under "Removal
+of protocol versions". Ask the user when unsure.
 
-## 3. Drop what is not news
+## 3. Flag what is not news
 
-- Entries that already shipped in a release of the baseline (compare with the notes and tag from step 1). For a
-  minor release this includes forward ports of fixes that a patch release of the previous line already announced.
-- For a minor release, work merged on `main` before the previous line branched, even if it shows up in this
-  line's history.
-- Entries without an observable effect for either audience: internal refactorings, internal APIs, protocol
-  internals, doc comment fixes, test or CI changes.
-- Daml changes (compiler, standard library, Daml-LF, engine), unless the user asks to include them.
-- Artifacts that only ship as examples (e.g. Grafana dashboards under `examples/`).
+Do not remove entries yourself. Leave them in place and collect them in one list of items to remove: each entry
+quoted, with one of the reasons below and its evidence (e.g. "duplicate: already in 3.6.1, line 581",
+"internal: the commit only changes an internal API"). Ask the user to review the list, then remove only the
+entries the user agrees to and keep the others. An entry marked as breaking is a candidate only for the reason
+"duplicate".
+
+Reasons to remove:
+
+- **duplicate**: readers already know the change. It shipped in a release of the baseline (compare with the
+  notes and tag from step 1), including forward ports of fixes and breaking changes that a patch release of the
+  previous line announced, or, for a minor release, it was merged on `main` before the previous line branched and
+  shipped with that line. Evidence: the release and line of the earlier note, or the commit and the branch point.
+- **internal**: no effect that application developers or node operators can observe: internal refactorings,
+  internal APIs, protocol internals, doc comment fixes, test or CI changes. Evidence: what the commit changes.
+- **example**: the artifact only ships as an example (e.g. Grafana dashboards under `examples/`), not as a
+  supported part of the release. Evidence: its path.
 
 ## 4. Find leaked and missing entries
 
@@ -190,7 +214,7 @@ mistakes:
 - Defaults that changed in the same commit (e.g. a feature now off by default).
 - Dependency versions: compare `project/` or the shared dependencies file between the baseline tag and the line.
 
-Fix wrong details; drop entries for changes that are not on the line.
+Fix wrong details. An entry for a change that is not on the line is not a removal reason of step 3: list it as an open question (step 9).
 
 ## 6. Writing style
 
@@ -200,7 +224,7 @@ Fix wrong details; drop entries for changes that are not on the line.
   improvements without table or index names. Keep a config key only when it is the operator's control.
 - Security-relevant changes other than advisories: call out the change and the required action, but never why
   the old behavior was a problem or how it could be abused. No triggers, no "previously X was possible", no "not
-  charged". Drop entries whose only content is a hardening detail.
+  charged".
 - Do not call a feature GA or announce timelines unless the user confirms it.
 - For a new message or format version, say who needs to migrate and how (e.g. decoders of a Ledger API result
   must support the new version, or request the old one with a field).
@@ -225,7 +249,8 @@ files); check the final files, not the commit that introduced them.
 
 ## 9. Report
 
-After each round, show what changed and list open questions for the user. For a patch release, start with any
+After each round, show what changed and list open questions for the user, and ask the
+user to review the list of items to remove (step 3). For a patch release, start with any
 breaking change or deprecation under a **BREAKING CHANGE IN A PATCH RELEASE** heading and any security fix not yet
 on MainNet under a **SECURITY FIX NOT ON MAINNET** heading, then any new functionality.
 Other open questions, e.g.: entries that may be internal, announced removals that did not happen, missing

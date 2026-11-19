@@ -418,6 +418,7 @@ private[dao] object UpdateReader {
         eventProjectionProperties,
         witnessParties,
         templateId,
+        contractId,
       ),
     )
 
@@ -593,6 +594,7 @@ private[dao] object UpdateReader {
         eventProjectionProperties,
         rawRemoveEvent.witnessParties,
         rawRemoveEvent.templateId,
+        rawRemoveEvent.contractId,
       ),
       acsDelta = rawRemoveEvent.witnessParties.nonEmpty,
     )

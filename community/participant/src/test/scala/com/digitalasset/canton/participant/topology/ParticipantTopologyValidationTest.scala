@@ -14,7 +14,9 @@ import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.topology.DefaultTestIdentities.{
   participant1,
   participant2,
+  participant3,
   party1,
+  party2,
   synchronizerId,
 }
 import com.digitalasset.canton.topology.ForceFlags
@@ -37,11 +39,12 @@ class ParticipantTopologyValidationTest extends AnyWordSpec with BaseTest with H
   }
 
   "checkInsufficientSignatoryAssigningParticipantsForParty" when {
-    // participant1 (Active) and participant2 are the reassigning participants of an incomplete
-    // reassignment. Raising the threshold to 2 passes only if participant2's entry counts.
-    def raiseThresholdTo2(
-        participant2Permission: ParticipantPermission,
-        participant2State: HostingState,
+    // participant1 and participant2 are the reassigning participants of an incomplete reassignment
+    // of contracts signed by `signatories`. party1 currently has threshold 1.
+    def checkParty1(
+        signatories: Set[LfPartyId],
+        nextThresholdO: Option[PositiveInt],
+        nextHostingParticipants: Seq[HostingParticipant],
     ) = {
       val store = mock[ReassignmentStore]
       when(
@@ -56,6 +59,7 @@ class ParticipantTopologyValidationTest extends AnyWordSpec with BaseTest with H
             IncompleteReassignmentData(
               ReassignmentId.tryCreate("00"),
               reassigningParticipants = Some(Set(participant1, participant2)),
+              signatories = Some(signatories),
               UnassignmentEventGlobalOffset(Offset.firstOffset),
               queryOffset = Offset.firstOffset,
             )
@@ -66,11 +70,8 @@ class ParticipantTopologyValidationTest extends AnyWordSpec with BaseTest with H
         .checkInsufficientSignatoryAssigningParticipantsForParty(
           party1,
           currentThreshold = PositiveInt.one,
-          nextThresholdO = Some(PositiveInt.two),
-          nextHostingParticipants = Seq(
-            HostingParticipant(participant1, Confirmation, HostingState.Active),
-            HostingParticipant(participant2, participant2Permission, participant2State),
-          ),
+          nextThresholdO = nextThresholdO,
+          nextHostingParticipants = nextHostingParticipants,
           ForceFlags.none,
           reassignmentStores = Map(synchronizerId -> store),
           ledgerEnd = () => None,
@@ -78,6 +79,21 @@ class ParticipantTopologyValidationTest extends AnyWordSpec with BaseTest with H
         .value
         .futureValueUS
     }
+
+    // participant1 (Active) and participant2 are the reassigning participants of an incomplete
+    // reassignment. Raising the threshold to 2 passes only if participant2's entry counts.
+    def raiseThresholdTo2(
+        participant2Permission: ParticipantPermission,
+        participant2State: HostingState,
+    ) =
+      checkParty1(
+        signatories = Set(party1.toLf),
+        nextThresholdO = Some(PositiveInt.two),
+        nextHostingParticipants = Seq(
+          HostingParticipant(participant1, Confirmation, HostingState.Active),
+          HostingParticipant(participant2, participant2Permission, participant2State),
+        ),
+      )
 
     "the next mapping has a confirming entry" should {
       // Nominated and Freezing as released in 3.7.0; judges the end state, in which every entry is Active
@@ -109,6 +125,37 @@ class ParticipantTopologyValidationTest extends AnyWordSpec with BaseTest with H
             ]
           )
         }
+      }
+    }
+
+    "the party is an observer of the reassigned contracts" should {
+      "accept moving it to a participant that is not reassigning" in {
+        checkParty1(
+          signatories = Set(party2.toLf),
+          nextThresholdO = Some(PositiveInt.one),
+          nextHostingParticipants =
+            Seq(HostingParticipant(participant3, Observation, HostingState.Active)),
+        ) shouldBe Right(())
+      }
+
+      "reject removing the party" in {
+        checkParty1(
+          signatories = Set(party2.toLf),
+          nextThresholdO = None,
+          nextHostingParticipants = Nil,
+        ).left.value shouldBe a[
+          InsufficientSignatoryAssigningParticipantsForParty.RejectRemovingParty
+        ]
+      }
+
+      "reject a next mapping without participants" in {
+        checkParty1(
+          signatories = Set(party2.toLf),
+          nextThresholdO = Some(PositiveInt.one),
+          nextHostingParticipants = Nil,
+        ).left.value shouldBe a[
+          InsufficientSignatoryAssigningParticipantsForParty.RejectNoHostingParticipant
+        ]
       }
     }
   }

@@ -334,7 +334,7 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
         |public-lapi-size-config.completion-stream-request.parties-size-limit = 10""".stripMargin
     ) { result =>
       val sizeLimits = result.value
-      inside(sizeLimits) { case LedgerApiSizeLimitsConfig(_, _, _, sharedSizeConfig, _, _, _) =>
+      inside(sizeLimits) { case LedgerApiSizeLimitsConfig(_, _, _, sharedSizeConfig, _, _) =>
         sharedSizeConfig.completionsRequestPartiesSizeLimit shouldBe PositiveInt.tryCreate(5)
       }
       sizeLimits.publicLapiSizeConfig.getCompletionsRequest.partiesSizeLimit shouldBe

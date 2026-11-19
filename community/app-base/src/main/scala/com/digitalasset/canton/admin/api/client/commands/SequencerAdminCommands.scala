@@ -130,6 +130,7 @@ object SequencerAdminCommands {
   final case class GetTrafficControlState(
       members: Seq[Member],
       timestampSelector: TimestampSelector = TimestampSelector.LatestSafe,
+      includeOnboardingMembers: Boolean = false,
   ) extends BaseSequencerAdministrationCommand[
         proto.TrafficControlStateRequest,
         proto.TrafficControlStateResponse,
@@ -137,8 +138,11 @@ object SequencerAdminCommands {
       ] {
     override protected def createRequest(): Either[String, proto.TrafficControlStateRequest] =
       Right(
-        proto
-          .TrafficControlStateRequest(members.map(_.toProtoPrimitive), timestampSelector.toProtoV30)
+        proto.TrafficControlStateRequest(
+          members.map(_.toProtoPrimitive),
+          timestampSelector.toProtoV30,
+          includeOnboardingMembers,
+        )
       )
 
     override protected def submitRequest(

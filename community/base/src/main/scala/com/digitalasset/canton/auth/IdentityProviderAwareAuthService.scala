@@ -153,5 +153,6 @@ class IdentityProviderAwareAuthService(
       participantId = payload.participantId,
       userId = payload.userId,
       expiration = payload.exp,
+      restriction = payload.scope.fold(Seq.empty[Claim])(Claim.parseJwtScope(_)),
     )
 }

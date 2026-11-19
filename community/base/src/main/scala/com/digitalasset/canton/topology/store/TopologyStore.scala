@@ -252,7 +252,7 @@ object StoredTopologyTransaction
   override def supportedProtoVersions: StoredTopologyTransaction.SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v36,
+        ProtocolVersion.minimum,
         supportedProtoVersion(adminTopoV30.TopologyTransactions.Item)(fromProtoV30),
         _.toAdminProtoV30,
       )

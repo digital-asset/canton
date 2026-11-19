@@ -62,7 +62,6 @@ final class StateTransferMessageSender[E <: Env[E]](
     //  multiple times in a row, resulting in uneven load balancing for certain periods. On the other hand, shuffling
     //  is more straightforward code-wise. A potentially irrelevant implication is that the order in which nodes
     //  are chosen is less predictable (e.g., by malicious nodes), and, at the same time, harder to reason about.
-    // TODO(#24940) consider not rotating when everything runs smoothly
     consensusDependencies.p2pNetworkOut.asyncSend(
       P2PNetworkOut.SendToRandomAuthenticated(
         wrapSignedMessage(blockTransferRequest),

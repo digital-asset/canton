@@ -121,8 +121,7 @@ abstract class ReassignmentBackdatingIntegrationTest
           painterDisabledP.success(())
         }
 
-        // TODO(i33545): change this comment when M2 is implemented.
-        //  The unassignment is now validated against each participant's localTargetTs, at which the Painter
+        // The unassignment is validated against each participant's localTargetTs, at which the Painter
         // is no longer hosted on the target synchronizer. The reassigning participants therefore abstain and
         // the request is rejected.
         loggerFactory.assertThrowsAndLogs[CommandFailure](

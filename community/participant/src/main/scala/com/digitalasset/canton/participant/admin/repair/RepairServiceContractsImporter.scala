@@ -11,20 +11,11 @@ import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
-import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.ledger.participant.state.Update.RepairParticipantEventUpdate
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.DedicatedRepresentativePackageId
-import com.digitalasset.canton.ledger.participant.state.Update.{
-  ContractInfo,
-  RepairReassignmentAccepted,
-}
-import com.digitalasset.canton.ledger.participant.state.{
-  Reassignment,
-  ReassignmentInfo,
-  RepairUpdate,
-  TransactionMeta,
-  Update,
-}
+import com.digitalasset.canton.ledger.participant.state.{ParticipantEvent, RepairUpdate}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -41,17 +32,18 @@ import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.sync.SyncPersistentStateLookup
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.platform.indexer.IndexerState.ShutdownInProgress
+import com.digitalasset.canton.platform.store.backend.PersistentParticipantEventUpdateCategory.{
+  AcsImport,
+  AcsImportTxStyle,
+}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PekkoUtil.FutureQueue
-import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.daml.lf.CantonOnly
-import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
+import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.CreationTime
-import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source as PekkoSource}
@@ -562,52 +554,42 @@ final class RepairServiceContractsImporter(
         )
     } yield ()
   }
-
-  private def prepareAddedEvents(
+  private def prepareAddedUpdate(
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
       repairCounter: RepairCounter,
-      ledgerCreateTime: CreationTime.CreatedAt,
       contractsAdded: Seq[(ContractToAdd, Long)],
       workflowIdProvider: () => Option[LfWorkflowId],
-  )(implicit traceContext: TraceContext): RepairUpdate = {
-    val contractInfos = contractsAdded.view.map { case (c, internalContractId) =>
-      val cid = c.contract.contractId
-      cid -> ContractInfo(
-        persistedContractInstance = PersistedContractInstance(
-          internalContractId = internalContractId,
-          inst = c.contract.inst,
-        ),
-        representativePackageId = DedicatedRepresentativePackageId(c.representativePackageId),
-      )
-    }.toMap
-    val nodeIds = LazyList.from(0).map(LfNodeId.apply)
-    val txNodes = nodeIds.zip(contractsAdded.map(_._1.contract.toLf)).toMap
-    Update.RepairTransactionAccepted(
-      transactionMeta = TransactionMeta(
-        ledgerEffectiveTime = ledgerCreateTime.time,
+      eventMode: RepairLedgerApiEventMode,
+  )(implicit traceContext: TraceContext): Option[RepairParticipantEventUpdate] = {
+    val category =
+      if (
+        contractsAdded.exists { case (contract, _) =>
+          eventMode.useReassignmentEvent(contract.reassignmentCounter)
+        }
+      ) AcsImport
+      else AcsImportTxStyle
+    Option.when(contractsAdded.nonEmpty)(
+      RepairParticipantEventUpdate(
+        updateId = randomUpdateId(syncCrypto),
         workflowId = workflowIdProvider(),
-        preparationTime = recordTime.toLf,
-        submissionSeed = Update.noOpSeed,
-        timeBoundaries = LedgerTimeBoundaries.unconstrained,
-        optUsedPackages = None,
-        optNodeSeeds = None,
-        optByKeyNodes = None,
-      ),
-      transactionInfo = Update.TransactionAccepted.TransactionInfo(
-        LfCommittedTransaction(
-          CantonOnly.lfVersionedTransaction(
-            nodes = txNodes,
-            roots = ImmArray.from(nodeIds.take(txNodes.size)),
+        synchronizerId = synchronizerId,
+        recordTime = recordTime,
+        events = contractsAdded.zipWithIndex.map { case ((c, internalContractId), nodeId) =>
+          ParticipantEvent.Added(
+            nodeId = nodeId,
+            contractInstance = PersistedContractInstance(
+              internalContractId = internalContractId,
+              inst = c.contract.inst,
+            ),
+            reassignmentCounter = c.reassignmentCounter.unwrap,
+            representativePackageId = DedicatedRepresentativePackageId(c.representativePackageId),
           )
-        )
-      ),
-      updateId = randomUpdateId(syncCrypto),
-      synchronizerId = synchronizerId,
-      repairCounter = repairCounter,
-      recordTime = recordTime,
-      contractInfos = contractInfos,
-      traceContext = traceContext,
+        },
+        category = category,
+        traceContext = traceContext,
+        repairCounter = repairCounter,
+      )
     )
   }
 
@@ -617,97 +599,20 @@ final class RepairServiceContractsImporter(
       workflowIds: Iterator[Option[LfWorkflowId]],
       repairIndexer: FutureQueue[RepairUpdate],
   )(implicit traceContext: TraceContext): Future[Unit] =
-    MonadUtil.sequentialTraverse_(contractsAdded) {
-      case (timeOfRepair, (ledgerCreateTime, contractsToAdd)) =>
-        // Groups are homogeneous with respect to the Ledger API representation (see grouping in
-        // `validateAndPersistContracts`)
-        val useReassignmentEvent = contractsToAdd.exists { case (contractToAdd, _) =>
-          eventMode.useReassignmentEvent(contractToAdd.reassignmentCounter)
-        }
-        val updateO: Option[RepairUpdate] =
-          if (useReassignmentEvent)
-            prepareAssignedEvent(
-              synchronizerId = synchronizerId,
-              recordTime = timeOfRepair.timestamp,
-              repairCounter = timeOfRepair.repairCounter,
-              contractsAdded = contractsToAdd,
-              workflowIdProvider = () => workflowIds.next(),
-            )
-          else
-            Some(
-              prepareAddedEvents(
-                synchronizerId = synchronizerId,
-                recordTime = timeOfRepair.timestamp,
-                repairCounter = timeOfRepair.repairCounter,
-                ledgerCreateTime = ledgerCreateTime,
-                contractsAdded = contractsToAdd,
-                workflowIdProvider = () => workflowIds.next(),
-              )
-            )
-        // not waiting for Update.persisted, since CommitRepair anyway will be waited for at the end
-        updateO.fold(Future.unit)(repairIndexer.offer(_).map(_ => ()))
-    }
-
-  /** Build assignment events to be offered to the indexer to signal imported contracts. Assigned
-    * event allows to preserve reassignment counters and shall be used until we have a dedicated
-    * `add` event in the indexer.
-    * @return
-    *   - None if `contractsAdded` is empty
-    *   - Some otherwise
-    */
-  private def prepareAssignedEvent(
-      synchronizerId: SynchronizerId,
-      recordTime: CantonTimestamp,
-      repairCounter: RepairCounter,
-      contractsAdded: Seq[(ContractToAdd, Long)],
-      workflowIdProvider: () => Option[LfWorkflowId],
-  )(implicit traceContext: TraceContext): Option[RepairReassignmentAccepted] = {
-
-    // Assignments set the same source and target synchronizerIds since they are artificial
-    // assigns without an actual target synchronizer (this is used for adding a contract)
-    val reassignmentId = ReassignmentId(
-      Source(synchronizerId),
-      Target(synchronizerId),
-      unassignmentTs = recordTime,
-      contractIdCounters = contractsAdded.view.map { case (c, _internalContractId) =>
-        (c.cid, c.reassignmentCounter)
-      },
-    )
-
-    val assigns = NonEmpty.from[Seq[Reassignment]](
-      contractsAdded.zipWithIndex
-        .map { case ((c, internalContractId), nodeId) =>
-          Reassignment.Assign(
-            reassignmentCounter = c.reassignmentCounter.unwrap,
-            nodeId = nodeId,
-            persistedContractInstance = PersistedContractInstance(
-              internalContractId = internalContractId,
-              inst = c.contract.inst,
-            ),
-            representativePackageId = c.representativePackageId,
+    // not waiting for Update.persisted, since CommitRepair anyway will be waited for at the end
+    MonadUtil
+      .sequentialTraverse_(
+        contractsAdded.flatMap { case (timeOfChange, contractsToAdd) =>
+          prepareAddedUpdate(
+            synchronizerId = synchronizerId,
+            recordTime = timeOfChange.timestamp,
+            repairCounter = timeOfChange.repairCounter,
+            contractsAdded = contractsToAdd._2,
+            workflowIdProvider = () => workflowIds.next(),
+            eventMode,
           )
         }
-    )
-
-    assigns.map { assignsNE =>
-      RepairReassignmentAccepted(
-        workflowId = workflowIdProvider(),
-        updateId = randomUpdateId(syncCrypto),
-        reassignmentInfo = ReassignmentInfo(
-          sourceSynchronizer = Source(synchronizerId),
-          targetSynchronizer = Target(synchronizerId),
-          submitter = None,
-          reassignmentId = reassignmentId,
-          isReassigningParticipant = false,
-        ),
-        reassignment = Reassignment.Batch(assignsNE),
-        repairCounter = repairCounter,
-        recordTime = recordTime,
-        synchronizerId = synchronizerId,
-        traceContext = traceContext,
-      )
-    }
-  }
+      )(repairIndexer.offer)
 
   private def packageKnown(
       lfPackageId: LfPackageId

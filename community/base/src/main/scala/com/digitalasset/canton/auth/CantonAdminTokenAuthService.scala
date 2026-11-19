@@ -42,12 +42,15 @@ class CantonAdminTokenAuthService(
     else
       adminParty.map(ClaimActAsParty.apply).toList
 
-  private val adminClaim = Option.when(adminTokenConfig.adminClaim)(ClaimAdmin).toList
+  private val adminClaim = Option
+    .when(adminTokenConfig.adminClaim)(ClaimAdmin :: ClaimApiArea.admin)
+    .toList
+    .flatten
 
   private val permit = Future.successful(
     AuthService.Result(
       ClaimSet.Claims.Empty.copy(
-        claims = List[Claim](ClaimPublic) ++ partyClaim ++ adminClaim
+        claims = ClaimApiArea.user ++ partyClaim ++ adminClaim
       )
     )
   )

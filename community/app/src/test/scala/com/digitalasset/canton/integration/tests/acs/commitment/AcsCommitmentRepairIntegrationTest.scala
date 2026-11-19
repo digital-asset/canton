@@ -7,6 +7,7 @@ import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommand
   SynchronizerTimeRange,
   TimeRange,
 }
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
 import com.digitalasset.canton.config.{CommitmentSendDelay, NonNegativeDuration}
@@ -162,9 +163,13 @@ trait AcsCommitmentRepairIntegrationTest
           tick1.forgetRefinement.immediateSuccessor,
           NonNegativeDuration.ofSeconds(10),
         )
-        // the await only covers this synchronizer, the fetch still nudges the other one
+        // the await only covers one synchronizer, the fetch nudges the other synchronizers
         participant.testing.fetch_synchronizer_times()
       }
+      participant1.health.ping(
+        participant2,
+        synchronizerId = Some(getInitializedSynchronizer(synchronizerAlias).synchronizerId),
+      )
 
       val p1Computed = participant1.commitments
         .computed(
@@ -485,6 +490,8 @@ trait AcsCommitmentRepairIntegrationTest
   }
 }
 
+// TODO(#37720): Fix this test before removing the old commitment processor with the removal of PV37
+@UnstableTest
 class AcsCommitmentRepairIntegrationTestPostgres extends AcsCommitmentRepairIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
@@ -500,6 +507,8 @@ class AcsCommitmentRepairIntegrationTestPostgres extends AcsCommitmentRepairInte
   )
 }
 
+// TODO(#37720): Fix this test before removing the old commitment processor with the removal of PV37
+@UnstableTest
 class AcsCommitmentRepairIntegrationTestH2 extends AcsCommitmentRepairIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(

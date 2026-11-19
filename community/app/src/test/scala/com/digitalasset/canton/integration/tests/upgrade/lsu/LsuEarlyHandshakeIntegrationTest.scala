@@ -210,8 +210,10 @@ final class LsuEarlyHandshakeIntegrationTest extends LsuBase {
           .value shouldBe 1L
 
         // configs are updated
-        getKnownSuccessors(participant1) shouldBe Set(sequencer1.id, sequencer2.id)
-        getKnownSuccessors(participant2) shouldBe Set(sequencer1.id, sequencer2.id)
+        eventually() {
+          getKnownSuccessors(participant1) shouldBe Set(sequencer1.id, sequencer2.id)
+          getKnownSuccessors(participant2) shouldBe Set(sequencer1.id, sequencer2.id)
+        }
       }
     }
 

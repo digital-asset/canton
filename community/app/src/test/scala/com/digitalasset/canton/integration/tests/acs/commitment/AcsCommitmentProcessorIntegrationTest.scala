@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.acs.commitment
 
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeProportion}
@@ -160,9 +161,12 @@ sealed trait AcsCommitmentProcessorIntegrationTest
       simClock.advanceTo(tick2.forgetRefinement.immediateSuccessor)
 
       simClock.advance(interval.plus(JDuration.ofSeconds(1)))
-      eventually() {
-        participants.local.foreach(_.testing.fetch_synchronizer_times())
+      // The time moves lazily on the CantonBFT, so wait before pinging; the pings then tick the
+      // (old) ACS commitment processors of participant1 and participant2 past the period end.
+      TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
+      Seq(participant1, participant2).foreach(p => p.health.ping(p, synchronizerId = Some(daId)))
 
+      eventually() {
         // Make the search for commitments exclusive on both ends, because it's inclusive by default on the end
         participant2.commitments
           .computed(
@@ -458,19 +462,18 @@ sealed trait AcsCommitmentProcessorIntegrationTest
 
           // fetch_synchronizer_times can return a stale time that was delivered after the clock advance,
           // so wait for the tick itself and for participant1 to have computed the period ending at
-          // lastCommTick. Otherwise the purge below can land before the tick and participant1 sends no commitment.
-          Seq(participant1, participant2).foreach(
-            _.testing.await_synchronizer_time(
+          // lastCommTick. Otherwise, the purge below can land before the tick and participant1 sends no commitment.
+          Seq(participant1, participant2).foreach { p =>
+            p.testing.await_synchronizer_time(
               daId,
               lastCommTick.forgetRefinement.immediateSuccessor,
             )
-          )
-
-          // The legacy commitment processor only completes the period (and updates lastComputedAndSent) once it
-          // is handed an ACS change past the tick, i.e., on a time proof or a transaction. Plain deliver events
-          // (such as the receipt of participant1's own commitment message at the clock time) do not trigger this,
-          // and await_synchronizer_time can already be satisfied by them. A ping forces a transaction past the tick.
-          participant1.health.ping(participant1)
+            // The legacy commitment processor only completes the period (and updates lastComputedAndSent) once it
+            // is handed an ACS change past the tick, i.e., on a time proof or a transaction. Plain deliver events
+            // (such as the receipt of participant1's own commitment message at the clock time) do not trigger this,
+            // and await_synchronizer_time can already be satisfied by them. A ping forces a transaction past the tick.
+            p.health.ping(p, synchronizerId = Some(daId))
+          }
 
           eventually() {
             participant1.commitments
@@ -903,6 +906,8 @@ sealed trait AcsCommitmentProcessorIntegrationTest
   }
 }
 
+// TODO(#37720): remove this test when removing the old AcsCommitmentProcessor together with PV37
+@UnstableTest
 class AcsCommitmentProcessorIntegrationTestPostgres extends AcsCommitmentProcessorIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(

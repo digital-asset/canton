@@ -62,7 +62,6 @@ import com.digitalasset.canton.platform.apiserver.{
   InProcessGrpcName,
   LedgerFeatures,
 }
-import com.digitalasset.canton.platform.config.IdentityProviderManagementConfig
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.platform.{
   PackagePreferenceBackend,
@@ -162,7 +161,7 @@ object LedgerApiServer {
       metrics = metrics,
       cacheExpiryAfterWrite =
         serverConfig.identityProviderManagement.cacheExpiryAfterWrite.underlying,
-      maxIdentityProviders = IdentityProviderManagementConfig.MaxIdentityProviders,
+      maxIdentityProviders = serverConfig.identityProviderManagement.maxIdentityProviderConfigs,
       loggerFactory = loggerFactory,
     )
 
@@ -345,6 +344,7 @@ object LedgerApiServer {
 
     def startHttpApiIfEnabled(
         authInterceptor: AuthInterceptor,
+        authorizer: Authorizer,
         packagePreferenceBackend: PackagePreferenceBackend,
         apiLoggingConfig: ApiLoggingConfig,
     ): ResourceOwner[Unit] =
@@ -372,6 +372,7 @@ object LedgerApiServer {
             ),
             httpsConfiguration = serverConfig.tls,
             channel = channel,
+            authorizer = authorizer,
             packageSyncService = timedSyncService,
             loggerFactory = loggerFactory,
             authInterceptor = authInterceptor,
@@ -388,7 +389,7 @@ object LedgerApiServer {
 
     (for {
       _ <- createAdditionalAdminUserIfNeeded
-      (_, authInterceptor) <- ApiServiceOwner(
+      (_, authInterceptor, authorizer) <- ApiServiceOwner(
         indexService = ledgerApiIndexService.indexService,
         transactionSubmissionTracker = inMemoryState.transactionSubmissionTracker,
         reassignmentSubmissionTracker = inMemoryState.reassignmentSubmissionTracker,
@@ -451,6 +452,7 @@ object LedgerApiServer {
       )
       _ <- startHttpApiIfEnabled(
         authInterceptor,
+        authorizer,
         ledgerApiIndexService.packagePreferenceBackend,
         parameters.loggingConfig.api,
       )

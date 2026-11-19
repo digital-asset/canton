@@ -23,8 +23,9 @@ sealed trait TransactionRoutingErrorWithSynchronizer extends TransactionRoutingE
   def synchronizerId: SynchronizerId
 }
 
-/** All routing errors happen before in-flight submission checking and are therefore never definite
-  * answers.
+/** Routing errors that happen before the transaction is registered as in-flight are never definite
+  * answers. Routing errors from the automatic reassignment of the transaction's input contracts
+  * happen after the registration and are definite answers.
   */
 object TransactionRoutingError extends RoutingErrorGroup {
 

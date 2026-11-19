@@ -27,11 +27,10 @@ sealed trait CommandInterpretationIntegrationTest
     EnvironmentDefinition.P2_S1M1
       .addConfigTransform(
         ConfigTransforms.updateAllParticipantConfigs_(
-          // Increase granularity of interruptions so that the (short) Ping command gets
-          // some `Result.Need.Interruption`s during interpretation before completing.
-          // We have had to previously lower this setting to 50 after the engine had
-          // become more efficient and needed fewer cycles for a ping.
-          _.focus(_.parameters.engine.iterationsBetweenInterruptions).replace(50)
+          // Interrupt the engine after every iteration, so that even the short Ping command is
+          // interrupted before it completes. A larger value only works as long as the engine
+          // needs that many iterations in a row for a ping (#20821).
+          _.focus(_.parameters.engine.iterationsBetweenInterruptions).replace(1)
         )
       )
 

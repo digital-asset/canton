@@ -150,7 +150,7 @@ class PbftViewChangeState(
     assert(viewChangeMessageSetForNewView.isEmpty)
     viewChangeMessageSetForNewView = Some(viewChangeSet)
 
-    // Highest View-numbered PrePrepare from the vcSet defined for each block number
+    // Select using the protocol-version-specific rule, preserving the original signed pre-prepare.
     val definedPrePrepares =
       NewView.computeCertificatePerBlock(viewChangeSet.map(_.message)).fmap(_.prePrepare)
 

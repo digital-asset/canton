@@ -1276,7 +1276,8 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
       """This error indicates that a dangerous PartyToParticipant mapping was rejected.
         |If the command is run, there will no longer be enough signatory-assigning participants
         |(i.e., reassigning participants with confirmation permissions for assignments) to complete the ongoing reassignments, these reassignments
-        |will remain stuck.
+        |will remain stuck. If the party is not a signatory of the reassigned contracts, the mapping is rejected
+        |only if it leaves the party without any hosting participant.
         | """
     )
     @Resolution(
@@ -1328,6 +1329,20 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
             cause =
               s"Changing the party to participant mapping for party $partyId would result in insufficient signatory-assigning participants for reassignment $reassignmentId " +
                 s"on synchronizer $synchronizerId. Completing the assignment requires $threshold signatory-assigning participants, but only $signatoryAssigningParticipants would be available. " +
+                s"Set the ForceFlag.AllowInsufficientSignatoryAssigningParticipantsForParty if you are certain about proceeding with this change."
+          )
+          with TopologyManagerError
+
+      final case class RejectNoHostingParticipant(
+          partyId: PartyId,
+          synchronizerId: SynchronizerId,
+          reassignmentId: ReassignmentId,
+      )(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends CantonError.Impl(
+            cause =
+              s"Changing the party to participant mapping for party $partyId would leave the party without any hosting participant, while it is a stakeholder of the incomplete reassignment $reassignmentId " +
+                s"on synchronizer $synchronizerId. " +
                 s"Set the ForceFlag.AllowInsufficientSignatoryAssigningParticipantsForParty if you are certain about proceeding with this change."
           )
           with TopologyManagerError

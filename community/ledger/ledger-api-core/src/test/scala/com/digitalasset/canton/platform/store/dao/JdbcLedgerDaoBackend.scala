@@ -17,6 +17,7 @@ import com.digitalasset.canton.metrics.{LedgerApiServerHistograms, LedgerApiServ
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.platform.config.{
   ActiveContractsServiceStreamsConfig,
+  HostedPartiesStreamsConfig,
   ServerRole,
   UpdatesStreamsConfig,
 }
@@ -152,6 +153,7 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
         commandExecutionContext = ec,
         metrics = metrics,
         participantId = JdbcLedgerDaoBackend.TestParticipantIdRef,
+        stringInterning = stringInterningView,
         readStorageBackend = dbSupport.storageBackendFactory
           .readStorageBackend(
             JdbcLedgerDaoBackend.TestParticipantIdRef,
@@ -172,6 +174,7 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
           contractProcessingParallelism = eventsProcessingParallelism,
         ),
         updatesStreamsConfig = UpdatesStreamsConfig.default,
+        hostedPartiesStreamsConfig = HostedPartiesStreamsConfig.default,
         globalMaxEventIdQueries = 20,
         globalMaxEventPayloadQueries = 10,
         tracer = OpenTelemetry.noop().getTracer("test"),

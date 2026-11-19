@@ -37,7 +37,10 @@ object RequestTimeoutDirective {
 
   /** A bare integer, interpreted as milliseconds (e.g. `5000`). */
   private object AsMillis {
-    def unapply(value: String): Option[FiniteDuration] = value.toLongOption.map(_.millis)
+    private val MaxMillis: Long = Long.MaxValue / 1000 / 1000
+
+    def unapply(value: String): Option[FiniteDuration] =
+      value.toLongOption.filter(millis => millis >= -MaxMillis && millis <= MaxMillis).map(_.millis)
   }
 
   /** A finite duration with a unit (e.g. `5s`, `1500ms`); `Inf` and the like don't match. */
@@ -46,7 +49,7 @@ object RequestTimeoutDirective {
       Try(Duration(value)).toOption.collect { case timeout: FiniteDuration => timeout }
   }
 
-  private def parse(rawHeaderValue: String): Option[FiniteDuration] =
+  private[http] def parse(rawHeaderValue: String): Option[FiniteDuration] =
     rawHeaderValue.trim match {
       case AsMillis(timeout) => Some(timeout)
       case AsDuration(timeout) => Some(timeout)

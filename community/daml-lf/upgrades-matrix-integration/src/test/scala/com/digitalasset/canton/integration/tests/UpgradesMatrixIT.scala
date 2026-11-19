@@ -565,6 +565,7 @@ abstract class UpgradesMatrixIntegration(
                   filtersByParty = Map(setupData.alice -> filters),
                   filtersForAnyParty = None,
                   verbose = false,
+                  filtersByContractId = Seq.empty,
                 ),
                 validAtOffset = offset,
                 includeIncompleteReassignments = false,

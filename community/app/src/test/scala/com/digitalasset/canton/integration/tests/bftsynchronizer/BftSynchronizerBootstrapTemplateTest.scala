@@ -46,6 +46,7 @@ sealed trait BftSynchronizerBootstrapTemplateTest
             GrpcSequencerConnection.fromInternal(
               s.config.publicApi.clientConfig
                 .asSequencerConnection(SequencerAlias.tryCreate(s.name), sequencerId = None)
+                .value
             )
           ),
           synchronizerAlias = daName,

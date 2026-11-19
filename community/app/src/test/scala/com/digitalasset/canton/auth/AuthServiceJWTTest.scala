@@ -207,6 +207,7 @@ class AuthServiceJWTTest extends AnyWordSpec with BaseTest {
             participantId = None,
             userId = "legacyUser",
             expiration = None,
+            restriction = List.empty,
           )
         }
       }
@@ -222,6 +223,7 @@ class AuthServiceJWTTest extends AnyWordSpec with BaseTest {
           participantId = Some("p1"),
           userId = "modernUser",
           expiration = None,
+          restriction = List.empty,
         )
       }
     }

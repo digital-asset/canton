@@ -100,7 +100,7 @@ object SubmitterMetadata
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.SubmitterMetadata)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(v32.SubmitterMetadata)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV32),
       _.toProtoV32,
     )
@@ -150,7 +150,7 @@ object SubmitterMetadata
       _ <- ProtoValidation
         .validateCondition(
           protocolVersionValidation,
-          ValidationParam(ProtocolVersion.v36 -> maxActAs),
+          ValidationParam(ProtocolVersion.minimum -> maxActAs),
         )(
           max => submitterActAs.sizeIs <= max.value,
           max =>
@@ -245,7 +245,7 @@ object SubmitterMetadata
           actAsP,
           "act_as",
           pvv,
-          ValidationParam(ProtocolVersion.v36 -> maxActAs),
+          ValidationParam(ProtocolVersion.minimum -> maxActAs),
         )(ProtoConverter.parseLfPartyId)
       userId <- ProtoValidation.validateThen(userIdP, "userId", pvv)((s, _) =>
         UserId

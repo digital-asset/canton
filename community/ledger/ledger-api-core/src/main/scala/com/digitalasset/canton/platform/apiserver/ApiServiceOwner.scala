@@ -135,7 +135,7 @@ object ApiServiceOwner {
       materializer: Materializer,
       traceContext: TraceContext,
       tracer: Tracer,
-  ): ResourceOwner[(ApiService, AuthInterceptor)] = {
+  ): ResourceOwner[(ApiService, AuthInterceptor, Authorizer)] = {
     import com.digitalasset.canton.platform.ResourceOwnerOps
     val logger = loggerFactory.getTracedLogger(getClass)
 
@@ -276,7 +276,7 @@ object ApiServiceOwner {
         s"Initialized API server listening to port = ${apiService.port} ${if (tls.isDefined) "using tls"
           else "without tls"}."
       )
-      (apiService, userAuthInterceptor)
+      (apiService, userAuthInterceptor, authorizer)
     }
   }
 
