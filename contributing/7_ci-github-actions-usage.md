@@ -58,6 +58,32 @@ Example view of the manual trigger for `Canton Build Required`:
 
 ---
 
+# Draft pull requests
+
+On a draft pull request, `Canton Build Required` runs only compile, `Test Protocol Version 37`,
+and `Crash Recovery Test 37`, and reports the result as `Canton Draft Build Gate`.
+That check does not satisfy branch protection, which requires `Canton Build Required Gate`.
+Marking the pull request ready for review starts the full run, which reuses passed
+protocol version 37 results from an earlier completed run of the same head commit
+instead of running those tests again.
+If the draft run is still in progress when you mark the pull request ready, it is
+cancelled and the full run runs every test, including protocol version 37: results are
+reused only from a draft run that has finished.
+Converting a pull request back to draft starts no run; the next push gets a draft run.
+
+To get full CI on a draft, add the `ci:full` label and then push a commit.
+CI reads the label only when a run starts: adding it starts nothing, and rerunning an
+existing run does not see it, because a rerun reuses the original event.
+If there is nothing to push, use an empty commit:
+
+```bash
+git commit --allow-empty -m "Run full CI"
+```
+
+With `ci:full`, marking the pull request ready also skips the reuse and reruns every test.
+
+---
+
 # How to inspect auto-rerun attempts
 
 When a workflow is rerun, GitHub keeps attempts under the same run.

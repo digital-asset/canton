@@ -122,7 +122,7 @@ object RootHashMessage
     )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.RootHashMessage)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(v30.RootHashMessage)(
       supportedProtoVersionPVV(_)((pv, deserializer, proto) =>
         fromProtoV30(pv, deserializer)(proto)
       ),

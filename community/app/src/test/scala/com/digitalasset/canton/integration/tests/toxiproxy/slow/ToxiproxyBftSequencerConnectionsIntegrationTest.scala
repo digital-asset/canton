@@ -449,9 +449,6 @@ sealed trait ToxiproxyBftSequencerConnectionsIntegrationTest
     _.warningMessage should include("Retry timeout has elapsed, giving up."),
     _.warningMessage should include("DEADLINE_EXCEEDED/CallOptions deadline exceeded"),
     _.warningMessage should include("Token refresh encountered error"),
-    _.warningMessage should include(
-      "Detected late processing (or clock skew) of batch with timestamp"
-    ),
     _.warningMessage should include regex
       raw"FAILED_PRECONDITION/SEQUENCER_SUBMISSION_REQUEST_REFUSED\(.*\): The estimated sequencing time .* is already past",
     _.warningMessage should include regex raw"The operation 'request current time' was not successful. Retrying after .*No connection available",

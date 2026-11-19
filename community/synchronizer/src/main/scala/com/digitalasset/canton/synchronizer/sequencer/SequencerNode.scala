@@ -775,15 +775,18 @@ class SequencerNodeBootstrap(
               synchronizerLoggerFactory,
             )
 
-          sequencerChannelServiceO = parameters.alphaSequencerChannelSupport.map(channelsConfig =>
-            GrpcSequencerChannelService(
-              authenticationConfig.check,
-              clock,
-              staticSynchronizerParameters.protocolVersion,
-              parameters.processingTimeouts,
-              channelsConfig,
-              loggerFactory,
-            )
+          sequencerChannelServiceO = parameters.alphaSequencerChannelSupport.flatMap(
+            channelsConfig =>
+              Option.when(psid.protocolVersion >= ProtocolVersion.sequencerChannel)(
+                GrpcSequencerChannelService(
+                  authenticationConfig.check,
+                  clock,
+                  staticSynchronizerParameters.protocolVersion,
+                  parameters.processingTimeouts,
+                  channelsConfig,
+                  loggerFactory,
+                )
+              )
           )
 
           sequencerServiceCell = new SingleUseCell[GrpcSequencerService]

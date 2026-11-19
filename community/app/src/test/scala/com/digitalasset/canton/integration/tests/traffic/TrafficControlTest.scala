@@ -231,7 +231,10 @@ trait TrafficControlTest
       // We also need to load the vetted admin packages ahead of time otherwise P4 will try to do it upon connection
       val vettedPackages = VettedPackages.tryCreate(
         participant4.id,
-        VettedPackage.unbounded(AdminWorkflowServices.PingPackages.keys.toSeq),
+        VettedPackage.unbounded(
+          (AdminWorkflowServices.PingPackages.keys.toSeq ++
+            AdminWorkflowServices.AcsReplicationPackages.keys.toSeq).distinct
+        ),
       )
       val vettedPackagesTx = TopologyTransaction.tryCreate(
         op = Replace,

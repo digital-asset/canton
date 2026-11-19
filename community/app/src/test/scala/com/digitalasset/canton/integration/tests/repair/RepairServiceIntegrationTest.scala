@@ -75,7 +75,7 @@ trait RepairServiceIntegrationTest
 
   protected def cantonTestsPath: String
 
-  override lazy val environmentDefinition: EnvironmentDefinition =
+  override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
@@ -894,6 +894,7 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
         Map(alice.toProtoPrimitive -> Filters(Nil), bob.toProtoPrimitive -> Filters(Nil)),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
     val updateWithPurge = participant1.ledger_api.updates
       .updates(
@@ -1227,6 +1228,7 @@ sealed trait RepairServiceMixedRepresentationTests extends RepairServiceIntegrat
         Map(alice.toProtoPrimitive -> Filters(Nil), bob.toProtoPrimitive -> Filters(Nil)),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
 
     participant1.ledger_api.updates.updates(
@@ -1416,17 +1418,54 @@ sealed trait RepairServiceBftSequencerPostgresTest {
   )
 }
 
+trait CacheDisabled extends RepairServiceIntegrationTest {
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition
+      .addConfigTransform(ConfigTransforms.disableCache)
+}
+
+trait ImfoBufferEnabled extends RepairServiceIntegrationTest {
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition
+      .addConfigTransforms(ConfigTransforms.updateAllParticipantConfigs { case (_, config) =>
+        config
+          .focus(_.ledgerApi.indexService.maxTransactionsInMemoryFanOutBufferSize)
+          .replace(1000)
+      })
+}
+
 class RepairServiceIntegrationTestPostgresStableLf
     extends RepairServiceIntegrationTestStableLf
+    with CacheDisabled
     with RepairServiceBftSequencerPostgresTest
     with RepairServiceMixedRepresentationTests
 
 class RepairServiceIntegrationTestPostgresStableLf_MultiSync
     extends RepairServiceIntegrationTestStableLf
+    with CacheDisabled
     with RepairServiceBftSequencerPostgresTest
     with WithMultiSynchronizerSupport
     with RepairServiceMultiSynchronizerTests
 
 class RepairServiceIntegrationTestPostgresLF23
     extends RepairServiceIntegrationTestLF23
+    with CacheDisabled
+    with RepairServiceBftSequencerPostgresTest
+
+class RepairServiceIntegrationTestImfoEnabledStableLf
+    extends RepairServiceIntegrationTestStableLf
+    with ImfoBufferEnabled
+    with RepairServiceBftSequencerPostgresTest
+    with RepairServiceMixedRepresentationTests
+
+class RepairServiceIntegrationTestImfoEnabledStableLf_MultiSync
+    extends RepairServiceIntegrationTestStableLf
+    with ImfoBufferEnabled
+    with RepairServiceBftSequencerPostgresTest
+    with WithMultiSynchronizerSupport
+    with RepairServiceMultiSynchronizerTests
+
+class RepairServiceIntegrationTestImfoEnabledLF23
+    extends RepairServiceIntegrationTestLF23
+    with ImfoBufferEnabled
     with RepairServiceBftSequencerPostgresTest

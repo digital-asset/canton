@@ -46,7 +46,7 @@ object UpdateFormatHashUtils {
       .addInt(transactionFormat.transactionShape.value)
 
   def hashUpdateFormat[T <: HashBuilder](hashBuilder: T)(uf: UpdateFormat): T =
-    hashBuilder
+    hashBuilder // TODO (#37329) include contract id filter in hash
       .addOptional(uf.includeReassignments, hashEventFormat)
       .addOptional(
         uf.includeTopologyEvents,

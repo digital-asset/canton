@@ -59,7 +59,6 @@ import com.digitalasset.canton.{
   SynchronizerAlias,
 }
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -89,7 +88,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
   private val connection1 = GrpcSequencerConnection(
     NonEmpty(Set, Endpoint("host1", Port.tryCreate(500)), Endpoint("host2", Port.tryCreate(600))),
     transportSecurity = false,
-    Some(ByteString.copyFrom("stuff".getBytes)),
+    None,
     sequencerAlias1,
     sequencerId = None,
   )
@@ -97,7 +96,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
   private val connection2 = GrpcSequencerConnection(
     NonEmpty(Set, Endpoint("host3", Port.tryCreate(501)), Endpoint("host4", Port.tryCreate(601))),
     transportSecurity = false,
-    Some(ByteString.copyFrom("stuff".getBytes)),
+    None,
     sequencerAlias2,
     sequencerId = None,
   )

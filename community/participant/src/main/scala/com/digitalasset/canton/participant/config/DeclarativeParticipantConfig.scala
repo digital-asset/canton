@@ -9,6 +9,7 @@ import com.daml.jwt.JwksUrl
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.ConfidentialConfigWriter
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.crypto.ValidatedPemCertificate
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
 import com.digitalasset.canton.sequencing.{
@@ -25,7 +26,6 @@ import com.digitalasset.canton.user.IdentityProviderId
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 import pureconfig.error.CannotConvert
 
 import java.io.File
@@ -254,11 +254,14 @@ final case class DeclarativeSequencerConnectionConfig(
     endpoints: NonEmpty[Set[Endpoint]],
     transportSecurity: Boolean = false,
     customTrustCertificates: Option[File] = None,
-)(customTrustCertificatesFromNode: Option[ByteString] = None) {
-  def customTrustCertificatesAsByteString: Either[String, Option[ByteString]] =
-    customTrustCertificates
-      .traverse(x => BinaryFileUtil.readByteStringFromFile(x.getPath))
-      .map(_.orElse(customTrustCertificatesFromNode))
+)(customTrustCertificatesFromNode: Option[ValidatedPemCertificate] = None) {
+  def customTrustCertificatesAsByteString: Either[String, Option[ValidatedPemCertificate]] =
+    for {
+      bs <- customTrustCertificates
+        .traverse(x => BinaryFileUtil.readByteStringFromFile(x.getPath))
+
+      pem <- bs.traverse(ValidatedPemCertificate.create)
+    } yield pem.orElse(customTrustCertificatesFromNode)
 
   def isEquivalent(other: DeclarativeSequencerConnectionConfig): Boolean =
     endpoints == other.endpoints && transportSecurity == other.transportSecurity && customTrustCertificatesAsByteString == other.customTrustCertificatesAsByteString

@@ -152,7 +152,6 @@ final class BftSequencerConnectionsIntegrationTestDefault
       raw" Are you using the right TLS settings\?",
     _.errorMessage should (include regex
       raw"Request failed for server-.*\." and include("GrpcServerError: UNKNOWN/channel closed")),
-    _.warningMessage should include("Detected late processing (or clock skew)"),
   )
 
   private def pingWithSequencersDown()(implicit env: TestConsoleEnvironment) = {
@@ -197,6 +196,7 @@ final class BftSequencerConnectionsIntegrationTestDefault
         GrpcSequencerConnection.fromInternal(
           s.config.publicApi
             .asSequencerConnection(SequencerAlias.tryCreate(s.name), sequencerId = None)
+            .value
         )
       )
       val delays = SequencerConnectionPoolDelays.default.copy(warnValidationDelay =

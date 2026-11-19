@@ -87,7 +87,6 @@ class DatabaseSequencer(
     writerStorageFactory: SequencerWriterStoreFactory,
     sequencerStore: SequencerStore,
     config: DatabaseSequencerConfig,
-    totalNodeCount: PositiveInt,
     eventSignaller: EventSignaller[SequencerMemberId, Unit],
     keepAliveInterval: Option[NonNegativeFiniteDuration],
     override protected val timeouts: ProcessingTimeout,
@@ -121,7 +120,6 @@ class DatabaseSequencer(
   private val writer = SequencerWriter(
     config.writer,
     writerStorageFactory,
-    totalNodeCount,
     keepAliveInterval,
     timeouts,
     storage,

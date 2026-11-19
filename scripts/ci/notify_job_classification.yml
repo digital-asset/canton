@@ -28,6 +28,7 @@ test_jobs:
   - variations_test_37_selected_users
 infra_jobs:
   - pick_runner
+  - plan_ci
   - setup_and_validation
   - static_tests
   - compile
@@ -45,3 +46,7 @@ infra_jobs:
   # flaky pipeline. Alert here, otherwise its failures would be silent.
   - crash_recovery_test_37
   - crash_recovery_test_37_requires_external_kms
+
+  # Pull-request only: publishes PV37 results for later runs of the same PR head to reuse.
+  # It never runs on main, so it never alerts; listed only so every job is classified.
+  - publish_draft_results

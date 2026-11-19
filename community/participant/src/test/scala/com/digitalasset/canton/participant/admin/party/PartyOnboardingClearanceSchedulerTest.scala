@@ -472,9 +472,7 @@ class PartyOnboardingClearanceSchedulerTest
                 .value
                 .failOnShutdown
                 .map { result =>
-                  result shouldBe Left(
-                    OnboardingClearanceScheduler.ClearanceAttemptError.NoPendingClearanceRecord.message
-                  )
+                  result shouldBe Right(FlagNotSet)
 
                   // Workflow should NOT be called since it was aborted early
                   fixture.fakeWorkflow.calls shouldBe empty

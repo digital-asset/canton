@@ -205,7 +205,6 @@ trait BasePerformanceIntegrationTestCommon
         }
       case _ =>
         val valid = Seq(
-          "Detected late processing (or clock skew)",
           "timed out at",
           "DEADLINE_EXCEEDED",
           InactiveContracts.id,

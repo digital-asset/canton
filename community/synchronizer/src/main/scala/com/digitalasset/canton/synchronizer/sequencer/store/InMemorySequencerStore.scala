@@ -458,11 +458,6 @@ class InMemorySequencerStore(
       }.toSet,
     )
 
-  /** This store does not support multiple concurrent instances so will do nothing. */
-  override def markLaggingSequencersOffline(cutoffTime: CantonTimestamp)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
-
   /** Members must be registered to receive a memberId, so can typically assume they exist in this
     * structure
     */

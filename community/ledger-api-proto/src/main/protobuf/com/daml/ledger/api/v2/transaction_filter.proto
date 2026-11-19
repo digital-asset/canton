@@ -106,6 +106,35 @@ message TemplateFilter {
   bool include_created_event_blob = 2;
 }
 
+// This filter matches contracts of a specific contract ID.
+message ContractIdFilter {
+  // The ID of the contract.
+  // The events related to this contract will be included in the result.
+  // Only contract ids known to the participant node at the time of query will be served
+  // (in case of streaming queries it must be known when the streaming starts), contract ids that
+  // are created later won't be visible even with tailing streams.
+  // Must be a valid LedgerString (as described in ``value.proto``).
+  //
+  // Required
+  string contract_id = 1;
+
+  // Whether to include a ``created_event_blob`` in the returned ``CreatedEvent``.
+  // Use this to access the contract event payload in your API client
+  // for submitting it as a disclosed contract with future commands.
+  //
+  // Optional
+  bool include_created_event_blob = 2;
+
+  // Whether to include interface views on the contract in the returned ``CreatedEvent``.
+  // Use this to access contract data in a uniform manner in your API client.
+  // The ``include_interface_views`` instances MUST each use a unique Interface Identifier.
+  // The ``include_interface_views`` need to be valid: corresponding interface should be defined in
+  // one of the available packages at the time of the query.
+  //
+  // Optional: can be empty
+  repeated Identifier include_interface_views = 3;
+}
+
 // A format for events which defines both which events should be included
 // and what data should be computed and included for them.
 //
@@ -134,6 +163,14 @@ message EventFormat {
   //
   // Optional
   bool verbose = 3;
+
+  // This filter matches events of specific contract IDs.
+  // This filter cannot be used in combination with other filters.
+  // This filter can be used only with some endpoints. If the endpoint
+  // documentation does not explicitly mention supporting it, it must not be set in such request.
+  //
+  // Optional: can be empty
+  repeated ContractIdFilter filters_by_contract_id = 4;
 }
 
 // Event shape for Transactions.

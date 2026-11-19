@@ -15,7 +15,7 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.LightTransactionViewTree.ToFullViewTreesResult
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.discard.Implicits.*
-import com.digitalasset.canton.error.TransactionError
+import com.digitalasset.canton.error.{TransactionError, TransactionRoutingError}
 import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.ledger.participant.state.Update.ContractInfo
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
@@ -218,6 +218,7 @@ class TransactionProcessingSteps(
       wfTransaction,
       disclosedContracts,
       _,
+      reassignContracts,
     ) = submissionParam
 
     val now = clock.now
@@ -239,6 +240,7 @@ class TransactionProcessingSteps(
         recentSnapshot,
         ephemeralState.contractLookup,
         disclosedContracts,
+        reassignContracts,
         now,
         maxSequencingTime,
       )
@@ -296,6 +298,7 @@ class TransactionProcessingSteps(
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
       contractLookup: ContractLookup { type ContractsCreatedAtTime <: CreationTime.CreatedAt },
       disclosedContracts: Map[LfContractId, ContractInstance],
+      reassignContracts: () => EitherT[FutureUnlessShutdown, TransactionRoutingError, Unit],
       override val approximateTimestampForSigning: CantonTimestamp,
       override val maxSequencingTime: CantonTimestamp,
   )(implicit traceContext: TraceContext)
@@ -404,6 +407,12 @@ class TransactionProcessingSteps(
                 causeWithTemplate(msg, MalformedSubmitter(rawSubmitter))
               )
           )
+
+        // The contracts are reassigned only once the submission is in flight and deduplicated,
+        // so that a duplicate submission does not compete for the contracts.
+        _ <- reassignContracts().leftMap[SubmissionTrackingData.RejectionCause](
+          SubmissionTrackingData.CauseWithTemplate(_)
+        )
 
         confirmationRequestTimer = metrics.protocolMessages.confirmationRequestCreation
         protocolLimits = staticSynchronizerParameters.synchronizerLimits.transactionProtocolLimits
@@ -1648,6 +1657,7 @@ object TransactionProcessingSteps {
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
       accounting: SubmissionAccounting,
+      reassignContracts: () => EitherT[FutureUnlessShutdown, TransactionRoutingError, Unit],
   )
 
   final case class ParsedTransactionRequest(

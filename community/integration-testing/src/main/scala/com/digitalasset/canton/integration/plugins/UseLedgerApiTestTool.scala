@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.plugins
 import better.files.File
 import com.daml.ledger.api.testtool.CliParser
 import com.daml.ledger.api.testtool.runner.{AvailableTests, Config, ConfiguredTests, TestRunner}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   CantonConfig,
   ClientConfig,
@@ -121,6 +122,13 @@ class UseLedgerApiTestTool(
         .modify(
           _.map(_.copy(aggregationThreshold = UseLedgerApiTestTool.achsAggregationThreshold))
         )
+        // `PrefetchContractKeysIT` prefetches more contract keys than the default limit allows.
+        .focus(_.ledgerApi.sizeLimits.publicLapiSizeConfig.commands.prefetchContractKeysSizeLimit)
+        .replace(UseLedgerApiTestTool.prefetchContractKeysSizeLimit)
+        .focus(
+          _.ledgerApi.sizeLimits.interactiveLapiSizeConfig.prepareSubmissionRequest.prefetchContractKeysSizeLimit
+        )
+        .replace(UseLedgerApiTestTool.prefetchContractKeysSizeLimit)
     )(withDelayLogging)
   }
 
@@ -316,6 +324,9 @@ object UseLedgerApiTestTool {
   // Small enough that ACHS maintenance still runs many times per conformance shard, large enough
   // that the biggest LimitsIT transaction is absorbed in a few rounds.
   val achsAggregationThreshold: Long = 1000L
+
+  // `PrefetchContractKeysIT` prefetches 1000 contract keys in a single submission.
+  val prefetchContractKeysSizeLimit: PositiveInt = PositiveInt.tryCreate(1000)
 
   sealed trait TestInclusions extends Product with Serializable {
     def testCaseEnabled(testCaseName: String): Boolean

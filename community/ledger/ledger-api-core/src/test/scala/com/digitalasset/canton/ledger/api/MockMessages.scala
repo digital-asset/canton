@@ -63,6 +63,7 @@ object MockMessages {
       filtersByParty = Map(party -> Filters(cumulative = Nil)),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
 
   private val transactionFormat = TransactionFormat(

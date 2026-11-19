@@ -599,6 +599,7 @@ object PerformanceRunnerRecorder {
                 filtersByParty = allParties.map(_.toLf -> Filters(Nil)).toMap,
                 filtersForAnyParty = None,
                 verbose = false,
+                filtersByContractId = Seq.empty,
               )
             ),
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

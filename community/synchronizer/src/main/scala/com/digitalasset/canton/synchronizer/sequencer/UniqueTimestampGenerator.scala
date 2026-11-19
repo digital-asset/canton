@@ -3,16 +3,15 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.time.Clock
 
 import java.util.concurrent.atomic.AtomicLong
 
-/** To generate unique timestamps between many nodes without coordination we partition available
-  * timestamps by the node index within a range of the total number of nodes.
+/** Generates strictly increasing, and therefore unique, timestamps based on the clock, even if the
+  * clock does not advance or moves backwards.
   */
-class PartitionedTimestampGenerator(clock: Clock, nodeIndex: Int, nodeCount: PositiveInt) {
+class UniqueTimestampGenerator(clock: Clock) {
   private val lastRef = new AtomicLong(
     // The `SequencerWriter` initialization waits after a restart until the clock has reached the highest watermark
     // written before a crash. So even if the clock jumps backwards across restarts,
@@ -22,11 +21,7 @@ class PartitionedTimestampGenerator(clock: Clock, nodeIndex: Int, nodeCount: Pos
 
   def generateNext: CantonTimestamp = {
     val nowMicros = clock.monotonicTime().toMicros
-    val micros = lastRef.updateAndGet { latest =>
-      val latestMicros = Math.max(nowMicros, latest + nodeCount.unwrap)
-      val uniqueMicros = latestMicros - (latestMicros % nodeCount.unwrap) + nodeIndex
-      uniqueMicros
-    }
+    val micros = lastRef.updateAndGet(latest => Math.max(nowMicros, latest + 1))
     CantonTimestamp.assertFromLong(micros)
   }
 

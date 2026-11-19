@@ -54,7 +54,7 @@ class InMemoryReassignmentStore(
       unassignmentData: UnassignmentData
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
+  ): FutureUnlessShutdown[Unit] = {
     ErrorUtil.requireArgument(
       unassignmentData.targetPsid.map(_.logical) == synchronizer,
       s"Synchronizer $synchronizer: Reassignment store cannot store reassignment for synchronizer ${unassignmentData.targetPsid
@@ -66,33 +66,22 @@ class InMemoryReassignmentStore(
     val reassignmentId = unassignmentData.reassignmentId
     val newEntry = ReassignmentEntry(unassignmentData, None, None, None)
 
-    val result: Either[ReassignmentStoreError, Unit] = MapsUtil
-      .updateWithConcurrentlyM_[Checked[
-        ReassignmentStoreError,
-        ReassignmentAlreadyCompleted,
-        *,
-      ], ReassignmentId, ReassignmentEntry](
-        reassignmentEntryMap,
-        reassignmentId,
-        Checked.result(newEntry),
-        merge(_, unassignmentData),
-      )
-      .toEither
+    reassignmentEntryMap
+      .updateWith(reassignmentId) {
+        case None => Some(newEntry)
+        case Some(existing) => Some(merge(existing, unassignmentData))
+      }
+      .discard
 
-    EitherT(FutureUnlessShutdown.pure(result))
+    FutureUnlessShutdown.unit
   }
 
   private def merge(
       reassignmentEntry: ReassignmentEntry,
       otherUnassignmentData: UnassignmentData,
-  ): Checked[ReassignmentStoreError, ReassignmentAlreadyCompleted, ReassignmentEntry] =
-    for {
-      reassignmentData <- reassignmentEntry.unassignmentData match {
-        case None => Checked.result(otherUnassignmentData)
-        case Some(oldUnassignmentData) => Checked.result(oldUnassignmentData)
-      }
-    } yield ReassignmentEntry(
-      reassignmentData,
+  ): ReassignmentEntry =
+    ReassignmentEntry(
+      reassignmentEntry.unassignmentData.getOrElse(otherUnassignmentData),
       reassignmentEntry.reassignmentGlobalOffset,
       reassignmentEntry.incompleteLastStakeholderOffboardedTargetOffset,
       reassignmentEntry.assignmentTs,
@@ -318,7 +307,7 @@ class InMemoryReassignmentStore(
 
   override def addAssignmentDataIfAbsent(assignmentData: AssignmentData)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
+  ): FutureUnlessShutdown[Unit] = {
     val newEntry = ReassignmentEntry(
       assignmentData,
       reassignmentGlobalOffset = None,
@@ -327,20 +316,9 @@ class InMemoryReassignmentStore(
       tsCompletion = None,
     )
 
-    val result: Either[ReassignmentStoreError, Unit] = MapsUtil
-      .updateWithConcurrentlyM_[Checked[
-        ReassignmentStoreError,
-        ReassignmentAlreadyCompleted,
-        *,
-      ], ReassignmentId, ReassignmentEntry](
-        reassignmentEntryMap,
-        assignmentData.reassignmentId,
-        Checked.result(newEntry),
-        existing => Checked.result(existing),
-      )
-      .toEither
+    reassignmentEntryMap.putIfAbsent(assignmentData.reassignmentId, newEntry).discard
 
-    EitherT(FutureUnlessShutdown.pure(result))
+    FutureUnlessShutdown.unit
   }
 
   override def findAfter(

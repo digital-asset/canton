@@ -28,9 +28,13 @@ option java_package = "com.daml.ledger.api.v2";
 // Clients SHOULD subscribe to the CompletionStream before starting to submit commands to prevent race conditions.
 service CommandSubmissionService {
   // Submit a single composite command.
+  //
+  // Required permissions: ``ledger:act`` and ``CanActAs` for the relevant parties.
   rpc Submit(SubmitRequest) returns (SubmitResponse);
 
   // Submit a single reassignment.
+  //
+  // Required permissions: ``ledger:act`` and ``CanActAs` for the relevant parties.
   rpc SubmitReassignment(SubmitReassignmentRequest) returns (SubmitReassignmentResponse);
 }
 

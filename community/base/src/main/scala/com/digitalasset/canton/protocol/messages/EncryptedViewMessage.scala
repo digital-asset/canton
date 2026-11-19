@@ -350,7 +350,9 @@ object EncryptedViewMessage
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.EncryptedMultipleViewsMessage)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(
+      v32.EncryptedMultipleViewsMessage
+    )(
       supportedProtoVersionPVV(_)(EncryptedViewMessage.fromProtoV32),
       _.toProtoV32,
     )

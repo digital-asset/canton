@@ -69,7 +69,7 @@ object DecodedCantonError {
     status.message match {
       case RedactedMessage(correlationId, traceId) =>
         Right(
-          redactedError(
+          redacted(
             grpcCode = statusCode,
             correlationId = correlationId,
             traceId = traceId,
@@ -139,7 +139,7 @@ object DecodedCantonError {
       // Hence fallback to the original cause on failure to parse
       .getOrElse(status.message)
 
-  private def redactedError(
+  def redacted(
       grpcCode: Status.Code,
       correlationId: Option[String],
       traceId: Option[String],

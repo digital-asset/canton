@@ -32,8 +32,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import datetime as dt
 import hashlib
+import io
 import json
 import os
 import sys
@@ -48,6 +50,9 @@ SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly"
 DEFAULT_SHEET_ID = "1PEmLKqoB2DpokVhao5PNxznMI5ufZZbXgUju7Npn0BU"
 SHEETS_EPOCH = dt.date(1899, 12, 30)  # Google Sheets serial-date epoch
 ROSTER_PATH = Path(__file__).resolve().parent / "roster_people.json"
+# stderr prefix for a rota name missing from the roster. alert_slack.py and the
+# slack_notify_failure_with_volunteer action copy these lines into the Slack alert.
+ROSTER_MISS_PREFIX = "roster-miss: "
 
 # rotation cli name -> the sheet column header(s) it maps to.
 ROTATION_HEADERS: dict[str, list[str]] = {
@@ -286,7 +291,10 @@ def resolve_slack_ids(names: list[str], slack_id_by_name: dict[str, str]) -> lis
         if sid:
             slack_ids.append(sid)
         else:
-            log(f"warning: no Slack ID for '{name}' in roster_people.json")
+            log(
+                f"{ROSTER_MISS_PREFIX}{name} is on the rota but missing from "
+                "scripts/ci/roster_people.json, so they were not pinged"
+            )
     return slack_ids
 
 
@@ -549,6 +557,18 @@ def self_test() -> None:
     ok_sheet = [flaky_hdr, [rota_serial, "Ada", "Bjarne", "Carla", "Dee"]]
     ids, bad = resolve_rotation_ids(ok_sheet, ["ci", "flaky-canton"], rota_week, rota_map)
     assert ids == ["UCI", "UB", "UC", "UD"] and not bad
+    # a rota name missing from the roster must surface as a marker line the alert copies,
+    # even when the rest of the shift resolves (no fallback fires to hint at the gap)
+    partial_sheet = [flaky_hdr, [rota_serial, "Ada", "Bjarne", "Newcomer", "Dee"]]
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        ids, bad = resolve_rotation_ids(partial_sheet, ["flaky-canton"], rota_week, rota_map)
+    assert ids == ["UB", "UD"] and not bad
+    misses = [ln for ln in err.getvalue().splitlines() if ln.startswith(ROSTER_MISS_PREFIX)]
+    assert misses == [
+        f"{ROSTER_MISS_PREFIX}Newcomer is on the rota but missing from "
+        "scripts/ci/roster_people.json, so they were not pinged"
+    ], misses
     blank_sheet = [flaky_hdr, [rota_serial, "Ada", "", "", ""]]  # flaky shift unresolvable
     ids, bad = resolve_rotation_ids(blank_sheet, ["ci", "flaky-canton"], rota_week, rota_map)
     assert ids == ["UCI"] and bad == {"flaky-canton": None}

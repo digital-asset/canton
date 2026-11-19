@@ -731,6 +731,24 @@ trait AuthenticationTokenIntegrationTest
     test
     participant1.synchronizers.reconnect_all()
 
+    def waitForParticipant1TopologyCatchUp() =
+      eventually() {
+        val participantTopology = participant1.topology.transactions
+          .list(store = daId)
+          .result
+          .map(_.transaction.hash)
+          .toSet
+
+        val sequencerTopology = sequencer1.topology.transactions
+          .list(store = daId)
+          .result
+          .map(_.transaction.hash)
+          .toSet
+
+        participantTopology shouldBe sequencerTopology
+      }
+
+    waitForParticipant1TopologyCatchUp()
     assertPingSucceeds(participant1, participant1)
   }
 

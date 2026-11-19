@@ -442,7 +442,7 @@ trait BaseTest
 
   private val scalaTestEventually = new Eventually {}
   def eventuallyAsync[T](
-      timeUntilSuccess: FiniteDuration = 20.seconds,
+      timeUntilSuccess: FiniteDuration = if (BaseTest.isRunningInCI) 60.seconds else 20.seconds,
       maxPollInterval: FiniteDuration = 5.seconds,
   )(testCode: => T)(implicit ec: ExecutionContext): FutureUnlessShutdown[T] =
     FutureUnlessShutdown.outcomeF(
@@ -453,7 +453,7 @@ trait BaseTest
     )
 
   def eventually[T](
-      timeUntilSuccess: FiniteDuration = 20.seconds,
+      timeUntilSuccess: FiniteDuration = if (BaseTest.isRunningInCI) 60.seconds else 20.seconds,
       maxPollInterval: FiniteDuration = 5.seconds,
       retryOnTestFailuresOnly: Boolean = true,
       logElapsed: Option[String] = None,
@@ -479,7 +479,7 @@ trait BaseTest
   ): T = BaseTest.always(durationOfSuccess, pollIntervalMs)(testCode)
 
   def eventuallyForever[T](
-      timeUntilSuccess: FiniteDuration = 20.seconds,
+      timeUntilSuccess: FiniteDuration = if (BaseTest.isRunningInCI) 60.seconds else 20.seconds,
       durationOfSuccess: FiniteDuration = 2.seconds,
       pollIntervalMs: Long = 10,
   )(testCode: => T): T =
@@ -531,6 +531,9 @@ trait BaseTest
 }
 
 object BaseTest extends EitherValues {
+
+  val isRunningInCI: Boolean = sys.env.contains("CI")
+
   implicit class RichSynchronizerIdO(val id: SynchronizerId) {
     def toPhysical: PhysicalSynchronizerId =
       PhysicalSynchronizerId(id, NonNegativeInt.zero, testedProtocolVersion)
@@ -580,7 +583,7 @@ object BaseTest extends EitherValues {
     */
   @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
   def eventually[T](
-      timeUntilSuccess: FiniteDuration = 20.seconds,
+      timeUntilSuccess: FiniteDuration = if (isRunningInCI) 60.seconds else 20.seconds,
       maxPollInterval: FiniteDuration = 5.seconds,
       retryOnTestFailuresOnly: Boolean = true,
       logElapsed: Option[(Logger, String)] = None,

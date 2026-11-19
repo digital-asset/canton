@@ -422,7 +422,7 @@ object ViewParticipantData
   }
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.ViewParticipantData)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(v32.ViewParticipantData)(
       supportedProtoVersionMemoizedPVV(_)(ic(fromProtoV32)),
       _.toProtoV32,
     )

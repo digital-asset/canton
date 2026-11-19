@@ -115,6 +115,7 @@ private[integration] trait HasCommandRunnersHelpers {
       filtersByParty = stakeholders.map(party => party -> wildcardTemplateFilter).toMap,
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
   }
 

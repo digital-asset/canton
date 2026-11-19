@@ -164,7 +164,6 @@ class BlockSequencer(
       SequencerWriterStoreFactory.singleInstance,
       dbSequencerStore,
       blockSequencerConfig.toDatabaseSequencerConfig,
-      TotalNodeCountValues.SingleSequencerTotalNodeCount,
       new LocalEventSignaller[SequencerMemberId, Unit](
         "member",
         parameters.processingTimeouts,

@@ -5,14 +5,15 @@ package com.digitalasset.canton.topology
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt.{one, two, zero}
 import com.digitalasset.canton.crypto.Fingerprint
-import com.digitalasset.canton.version.ProtocolVersion.{latest, v35, v36}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.ProtocolVersion.latest
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.util.Random
 
-class PhysicalSynchronizerIdTest extends AnyWordSpec with EitherValues with Matchers {
+final class PhysicalSynchronizerIdTest extends AnyWordSpec with EitherValues with Matchers {
   "PhysicalSynchronizerId" should {
     "parsed from string" in {
       val namespace: Namespace = Namespace(Fingerprint.tryFromString("default"))
@@ -32,15 +33,18 @@ class PhysicalSynchronizerIdTest extends AnyWordSpec with EitherValues with Matc
       val lsid1: SynchronizerId = SynchronizerId(UniqueIdentifier.tryCreate("da1", namespace))
       val lsid2: SynchronizerId = SynchronizerId(UniqueIdentifier.tryCreate("da2", namespace))
 
+      val pv1 = ProtocolVersion.supported(0)
+      val pv2 = ProtocolVersion.supported(1)
+
       val inCorrectOrder = List(
-        PhysicalSynchronizerId(lsid1, zero, v35),
-        PhysicalSynchronizerId(lsid1, zero, v36),
-        PhysicalSynchronizerId(lsid1, two, v35),
-        PhysicalSynchronizerId(lsid1, two, v36),
-        PhysicalSynchronizerId(lsid2, zero, v35),
-        PhysicalSynchronizerId(lsid2, zero, v36),
-        PhysicalSynchronizerId(lsid2, one, v35),
-        PhysicalSynchronizerId(lsid2, one, v36),
+        PhysicalSynchronizerId(lsid1, zero, pv1),
+        PhysicalSynchronizerId(lsid1, zero, pv2),
+        PhysicalSynchronizerId(lsid1, two, pv1),
+        PhysicalSynchronizerId(lsid1, two, pv2),
+        PhysicalSynchronizerId(lsid2, zero, pv1),
+        PhysicalSynchronizerId(lsid2, zero, pv2),
+        PhysicalSynchronizerId(lsid2, one, pv1),
+        PhysicalSynchronizerId(lsid2, one, pv2),
       )
       Random.shuffle(inCorrectOrder).sorted shouldBe inCorrectOrder
 

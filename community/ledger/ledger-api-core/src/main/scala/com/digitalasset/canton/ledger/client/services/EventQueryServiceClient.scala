@@ -27,6 +27,7 @@ class EventQueryServiceClient(
       filtersByParty = requestingParties.map(_ -> Filters(Nil)).toMap,
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
 
     LedgerClient

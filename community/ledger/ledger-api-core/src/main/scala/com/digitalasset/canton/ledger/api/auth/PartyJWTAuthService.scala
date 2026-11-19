@@ -19,7 +19,7 @@ import com.daml.jwt.{
   Error as JwtError,
 }
 import com.daml.logging.LoggingContext
-import com.digitalasset.canton.auth.{AuthService, ClaimSet, UninitializedPartyJWTAuthService}
+import com.digitalasset.canton.auth.{AuthService, Claim, ClaimSet, UninitializedPartyJWTAuthService}
 import com.digitalasset.canton.crypto.{
   SignatureFormat,
   SignatureWithoutSigner,
@@ -169,6 +169,7 @@ class PartyJWTAuthService(
       identityProviderId = None,
       userId = partyPayload.userId,
       expiration = partyPayload.exp,
+      restriction = partyPayload.scope.fold(Seq.empty[Claim])(Claim.parseJwtScope(_)),
     )
   }
 

@@ -32,6 +32,7 @@ import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingSt
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.{PartyToParticipant, TopologyChangeOp}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.retry.Success.either
 import com.digitalasset.canton.util.retry.{Backoff, ErrorKind, ExceptionRetryPolicy}
 import com.google.common.annotations.VisibleForTesting
@@ -122,34 +123,32 @@ class OnboardingClearanceScheduler(
         }
     }
 
-  /** Safely checks the persistent store for Protocol Version 35 or higher. If no record exists, it
-    * aborts the operation and removes the task from the pending map.
+  /** Safely checks the persistent store for Protocol Version 35 or higher. Returns false if no
+    * record exists, otherwise returns true.
     */
   private def ensureClearanceRecordExists(
       partyId: PartyId
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, OnboardingClearanceScheduler.ClearanceAttemptError, Unit] =
-    EitherT(
-      pendingClearancesStore
-        .get(
-          psid.logical,
-          operationKey = OnboardingClearanceOperation.operationKey(partyId),
-          operationName = OnboardingClearanceOperation.operationName,
-        )
-        .value
-        .map {
-          case None =>
-            logger.info(
-              s"Stopping the onboarding flag clearance for $partyId: its pending clearance record is gone, as the flag is cleared or this participant no longer hosts the party."
-            )
-            // Actively remove the task as requested
-            pendingClearances.remove(partyId).discard
-            Left(OnboardingClearanceScheduler.ClearanceAttemptError.NoPendingClearanceRecord)
-          case Some(_) =>
-            Right(())
-        }
-    )
+  ): FutureUnlessShutdown[Boolean] =
+    pendingClearancesStore
+      .get(
+        psid.logical,
+        operationKey = OnboardingClearanceOperation.operationKey(partyId),
+        operationName = OnboardingClearanceOperation.operationName,
+      )
+      .value
+      .map {
+        case None =>
+          logger.info(
+            s"Stopping the onboarding flag clearance for $partyId: its pending clearance record is gone, as the flag is cleared or this participant no longer hosts the party."
+          )
+          // Actively remove the task as requested
+          pendingClearances.remove(partyId).discard
+          false
+        case Some(_) =>
+          true
+      }
 
   /** Attempts to clear the party's onboarding flag.
     *
@@ -221,8 +220,12 @@ class OnboardingClearanceScheduler(
           )
         case None =>
           for {
-            _ <- ensureClearanceRecordExists(partyId).leftMap(_.message)
-            res <- authorizeClearance(partyId, onboardingEffectiveAt, context).leftMap(_.message)
+            recordExists <- EitherT.right[String](ensureClearanceRecordExists(partyId))
+            res <-
+              if (recordExists)
+                authorizeClearance(partyId, onboardingEffectiveAt, context).leftMap(_.message)
+              else
+                EitherT.rightT[FutureUnlessShutdown, String](FlagNotSet: PartyOnboardingFlagStatus)
           } yield res
       }
     } yield {
@@ -360,7 +363,12 @@ class OnboardingClearanceScheduler(
           )
         case None =>
           // Check the store before allowing the workflow to proceed
-          ensureClearanceRecordExists(partyId)
+          EitherT.right(ensureClearanceRecordExists(partyId)).flatMap { recordExists =>
+            EitherTUtil.condUnitET(
+              recordExists,
+              OnboardingClearanceScheduler.ClearanceAttemptError.NoPendingClearanceRecord,
+            )
+          }
       }
 
       outcome <- authorizeClearance(partyId, onboardingEffectiveAt, context)

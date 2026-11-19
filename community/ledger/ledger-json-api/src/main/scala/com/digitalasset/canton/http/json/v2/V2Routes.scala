@@ -4,11 +4,11 @@
 package com.digitalasset.canton.http.json.v2
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.digitalasset.canton.auth.AuthInterceptor
+import com.digitalasset.canton.auth.{AuthInterceptor, Authorizer}
 import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.http.json.JsHealthService
 import com.digitalasset.canton.http.json.v2.damldefinitionsservice.DamlDefinitionsView
-import com.digitalasset.canton.http.{HealthService, WebsocketConfig}
+import com.digitalasset.canton.http.{HealthService, ServerRequestTimeout, WebsocketConfig}
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.ledger.client.services.version.VersionClient
 import com.digitalasset.canton.ledger.participant.state.PackageSyncService
@@ -99,9 +99,11 @@ object V2Routes {
       healthService: HealthService,
   )(implicit
       ws: WebsocketConfig,
+      serverRequestTimeout: ServerRequestTimeout,
       esf: ExecutionSequencerFactory,
       materializer: Materializer,
       authInterceptor: AuthInterceptor,
+      authorizer: Authorizer,
   ): V2Routes = {
     implicit val ec: ExecutionContext = executionContext
     val requestLogger = new ApiRequestLogger(apiLoggingConfig, loggerFactory)

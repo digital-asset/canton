@@ -30,9 +30,16 @@ import com.daml.ledger.api.v2.admin.{
   user_management_service as uproto,
 }
 import com.daml.ledger.api.v2.crypto as lapicrypto
-import com.digitalasset.canton.integration.TestConsoleEnvironment
+import com.digitalasset.canton.config.CantonConfig
 import com.digitalasset.canton.integration.plugins.UseJWKSServer
+import com.digitalasset.canton.integration.{
+  ConfigTransforms,
+  EnvironmentSetupPlugin,
+  TestConsoleEnvironment,
+}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.google.protobuf.ByteString
+import monocle.macros.syntax.lens.*
 
 import java.security.{KeyPairGenerator, Signature}
 import java.util.UUID
@@ -283,5 +290,17 @@ trait IdentityProviderConfigAuth extends KeyPairs {
       uproto.Right.Kind.IdentityProviderAdmin(uproto.Right.IdentityProviderAdmin())
     )
   )
+
+  // Some tests create a high amount of identity providers and need a higher limit.
+  protected case class SetMaxIdentityProviderConfigs(
+      protected val loggerFactory: NamedLoggerFactory,
+      maxIdentityProviderConfigs: Int,
+  ) extends EnvironmentSetupPlugin {
+    override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig =
+      ConfigTransforms.updateAllParticipantConfigs_ {
+        _.focus(_.ledgerApi.identityProviderManagement.maxIdentityProviderConfigs)
+          .replace(20)
+      }(config)
+  }
 
 }

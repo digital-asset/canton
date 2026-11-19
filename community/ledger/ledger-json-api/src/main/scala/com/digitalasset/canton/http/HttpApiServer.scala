@@ -8,7 +8,7 @@ import cats.syntax.show.*
 import com.daml.grpc.adapter.PekkoExecutionSequencerPool
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.tls.TlsServerConfig
-import com.digitalasset.canton.auth.AuthInterceptor
+import com.digitalasset.canton.auth.{AuthInterceptor, Authorizer}
 import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.http.util.Logging.instanceUUIDLogCtx
@@ -28,6 +28,7 @@ object HttpApiServer extends NoTracing {
       config: JsonApiConfig,
       httpsConfiguration: Option[TlsServerConfig],
       channel: Channel,
+      authorizer: Authorizer,
       packageSyncService: PackageSyncService,
       loggerFactory: NamedLoggerFactory,
       authInterceptor: AuthInterceptor,
@@ -61,6 +62,7 @@ object HttpApiServer extends NoTracing {
           loggingContextOf,
           jsonApiMetrics,
           authInterceptor,
+          authorizer,
         )
       )
     } yield {

@@ -3,7 +3,14 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
-import com.daml.jwt.{Jwt, StandardJWTPayload, StandardJWTTokenFormat}
+import com.daml.jwt.{
+  AuthServiceJWTPayload,
+  Jwt,
+  PartyJWTPayload,
+  StandardJWTPayload,
+  StandardJWTTokenFormat,
+}
+import com.daml.ledger.api.v2.admin.user_management_service
 import com.daml.ledger.api.v2.{state_service, transaction_filter}
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.base.error.ErrorsAssertions
@@ -45,6 +52,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.ledger.error.JsonApiErrors
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, SuppressionRule}
+import com.digitalasset.canton.util.MonadUtil
 import io.circe.parser.decode
 import io.circe.syntax.EncoderOps
 import monocle.macros.syntax.lens.*
@@ -55,7 +63,7 @@ import org.apache.pekko.http.scaladsl.model.ws.{
   WebSocketRequest,
   WebSocketUpgradeResponse,
 }
-import org.apache.pekko.http.scaladsl.model.{StatusCode, StatusCodes, Uri}
+import org.apache.pekko.http.scaladsl.model.{HttpMethods, StatusCode, StatusCodes, Uri}
 import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
 import org.slf4j.event.Level
 
@@ -96,6 +104,7 @@ class JsonApiAuthIT
     Some(WebsocketConfig(cookieAuthAllowedOrigins = Seq(allowedOrigin)))
 
   import com.digitalasset.canton.http.json.v2.JsCommandServiceCodecs.*
+  import com.digitalasset.canton.http.json.v2.JsUserManagementCodecs.*
 
   def serviceCallName: String =
     "JSON API"
@@ -200,6 +209,7 @@ class JsonApiAuthIT
           ),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         )
       ),
       streamContinuationToken = None,
@@ -548,30 +558,22 @@ class JsonApiAuthIT
           "Ledger API client cannot open a websocket stream without a valid token in the header, subprotocol or cookie"
         )
       ) in httpTestFixture { fixture =>
-      implicit val env = provideEnvironment
       loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
         val wsUri = fixture.uri.withPath(websocketPath)
         val expiredToken =
           toScopeContext(scope.expired).token.getOrElse(fail("expected a token"))
-        // security sensitive errors are redacted, but the gRPC status code is kept
-        def expectUnauthenticated(message: String) =
-          decode[JsCantonError](message).value.grpcCodeValue shouldBe Some(
-            io.grpc.Status.Code.UNAUTHENTICATED.value()
-          )
-        val request = activeContractsRequest(getPartyId(randomParty))
         for {
-          noToken <- firstWebsocketMessage(
-            websocketFlow(WebSocketRequest(wsUri, subprotocol = Some(HttpTestFuns.wsProtocol))),
-            request,
+          _ <- expect(StatusCodes.Unauthorized)(
+            websocketHandshakeStatus(
+              websocketFlow(WebSocketRequest(wsUri, subprotocol = Some(HttpTestFuns.wsProtocol)))
+            )
           )
-          expiredInCookie <- firstWebsocketMessage(
-            websocketWithCookieAuth(wsUri, Jwt(expiredToken), origin = Some(allowedOriginHeader)),
-            request,
+          _ <- expect(StatusCodes.Unauthorized)(
+            websocketHandshakeStatus(
+              websocketWithCookieAuth(wsUri, Jwt(expiredToken), origin = Some(allowedOriginHeader))
+            )
           )
-        } yield {
-          expectUnauthenticated(noToken)
-          expectUnauthenticated(expiredInCookie)
-        }
+        } yield ()
       }
     }
 
@@ -732,7 +734,7 @@ class JsonApiAuthIT
       ) in httpTestFixture { fixture =>
       loggerFactory.suppress(AuthServiceJWTSuppressionRule || AuthInterceptorSuppressionRule) {
         for {
-          _ <- expect(StatusCodes.Forbidden)(
+          _ <- expect(StatusCodes.Unauthorized)(
             serviceCallWithResult(fixture, toScopeContext(scope.unknownUser)).map {
               case (code, result) =>
                 io.circe.parser
@@ -744,7 +746,7 @@ class JsonApiAuthIT
                 code
             }
           )
-          _ <- expect(StatusCodes.Forbidden)(
+          _ <- expect(StatusCodes.Unauthorized)(
             serviceCall(fixture, toAudienceContext(audience.unknownUser))
           )
         } yield ()
@@ -758,6 +760,150 @@ class JsonApiAuthIT
       expect(StatusCodes.BadRequest)(
         serviceCall(fixture, noToken)
       )
+    }
+
+    "allow access to the health endpoints without a token" taggedAs securityAsset
+      .setHappyCase(
+        "Health probes can check the JSON API without a token"
+      ) in httpTestFixture { fixture =>
+      for {
+        livez <- fixture.getRequestString(Uri.Path("/livez"), headers = Nil)
+        readyz <- fixture.getRequestString(Uri.Path("/readyz"), headers = Nil)
+      } yield {
+        livez._1 shouldBe StatusCodes.OK
+        readyz._1 shouldBe StatusCodes.OK
+        readyz._2 should include("readyz check passed")
+      }
+    }
+
+    "reject invalid tokens before serving the request" taggedAs securityAsset
+      .setAttack(
+        attackUnauthenticated(threat =
+          "Ledger API client cannot make the JSON API process a request with an invalid token"
+        )
+      ) in httpTestFixture { fixture =>
+      // Some calls that we know will fail validation in the JsonApi layer, before calling gRPC.
+      // By checking that we get a 401 for these (rather than e.g. a 400) we confirm that they
+      // were immediately rejected.
+      val calls: Seq[(String, String => Future[StatusCode])] = Seq(
+        "update a user" -> { token =>
+          fixture
+            .jsonRequest(
+              HttpMethods.PATCH,
+              Uri.Path("/v2/users/user-in-path"),
+              Some(
+                // The user in the body does not match the user in the path
+                user_management_service
+                  .UpdateUserRequest(
+                    user = Some(
+                      user_management_service.User(
+                        id = "user-in-body",
+                        primaryParty = "",
+                        isDeactivated = false,
+                        metadata = None,
+                        identityProviderId = "",
+                        primaryPartyAuthentication = false,
+                      )
+                    ),
+                    updateMask = None,
+                  )
+                  .asJson
+              ),
+              HttpServiceTestFixture.authorizationHeader(Jwt(token)),
+            )
+            .map(_._1)
+        },
+        "submit and wait for commands" -> { token =>
+          postJsonRequest(
+            uri = fixture.uri.withPath(Uri.Path("/v2/commands/submit-and-wait")),
+            json = Circe
+              .parse(
+                // The create arguments do not match the template, and transcode should reject it
+                JsCommands(
+                  commands = Seq(
+                    JsCommand.CreateCommand(
+                      templateId = templateIds.dummy,
+                      createArguments =
+                        io.circe.parser.parse("""{"unexpectedField":"value"}""").value,
+                    )
+                  ),
+                  commandId = s"$serviceCallName-${UUID.randomUUID}",
+                  actAs = Seq("party"),
+                  userId = None,
+                ).asJson.noSpaces
+              )
+              .fold(err => fail(s"$err"), identity),
+            headers = HttpServiceTestFixture.authorizationHeader(Jwt(token)),
+          ).map(_._1)
+        },
+        "opening a websocket" -> { token =>
+          // Here we check that we get 401 instead of a websocket upgrade (101)
+          val wsUri = fixture.uri.withPath(websocketPath)
+          websocketHandshakeStatus(
+            websocketFlow(WebSocketRequest(wsUri, subprotocol = validSubprotocol(Jwt(token))))
+          )
+        },
+      )
+
+      // Construct a number of invalid tokens, they should all result in 401s
+      val unknownSecret = UUID.randomUUID().toString
+      def withUnknownSecret(payload: AuthServiceJWTPayload, format: StandardJWTTokenFormat) =
+        toHeader(payload = payload, secret = unknownSecret, enforceFormat = Some(format))
+      val invalidTokens = Seq(
+        "scope token with invalid signature" ->
+          withUnknownSecret(scope.admin, StandardJWTTokenFormat.Scope),
+        "audience token with invalid signature" ->
+          withUnknownSecret(audience.admin, StandardJWTTokenFormat.Audience),
+        "privileged scope token with invalid signature" ->
+          withUnknownSecret(privilegedScp.admin, StandardJWTTokenFormat.Scope),
+        "privileged audience token with invalid signature" ->
+          withUnknownSecret(privilegedAud.admin, StandardJWTTokenFormat.Audience),
+        "party token with invalid signature" -> toHeader(
+          payload = PartyJWTPayload(
+            synchronizerId = "synchronizer::id",
+            partyId = "party::id",
+            userId = participantAdmin,
+            participantId = "participant::id",
+            exp = Some(Instant.now().plusNanos(Duration.ofMinutes(5).toNanos)),
+            scope = Some(defaultScope),
+          ),
+          secret = unknownSecret,
+        ),
+        "token from an unknown issuer" -> withUnknownSecret(
+          audience.admin.copy(issuer = Some("https://unknown-issuer.example.com")),
+          StandardJWTTokenFormat.Audience,
+        ),
+        "token from an unknown user" -> toHeader(
+          scope.unknownUser,
+          secret = scopeJwtSecret.unwrap,
+          enforceFormat = Some(StandardJWTTokenFormat.Scope),
+        ),
+        "expired token" -> toHeader(
+          scope.expired,
+          enforceFormat = Some(StandardJWTTokenFormat.Scope),
+        ),
+        "invalid canton admin token" -> UUID.randomUUID().toString,
+        "malformed token" -> "not-a-jwt",
+        "malformed three-part token" -> "aaaa.bbbb.cccc",
+      )
+
+      val combinations = for {
+        (callDescription, call) <- calls
+        (tokenDescription, token) <- invalidTokens
+      } yield (s"$callDescription with $tokenDescription", call, token)
+      loggerFactory.suppress(AuthServiceJWTSuppressionRule || AuthInterceptorSuppressionRule) {
+        MonadUtil
+          .sequentialTraverse(combinations) { case (description, call, token) =>
+            call(token).map((description, _))
+          }
+          .map { results =>
+            forEvery(results) { case (description, code) =>
+              withClue(description) {
+                code shouldBe StatusCodes.Unauthorized
+              }
+            }
+          }
+      }
     }
   }
 

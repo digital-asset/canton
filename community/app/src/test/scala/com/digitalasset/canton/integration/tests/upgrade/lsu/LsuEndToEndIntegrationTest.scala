@@ -13,7 +13,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SynchronizerPredecessor,
 }
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
@@ -72,7 +71,8 @@ sealed trait LsuEndToEndIntegrationTest extends LsuBase {
 
       val alice = participant1.parties.enable("Alice")
       val bank = participant2.parties.enable("Bank")
-      IouSyntax.createIou(participant2)(bank, alice).discard
+      val (iou, _, iouCompletion) = IouSyntax.createIouComplete(participant2)(bank, alice)
+      val iouOffsetP2 = iouCompletion.offset
 
       val fixture = fixtureWithDefaults()
       performSynchronizerNodesLsu(fixture)
@@ -119,6 +119,12 @@ sealed trait LsuEndToEndIntegrationTest extends LsuBase {
               .copy(isConnected = true, status = Status.Active),
           )
         }
+      }
+
+      clue("querying historical data from before the LSU works") {
+        participant2.ledger_api.state.acs
+          .active_contracts_of_party(bank, activeAtOffsetO = Some(iouOffsetP2))
+          .map(_.createdEvent.value.contractId) should contain(iou.id.contractId)
       }
 
       oldSynchronizerNodes.all.stop()

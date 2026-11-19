@@ -4,12 +4,16 @@
 package com.digitalasset.canton.crypto
 
 import cats.syntax.either.*
-import com.digitalasset.canton.checked
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.{ProtoDeserializationError, checked}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.common.annotations.VisibleForTesting
 
@@ -31,6 +35,10 @@ import scala.annotation.tailrec
   */
 final case class InclusionPath private (index: Int, siblings: Seq[Hash])
     extends PrettyPrintingFromCompanion {
+
+  def toProtoV30: v30.InclusionPath =
+    v30.InclusionPath(index = index, siblings = siblings.map(_.getCryptographicEvidence))
+
   override def prettyCompanion: PrettyPrintingCompanion[InclusionPath] = InclusionPath
 }
 
@@ -70,6 +78,33 @@ object InclusionPath extends PrettyPrintingCompanion[InclusionPath] {
   /** Creates the inclusion path. Throws if [[create]] fails. */
   def tryCreate(index: Int, siblings: Seq[Hash]): InclusionPath =
     create(index, siblings).valueOr(err => throw new IllegalArgumentException(err))
+
+  /** The inclusion path of the only leaf of a tree over a single hash, which is the root itself */
+  val empty: InclusionPath = new InclusionPath(0, Seq.empty)
+
+  // Bounds the number of siblings for every protocol version, as inclusion paths come from untrusted
+  // sources. Safe: `MaxDepth` is positive.
+  private val maxSiblings: ValidationParam[PositiveInt] =
+    ValidationParam(ProtocolVersion.minimum -> PositiveInt.tryCreate(MerkleHashTree.MaxDepth))
+
+  /** Parses an inclusion path received from an untrusted source. The number of siblings is checked
+    * before the siblings are parsed, to bound the work for oversized paths.
+    */
+  def fromProtoV30(inclusionPathP: v30.InclusionPath): ParsingResult[InclusionPath] = {
+    val v30.InclusionPath(indexP, siblingsP) = inclusionPathP
+    for {
+      siblings <- ProtoValidation.validateLengthThen(
+        siblingsP,
+        "siblings",
+        ProtocolVersionValidation.AlwaysValidation,
+        maxSiblings,
+      )((siblingP, _) => Hash.fromProtoPrimitive(siblingP))
+      // `index` is a `uint32`, so values of at least 2^31 are negative here and rejected as out of range
+      path <- create(indexP, siblings).leftMap(
+        ProtoDeserializationError.InvariantViolation("index", _)
+      )
+    } yield path
+  }
 }
 
 /** A binary Merkle tree over a non-empty sequence of hashes. The root of the tree is a single hash

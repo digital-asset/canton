@@ -148,7 +148,7 @@ class GrpcSequencerAuthenticationService(
           request.memberProtocolVersions,
           "member_protocol_versions",
           pvv,
-          ValidationParam(ProtocolVersion.v36 -> sequencerLimits.maxMemberProtocolVersions),
+          ValidationParam(ProtocolVersion.minimum -> sequencerLimits.maxMemberProtocolVersions),
         )
         .getOrElse(Seq.empty)
       val redactedError =
@@ -231,7 +231,7 @@ class GrpcSequencerAuthenticationService(
           request.memberProtocolVersions,
           "member_protocol_versions",
           pvv,
-          ValidationParam(ProtocolVersion.v36 -> sequencerLimits.maxMemberProtocolVersions),
+          ValidationParam(ProtocolVersion.minimum -> sequencerLimits.maxMemberProtocolVersions),
         )
         .leftMap(err => (Status.INVALID_ARGUMENT.withDescription(err.toString), false))
       clientVersion <- ProtoValidation

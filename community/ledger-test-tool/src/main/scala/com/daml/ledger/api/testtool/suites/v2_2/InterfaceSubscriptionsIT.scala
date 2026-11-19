@@ -351,6 +351,7 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
               ),
               filtersForAnyParty = None,
               verbose = false,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

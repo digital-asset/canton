@@ -976,7 +976,7 @@ object DynamicSynchronizerParameters
     )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(
       v30.DynamicSynchronizerParameters
     )(
       supportedProtoVersion(_)(fromProtoV30),

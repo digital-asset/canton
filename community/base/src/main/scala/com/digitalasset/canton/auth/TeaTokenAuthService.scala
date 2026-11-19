@@ -9,7 +9,7 @@ import scala.concurrent.Future
 
 /** Internal TEA-only AuthService that grants read-only visibility across all parties.
   *
-  * Resolves a valid token to [[ClaimPublic]] + [[ClaimReadAsAnyParty]], satisfying the
+  * Resolves a valid token to [[ClaimApiArea.ledgerRead]] + [[ClaimReadAsAnyParty]], satisfying the
   * `GetCompletions` call TEA makes with an empty parties list.
   *
   * Using a dedicated class rather than tweaking [[CantonAdminTokenAuthService]] because the knobs
@@ -33,7 +33,7 @@ class TeaTokenAuthService(tokenDispenser: CantonAdminTokenDispenser) extends Aut
   private val permit = Future.successful(
     AuthService.Result(
       ClaimSet.Claims.Empty.copy(
-        claims = List[Claim](ClaimPublic, ClaimReadAsAnyParty)
+        claims = List[Claim](ClaimApiArea.ledgerRead, ClaimReadAsAnyParty)
       )
     )
   )

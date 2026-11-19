@@ -1591,25 +1591,6 @@ class DbSequencerStore(
       )
     }
 
-  override def markLaggingSequencersOffline(
-      cutoffTime: CantonTimestamp
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    for {
-      rowsUpdated <- storage.update(
-        sqlu"""update sequencer_watermarks
-                set sequencer_online = ${false}
-                where sequencer_online = ${true} and watermark_ts <= $cutoffTime""",
-        functionFullName,
-      )
-    } yield {
-      if (rowsUpdated > 0) {
-        // The log message may be omitted if `update` underreports the number of changed rows
-        logger.info(
-          s"Knocked $rowsUpdated sequencers offline that haven't been active since cutoff of $cutoffTime"
-        )
-      }
-    }
-
   @VisibleForTesting
   override protected[canton] def countRecords(implicit
       traceContext: TraceContext

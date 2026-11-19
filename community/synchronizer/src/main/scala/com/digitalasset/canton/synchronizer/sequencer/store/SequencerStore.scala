@@ -679,8 +679,8 @@ trait SequencerStore
 
   /** Save a series of events to the store. Callers should determine batch size. No batching is done
     * within the store. Callers MUST ensure that event-ids are unique as no errors will be returned
-    * if a duplicate is present (for the sequencer writer see
-    * [[sequencer.PartitionedTimestampGenerator]] for use with their instance index).
+    * if a duplicate is present (for the sequencer writer see [[sequencer.UniqueTimestampGenerator]]
+    * for use with their instance index).
     */
   def saveEvents(instanceIndex: Int, events: NonEmpty[Seq[Sequenced[PayloadId]]])(implicit
       traceContext: TraceContext
@@ -721,13 +721,6 @@ trait SequencerStore
     else FutureUnlessShutdown.unit
 
   protected def preloadBufferInternal()(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit]
-
-  /** Flag any sequencers that have a last updated watermark on or before the given `cutoffTime` as
-    * offline.
-    */
-  def markLaggingSequencersOffline(cutoffTime: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 

@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.admin.user_management_service.*
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
@@ -13,11 +14,21 @@ import io.grpc.Status
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
 
-class GetUserAuthIT extends AdminOrIDPAdminServiceCallAuthTests with UserManagementAuth {
+class GetUserAuthIT
+    extends AdminOrIDPAdminServiceCallAuthTests
+    with UserManagementAuth
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "UserManagementService#GetUser"
+
+  override def apiAreaScopeBaseToken = adminToken
+  override def apiAreaScopeRestrictions = List[(List[ClaimApiArea.Area], Boolean)](
+    List(ClaimApiArea.usersRead.area) -> true,
+    List(ClaimApiArea.usersWrite.area) -> true,
+    List(ClaimApiArea.trafficRead.area) -> false,
+  )
 
   def getUser(context: ServiceCallContext, userId: String, idpId: Option[String] = None)(implicit
       ec: ExecutionContext

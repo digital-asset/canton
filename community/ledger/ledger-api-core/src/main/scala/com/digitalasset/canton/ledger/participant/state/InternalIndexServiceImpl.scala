@@ -61,6 +61,7 @@ class InternalIndexServiceImpl(
                 filtersForAnyParty =
                   Option.when(partyIds.isEmpty)(CumulativeFilter.templateWildcardFilter(true)),
                 verbose = false,
+                filtersByContractId = Seq.empty,
               ),
               activeAt = validAt,
               rangeInfo = AcsRangeInfo.assertFromContinuationTokenBytes(continuationToken),

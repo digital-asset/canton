@@ -180,7 +180,7 @@ class ApiCommandCompletionServiceSpec
       )
       claimsRef.set(
         ClaimSet.Claims(
-          claims = Seq[Claim](ClaimPublic, ClaimReadAsParty(party1)),
+          claims = ClaimReadAsParty(party1) :: ClaimApiArea.user,
           participantId = None,
           userId = Some("someUser"),
           expiration = None,
@@ -214,7 +214,7 @@ class ApiCommandCompletionServiceSpec
       )
       claimsRef.set(
         ClaimSet.Claims(
-          claims = Seq[Claim](ClaimPublic, ClaimReadAsParty(party1), ClaimReadAsParty(party2)),
+          claims = ClaimReadAsParty(party1) :: ClaimReadAsParty(party2) :: ClaimApiArea.user,
           participantId = None,
           userId = Some("user1"),
           expiration = None,
@@ -239,7 +239,7 @@ class ApiCommandCompletionServiceSpec
       )
       claimsRef.set(
         ClaimSet.Claims(
-          claims = Seq[Claim](ClaimPublic, ClaimReadAsParty(party1)),
+          claims = ClaimReadAsParty(party1) :: ClaimApiArea.user,
           participantId = None,
           userId = Some("myuser"),
           expiration = None,
@@ -268,10 +268,10 @@ class ApiCommandCompletionServiceSpec
         metrics,
         loggerFactory,
       )
-      // Token with only ClaimPublic, no read-as or act-as
+      // Token with only some logged in user, no read-as or act-as
       claimsRef.set(
         ClaimSet.Claims(
-          claims = Seq[Claim](ClaimPublic),
+          claims = ClaimApiArea.user,
           participantId = None,
           userId = Some("user1"),
           expiration = None,
@@ -297,7 +297,7 @@ class ApiCommandCompletionServiceSpec
       )
       claimsRef.set(
         ClaimSet.Claims(
-          claims = Seq[Claim](ClaimPublic, ClaimReadAsParty(party1)),
+          claims = ClaimReadAsParty(party1) :: ClaimApiArea.user,
           participantId = None,
           userId = Some("user1"),
           expiration = None,
@@ -325,7 +325,7 @@ class ApiCommandCompletionServiceSpec
       // The userId plays no role; only the readAs parties enter the filter.
       claimsRef.set(
         ClaimSet.Claims(
-          claims = Seq[Claim](ClaimPublic, ClaimReadAsParty(party1)),
+          claims = ClaimReadAsParty(party1) :: ClaimApiArea.user,
           participantId = None,
           userId = Some("completelyUnrelatedUser"),
           expiration = None,
@@ -350,7 +350,7 @@ class ApiCommandCompletionServiceSpec
       )
       claimsRef.set(
         ClaimSet.Claims(
-          claims = Seq[Claim](ClaimPublic, ClaimReadAsAnyParty),
+          claims = ClaimReadAsAnyParty :: ClaimApiArea.user,
           participantId = None,
           userId = Some("adminUser"),
           expiration = None,

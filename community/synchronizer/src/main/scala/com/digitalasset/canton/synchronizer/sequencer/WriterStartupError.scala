@@ -26,40 +26,12 @@ object WriterStartupError {
       false // likely set at the database or user level, so retrying won't make a difference
   }
 
-  /** We only support running some features with certain types of databases (locking for HA requires
-    * postgres), an enterprise config validation should prevent starting a node with a bad
-    * configuration however if we reach creating a Writer with this config this error will be
-    * returned.
-    */
-  final case class DatabaseNotSupported(message: String) extends WriterStartupError {
-    override val retryable = false // config or setup error
-  }
-
-  /** We have a upper limit of how many instances can run concurrently (this is defined by how many
-    * [[com.digitalasset.canton.config.DbLockConfig.MAX_SEQUENCER_WRITERS_AVAILABLE]] are
-    * allocated). We can not start a new sequencer instance if locks for all of these counters are
-    * allocated and appear online. However we can keep retrying starting on the chance that one of
-    * these will eventually go offline.
-    */
-  final case class AllInstanceIndexesInUse(message: String) extends WriterStartupError {
-    override val retryable = true
-  }
-
   /** The sequencer is in the process of shutting down so cannot create a new sequencer writer. If
     * we happen to attempt to recreate the writer during a shutdown this will be logged at error
     * level but can be safely ignored.
     */
   case object WriterShuttingDown extends WriterStartupError {
     override val retryable = false
-  }
-
-  /** We failed to create an exclusive storage instance for this writer. Typically this will be
-    * caused by contention caused by multiple writers trying to create a lock with the same instance
-    * index. This is expected and we can just safely retry as a new free instance index will be
-    * assigned.
-    */
-  final case class FailedToCreateExclusiveStorage(message: String) extends WriterStartupError {
-    override val retryable = true
   }
 
   /** Failed to reset the watermark during the recovery

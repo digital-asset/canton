@@ -33,7 +33,8 @@ case object RequiringAdminClaimResolver extends ClaimResolver {
               .asGrpcError
           )
         case claimSet: ClaimSet.Claims =>
-          if (claimSet.claims.contains(ClaimAdmin)) Success(claimSet)
+          if (claimSet.claims.contains(ClaimAdmin))
+            Success(claimSet.copy(claims = claimSet.claims.prependedAll(ClaimApiArea.admin)))
           else
             Failure(
               AuthorizationChecksErrors.PermissionDenied.Reject("lacking admin claim").asGrpcError

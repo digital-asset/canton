@@ -134,7 +134,7 @@ object Batch
   override def name: String = "Batch"
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.CompressedBatch)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(v32.CompressedBatch)(
       supportedProtoVersionPVV(_)(Batch.fromProtoV32),
       _.toProtoV32,
     )
@@ -190,7 +190,7 @@ object Batch
           "recipients",
           pvv,
           ValidationParam(
-            ProtocolVersion.v36 -> synchronizerLimits.transactionProtocolLimits.maxRecipientsPerBatch
+            ProtocolVersion.minimum -> synchronizerLimits.transactionProtocolLimits.maxRecipientsPerBatch
           ),
         )
         .flatMap(_.toList.traverse(Recipients.fromProtoV30(pvv, synchronizerLimits, _)))
@@ -200,7 +200,7 @@ object Batch
         "compressed_envelopes",
         pvv,
         ValidationParam(
-          ProtocolVersion.v36 -> synchronizerLimits.transactionProtocolLimits.maxEnvelopes
+          ProtocolVersion.minimum -> synchronizerLimits.transactionProtocolLimits.maxEnvelopes
         ),
       )
 

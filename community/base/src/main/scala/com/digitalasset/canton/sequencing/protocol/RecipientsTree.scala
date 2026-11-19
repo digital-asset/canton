@@ -123,7 +123,7 @@ object RecipientsTree extends PrettyPrintingCompanion[RecipientsTree] {
       for {
         _ <- ProtoValidation.validateCondition(
           pvv,
-          ValidationParam(ProtocolVersion.v36 -> maxRecipientsTreeDepth),
+          ValidationParam(ProtocolVersion.minimum -> maxRecipientsTreeDepth),
         )(
           maxDepth => currentDepth <= maxDepth.value,
           maxDepth => InvariantViolation("recipients_tree", s"depth exceeds maximum of $maxDepth"),
@@ -133,7 +133,7 @@ object RecipientsTree extends PrettyPrintingCompanion[RecipientsTree] {
           "RecipientsTreeProto.recipients",
           pvv,
           ValidationParam(
-            ProtocolVersion.v36 -> maxRecipientsPerRecipientsTreeLevel
+            ProtocolVersion.minimum -> maxRecipientsPerRecipientsTreeLevel
           ),
         )(Recipient.fromProtoPrimitive)
         recipientsNonEmpty <- NonEmpty
@@ -150,7 +150,7 @@ object RecipientsTree extends PrettyPrintingCompanion[RecipientsTree] {
             "children",
             pvv,
             ValidationParam(
-              ProtocolVersion.v36 -> maxChildrenPerRecipientsTreeLevel
+              ProtocolVersion.minimum -> maxChildrenPerRecipientsTreeLevel
             ),
           )
           .flatMap(_.toList.traverse(go(_, currentDepth + 1)))

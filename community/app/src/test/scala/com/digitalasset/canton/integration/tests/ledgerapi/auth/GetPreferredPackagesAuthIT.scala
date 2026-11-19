@@ -9,18 +9,27 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   InteractiveSubmissionServiceGrpc,
   PackageVettingRequirement,
 }
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal.ping.Ping
 
 import scala.concurrent.Future
 
-final class GetPreferredPackagesAuthIT extends PublicServiceCallAuthTests {
+final class GetPreferredPackagesAuthIT
+    extends PublicServiceCallAuthTests
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String =
     s"${InteractiveSubmissionService.getClass.getSimpleName}#GetPreferredPackages"
+
+  override def apiAreaScopeBaseToken = standardToken(randomPartyActUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerRead.area) -> true,
+    List(ClaimApiArea.partiesAllocate.area) -> false,
+  )
 
   private val someParty = "someRandomParty"
   override def prerequisiteParties: List[String] = List(someParty)

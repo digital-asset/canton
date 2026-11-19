@@ -154,6 +154,7 @@ class AuthServiceJWT(
         participantId = payload.participantId,
         userId = payload.userId,
         expiration = payload.exp,
+        restriction = payload.scope.fold(Seq[Claim]())(Claim.parseJwtScope(_)),
       )
     case payload: PartyJWTPayload => ClaimSet.Unauthenticated
   }
@@ -211,6 +212,7 @@ class AuthServicePrivilegedJWT private[auth] (
         userId = Option.when(payload.userId.nonEmpty)(payload.userId),
         expiration = payload.exp,
         resolvedFromUser = false,
+        appliedRestriction = List.empty,
       )
   }
 }
