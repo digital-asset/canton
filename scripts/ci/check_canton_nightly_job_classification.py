@@ -46,6 +46,7 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
+import pytest
 import yaml
 from flaky_common import NIGHTLY_JOBS_WITHOUT_PREFIX, is_nightly_job, is_unstable_job
 
@@ -529,6 +530,11 @@ def test_render_drift_lists_each_nonempty_category():
     assert _render_drift(Drift()) == []
 
 
+# TODO(i38321): Drop the skip once the nightly runs fully on GHA
+@pytest.mark.skipif(
+    not CIRCLECI_WORKFLOW.exists(),
+    reason="the open-source code drop removes the CircleCI canton_nightly.yml",
+)
 def test_real_files_are_in_sync():
     """The shipped sets must classify every job the real nightly workflows report,
     including each name the GHA nightly reports, or its failures never raise a

@@ -102,6 +102,9 @@ jobs:
         with:
           command: python3 scripts/ci/check_canton_build_required_gate.py
       - name: Check nightly jobs are classified for is_nightly_job
+        # TODO(i38321): Remove once the nightly runs fully on GHA. The open-source code drop
+        # removes the CircleCI canton_nightly.yml this check reads
+        if: github.repository == 'DACH-NY/canton'
         uses: ./.github/actions/nix/nix_run
         with:
           command: python3 scripts/ci/check_canton_nightly_job_classification.py
