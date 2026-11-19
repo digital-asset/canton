@@ -371,6 +371,8 @@ fix is deployed on MainNet:
   Previously, a participant returned the identity transactions of its authorized store instead whenever they had the
   requested protocol version, which ignored a delegation to an intermediate key provided in the temporary store when the
   root namespace key is offline.
+- The sequencer client traffic metrics `event-delivered` and `event-rejected` were swapped: rejected events incremented
+  `event-delivered` and delivered events incremented `event-rejected`. Each counter now counts the right events.
 
 ### CantonBFT
 

@@ -260,6 +260,58 @@ class SendTrackerTest extends AnyWordSpec with BaseTest with MetricsUtils with F
       assertNotInContext("test.extra-traffic-consumed", "test")
     }
 
+    "count a delivered event as delivered" in {
+      val Env(tracker, _) = mkSendTracker()
+
+      tracker.track(msgId1, CantonTimestamp.MinValue).valueOrFail("track first")
+      tracker.update(
+        Seq(
+          deliver(
+            msgId1,
+            initialTrafficState.timestamp.immediateSuccessor,
+            trafficReceipt = Some(
+              TrafficReceipt(
+                consumedCost = NonNegativeLong.tryCreate(1),
+                extraTrafficConsumed = NonNegativeLong.tryCreate(2),
+                baseTrafficRemainder = NonNegativeLong.tryCreate(3),
+              )
+            ),
+          )
+        )
+      )
+
+      assertLongValue("test.event-delivered-cost", 1L)
+      assertLongValue("test.event-delivered", 1L)
+      assertNoValue("test.event-rejected-cost")
+      assertNoValue("test.event-rejected")
+    }
+
+    "count a deliver error as rejected" in {
+      val Env(tracker, _) = mkSendTracker()
+
+      tracker.track(msgId1, CantonTimestamp.MinValue).valueOrFail("track first")
+      tracker.update(
+        Seq(
+          deliverError(
+            msgId1,
+            initialTrafficState.timestamp.immediateSuccessor,
+            trafficReceipt = Some(
+              TrafficReceipt(
+                consumedCost = NonNegativeLong.tryCreate(1),
+                extraTrafficConsumed = NonNegativeLong.tryCreate(2),
+                baseTrafficRemainder = NonNegativeLong.tryCreate(3),
+              )
+            ),
+          )
+        )
+      )
+
+      assertLongValue("test.event-rejected-cost", 1L)
+      assertLongValue("test.event-rejected", 1L)
+      assertNoValue("test.event-delivered-cost")
+      assertNoValue("test.event-delivered")
+    }
+
     "not re-export metrics when replaying events older than current state" in {
       val Env(tracker, _) = mkSendTracker()
       tracker.track(msgId1, CantonTimestamp.MinValue).valueOrFail("track first")
