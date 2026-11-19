@@ -665,6 +665,15 @@ trait SequencerStore
       traceContext: TraceContext
   ): FutureUnlessShutdown[Set[Member]]
 
+  /** Members that were registered as onboarding (see [[registerOnboardingMember]]) and are not
+    * registered at `asOf`: those still onboarding, and those whose registration only takes effect
+    * at or after `asOf`. Members that registered without onboarding first and disabled members are
+    * not included. Uncached, like [[allRegisteredMembers]].
+    */
+  def onboardingMembersAt(asOf: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[Member]]
+
   /** Save a series of payloads to the store. Is up to the caller to determine a reasonable batch
     * size and no batching is done within the store.
     * @param payloads
@@ -679,8 +688,8 @@ trait SequencerStore
 
   /** Save a series of events to the store. Callers should determine batch size. No batching is done
     * within the store. Callers MUST ensure that event-ids are unique as no errors will be returned
-    * if a duplicate is present (for the sequencer writer see
-    * [[sequencer.PartitionedTimestampGenerator]] for use with their instance index).
+    * if a duplicate is present (for the sequencer writer see [[sequencer.UniqueTimestampGenerator]]
+    * for use with their instance index).
     */
   def saveEvents(instanceIndex: Int, events: NonEmpty[Seq[Sequenced[PayloadId]]])(implicit
       traceContext: TraceContext
@@ -721,13 +730,6 @@ trait SequencerStore
     else FutureUnlessShutdown.unit
 
   protected def preloadBufferInternal()(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit]
-
-  /** Flag any sequencers that have a last updated watermark on or before the given `cutoffTime` as
-    * offline.
-    */
-  def markLaggingSequencersOffline(cutoffTime: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 

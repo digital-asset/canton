@@ -1,0 +1,15 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Experimental where
+
+import Daml.Script (script)
+import DA.Assert ((===))
+
+import GHC.Types (primitive)
+
+answer: () -> Int
+answer = primitive @"$ANSWER"
+
+run = script do
+  answer () === 42

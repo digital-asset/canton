@@ -3,29 +3,24 @@
 
 package com.digitalasset.canton.integration.tests.variations
 
-import com.digitalasset.canton.integration.tests.DamlScriptPV36LF23ITBase
+import com.digitalasset.canton.integration.tests.DamlScriptTestSuiteFramework
+import com.digitalasset.canton.integration.tests.testsuite.ContractKeysLatestStablePVTestSuite
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 
 // TODO(#33803): change the base class of these tests to one containing the appropriate daml script tests
-abstract class DamlScriptITLatestStable extends DamlScriptPV36LF23ITBase {
-  override def doRunTests(scriptIdsToTest: List[String]): Unit =
-    // variation tests do not use protocolVersionForTesting filter given the canton version determined outside
-    // variation tests do not check that all scriptIds should have expected results defined
-    // instead only use those that do have, sparing some time to run only the tests required
-    scriptIdsToTest
-      .filter(expectedResults.keySet)
-      .foreach(testScriptId => testScriptId in testGivenScriptId(testScriptId))
 
-}
-
-class DamlScriptLatestStableTinyCacheTest extends DamlScriptITLatestStable {
+class DamlScriptLatestStableTinyCacheTest
+    extends DamlScriptTestSuiteFramework(ContractKeysLatestStablePVTestSuite) {
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition.addConfigTransforms(ConfigTransforms.setTinyCache)
-  doRunTests(scriptIdsToTest)
+
+  declareTests()
 }
 
-class DamlScriptLatestStableNoCacheTest extends DamlScriptITLatestStable {
+class DamlScriptLatestStableNoCacheTest
+    extends DamlScriptTestSuiteFramework(ContractKeysLatestStablePVTestSuite) {
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition.addConfigTransforms(ConfigTransforms.disableCache)
-  doRunTests(scriptIdsToTest)
+
+  declareTests()
 }

@@ -74,6 +74,31 @@ message SignatureDelegation {
   SigningAlgorithmSpec signing_algorithm_spec = 7;
 }
 
+// A signature over the root of a Merkle hash tree of salted leaves, together with the salt and the inclusion path of
+// one of its leaves. Without an inclusion path, it is the signature of a tree over a single item, which covers that
+// item's salted leaf. Signatures that are not made through such a tree use the Signature message instead.
+message MultiHashSignature {
+  // The signature over the root of the tree
+  Signature signature = 1;
+
+  // The inclusion path from the leaf to the root. It has no siblings in a tree over a single item.
+  InclusionPath inclusion_path = 2;
+
+  // The salt of the leaf: 32 random bytes, from which the leaf is computed together with the hash of the signed item,
+  // so that the sibling hashes reveal nothing about the other leaves. Every leaf is salted.
+  bytes leaf_salt = 3;
+}
+
+// The inclusion path of a leaf in a Merkle hash tree
+message InclusionPath {
+  // One bit per sibling, starting with the least significant bit for the sibling at the leaf: 0 if the node on
+  // the path is the left child at that level, 1 if it is the right child. Must be smaller than 2^(number of siblings).
+  uint32 index = 1;
+
+  // The sibling hashes of the nodes on the path, from the leaf to the root, as multi-hashes. At most 20.
+  repeated bytes siblings = 2;
+}
+
 enum SignatureFormat {
   SIGNATURE_FORMAT_UNSPECIFIED = 0;
 

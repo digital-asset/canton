@@ -17,7 +17,8 @@ service SequencerAdministrationService {
   rpc PruningStatus(PruningStatusRequest) returns (PruningStatusResponse);
 
   /* Return the status of the specified members. If the list is empty, return the status of all members.
-   * Requested members who are not registered or disabled in the Sequencer will not be in the response.
+   * Requested members who are not registered or disabled in the Sequencer will not be in the response,
+   * unless they are onboarding and the request sets include_onboarding_members.
    * Registered members with no sent or received event will return an empty status.
    */
   rpc TrafficControlState(TrafficControlStateRequest) returns (TrafficControlStateResponse);
@@ -104,6 +105,11 @@ message TrafficControlStateRequest {
     // A relative timestamp based on the sequencer's state at the time of the request, see above for details
     RelativeTimestamp relative_timestamp = 3;
   }
+
+  // Also return the traffic state of onboarding members, i.e. members that traffic was purchased for
+  // before they joined the synchronizer. If members is set, only the onboarding members among them are added.
+  // Defaults to false.
+  bool include_onboarding_members = 4;
 }
 
 message TrafficControlStateResponse {

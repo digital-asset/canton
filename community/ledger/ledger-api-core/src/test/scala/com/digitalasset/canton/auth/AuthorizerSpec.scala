@@ -4,6 +4,7 @@
 package com.digitalasset.canton.auth
 
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.{BaseTest, LfLedgerString}
 import com.digitalasset.daml.lf.data.Ref
@@ -46,86 +47,99 @@ class AuthorizerSpec
     RequiredClaim.ListTrafficAccounts[String](acceptExecuteRights = true)
   private val listIgnoringExecute =
     RequiredClaim.ListTrafficAccounts[String](acceptExecuteRights = false)
-  private val adminOrDebitAcceptingExecute =
-    RequiredClaim.AdminOrDebitTrafficFrom[String]("party", acceptExecuteRights = true)
-  private val adminOrListAcceptingExecute =
-    RequiredClaim.AdminOrListTrafficAccounts[String](acceptExecuteRights = true)
 
   private def withClaims(claims: Claim*): ClaimSet.Claims =
     ClaimSet.Claims.Empty.copy(claims = claims)
-
-  behavior of s"$className.authorize for RequiredClaim.Public"
-
-  List(
-    TestDefinition(RequiredClaim.Public(), ClaimSet.Claims.Empty, expectedPermissionDenied),
-    TestDefinition(RequiredClaim.Public(), ClaimSet.Claims.Wildcard, ExpectedSuccess),
-    TestDefinition(
-      RequiredClaim.Public(),
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimAdmin)),
-      expectedPermissionDenied,
-    ),
-    TestDefinition(RequiredClaim.Public(), ClaimSet.Claims.Admin, ExpectedSuccess),
-    TestDefinition(
-      RequiredClaim.Public(),
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimPublic)),
-      ExpectedSuccess,
-    ),
-    TestDefinition(
-      RequiredClaim.Public(),
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimIdentityProviderAdmin)),
-      expectedPermissionDenied,
-    ),
-  ).foreach(generateAuthorizationTest)
 
   behavior of s"$className.authorize for RequiredClaim.Admin"
 
   List(
     TestDefinition(RequiredClaim.Admin(), ClaimSet.Claims.Empty, expectedPermissionDenied),
-    TestDefinition(
-      RequiredClaim.Admin(),
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimPublic)),
-      expectedPermissionDenied,
-    ),
     TestDefinition(RequiredClaim.Admin(), ClaimSet.Claims.Wildcard, ExpectedSuccess),
-    TestDefinition(
-      RequiredClaim.Admin(),
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimIdentityProviderAdmin)),
-      expectedPermissionDenied,
-    ),
     TestDefinition(
       RequiredClaim.Admin(),
       ClaimSet.Claims.Empty.copy(claims = Seq(ClaimAdmin)),
       ExpectedSuccess,
     ),
     TestDefinition(RequiredClaim.Admin(), ClaimSet.Claims.Admin, ExpectedSuccess),
+    TestDefinition(
+      RequiredClaim.Admin(),
+      withClaims(ClaimApiArea.admin*),
+      expectedPermissionDenied,
+      descSuffix = "(admin API areas without ClaimAdmin)",
+    ),
+    TestDefinition(
+      RequiredClaim.Admin(),
+      withClaims(ClaimApiArea.idpAdmin*),
+      expectedPermissionDenied,
+      descSuffix = "(IDP admin API areas)",
+    ),
   ).foreach(generateAuthorizationTest)
 
-  behavior of s"$className.authorize for RequiredClaim.AdminOrIdpAdmin"
+  behavior of s"$className.authorize for RequiredClaim.ApiArea"
 
-  List(
-    TestDefinition(
-      RequiredClaim.AdminOrIdpAdmin(),
-      ClaimSet.Claims.Empty,
+  List[(ClaimSet.Claims, ClaimApiArea, ExpectedResult)](
+    // ledger verbs: act implies read and execute, but read and execute are independent
+    (withClaims(ClaimApiArea.ledgerRead), ClaimApiArea.ledgerRead, ExpectedSuccess),
+    (withClaims(ClaimApiArea.ledgerAct), ClaimApiArea.ledgerRead, ExpectedSuccess),
+    (withClaims(ClaimApiArea.ledgerExecute), ClaimApiArea.ledgerRead, expectedPermissionDenied),
+    (withClaims(ClaimApiArea.ledgerExecute), ClaimApiArea.ledgerExecute, ExpectedSuccess),
+    (withClaims(ClaimApiArea.ledgerAct), ClaimApiArea.ledgerExecute, ExpectedSuccess),
+    (withClaims(ClaimApiArea.ledgerRead), ClaimApiArea.ledgerExecute, expectedPermissionDenied),
+    (withClaims(ClaimApiArea.ledgerAct), ClaimApiArea.ledgerAct, ExpectedSuccess),
+    (
+      withClaims(ClaimApiArea.ledgerRead, ClaimApiArea.ledgerExecute),
+      ClaimApiArea.ledgerAct,
       expectedPermissionDenied,
     ),
-    TestDefinition(
-      RequiredClaim.AdminOrIdpAdmin(),
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimPublic)),
+    // parties verbs: write implies read, but not allocate
+    (withClaims(ClaimApiArea.partiesAllocate), ClaimApiArea.partiesAllocate, ExpectedSuccess),
+    (
+      withClaims(ClaimApiArea.partiesWrite),
+      ClaimApiArea.partiesAllocate,
       expectedPermissionDenied,
     ),
-    TestDefinition(RequiredClaim.AdminOrIdpAdmin(), ClaimSet.Claims.Wildcard, ExpectedSuccess),
-    TestDefinition(
-      RequiredClaim.AdminOrIdpAdmin(),
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimIdentityProviderAdmin)),
-      ExpectedSuccess,
+    (withClaims(ClaimApiArea.partiesWrite), ClaimApiArea.partiesRead, ExpectedSuccess),
+    (withClaims(ClaimApiArea.partiesAllocate), ClaimApiArea.partiesRead, expectedPermissionDenied),
+    (withClaims(ClaimApiArea.partiesRead), ClaimApiArea.partiesWrite, expectedPermissionDenied),
+    // read/write areas: write implies read
+    (withClaims(ClaimApiArea.usersWrite), ClaimApiArea.usersRead, ExpectedSuccess),
+    (withClaims(ClaimApiArea.usersRead), ClaimApiArea.usersWrite, expectedPermissionDenied),
+    (withClaims(ClaimApiArea.idpsWrite), ClaimApiArea.idpsRead, ExpectedSuccess),
+    (withClaims(ClaimApiArea.trafficWrite), ClaimApiArea.trafficRead, ExpectedSuccess),
+    (withClaims(ClaimApiArea.trafficRead), ClaimApiArea.trafficWrite, expectedPermissionDenied),
+    // areas of different resources are unrelated
+    (withClaims(ClaimApiArea.vettingWrite), ClaimApiArea.packagesWrite, expectedPermissionDenied),
+    (withClaims(ClaimApiArea.usersWrite), ClaimApiArea.idpsRead, expectedPermissionDenied),
+    // non-area claims do not grant API areas
+    (ClaimSet.Claims.Empty, ClaimApiArea.ledgerRead, expectedPermissionDenied),
+    (withClaims(ClaimAdmin), ClaimApiArea.timeWrite, expectedPermissionDenied),
+    (withClaims(ClaimActAsAnyParty), ClaimApiArea.ledgerRead, expectedPermissionDenied),
+    (
+      withClaims(ClaimDebitTrafficFromAnyAccount),
+      ClaimApiArea.trafficRead,
+      expectedPermissionDenied,
     ),
-    TestDefinition(
-      RequiredClaim.AdminOrIdpAdmin(),
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimAdmin)),
-      ExpectedSuccess,
-    ),
-    TestDefinition(RequiredClaim.AdminOrIdpAdmin(), ClaimSet.Claims.Admin, ExpectedSuccess),
-  ).foreach(generateAuthorizationTest)
+    // predefined sets
+    (ClaimSet.Claims.Admin, ClaimApiArea.timeWrite, ExpectedSuccess),
+    (ClaimSet.Claims.Wildcard, ClaimApiArea.packagesWrite, ExpectedSuccess),
+    (withClaims(ClaimApiArea.idpAdmin*), ClaimApiArea.usersWrite, ExpectedSuccess),
+    (withClaims(ClaimApiArea.idpAdmin*), ClaimApiArea.trafficWrite, expectedPermissionDenied),
+    (withClaims(ClaimApiArea.idpAdmin*), ClaimApiArea.idpsRead, expectedPermissionDenied),
+    (withClaims(ClaimApiArea.idpAdmin*), ClaimApiArea.packagesWrite, expectedPermissionDenied),
+    (withClaims(ClaimApiArea.user*), ClaimApiArea.partiesAllocate, ExpectedSuccess),
+    (withClaims(ClaimApiArea.user*), ClaimApiArea.partiesRead, expectedPermissionDenied),
+    (withClaims(ClaimApiArea.user*), ClaimApiArea.usersRead, expectedPermissionDenied),
+  ).foreach { case (claims, required, expected) =>
+    generateAuthorizationTest(
+      TestDefinition(
+        RequiredClaim.ApiArea(required.area),
+        claims,
+        expected,
+        descSuffix = s"requiring ${required.area.toJwtScope}",
+      )
+    )
+  }
 
   behavior of s"$className.authorize for RequiredClaim.ReadAs"
 
@@ -133,11 +147,6 @@ class AuthorizerSpec
     TestDefinition(RequiredClaim.ReadAs("party"), ClaimSet.Claims.Empty, expectedPermissionDenied),
     TestDefinition(RequiredClaim.ReadAs("party"), ClaimSet.Claims.Wildcard, ExpectedSuccess),
     TestDefinition(RequiredClaim.ReadAs("party"), ClaimSet.Claims.Admin, expectedPermissionDenied),
-    TestDefinition(
-      RequiredClaim.ReadAs("party"),
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimPublic)),
-      expectedPermissionDenied,
-    ),
     TestDefinition(
       RequiredClaim.ReadAs("party"),
       ClaimSet.Claims.Empty.copy(claims = Seq(ClaimReadAsAnyParty)),
@@ -197,11 +206,6 @@ class AuthorizerSpec
     TestDefinition(
       RequiredClaim.ExecuteAs("party"),
       ClaimSet.Claims.Admin,
-      expectedPermissionDenied,
-    ),
-    TestDefinition(
-      RequiredClaim.ExecuteAs("party"),
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimPublic)),
       expectedPermissionDenied,
     ),
     TestDefinition(
@@ -287,15 +291,15 @@ class AuthorizerSpec
     withClaims(ClaimExecuteAsAnyParty) -> ExpectedSuccess,
     withClaims(ClaimActAsAnyParty) -> ExpectedSuccess,
     ClaimSet.Claims.Wildcard -> ExpectedSuccess,
+    ClaimSet.Claims.Admin -> ExpectedSuccess,
+    withClaims(ClaimApiArea(ClaimApiArea.trafficRead.area)) -> ExpectedSuccess,
     withClaims(
       ClaimDebitTrafficFromAccount(account),
       ClaimExecuteAsParty(party),
       ClaimActAsParty(party),
       ClaimReadAsAnyParty,
-      ClaimPublic,
     ) -> expectedPermissionDenied,
     ClaimSet.Claims.Empty -> expectedPermissionDenied,
-    ClaimSet.Claims.Admin -> expectedPermissionDenied,
   ).foreach { case (claims, expected) =>
     generateAuthorizationTest(TestDefinition(listAcceptingExecute, claims, expected))
   }
@@ -315,28 +319,95 @@ class AuthorizerSpec
     generateAuthorizationTest(TestDefinition(listIgnoringExecute, claims, expected))
   }
 
-  behavior of s"$className.authorize for RequiredClaim.AdminOrDebitTrafficFrom"
+  behavior of s"$className.authorize for RequiredClaim.ReadTrafficFrom"
 
-  List[(ClaimSet.Claims, ExpectedResult)](
-    ClaimSet.Claims.Admin -> ExpectedSuccess,
-    withClaims(ClaimIdentityProviderAdmin) -> expectedPermissionDenied,
-    withClaims(ClaimDebitTrafficFromAccount(account)) -> ExpectedSuccess,
-    withClaims(ClaimDebitTrafficFromAccount(account2)) -> expectedPermissionDenied,
-    withClaims(ClaimExecuteAsParty(party)) -> ExpectedSuccess,
-  ).foreach { case (claims, expected) =>
-    generateAuthorizationTest(TestDefinition(adminOrDebitAcceptingExecute, claims, expected))
+  List[(Boolean, ClaimSet.Claims, ExpectedResult)](
+    (true, withClaims(ClaimApiArea.trafficRead), ExpectedSuccess),
+    (true, withClaims(ClaimApiArea.trafficWrite), ExpectedSuccess),
+    (true, withClaims(ClaimApiArea.admin*), ExpectedSuccess),
+    (
+      true,
+      withClaims(ClaimApiArea.trafficSelf, ClaimDebitTrafficFromAccount(account)),
+      ExpectedSuccess,
+    ),
+    (true, withClaims(ClaimDebitTrafficFromAnyAccount), ExpectedSuccess),
+    (true, withClaims(ClaimApiArea.trafficSelf, ClaimExecuteAsParty(party)), ExpectedSuccess),
+    (
+      false,
+      withClaims(ClaimApiArea.trafficSelf, ClaimDebitTrafficFromAccount(account)),
+      ExpectedSuccess,
+    ),
+    (false, withClaims(ClaimExecuteAsParty(party)), expectedPermissionDenied),
+    (false, withClaims(ClaimActAsAnyParty), expectedPermissionDenied),
+    (true, withClaims(ClaimDebitTrafficFromAccount(account2)), expectedPermissionDenied),
+    (true, withClaims(ClaimReadAsParty(party)), expectedPermissionDenied),
+    (true, withClaims(ClaimAdmin), expectedPermissionDenied),
+    (true, withClaims(ClaimApiArea.user*), expectedPermissionDenied),
+    (true, ClaimSet.Claims.Empty, expectedPermissionDenied),
+  ).foreach { case (acceptExecuteRights, claims, expected) =>
+    generateAuthorizationTest(
+      TestDefinition(
+        RequiredClaim.ReadTrafficFrom("party", acceptExecuteRights),
+        claims,
+        expected,
+        descSuffix = s"with acceptExecuteRights=$acceptExecuteRights",
+      )
+    )
   }
 
-  behavior of s"$className.authorize for RequiredClaim.AdminOrListTrafficAccounts"
+  behavior of s"$className.authorize for RequiredClaim.PartiesReadOrSelfRead"
 
-  List[(ClaimSet.Claims, ExpectedResult)](
-    ClaimSet.Claims.Admin -> ExpectedSuccess,
-    withClaims(ClaimIdentityProviderAdmin) -> expectedPermissionDenied,
-    withClaims(ClaimDebitTrafficFromAnyAccount) -> ExpectedSuccess,
-    withClaims(ClaimDebitTrafficFromAccount(account)) -> expectedPermissionDenied,
-    withClaims(ClaimExecuteAsAnyParty) -> ExpectedSuccess,
-  ).foreach { case (claims, expected) =>
-    generateAuthorizationTest(TestDefinition(adminOrListAcceptingExecute, claims, expected))
+  List[(Seq[String], ClaimSet.Claims, ExpectedResult)](
+    (Nil, withClaims(ClaimApiArea.partiesRead), ExpectedSuccess),
+    (Nil, withClaims(ClaimApiArea.partiesWrite), ExpectedSuccess),
+    (Seq("party", "party2"), withClaims(ClaimApiArea.partiesRead), ExpectedSuccess),
+    (Seq("party"), ClaimSet.Claims.Admin, ExpectedSuccess),
+    (Seq("party"), withClaims(ClaimApiArea.idpAdmin*), ExpectedSuccess),
+    (Seq("party"), withClaims(ClaimApiArea.partiesSelf, ClaimReadAsParty(party)), ExpectedSuccess),
+    (
+      Seq("party"),
+      withClaims(ClaimApiArea.partiesSelf, ClaimExecuteAsParty(party)),
+      ExpectedSuccess,
+    ),
+    (Seq("party"), withClaims(ClaimApiArea.partiesSelf, ClaimActAsParty(party)), ExpectedSuccess),
+    (
+      Seq("party", "party2"),
+      withClaims(ClaimApiArea.partiesSelf, ClaimReadAsAnyParty),
+      ExpectedSuccess,
+    ),
+    (
+      Seq("party", "party2"),
+      withClaims(ClaimApiArea.partiesSelf, ClaimExecuteAsAnyParty),
+      ExpectedSuccess,
+    ),
+    (
+      Seq("party", "party2"),
+      withClaims(ClaimApiArea.partiesSelf, ClaimActAsAnyParty),
+      ExpectedSuccess,
+    ),
+    (
+      Seq("party", "party2"),
+      withClaims(ClaimApiArea.partiesSelf, ClaimReadAsParty(party), ClaimActAsParty(party2)),
+      ExpectedSuccess,
+    ),
+    (Seq("party", "party2"), withClaims(ClaimReadAsParty(party)), expectedPermissionDenied),
+    (Seq("party"), withClaims(ClaimReadAsParty(party2)), expectedPermissionDenied),
+    // operating as parties does not grant reading all parties
+    (Nil, withClaims(ClaimReadAsParty(party)), expectedPermissionDenied),
+    (Nil, withClaims(ClaimActAsAnyParty), expectedPermissionDenied),
+    (Nil, ClaimSet.Claims.Empty, expectedPermissionDenied),
+    (Seq("party"), withClaims(ClaimAdmin), expectedPermissionDenied),
+    (Seq("party"), withClaims(ClaimApiArea.user*), expectedPermissionDenied),
+    (Seq("party"), withClaims(ClaimApiArea.partiesAllocate), expectedPermissionDenied),
+  ).foreach { case (parties, claims, expected) =>
+    generateAuthorizationTest(
+      TestDefinition(
+        RequiredClaim.PartiesReadOrSelfRead(parties),
+        claims,
+        expected,
+        descSuffix = s"for parties [${parties.mkString(",")}]",
+      )
+    )
   }
 
   behavior of s"$className.authorize for RequiredClaim.ReadAsAnyParty"
@@ -345,11 +416,6 @@ class AuthorizerSpec
     TestDefinition(RequiredClaim.ReadAsAnyParty(), ClaimSet.Claims.Empty, expectedPermissionDenied),
     TestDefinition(RequiredClaim.ReadAsAnyParty(), ClaimSet.Claims.Wildcard, ExpectedSuccess),
     TestDefinition(RequiredClaim.ReadAsAnyParty(), ClaimSet.Claims.Admin, expectedPermissionDenied),
-    TestDefinition(
-      RequiredClaim.ReadAsAnyParty(),
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimPublic)),
-      expectedPermissionDenied,
-    ),
     TestDefinition(
       RequiredClaim.ReadAsAnyParty(),
       ClaimSet.Claims.Empty.copy(claims = Seq(ClaimReadAsAnyParty)),
@@ -403,11 +469,6 @@ class AuthorizerSpec
     TestDefinition(RequiredClaim.ActAs("party"), ClaimSet.Claims.Empty, expectedPermissionDenied),
     TestDefinition(RequiredClaim.ActAs("party"), ClaimSet.Claims.Wildcard, ExpectedSuccess),
     TestDefinition(RequiredClaim.ActAs("party"), ClaimSet.Claims.Admin, expectedPermissionDenied),
-    TestDefinition(
-      RequiredClaim.ActAs("party"),
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimPublic)),
-      expectedPermissionDenied,
-    ),
     TestDefinition(
       RequiredClaim.ActAs("party"),
       ClaimSet.Claims.Empty.copy(claims = Seq(ClaimReadAsAnyParty)),
@@ -522,16 +583,6 @@ class AuthorizerSpec
     }.transform(assertExpectedFailure(Status.PERMISSION_DENIED.getCode))
   }
 
-  it should "return permission denied for ClaimPublic without party read access" in {
-    contextWithClaims(
-      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimPublic))
-    ) {
-      authorizer().rpc(testPartyReqRes)(RequiredClaim.MatchReadAsParties(testPartiesL))(
-        emptyPartyReq
-      )
-    }.transform(assertExpectedFailure(Status.PERMISSION_DENIED.getCode))
-  }
-
   it should "return permission denied for ClaimAdmin without party read access" in {
     contextWithClaims(
       ClaimSet.Claims.Empty.copy(claims = Seq(ClaimAdmin))
@@ -574,7 +625,7 @@ class AuthorizerSpec
       resolvedFromUser: Boolean = true,
   ): TestDefinition =
     TestDefinition(
-      RequiredClaim.MatchUserIdForUserManagement(simpleLens),
+      RequiredClaim.MatchUserIdForUserRead(simpleLens),
       ClaimSet.Claims.Empty.copy(
         claims = claims,
         userId = userId,
@@ -586,52 +637,31 @@ class AuthorizerSpec
       resultAssert = _ shouldBe userId1,
     )
 
-  behavior of s"$className.authorize for RequiredClaim.MatchUserIdForUserManagement without Admin rights"
-
+  behavior of s"$className.authorize for RequiredClaim.MatchUserIdForUserRead without Admin rights"
   List(
     matchUserIdTestDef(
-      Nil,
+      Seq(ClaimApiArea.usersSelf),
       Some(userId1),
       userId1,
       ExpectedSuccess,
       "when authorized and request user IDs match",
     ),
-    matchUserIdTestDef(Nil, Some(userId1), "", ExpectedSuccess, "when missing request user ID"),
     matchUserIdTestDef(
-      Nil,
+      Seq(ClaimApiArea.usersSelf),
+      Some(userId1),
+      "",
+      ExpectedSuccess,
+      "when missing request user ID",
+    ),
+    matchUserIdTestDef(
+      Seq(ClaimApiArea.usersSelf),
       Some(userId2),
       userId1,
       expectedPermissionDenied,
       "when authorized and request user IDs don't match",
     ),
-    matchUserIdTestDef(Nil, None, userId1, expectedInternal, "when undefined authorized user ID"),
-  ).foreach(generateAuthorizationTest)
-
-  behavior of s"$className.authorize for RequiredClaim.MatchUserIdForUserManagement with Admin rights"
-  List(
     matchUserIdTestDef(
-      Seq(ClaimAdmin),
-      Some(userId1),
-      userId1,
-      ExpectedSuccess,
-      "when authorized and request user IDs match",
-    ),
-    matchUserIdTestDef(
-      Seq(ClaimAdmin),
-      Some(userId1),
-      "",
-      ExpectedSuccess,
-      "when missing request user ID",
-    ),
-    matchUserIdTestDef(
-      Seq(ClaimAdmin),
-      Some(userId2),
-      userId1,
-      ExpectedSuccess,
-      "when authorized and request user IDs don't match",
-    ),
-    matchUserIdTestDef(
-      Seq(ClaimAdmin),
+      Seq(ClaimApiArea.usersSelf),
       None,
       userId1,
       expectedInternal,
@@ -639,31 +669,31 @@ class AuthorizerSpec
     ),
   ).foreach(generateAuthorizationTest)
 
-  behavior of s"$className.authorize for RequiredClaim.MatchUserIdForUserManagement with IDP Admin rights"
+  behavior of s"$className.authorize for RequiredClaim.MatchUserIdForUserRead with Admin rights"
   List(
     matchUserIdTestDef(
-      Seq(ClaimIdentityProviderAdmin),
+      ClaimApiArea.admin,
       Some(userId1),
       userId1,
       ExpectedSuccess,
       "when authorized and request user IDs match",
     ),
     matchUserIdTestDef(
-      Seq(ClaimIdentityProviderAdmin),
+      ClaimApiArea.admin,
       Some(userId1),
       "",
       ExpectedSuccess,
       "when missing request user ID",
     ),
     matchUserIdTestDef(
-      Seq(ClaimIdentityProviderAdmin),
+      ClaimApiArea.admin,
       Some(userId2),
       userId1,
       ExpectedSuccess,
       "when authorized and request user IDs don't match",
     ),
     matchUserIdTestDef(
-      Seq(ClaimIdentityProviderAdmin),
+      ClaimApiArea.admin,
       None,
       userId1,
       expectedInternal,
@@ -671,8 +701,78 @@ class AuthorizerSpec
     ),
   ).foreach(generateAuthorizationTest)
 
-  behavior of s"$className.authorize for RequiredClaim.MatchUserIdForUserManagement not resolvedFromUser"
+  behavior of s"$className.authorize for RequiredClaim.MatchUserIdForUserRead with IDP Admin rights"
+  List(
+    matchUserIdTestDef(
+      ClaimApiArea.idpAdmin,
+      Some(userId1),
+      userId1,
+      ExpectedSuccess,
+      "when authorized and request user IDs match",
+    ),
+    matchUserIdTestDef(
+      ClaimApiArea.idpAdmin,
+      Some(userId1),
+      "",
+      ExpectedSuccess,
+      "when missing request user ID",
+    ),
+    matchUserIdTestDef(
+      ClaimApiArea.idpAdmin,
+      Some(userId2),
+      userId1,
+      ExpectedSuccess,
+      "when authorized and request user IDs don't match",
+    ),
+    matchUserIdTestDef(
+      ClaimApiArea.idpAdmin,
+      None,
+      userId1,
+      expectedInternal,
+      "when undefined authorized user ID",
+    ),
+  ).foreach(generateAuthorizationTest)
 
+  behavior of s"$className.authorize for RequiredClaim.MatchUserIdForUserRead with other claims"
+  List(
+    matchUserIdTestDef(
+      Seq(ClaimAdmin),
+      Some(userId2),
+      userId1,
+      expectedPermissionDenied,
+      "when ClaimAdmin without users:read reads another user",
+    ),
+    matchUserIdTestDef(
+      Seq(ClaimApiArea.usersSelf),
+      Some(userId1),
+      userId1,
+      ExpectedSuccess,
+      "when user with users:self reads itself",
+    ),
+    matchUserIdTestDef(
+      Seq(ClaimApiArea.usersRead),
+      Some(userId1),
+      userId1,
+      ExpectedSuccess,
+      "when user with users:read reads itself",
+    ),
+    matchUserIdTestDef(
+      Seq(ClaimApiArea.usersWrite),
+      Some(userId2),
+      userId1,
+      ExpectedSuccess,
+      "when users:write reads another user",
+    ),
+    matchUserIdTestDef(
+      ClaimApiArea.user,
+      Some(userId2),
+      userId1,
+      expectedPermissionDenied,
+      "when user reads another user",
+    ),
+  ).foreach(generateAuthorizationTest)
+
+  behavior of s"$className.authorize for RequiredClaim.MatchUserIdForUserRead not resolvedFromUser"
   List(
     matchUserIdTestDef(
       Nil,
@@ -699,7 +799,7 @@ class AuthorizerSpec
       resolvedFromUser = false,
     ),
     matchUserIdTestDef(
-      Seq(ClaimAdmin),
+      Seq(ClaimApiArea.usersRead),
       Some(userId1),
       userId1,
       ExpectedSuccess,
@@ -707,7 +807,7 @@ class AuthorizerSpec
       resolvedFromUser = false,
     ),
     matchUserIdTestDef(
-      Seq(ClaimAdmin),
+      Seq(ClaimApiArea.usersRead),
       None,
       userId1,
       ExpectedSuccess,
@@ -715,7 +815,7 @@ class AuthorizerSpec
       resolvedFromUser = false,
     ),
     matchUserIdTestDef(
-      Seq(ClaimAdmin),
+      Seq(ClaimApiArea.usersRead),
       Some(userId2),
       userId1,
       ExpectedSuccess,
@@ -724,7 +824,7 @@ class AuthorizerSpec
     ),
   ).foreach(generateAuthorizationTest)
 
-  def anyAdminTestDef(
+  def partiesWriteOrSelfAllocateTestDef(
       claims: Seq[Claim],
       userId: Option[String],
       req: String,
@@ -733,7 +833,7 @@ class AuthorizerSpec
       resolvedFromUser: Boolean = true,
   ): TestDefinition =
     TestDefinition(
-      RequiredClaim.AdminOrIdpAdminOrSelfAdmin(simpleLens),
+      RequiredClaim.PartiesWriteOrSelfAllocate(simpleLens),
       ClaimSet.Claims.Empty.copy(
         claims = claims,
         userId = userId,
@@ -744,31 +844,31 @@ class AuthorizerSpec
       descSuffix = descSuffix,
     )
 
-  behavior of s"$className.authorize for AdminOrIdpAdminOrSelfAdmin with Admin claims"
+  behavior of s"$className.authorize for PartiesWriteOrSelfAllocate with Admin claims"
   List(
-    anyAdminTestDef(
-      Seq(ClaimAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      ClaimApiArea.admin,
       Some(userId2),
       userId2,
       ExpectedSuccess,
       "when authorized and request user IDs match",
     ),
-    anyAdminTestDef(
-      Seq(ClaimAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      ClaimApiArea.admin,
       Some(userId1),
       userId2,
       ExpectedSuccess,
       "when authorized and request user IDs don't match",
     ),
-    anyAdminTestDef(
-      Seq(ClaimAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      ClaimApiArea.admin,
       Some(userId1),
       "",
       ExpectedSuccess,
       "when request user ID missing",
     ),
-    anyAdminTestDef(
-      Seq(ClaimAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      ClaimApiArea.admin,
       None,
       userId2,
       ExpectedSuccess,
@@ -776,31 +876,31 @@ class AuthorizerSpec
     ),
   ).foreach(generateAuthorizationTest)
 
-  behavior of s"$className.authorize for AdminOrIdpAdminOrSelfAdmin with Idp Admin claims"
+  behavior of s"$className.authorize for PartiesWriteOrSelfAllocate with Idp Admin claims"
   List(
-    anyAdminTestDef(
-      Seq(ClaimIdentityProviderAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimApiArea.partiesWrite),
       Some(userId2),
       userId2,
       ExpectedSuccess,
       "when authorized and request user IDs match",
     ),
-    anyAdminTestDef(
-      Seq(ClaimIdentityProviderAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimApiArea.partiesWrite),
       Some(userId1),
       userId2,
       ExpectedSuccess,
       "when authorized and request user IDs don't match",
     ),
-    anyAdminTestDef(
-      Seq(ClaimIdentityProviderAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimApiArea.partiesWrite),
       Some(userId1),
       "",
       ExpectedSuccess,
       "when request user ID missing",
     ),
-    anyAdminTestDef(
-      Seq(ClaimIdentityProviderAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimApiArea.partiesWrite),
       None,
       userId2,
       ExpectedSuccess,
@@ -809,60 +909,73 @@ class AuthorizerSpec
   )
     .foreach(generateAuthorizationTest)
 
-  behavior of s"$className.authorize for AdminOrIdpAdminOrSelfAdmin without Admin claims"
+  behavior of s"$className.authorize for PartiesWriteOrSelfAllocate without Admin claims"
   List(
-    anyAdminTestDef(
-      Nil,
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimApiArea.partiesAllocate),
       Some(userId2),
       userId2,
       ExpectedSuccess,
       "when authorized and request user IDs match",
     ),
-    anyAdminTestDef(
-      Nil,
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimApiArea.partiesAllocate),
       Some(userId1),
       userId2,
       expectedPermissionDenied,
       "when authorized and request user IDs don't match",
     ),
-    anyAdminTestDef(
-      Nil,
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimApiArea.partiesAllocate),
       Some(userId1),
       "",
       expectedPermissionDenied,
       "when request user ID missing",
     ),
-    anyAdminTestDef(Nil, None, userId2, expectedInternal, "when authorized user ID missing"),
+    partiesWriteOrSelfAllocateTestDef(
+      Nil,
+      None,
+      userId2,
+      expectedInternal,
+      "when authorized user ID missing",
+    ),
+    partiesWriteOrSelfAllocateTestDef(
+      Nil,
+      Some(userId2),
+      userId2,
+      expectedPermissionDenied,
+      "when missing parties:allocate claim",
+    ),
   ).foreach(generateAuthorizationTest)
 
-  behavior of s"$className.authorize for AdminOrIdpAdminOrSelfAdmin with Admin claims when not resolvedFromUser"
+  behavior of s"$className.authorize for PartiesWriteOrSelfAllocate with Admin claims when not resolvedFromUser"
   List(
-    anyAdminTestDef(
-      Seq(ClaimAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      ClaimApiArea.admin,
       Some(userId2),
       userId2,
       ExpectedSuccess,
       "when authorized and request user IDs match",
       resolvedFromUser = false,
     ),
-    anyAdminTestDef(
-      Seq(ClaimAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      ClaimApiArea.admin,
       Some(userId1),
       userId2,
       ExpectedSuccess,
       "when authorized and request user IDs don't match",
       resolvedFromUser = false,
     ),
-    anyAdminTestDef(
-      Seq(ClaimAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      ClaimApiArea.admin,
       Some(userId1),
       "",
       ExpectedSuccess,
       "when request user ID missing",
       resolvedFromUser = false,
     ),
-    anyAdminTestDef(
-      Seq(ClaimAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      ClaimApiArea.admin,
       None,
       userId2,
       ExpectedSuccess,
@@ -871,34 +984,34 @@ class AuthorizerSpec
     ),
   ).foreach(generateAuthorizationTest)
 
-  behavior of s"$className.authorize for AdminOrIdpAdminOrSelfAdmin with Idp Admin claims when not resolvedFromUser"
+  behavior of s"$className.authorize for PartiesWriteOrSelfAllocate with parties:write claims when not resolvedFromUser"
   List(
-    anyAdminTestDef(
-      Seq(ClaimIdentityProviderAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimApiArea.partiesWrite),
       Some(userId2),
       userId2,
       ExpectedSuccess,
       "when authorized and request user IDs match",
       resolvedFromUser = false,
     ),
-    anyAdminTestDef(
-      Seq(ClaimIdentityProviderAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimApiArea.partiesWrite),
       Some(userId1),
       userId2,
       ExpectedSuccess,
       "when authorized and request user IDs don't match",
       resolvedFromUser = false,
     ),
-    anyAdminTestDef(
-      Seq(ClaimIdentityProviderAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimApiArea.partiesWrite),
       Some(userId1),
       "",
       ExpectedSuccess,
       "when request user ID missing",
       resolvedFromUser = false,
     ),
-    anyAdminTestDef(
-      Seq(ClaimIdentityProviderAdmin),
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimApiArea.partiesWrite),
       None,
       userId2,
       ExpectedSuccess,
@@ -907,9 +1020,9 @@ class AuthorizerSpec
     ),
   ).foreach(generateAuthorizationTest)
 
-  behavior of s"$className.authorize for AdminOrIdpAdminOrSelfAdmin without Admin claims when not resolvedFromUser"
+  behavior of s"$className.authorize for PartiesWriteOrSelfAllocate without Admin claims when not resolvedFromUser"
   List(
-    anyAdminTestDef(
+    partiesWriteOrSelfAllocateTestDef(
       Nil,
       Some(userId2),
       userId2,
@@ -917,7 +1030,7 @@ class AuthorizerSpec
       "when authorized and request user IDs match",
       resolvedFromUser = false,
     ),
-    anyAdminTestDef(
+    partiesWriteOrSelfAllocateTestDef(
       Nil,
       Some(userId1),
       userId2,
@@ -925,7 +1038,7 @@ class AuthorizerSpec
       "when authorized and request user IDs don't match",
       resolvedFromUser = false,
     ),
-    anyAdminTestDef(
+    partiesWriteOrSelfAllocateTestDef(
       Nil,
       Some(userId1),
       "",
@@ -933,13 +1046,46 @@ class AuthorizerSpec
       "when request user ID missing",
       resolvedFromUser = false,
     ),
-    anyAdminTestDef(
+    partiesWriteOrSelfAllocateTestDef(
       Nil,
       None,
       userId2,
       expectedPermissionDenied,
       "when authorized user ID missing",
       resolvedFromUser = false,
+    ),
+  ).foreach(generateAuthorizationTest)
+
+  behavior of s"$className.authorize for PartiesWriteOrSelfAllocate with other claims"
+  List(
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimAdmin),
+      Some(userId1),
+      userId2,
+      expectedPermissionDenied,
+      "when ClaimAdmin without parties:write allocates for another user",
+    ),
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimAdmin),
+      None,
+      userId2,
+      expectedPermissionDenied,
+      "when ClaimAdmin without parties:write is not a user",
+      resolvedFromUser = false,
+    ),
+    partiesWriteOrSelfAllocateTestDef(
+      Seq(ClaimApiArea.partiesRead, ClaimApiArea.partiesAllocate),
+      Some(userId1),
+      userId2,
+      expectedPermissionDenied,
+      "when parties:read and parties:allocate allocate for another user",
+    ),
+    partiesWriteOrSelfAllocateTestDef(
+      ClaimApiArea.user,
+      Some(userId2),
+      userId2,
+      ExpectedSuccess,
+      "when user API areas allocate for itself",
     ),
   ).foreach(generateAuthorizationTest)
 

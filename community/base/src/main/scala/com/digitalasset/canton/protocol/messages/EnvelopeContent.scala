@@ -36,7 +36,7 @@ object EnvelopeContent
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(32) -> VersionedProtoCodec(
-      ProtocolVersion.v36
+      ProtocolVersion.minimum
     )(v32.EnvelopeContent)(
       supportedProtoVersionPVV(_)(fromProtoV32),
       _.toProtoV32,

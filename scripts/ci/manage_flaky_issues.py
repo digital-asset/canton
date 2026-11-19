@@ -39,6 +39,9 @@ from flaky_common import (
     get_ci_job_name,
     flaky_test_project,
     release_line_field,
+    status_field,
+    status_todo,
+    status_done,
     branches_to_report,
     milestone,
     CONSECUTIVE_FAILURES_THRESHOLD,
@@ -126,6 +129,7 @@ def report_issue(issue: str, cause: str = DEFAULT_CAUSE, evidence_comment: Optio
     idx = None
     project_item_id = None
     release_line = None
+    is_done = False
     is_archived = False
     has_assignee = False
     assigned_at = None
@@ -161,6 +165,10 @@ def report_issue(issue: str, cause: str = DEFAULT_CAUSE, evidence_comment: Optio
 
                     # remember whether the issue is archived or not, so we can unarchive later
                     is_archived = project_relation["isArchived"]
+
+                    # the board marks an issue Done on close, but does not move it back when the
+                    # bot reopens it
+                    is_done = (project_relation.get("status") or {}).get("optionId") == status_done
 
                     # extract the custom "Release Line" field
                     if project_relation["releaseLine"]:
@@ -198,10 +206,37 @@ def report_issue(issue: str, cause: str = DEFAULT_CAUSE, evidence_comment: Optio
             has_assignee=has_assignee,
             assigned_at=assigned_at,
             has_broken_nightly_label=has_broken_nightly_label,
+            reset_status_item=project_item_id if is_done else None,
         )
 
     else:
         create_issue(title, cause, evidence_comment)
+
+
+# Issues whose board reset failed in this run. update_issue swallows the error so the streak
+# alert still goes out, run() raises once at the end so the rota is paged.
+status_reset_failures: list[str] = []
+
+
+def gh_reset_status_to_todo(idx: str, project_item_id: str):
+    result = run_gh_with_retries(
+        [
+            "api",
+            "graphql",
+            "-F",
+            "query=@scripts/ci/setProjectFieldOnIssue.graphql",
+            "-F",
+            f"issue={project_item_id}",
+            "-F",
+            f"project={flaky_test_project}",
+            "-F",
+            f"field={status_field}",
+            "-F",
+            f"value={status_todo}",
+        ]
+    )
+    check_result(result)
+    print(f"Moved issue back to Todo: https://github.com/DACH-NY/canton/issues/{idx}")
 
 
 def gh_assign_release_line(idx: str, project_item_id: str):
@@ -212,7 +247,7 @@ def gh_assign_release_line(idx: str, project_item_id: str):
                 "api",
                 "graphql",
                 "-F",
-                "query=@scripts/ci/assignReleaseLine.graphql",
+                "query=@scripts/ci/setProjectFieldOnIssue.graphql",
                 "-F",
                 f"issue={project_item_id}",
                 "-F",
@@ -934,6 +969,7 @@ def update_issue(
     has_assignee: bool = False,
     assigned_at: Optional[datetime.datetime] = None,
     has_broken_nightly_label: bool = False,
+    reset_status_item: Optional[str] = None,
 ) -> Optional[tuple[str, str, str, Optional[str]]]:
     job = get_ci_job_name()
     threshold = (
@@ -1039,6 +1075,14 @@ def update_issue(
     new_body = f"{body}\n{create_issue_table_row(cause, evidence_url, label)}"
     deleted_urls = prune_evidence_comments(idx, *posted) if posted else set()
     gh_issue_edit_cmd(idx, title, truncate_history(unlink_evidence(new_body, deleted_urls)))
+    if reset_status_item:
+        try:
+            gh_reset_status_to_todo(idx, reset_status_item)
+        except Exception as e:
+            # failure-surfaced: run() raises after the loop, deferred so the streak alert
+            # below still goes out
+            print(f"::warning::Could not move issue #{idx} back to Todo: {e}")
+            status_reset_failures.append(idx)
     print(f"Updated issue: https://github.com/DACH-NY/canton/issues/{idx}")
     if notify:
         return (idx, title, commit_hash, streak)
@@ -1153,6 +1197,41 @@ def test_run_reports_issues_even_if_evidence_is_broken():
         ):
             run(failing, streaks, evidence)
     assert reported == [("FooTest", None), ("NoEvidenceTest", None)], reported
+
+
+def test_run_fails_loud_when_a_status_reset_failed():
+    # A reset that never lands leaves reopened flakes hidden in Done, so the step must
+    # fail once the loop finished, instead of staying green with only a warning.
+    with tempfile.TemporaryDirectory() as tmp:
+        failing, evidence, streaks = _write_pipeline_inputs(tmp)
+        env = {
+            "CIRCLECI": "true",
+            "GITHUB_ACTIONS": "false",
+            "CIRCLE_SHA1": "c" * 40,
+            "CIRCLE_JOB": "test",
+            "CIRCLE_NODE_INDEX": "0",
+            "CIRCLE_BUILD_URL": "https://circleci.com/gh/DACH-NY/canton/1",
+        }
+        reported: list = []
+
+        def fake_report(name, cause, comment):
+            reported.append(name)
+            status_reset_failures.append("99")
+
+        with (
+            patch.dict(os.environ, env),
+            patch(f"{__name__}.branch", "main"),
+            patch(f"{__name__}.report_issue", side_effect=fake_report),
+        ):
+            try:
+                run(failing, streaks, evidence)
+                raised = False
+            except Exception as e:
+                raised = "back to Todo" in str(e)
+    assert raised
+    # every test was still reported before the step failed
+    assert reported == ["FooTest", "NoEvidenceTest"], reported
+    status_reset_failures.clear()
 
 
 def test_run_skips_issues_outside_the_issue_repo():
@@ -2240,6 +2319,7 @@ def test_report_issue_finds_flaky_project_among_other_projects():
                                         "id": "flaky_item",
                                         "project": {"id": flaky_test_project},
                                         "isArchived": True,
+                                        "status": {"optionId": status_done},
                                         "releaseLine": None,
                                     },
                                 ]
@@ -2263,6 +2343,79 @@ def test_report_issue_finds_flaky_project_among_other_projects():
 
     mock_unarchive.assert_called_once_with("99", "flaky_item")
     mock_assign_release_line.assert_called_once_with("99", "flaky_item")
+
+
+def test_gh_reset_status_to_todo_sends_todo_option():
+    # Sending the Done option instead would silently leave the issue hidden on the board.
+    with patch(f'{__name__}.run_gh_with_retries') as mock_gh:
+        mock_gh.return_value.returncode = 0
+        gh_reset_status_to_todo("99", "flaky_item")
+    args = mock_gh.call_args.args[0]
+    assert f"field={status_field}" in args
+    assert f"value={status_todo}" in args
+    assert "issue=flaky_item" in args
+
+
+def test_failed_status_reset_does_not_cancel_the_alert():
+    # The reset runs after the reopen, so its failure must not drop the streak alert.
+    with (
+        patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(f'{__name__}.gh_reset_status_to_todo', side_effect=RuntimeError("boom")) as reset,
+        patch(f'{__name__}.flake_predates_close', return_value=False),
+    ):
+        status_reset_failures.clear()
+        update_issue("99", "t", "", reset_status_item="flaky_item")
+    reset.assert_called_once_with("99", "flaky_item")
+    # recorded so run() can fail the step once, loudly
+    assert status_reset_failures == ["99"]
+    status_reset_failures.clear()
+
+
+def test_report_issue_resets_done_status_on_reopen():
+    # The board sets Done on close and never moves the item back when the bot reopens
+    # the issue, so a reopened flake would stay hidden in the Done column.
+    title = format_issue_title("SomeFlakyTest")
+
+    def search(status):
+        return json.dumps(
+            {
+                "data": {
+                    "search": {
+                        "nodes": [
+                            {
+                                "title": title,
+                                "number": 99,
+                                "body": "",
+                                "assignees": {"totalCount": 0},
+                                "labels": {"nodes": []},
+                                "timelineItems": {"nodes": []},
+                                "projectItems": {
+                                    "nodes": [
+                                        {
+                                            "id": "flaky_item",
+                                            "project": {"id": flaky_test_project},
+                                            "isArchived": False,
+                                            "status": {"optionId": status},
+                                            "releaseLine": {"name": "main"},
+                                        }
+                                    ]
+                                },
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+
+    for status, expected in [(status_done, "flaky_item"), (status_todo, None)]:
+        with (
+            patch(f'{__name__}.run_gh_with_retries') as mock_gh,
+            patch(f'{__name__}.update_issue') as mock_update,
+        ):
+            mock_gh.return_value.returncode = 0
+            mock_gh.return_value.stdout = search(status)
+            report_issue("SomeFlakyTest")
+        assert mock_update.call_args.kwargs["reset_status_item"] == expected, status
 
 
 def test_update_issue_assigned_daily_cap():
@@ -2666,6 +2819,7 @@ def run(failing_tests_json=None, streaks_json=None, evidence_json=None):
     # variants is recorded, not just the cause of the alphabetically first variant.
     seen_titles: set = set()
     duplicates = []
+    status_reset_failures.clear()
     for test_name in failing_tests[:failing_tests_max]:
         title = format_issue_title(test_name)
         if title in seen_titles:
@@ -2678,6 +2832,10 @@ def run(failing_tests_json=None, streaks_json=None, evidence_json=None):
 
     write_streaks(out_path, duplicates)
     print("Finished updating github issues.")
+    if status_reset_failures:
+        raise Exception(
+            f"Could not move reopened issue(s) back to Todo on the board: {status_reset_failures}"
+        )
 
 
 def parse_args(argv):

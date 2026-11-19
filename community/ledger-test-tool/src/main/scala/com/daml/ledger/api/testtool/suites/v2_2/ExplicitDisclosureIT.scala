@@ -661,6 +661,7 @@ object ExplicitDisclosureIT {
           ),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         )
       ),
       transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,

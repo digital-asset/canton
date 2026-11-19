@@ -193,6 +193,7 @@ sealed trait SuperReaderUserIT extends CantonFixture with CreatesParties with Te
                 filtersByParty = Map(partyA -> Filters(Nil)),
                 filtersForAnyParty = None,
                 verbose = false,
+                filtersByContractId = Seq.empty,
               )
             ),
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

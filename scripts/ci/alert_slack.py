@@ -56,8 +56,9 @@ def _redact(text: str) -> str:
     return text
 
 
-def select_rota(rotation: str) -> list[str]:
-    """Return the Slack user ID(s) on the current rota shift for ``rotation``.
+def select_rota(rotation: str) -> tuple[list[str], list[str]]:
+    """Return the Slack user ID(s) on the current rota shift for ``rotation``, and a
+    warning for each rota name that select_rota.py could not map to a Slack ID.
 
     Delegates to select_rota.py, which reads the rota Google Sheet and falls
     back to a deterministic pick from the roster when the sheet is unreadable,
@@ -73,7 +74,7 @@ def select_rota(rotation: str) -> list[str]:
     )
     if result.returncode != 0:
         print(f"select_rota.py failed: {_redact(result.stderr.strip())}. No one selected.")
-        return []
+        return [], []
     # select_rota.py exits 0 even when it degrades to the fallback pool, writing the
     # reason (sheet auth/lookup failure) to stderr. Surface it so a fallback ping is
     # explained in the log instead of looking like a normal rota pick.
@@ -82,7 +83,10 @@ def select_rota(rotation: str) -> list[str]:
     ids = [tok for tok in result.stdout.split() if re.match(r'^U[A-Z0-9]+$', tok)]
     if not ids:
         print(f"Unexpected output from select_rota.py: {result.stdout.strip()!r}. No one selected.")
-    return ids
+    prefix = select_rota_lib.ROSTER_MISS_PREFIX
+    # dict.fromkeys dedups (a name can miss in several lookups) and keeps first-seen order
+    misses = [ln[len(prefix) :] for ln in result.stderr.splitlines() if ln.startswith(prefix)]
+    return ids, list(dict.fromkeys(misses))
 
 
 def _notify_alert_post_failure(token: str, reason: str) -> None:
@@ -136,7 +140,7 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str, str | None]]) -
     nightly = is_nightly_job(get_ci_job_name())
     # Both a flaky streak and a genuinely-broken nightly are the Flaky Canton
     # rotation's to fix (three people share it, so all get pinged).
-    responders = select_rota("flaky-canton")
+    responders, roster_misses = select_rota("flaky-canton")
     mention = "".join(f"<@{uid}> " for uid in responders)
     # Label the alert with the CI that produced it so the reader can tell GHA from
     # CircleCI at a glance (they route the rota mention differently). Matches the
@@ -182,7 +186,11 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str, str | None]]) -
         },
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"{mention}{description}\n{prompt}"},
+            "text": {
+                "type": "mrkdwn",
+                "text": f"{mention}{description}\n{prompt}"
+                + "".join(f"\n:warning: {miss}" for miss in roster_misses),
+            },
         },
     ] + [
         {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(section)}}
@@ -235,13 +243,19 @@ def self_test() -> None:
     orig_run = subprocess.run
     try:
         subprocess.run = _fake_run(0, "U123 U456\n")
-        assert select_rota("flaky-canton") == ["U123", "U456"]
+        assert select_rota("flaky-canton") == (["U123", "U456"], [])
         subprocess.run = _fake_run(0, "noise U999 more")  # non-id tokens are filtered out
-        assert select_rota("flaky-canton") == ["U999"]
+        assert select_rota("flaky-canton") == (["U999"], [])
         subprocess.run = _fake_run(0, "")  # empty output -> no mention
-        assert select_rota("flaky-canton") == []
+        assert select_rota("flaky-canton") == ([], [])
         subprocess.run = _fake_run(1, "", "boom")  # non-zero exit -> no mention
-        assert select_rota("flaky-canton") == []
+        assert select_rota("flaky-canton") == ([], [])
+        # an on-rota name missing from the roster is returned so the alert can show it,
+        # other diagnostics stay in the log only
+        miss = f"{select_rota_lib.ROSTER_MISS_PREFIX}Newcomer is missing\n"
+        miss_err = f"warning: other\n{miss}{miss}"  # repeated miss is shown once
+        subprocess.run = _fake_run(0, "U123\n", miss_err)
+        assert select_rota("flaky-canton") == (["U123"], ["Newcomer is missing"])
     finally:
         subprocess.run = orig_run
 
@@ -298,7 +312,7 @@ def self_test() -> None:
         duplicates = [("123", "Some Test", "cause", 3)]
 
         with (
-            patch(f"{__name__}.select_rota", return_value=[]),
+            patch(f"{__name__}.select_rota", return_value=([], [])),
             patch(
                 f"{__name__}._notify_alert_post_failure",
                 side_effect=lambda t, r: post_failure_calls.append((t, r)),
@@ -343,6 +357,18 @@ def self_test() -> None:
             assert "Six (failed on 6 consecutive commits)" in tests, tests
             assert "Long (failed on 30+ consecutive commits)" in tests, tests
             assert tests.endswith("> Nightly"), tests
+
+            # An on-rota person missing from the roster is silently not pinged, so the alert
+            # itself must say so, where the people who can add them will see it.
+            sent.clear()
+            with (
+                patch(f"{__name__}.select_rota", return_value=(["U1"], ["Newcomer is missing"])),
+                patch("urllib.request.urlopen", side_effect=_capture),
+            ):
+                send_duplicate_summary(duplicates)
+            intro = sent[0]["blocks"][1]["text"]["text"]
+            assert intro.startswith("<@U1> "), intro
+            assert intro.endswith("\n:warning: Newcomer is missing"), intro
 
             # Slack rejects a section over 3000 characters, losing the whole alert, so a
             # long list of affected tests must be spread over several sections, none lost.

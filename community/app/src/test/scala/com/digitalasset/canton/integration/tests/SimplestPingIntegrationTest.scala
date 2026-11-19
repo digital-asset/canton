@@ -12,8 +12,6 @@ import com.digitalasset.canton.integration.{
 }
 import monocle.macros.syntax.lens.*
 
-import scala.concurrent.duration.*
-
 /** Trivial test which can be used as a first end to end test */
 sealed trait SimplestPingIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
 
@@ -31,8 +29,7 @@ sealed trait SimplestPingIntegrationTest extends CommunityIntegrationTest with S
     }
     clue("maybe ping") {
       participant1.health.maybe_ping(
-        participant2,
-        timeout = 30.seconds,
+        participant2
       ) shouldBe defined
     }
   }

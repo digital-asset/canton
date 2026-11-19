@@ -160,6 +160,8 @@ final class ProtobufCompatibilityReaderTest
       """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
       // Added `min_stable_duration` field to `SequencerConnectionPoolDelays` for connection stability configuration
       """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "5" with name "min_stable_duration" on message "SequencerConnectionPoolDelays" was deleted.""",
+      // Added `include_onboarding_members` to `TrafficControlStateRequest`; older nodes simply ignore the new field
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "4" with name "include_onboarding_members" on message "TrafficControlStateRequest" was deleted.""",
     ),
     (3, 5) -> Seq(
       // Added LF-Value(s)
@@ -246,6 +248,8 @@ final class ProtobufCompatibilityReaderTest
       """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
       // Added `min_stable_duration` field to `SequencerConnectionPoolDelays` for connection stability configuration
       """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "5" with name "min_stable_duration" on message "SequencerConnectionPoolDelays" was deleted.""",
+      // Added `include_onboarding_members` to `TrafficControlStateRequest`; older nodes simply ignore the new field
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "4" with name "include_onboarding_members" on message "TrafficControlStateRequest" was deleted.""",
     ),
     (3, 6) -> Seq(
       // Added LF-Vlue(s)
@@ -293,6 +297,8 @@ final class ProtobufCompatibilityReaderTest
       """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
       // Added `min_stable_duration` field to `SequencerConnectionPoolDelays` for connection stability configuration
       """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "5" with name "min_stable_duration" on message "SequencerConnectionPoolDelays" was deleted.""",
+      // Added `include_onboarding_members` to `TrafficControlStateRequest`; older nodes simply ignore the new field
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "4" with name "include_onboarding_members" on message "TrafficControlStateRequest" was deleted.""",
     ),
     (3, 7) -> Seq(
       // Added LF-Value(s)

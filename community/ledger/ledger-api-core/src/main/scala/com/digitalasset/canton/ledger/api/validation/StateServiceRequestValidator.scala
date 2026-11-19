@@ -3,13 +3,19 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
+import cats.instances.either.*
+import cats.instances.seq.*
+import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.state_service
+import com.daml.ledger.api.v2.state_service.HostedPartiesFilter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.api.messages.state
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
+import com.digitalasset.canton.ledger.participant.state.index.IndexerHostedPartyFilter
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.StatusRuntimeException
 
 object StateServiceRequestValidator {
@@ -46,6 +52,36 @@ object StateServiceRequestValidator {
     recordTime = recordTimeParsed,
     synchronizerId = parsedSynchronizerId,
   )
+
+  def validateHostedPartiesFilter(
+      filter: Option[HostedPartiesFilter]
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+  ): Result[IndexerHostedPartyFilter] = {
+    val requested = filter.getOrElse(HostedPartiesFilter.defaultInstance)
+    val limits = sizeLimitsConfig.publicLapiSizeConfig.hostedPartiesFilter
+    for {
+      _ <- validateCardinality(
+        values = requested.partyFilter,
+        fieldName = "party_filter",
+        limit = limits.partyFilterSizeLimit,
+      )
+      _ <- validateCardinality(
+        values = requested.synchronizerIdFilter,
+        fieldName = "synchronizer_id_filter",
+        limit = limits.synchronizerIdFilterSizeLimit,
+      )
+      parties <- requireParties(requested.partyFilter.toSet)
+      synchronizerIds <- requested.synchronizerIdFilter.traverse(
+        requireSynchronizerId(_, "synchronizer_id_filter")
+      )
+    } yield IndexerHostedPartyFilter(
+      NonEmpty.from(parties),
+      requested.allParticipants,
+      NonEmpty.from(synchronizerIds.toSet),
+    )
+  }
 
   private def resolveLastRecordTimeForSynchronizer(
       synchronizerId: SynchronizerId,

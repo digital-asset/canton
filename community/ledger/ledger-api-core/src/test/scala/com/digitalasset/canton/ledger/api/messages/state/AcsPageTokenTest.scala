@@ -29,6 +29,7 @@ class AcsPageTokenTest extends AnyWordSpec with SizeLimitTestUtils {
     filtersByParty = Map("party" -> Filters(Nil)),
     filtersForAnyParty = None,
     verbose = false,
+    filtersByContractId = Seq.empty,
   )
   private val originalActiveAt = 100L
   private val originalRequest =
@@ -41,7 +42,7 @@ class AcsPageTokenTest extends AnyWordSpec with SizeLimitTestUtils {
     )
   private val participantId = Ref.ParticipantId.assertFromString("Ledger")
   private val originalContinuationToken =
-    AcsContinuationToken.activeContracts(42, AcsContinuationToken.emptyChecksum)
+    AcsContinuationToken.activeContracts(42, PageTokenUtils.emptyChecksum)
   private val originalToken = AcsPageToken.encode(
     originalRequest,
     originalContinuationToken,

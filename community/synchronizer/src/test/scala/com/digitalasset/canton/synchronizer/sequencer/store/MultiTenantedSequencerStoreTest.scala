@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.store
 
-import cats.syntax.either.*
 import cats.syntax.option.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.data.CantonTimestamp
@@ -69,30 +68,6 @@ trait MultiTenantedSequencerStoreTest
     def assertTimestamps(events: ReadEvents)(epochSeconds: Int*): Assertion = {
       events.events.length shouldBe epochSeconds.length
       events.events.map(_.timestamp) should contain theSameElementsInOrderAs epochSeconds.map(ts)
-    }
-
-    "checking sequencer liveness" should {
-      "knock stale sequencers offline" in {
-        val store = mk()
-        val sequencer0 = mkInstanceStore(0, store)
-        val sequencer1 = mkInstanceStore(1, store)
-        val sequencer2 = mkInstanceStore(2, store)
-        for {
-          _ <- sequencer0.saveWatermark(ts(5)).valueOrFail("saveWatermark0")
-          _ <- sequencer1.saveWatermark(ts(10)).valueOrFail("saveWatermark1")
-          _ <- sequencer2.saveWatermark(ts(15)).valueOrFail("saveWatermark2")
-          _ <- store.markLaggingSequencersOffline(ts(10))
-          s0Update <- sequencer0.saveWatermark(ts(25)).value
-          s1Update <- sequencer1.saveWatermark(ts(25)).value
-          s2Update <- sequencer2.saveWatermark(ts(25)).value
-        } yield {
-          // s0 & s1 should both be offline so the watermark update should have failed
-          // s2 should be online so shouldn't have returned an error
-          s0Update.left.value shouldBe SaveWatermarkError.WatermarkFlaggedOffline
-          s1Update.left.value shouldBe SaveWatermarkError.WatermarkFlaggedOffline
-          s2Update shouldBe Either.unit
-        }
-      }
     }
 
     "reading events" should {
@@ -161,7 +136,7 @@ trait MultiTenantedSequencerStoreTest
           // so despite a bunch of later events because s1 is last has a watermark at ts(3) we won't see any later events
           _ = assertTimestamps(eventsBefore)(1, 2, 3)
           // mark s1 as offline
-          _ <- store.markLaggingSequencersOffline(ts(3))
+          _ <- sequencer1.goOffline()
           eventsAfter <- store
             .readEvents(aliceId, alice, aliceRegisteredFrom, fromExclusiveO = ts(0).some, 10)
         } yield {
@@ -239,7 +214,9 @@ trait MultiTenantedSequencerStoreTest
           _ <- sequencer2.saveWatermark(ts(3)).valueOrFail("saveWatermark2")
           _ <- sequencer3.saveWatermark(ts(3)).valueOrFail("saveWatermark3")
           // mark all sequencers as offline
-          _ <- store.markLaggingSequencersOffline(ts(3))
+          _ <- sequencer1.goOffline()
+          _ <- sequencer2.goOffline()
+          _ <- sequencer3.goOffline()
           readEvents <- store.readEvents(
             aliceId,
             alice,
@@ -261,7 +238,12 @@ trait MultiTenantedSequencerStoreTest
         _ <- sequencer.saveWatermark(ts(10)).valueOrFail("saveWatermark")
         _ <- sequencer.goOffline()
         watermarkO <- sequencer.fetchWatermark()
-      } yield watermarkO.value shouldBe Watermark(ts(10), online = false)
+        updateWhileOffline <- sequencer.saveWatermark(ts(20)).value
+      } yield {
+        watermarkO.value shouldBe Watermark(ts(10), online = false)
+        // an offline sequencer can't update its watermark
+        updateWhileOffline.left.value shouldBe SaveWatermarkError.WatermarkFlaggedOffline
+      }
     }
 
     "going online" should {

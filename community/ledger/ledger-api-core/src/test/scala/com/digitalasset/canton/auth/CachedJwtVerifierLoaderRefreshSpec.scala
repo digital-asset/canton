@@ -5,6 +5,7 @@ package com.digitalasset.canton.auth
 
 import com.daml.jwt.*
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressionRule.{LevelAndAbove, LoggerNameContains}
 import com.digitalasset.canton.util.{DelayUtil, ResourceUtil}
 import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext}
@@ -13,6 +14,7 @@ import org.apache.pekko.http.scaladsl.Http
 import org.apache.pekko.http.scaladsl.model.{ContentTypes, HttpEntity, StatusCodes}
 import org.apache.pekko.http.scaladsl.server.Directives.*
 import org.apache.pekko.http.scaladsl.server.Route
+import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 import org.slf4j.event.Level.WARN
 
@@ -30,8 +32,7 @@ class CachedJwtVerifierLoaderRefreshSpec
     with HasActorSystem {
 
   private val suppressExpectedRefreshWarnings =
-    LevelAndAbove(WARN) &&
-      (LoggerNameContains("CachedJwtVerifierLoader") || LoggerNameContains("BoundedLocalCache"))
+    LevelAndAbove(WARN) && LoggerNameContains("JwksCache")
 
   private val keySize = 2048
   private val kpg = KeyPairGenerator.getInstance("RSA")
@@ -76,6 +77,32 @@ class CachedJwtVerifierLoaderRefreshSpec
       autoRefreshAfter = autoRefreshTime,
       loggerFactory = loggerFactory,
     )
+
+  private def endServerOutage(
+      loader: CachedJwtVerifierLoader,
+      server: ControllableJwksServer,
+  ): Future[Unit] = {
+    server.serve()
+    val fetchesAtRecovery = server.fetchCount
+
+    def loadUntilNextFetch(deadline: Deadline): Future[Unit] =
+      if (server.fetchCount > fetchesAtRecovery) Future.unit
+      else if (deadline.isOverdue())
+        Future.failed(new IllegalStateException("No JWKS fetch after the outage ended"))
+      else
+        loader
+          .loadJwtVerifier(server.url, Some(keyId))
+          .transformWith(_ => DelayUtil.delay(50.milliseconds))
+          .flatMap(_ => loadUntilNextFetch(deadline))
+
+    loadUntilNextFetch(10.seconds.fromNow)
+  }
+
+  private def everyFailedFetchLoggedWarning(
+      warnings: Seq[LogEntry],
+      server: ControllableJwksServer,
+  ): Assertion =
+    warnings.size should be >= server.failedFetchCount
 
   "CachedJwtVerifierLoader with autoRefreshTime=0 (original logic)" should {
     "successfully load and verify when JWKS is available" in {
@@ -163,18 +190,12 @@ class CachedJwtVerifierLoaderRefreshSpec
               _ = verifier1.verify(token).isRight shouldBe true
               _ = jwksServer.fail()
               _ <- serveWhileRefreshFails(1.second.fromNow)
+              _ <- endServerOutage(loader, jwksServer)
             } yield succeed,
             assertion = entries => {
-              val loaderWarnings =
-                entries.filter(_.loggerName.contains("CachedJwtVerifierLoader"))
-              loaderWarnings should not be empty
-              forAll(loaderWarnings) { entry =>
-                val message = entry.warningMessage
-                message should (
-                  include("Failed to refresh jwt verifier") or
-                    include("Failed to load jwt verifier")
-                )
-              }
+              entries should not be empty
+              everyFailedFetchLoggedWarning(entries, jwksServer)
+              forAll(entries)(_.warningMessage should include("Failed to load jwt verifier"))
             },
           )
         }
@@ -219,18 +240,12 @@ class CachedJwtVerifierLoaderRefreshSpec
               _ = verifier1.verify(token).isRight shouldBe true
               _ = jwksServer.fail()
               failure <- loadUntilFailure(10.seconds.fromNow)
+              _ <- endServerOutage(loader, jwksServer)
             } yield failure shouldBe a[JwtException],
             assertion = entries => {
-              val loaderWarnings =
-                entries.filter(_.loggerName.contains("CachedJwtVerifierLoader"))
-              loaderWarnings should not be empty
-              forAll(loaderWarnings) { entry =>
-                val message = entry.warningMessage
-                message should (
-                  include("Failed to refresh jwt verifier") or
-                    include("Failed to load jwt verifier")
-                )
-              }
+              entries should not be empty
+              everyFailedFetchLoggedWarning(entries, jwksServer)
+              forAll(entries)(_.warningMessage should include("Failed to load jwt verifier"))
             },
           )
         }
@@ -244,6 +259,7 @@ private class ControllableJwksServer(jwksJson: String)(implicit system: ActorSys
   private val serving = new AtomicBoolean(true)
   private val currentJwks = new AtomicReference[String](jwksJson)
   private val fetches = new AtomicInteger(0)
+  private val failures = new AtomicInteger(0)
   private val held = new AtomicReference[Future[Unit]](Future.unit)
 
   private val route: Route = path("result") {
@@ -252,8 +268,10 @@ private class ControllableJwksServer(jwksJson: String)(implicit system: ActorSys
       onSuccess(held.get()) {
         if (serving.get())
           complete(HttpEntity(ContentTypes.`application/json`, currentJwks.get()))
-        else
+        else {
+          failures.incrementAndGet().discard
           complete(StatusCodes.ServiceUnavailable)
+        }
       }
     }
   }
@@ -285,6 +303,9 @@ private class ControllableJwksServer(jwksJson: String)(implicit system: ActorSys
 
   /** Number of JWKS requests received so far, including failed ones. */
   def fetchCount: Int = fetches.get()
+
+  /** Number of JWKS requests answered with an error. */
+  def failedFetchCount: Int = failures.get()
 
   override def close(): Unit = stop()
 }

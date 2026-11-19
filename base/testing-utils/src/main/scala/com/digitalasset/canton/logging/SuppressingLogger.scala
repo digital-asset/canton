@@ -649,17 +649,21 @@ object SuppressingLogger {
       )
     }
 
-  /** Lists criteria for log entries that are skipped during suppression in all test cases */
-  val skippedLogEntries: Seq[LogEntryCriterion] = Seq(
-    LogEntryCriterion(
-      WARN,
-      "com.digitalasset.canton.concurrent.ExecutionContextMonitor",
-      ("""(?s)Task runner .* is .* overloaded.*""").r,
-    )
-  )
+  private lazy val configuredAppender = RewritingAppender.configured()
 
-  def defaultSkipLogEntry(logEntry: LogEntry): Boolean =
-    skippedLogEntries.exists(_.matches(logEntry))
+  /** Skips log entries in all test cases that match a rewrite rule in `rewrite-appender.xml` marked
+    * with `<skipInSuppression>true</skipInSuppression>`.
+    */
+  private def defaultSkipLogEntry(logEntry: LogEntry): Boolean =
+    configuredAppender
+      .exists(
+        _.isSkippedInSuppression(
+          ch.qos.logback.classic.Level.toLevel(logEntry.level.toString),
+          logEntry.loggerName,
+          logEntry.message,
+          logEntry.throwable,
+        )
+      )
 
   sealed trait LogEntryOptionality extends Product with Serializable
   object LogEntryOptionality {

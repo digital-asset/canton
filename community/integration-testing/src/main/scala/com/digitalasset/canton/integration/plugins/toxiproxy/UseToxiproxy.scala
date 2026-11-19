@@ -51,7 +51,7 @@ final case class UseToxiproxy(toxiproxyConfig: ToxiproxyConfig)
   var toxiContainer: ToxiproxyContainer = _
 
   override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig = {
-    val ci = sys.env.contains("CI") && !sys.env.contains("MACHINE")
+    val ci = BaseTest.isRunningInCI && !sys.env.contains("MACHINE")
     setup(config, ci)
   }
 

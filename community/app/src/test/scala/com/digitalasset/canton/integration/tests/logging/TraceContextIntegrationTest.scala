@@ -56,6 +56,22 @@ abstract class TraceContextIntegrationTest extends CommunityIntegrationTest with
     }
   }
 
+  private def containTraceIdFor(traceId: String, substrings: String*) = new Matcher[Seq[LogEntry]] {
+    override def apply(left: Seq[LogEntry]): MatchResult = {
+      val allTraceIds = substrings.flatMap { substring =>
+        left
+          .filter(_.message.contains(substring))
+          .flatMap(_.mdc.get("trace-id"))
+      }.toSet
+      MatchResult(
+        allTraceIds.contains(traceId),
+        s"Expected trace-id $traceId in the log, but only found other trace-ids: ${allTraceIds
+            .mkString(", ")}",
+        "Log messages contain the expected trace-id",
+      )
+    }
+  }
+
   "propagate trace-ids set by ping service startup to ledger api" in { implicit env =>
     import env.*
 
@@ -73,10 +89,13 @@ abstract class TraceContextIntegrationTest extends CommunityIntegrationTest with
           "Loading admin workflows DAR",
           "PackageService/GetPackageStatus",
         )
-        logs should haveTheSameTraceIdFor(
-          "Creating admin workflow service admin-ping",
-          "StateService/GetLedgerEnd",
-        )
+        logs should haveTheSameTraceIdFor("Creating admin workflow service admin-ping")
+
+        val traceId = logs
+          .find(_.message.contains("Creating admin workflow service admin-ping"))
+          .flatMap(_.mdc.get("trace-id"))
+          .getOrElse(fail("No trace-id found for admin-ping creation log message"))
+        logs should containTraceIdFor(traceId, "StateService/GetLedgerEnd")
       },
     )
   }

@@ -44,9 +44,7 @@ service PackageService {
   // Enable vetting for all packages pertaining to a specific DAR
   rpc VetDar(VetDarRequest) returns (VetDarResponse);
 
-  // Revoke vetting for all packages pertaining to a specific DAR.
-  // NOTE:  Experimental operation for which expert-level knowledge is required.
-  //        Erroneous usage might result in the participant failing to process transactions.
+  // Revoke vetting for the main package or all packages pertaining to a specific DAR.
   rpc UnvetDar(UnvetDarRequest) returns (UnvetDarResponse);
 }
 
@@ -197,9 +195,25 @@ message VetDarResponse {}
 
 message UnvetDarRequest {
   string main_package_id = 1;
-  // the synchronizer on which to unvet the package.
-  // can be omitted if the participant is connected to only one synchronizer.
+  // The synchronizer on which to unvet the package.
+  // Can be omitted if the participant is connected to only one synchronizer.
   optional string synchronizer_id = 2;
+
+  enum UnvetScope {
+    UNVET_SCOPE_UNSPECIFIED = 0;
+    // Unvet only the main package of the DAR.
+    UNVET_SCOPE_MAIN_PACKAGE_ONLY = 1;
+    // Unvet all packages of the DAR, including dependencies.
+    //
+    // Note: Unvetting all package dependencies of a DAR is not safe
+    //       as a DAR's dependencies might be used by other DARs. Use with caution.
+    UNVET_SCOPE_ALL_DAR_PACKAGES = 2;
+  }
+
+  // Specifies which packages of the DAR to unvet.
+  //
+  // Optional. If not specified, defaults to UNVET_SCOPE_MAIN_PACKAGE_ONLY.
+  UnvetScope unvet_scope = 3;
 }
 
 message UnvetDarResponse {}

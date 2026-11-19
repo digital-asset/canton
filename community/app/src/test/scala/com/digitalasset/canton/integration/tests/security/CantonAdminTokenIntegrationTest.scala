@@ -285,7 +285,7 @@ class CantonAdminTokenFewPermissionsIntegrationTest extends CantonAdminTokenInte
         loggerFactory.assertThrowsAndLogs[CommandFailure](
           admin.ledger_api.parties.list(),
           _.warningMessage should include regex
-            """PERMISSION_DENIED\(7,.{8}\): Claims do not authorize the use of administrative services""".r,
+            """PERMISSION_DENIED\(7,.{8}\): Claims do not authorize parties:read methods of the Ledger API""".r,
           _.commandFailureMessage should include("PERMISSION_DENIED"),
         )
       }

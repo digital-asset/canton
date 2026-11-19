@@ -132,6 +132,13 @@ package api {
       filtersByParty: immutable.Map[Ref.Party, CumulativeFilter],
       filtersForAnyParty: Option[CumulativeFilter],
       verbose: Boolean,
+      filtersByContractId: Seq[ContractIdFilter],
+  )
+
+  final case class ContractIdFilter(
+      contractId: Lf.ContractId,
+      includeCreatedEventBlob: Boolean,
+      includeInterfaceViews: Seq[Ref.NameTypeConRef],
   )
 
   final case class InterfaceFilter(

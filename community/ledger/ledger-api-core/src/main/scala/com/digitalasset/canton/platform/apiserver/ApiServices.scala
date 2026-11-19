@@ -335,6 +335,7 @@ object ApiServices {
       val commandsValidator = new CommandsValidator(
         validateUpgradingPackageResolutions = validateUpgradingPackageResolutions,
         topologyAwarePackageSelectionEnabled = ledgerFeatures.topologyAwarePackageSelection,
+        minLedgerTimeMaxDelay = commandConfig.minLedgerTimeMaxDelay,
       )
       val commandSubmissionService =
         CommandSubmissionServiceImpl.createApiService(

@@ -8,6 +8,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.ConsoleEnvironment
+import com.digitalasset.canton.crypto.ValidatedPemCertificate
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
@@ -213,7 +214,7 @@ final case class SynchronizerConnectionConfig(
 
   def withCertificates(
       sequencerAlias: SequencerAlias,
-      certificates: ByteString,
+      certificates: ValidatedPemCertificate,
   ): SynchronizerConnectionConfig =
     copy(sequencerConnections = sequencerConnections.withCertificates(sequencerAlias, certificates))
 

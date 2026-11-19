@@ -9,16 +9,25 @@ import com.daml.ledger.api.v2.state_service.{
   GetActiveContractsResponse,
   StateServiceGrpc,
 }
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 
 import scala.concurrent.Future
 
-final class GetActiveContractsAuthIT extends SuperReaderServiceCallAuthTests {
+final class GetActiveContractsAuthIT
+    extends SuperReaderServiceCallAuthTests
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "StateService#GetActiveContracts"
+
+  override def apiAreaScopeBaseToken = standardToken(mainActorReadUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerRead.area) -> true,
+    List(ClaimApiArea.partiesAllocate.area) -> false,
+  )
 
   override def serviceCall(
       context: ServiceCallContext

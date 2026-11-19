@@ -7,6 +7,7 @@ import com.daml.ledger.api.v2.admin.user_management_service.{
   UpdateUserIdentityProviderIdRequest,
   UserManagementServiceGrpc,
 }
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 
@@ -15,11 +16,19 @@ import scala.concurrent.Future
 final class UpdateUserIdentityProviderIdAuthIT
     extends AdminServiceCallAuthTests
     with IdentityProviderConfigAuth
-    with UserManagementAuth {
+    with UserManagementAuth
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "UserManagementService#UpdateUserIdentityProviderId"
+
+  override def apiAreaScopeBaseToken = adminToken
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.usersWrite.area, ClaimApiArea.idpsWrite.area) -> true,
+    List(ClaimApiArea.usersWrite.area) -> false,
+    List(ClaimApiArea.idpsWrite.area) -> false,
+  )
 
   override def serviceCall(
       context: ServiceCallContext

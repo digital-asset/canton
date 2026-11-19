@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import io.grpc.Status.Code
@@ -12,12 +13,20 @@ import scala.concurrent.Future
 
 final class CreateIdentityProviderConfigAuthIT
     extends AdminServiceCallAuthTests
-    with IdentityProviderConfigAuth {
+    with IdentityProviderConfigAuth
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String =
     "IdentityProviderConfigService#CreateIdentityProviderConfig"
+
+  override def apiAreaScopeBaseToken = adminToken
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.idpsWrite.area) -> true,
+    List(ClaimApiArea.idpsRead.area) -> false,
+    List(ClaimApiArea.ledgerRead.area) -> false,
+  )
 
   override def serviceCall(context: ServiceCallContext)(implicit
       env: TestConsoleEnvironment

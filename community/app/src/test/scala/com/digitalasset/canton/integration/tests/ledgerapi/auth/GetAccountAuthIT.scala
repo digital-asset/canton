@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.admin.user_management_service as proto
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.{
   ConfigTransforms,
@@ -17,7 +18,9 @@ import monocle.Monocle.toAppliedFocusOps
 
 import scala.concurrent.Future
 
-final class GetAccountAuthIT extends SyncServiceCallAuthTests {
+final class GetAccountAuthIT
+    extends SyncServiceCallAuthTests
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
@@ -30,6 +33,14 @@ final class GetAccountAuthIT extends SyncServiceCallAuthTests {
 
   override def serviceCallName: String = "TrafficService#GetAccount"
 
+  override def apiAreaScopeBaseToken = standardToken(mainActorActUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.trafficSelf.area) -> true,
+    List(ClaimApiArea.ledgerRead.area) -> false,
+  )
+
+  // Admin currently has traffic:read permissions, which allows them to read all
+  // traffic accounts.
   override def denyCallsWithParticipantAdmin: Boolean = false
 
   override def serviceCall(
@@ -60,7 +71,9 @@ final class GetAccountAuthIT extends SyncServiceCallAuthTests {
       expectSuccess(
         serviceCallWithMainActorUser(
           "debit1",
-          proto.Right.Kind.CanDebitTrafficFrom(proto.Right.CanDebitTrafficFrom(getMainActorId)),
+          Vector(
+            proto.Right.Kind.CanDebitTrafficFrom(proto.Right.CanDebitTrafficFrom(getMainActorId))
+          ),
         )
       )
     }
@@ -72,7 +85,9 @@ final class GetAccountAuthIT extends SyncServiceCallAuthTests {
       expectPermissionDenied(
         serviceCallWithMainActorUser(
           "debit2",
-          proto.Right.Kind.CanDebitTrafficFrom(proto.Right.CanDebitTrafficFrom("acme/billing")),
+          Vector(
+            proto.Right.Kind.CanDebitTrafficFrom(proto.Right.CanDebitTrafficFrom("acme/billing"))
+          ),
         )
       )
     }
@@ -84,8 +99,10 @@ final class GetAccountAuthIT extends SyncServiceCallAuthTests {
       expectSuccess(
         serviceCallWithMainActorUser(
           "debit3",
-          proto.Right.Kind.CanDebitTrafficFromAnyAccount(
-            proto.Right.CanDebitTrafficFromAnyAccount()
+          Vector(
+            proto.Right.Kind.CanDebitTrafficFromAnyAccount(
+              proto.Right.CanDebitTrafficFromAnyAccount()
+            )
           ),
         )
       )

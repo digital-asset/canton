@@ -221,6 +221,18 @@ private[decrypter] class ViewMessageDecrypterImplV1(
 
       viewTrees = lightTransactionMultiViewTree.viewTrees
 
+      // From the protocol versions above v37, an honest sender emits one view hash per view tree,
+      // so a mismatch is a malformed message.
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        protocolVersion <= ProtocolVersion.v37 ||
+          viewTrees.sizeCompare(encryptedViewMessage.viewHashes) == 0,
+        (),
+        EncryptedViewMessageError.ViewHashesLengthMismatch(
+          numViewTrees = viewTrees.size,
+          numViewHashes = encryptedViewMessage.viewHashes.size,
+        ): EncryptedViewMessageError,
+      )
+
       _ = viewTrees.forgetNE.foreach { viewTree =>
         viewTree.subviewReferencesAndKeys
           .foreach {

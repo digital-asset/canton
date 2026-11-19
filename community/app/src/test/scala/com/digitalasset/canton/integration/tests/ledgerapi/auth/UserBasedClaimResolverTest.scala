@@ -4,7 +4,7 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
-import com.digitalasset.canton.auth.{ClaimPublic, ClaimSet, UserBasedClaimResolver}
+import com.digitalasset.canton.auth.{ClaimApiArea, ClaimSet, UserBasedClaimResolver}
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.user.store.UserManagementStore
@@ -40,12 +40,12 @@ class UserBasedClaimResolverTest extends CantonFixture with Matchers with Securi
       )
 
       val claims = userBasedClaimResolver(
-        ClaimSet.AuthenticatedUser(None, "potato", Some("participant1"), None)
+        ClaimSet.AuthenticatedUser(None, "potato", Some("participant1"), None, Seq())
       ).futureValue
 
       claims shouldBe
         ClaimSet.Claims(
-          claims = List(ClaimPublic), // No IDP admin claim
+          claims = ClaimApiArea.user, // No IDP admin claim
           participantId = Some("participant1"),
           userId = Some("potato"),
           expiration = None,

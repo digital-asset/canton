@@ -37,9 +37,22 @@ runs:
         GCLOUD_SHEETS_SA_KEY: ${{ inputs.gcloud_sheets_sa_key }}
         FAILED_JOB: ${{ inputs.failed_job }}
       run: |
-        SELECTED_VOLUNTEER=$(.ci/nix-exec python3 scripts/ci/select_rota.py --job "$FAILED_JOB")
+        RC=0
+        SELECTED_VOLUNTEER=$(.ci/nix-exec python3 scripts/ci/select_rota.py --job "$FAILED_JOB" 2> "$RUNNER_TEMP/select_rota.err") || RC=$?
+        cat "$RUNNER_TEMP/select_rota.err" >&2
+        if [ "$RC" -ne 0 ]
+        then
+          exit "$RC"
+        fi
         echo "$SELECTED_VOLUNTEER"
         echo "volunteer=${SELECTED_VOLUNTEER}" >> $GITHUB_OUTPUT
+        # On-rota names missing from the roster (ROSTER_MISS_PREFIX in select_rota.py),
+        # shown in the alert since those people are silently not pinged.
+        {
+          echo "roster_misses<<ROSTER_MISSES_EOF"
+          sed -n 's/^roster-miss: //p' "$RUNNER_TEMP/select_rota.err" | awk '!seen[$0]++'
+          echo "ROSTER_MISSES_EOF"
+        } >> $GITHUB_OUTPUT
       shell: bash
 
     - name: Check allowed branch
@@ -57,6 +70,7 @@ runs:
         REF_NAME: ${{ steps.resolve_ref.outputs.resolved_ref }}
         REF_KIND: ${{ steps.resolve_ref.outputs.ref_kind }}
         VOLUNTEER: ${{ steps.choose_volunteer.outputs.volunteer }}
+        ROSTER_MISSES: ${{ steps.choose_volunteer.outputs.roster_misses }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
       run: |
         KIND=branch
@@ -74,6 +88,13 @@ runs:
         do
           TEXT="$TEXT <@$ID>"
         done
+        while IFS= read -r MISS
+        do
+          if [ -n "$MISS" ]
+          then
+            TEXT="$TEXT"$'\n'":warning: $MISS"
+          fi
+        done <<< "$ROSTER_MISSES"
         # Build the payload with jq so the text is JSON-escaped, the job name can
         # contain quotes or other special characters without breaking the payload.
         PAYLOAD=$(jq -cn --arg text "$TEXT" '{text: $text}')

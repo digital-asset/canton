@@ -109,6 +109,7 @@ object ContractKeysExplicitDisclosureIT {
           ),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         )
       ),
       transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

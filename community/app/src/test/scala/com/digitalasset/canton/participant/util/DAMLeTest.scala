@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, ExternalCallReplayData}
 import com.digitalasset.canton.examples.java.cycle.Cycle
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.protocol.EngineController.{
   EngineAbortStatus,
   GetEngineAbortStatus,
@@ -37,6 +37,7 @@ import com.digitalasset.daml.lf.engine
 import com.digitalasset.daml.lf.engine.EngineLoggingConfig
 import com.digitalasset.daml.lf.language.Ast
 import org.scalatest.wordspec.AsyncWordSpec
+import org.slf4j.event.Level
 
 class DAMLeTest
     extends AsyncWordSpec
@@ -172,7 +173,9 @@ class DAMLeTest
 
       val expected = "test execution aborted"
 
-      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+      loggerFactory.assertLogsSeq(
+        SuppressionRule.forLogger[DAMLe] && SuppressionRule.Level(Level.INFO)
+      )(
         reinterpret(
           submitters = submitters,
           command = replayCreate,
@@ -182,7 +185,7 @@ class DAMLeTest
         LogEntry.assertLogSeq(
           mustContainWithClue = Seq(
             (
-              _.warningMessage should include(s"Aborting engine computation, reason = $expected"),
+              _.infoMessage should include(s"Aborting engine computation, reason = $expected"),
               "engine gets aborted",
             )
           )

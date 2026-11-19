@@ -14,7 +14,17 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ViewNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.ViewChange
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
+  CommitCertificate,
+  ConsensusCertificate,
+  PrepareCertificate,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.{
+  NewView,
+  PrePrepare,
+  ViewChange,
+}
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 import org.slf4j.event.Level.{INFO, WARN}
 
@@ -175,7 +185,7 @@ class PbftViewChangeStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         nv.prePrepares should have size slotNumbers.size.toLong
       }
 
-      "produce a New View with the highest-view PrePrepare (w/ valid cert) for each slot" in {
+      "produce a New View with the highest-view prepare certificate for each slot" in {
         val systemState = new SystemState(
           Seq(
             Map(BlockNumber.First -> ViewNumber.First, 4L -> 1L, 8L -> 2L),
@@ -204,7 +214,7 @@ class PbftViewChangeStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         prePrepares should have size slotNumbers.size.toLong
       }
 
-      "produce a New View with highest-view PrePrepare for each slot, including bottom blocks" in {
+      "produce a New View with the highest-view prepare certificate for each slot, including bottom blocks" in {
         val systemState = new SystemState(
           Seq(
             Map(BlockNumber.First -> ViewNumber.First, 4L -> 1),
@@ -234,6 +244,81 @@ class PbftViewChangeStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           myId -> 3,
         )
         prePrepares should have size slotNumbers.size.toLong
+      }
+
+      Seq(false, true).foreach { useCommitCertificates =>
+        val certificateType = if (useCommitCertificates) "commit" else "prepare"
+
+        s"select the $certificateType certificate using the protocol-version-specific rule when" +
+          "pre-prepare views disagree" in {
+            val nextView = ViewNumber(3L)
+            val vcState = new PbftViewChangeState(
+              fullMembership,
+              leader = myId,
+              view = nextView,
+              slotNumbers,
+              metrics,
+              loggerFactory,
+            )
+            val carriedPrePrepare = createPrePrepare(BlockNumber.First, 0L, otherId1)
+            val laterOriginPrePrepare = createPrePrepare(BlockNumber.First, 1L, otherId2)
+            val voters = allIds.take(fullMembership.orderingTopology.strongQuorum)
+
+            def certificate(
+                prePrepare: SignedMessage[PrePrepare],
+                votingView: Long,
+            ): ConsensusCertificate =
+              if (useCommitCertificates)
+                CommitCertificate(
+                  prePrepare,
+                  voters.map(
+                    createCommit(BlockNumber.First, votingView, _, prePrepare.message.hash)
+                  ),
+                )
+              else
+                PrepareCertificate(
+                  prePrepare,
+                  voters.map(
+                    createPrepare(BlockNumber.First, votingView, _, prePrepare.message.hash)
+                  ),
+                )
+
+            val newerCertificate = certificate(carriedPrePrepare, 2L)
+            val olderCertificate = certificate(laterOriginPrePrepare, 1L)
+            val viewChanges =
+              voters.zip(Seq(newerCertificate, newerCertificate, olderCertificate)).map {
+                case (node, cert) =>
+                  ViewChange.create(blockMetaData, nextView, Seq(cert), node).fakeSign
+              }
+            viewChanges.foreach(vcState.processMessage)
+            vcState.shouldCreateNewView shouldBe true
+
+            val prePrepares = vcState.constructPrePreparesForNewView(blockMetaData).map {
+              case Right(signed) => signed
+              case Left(toSign) => toSign.fakeSign
+            }
+            val expectedCertificate =
+              if (synchronizerProtocolVersion > ProtocolVersion.v37) newerCertificate
+              else olderCertificate
+            prePrepares.head shouldBe expectedCertificate.prePrepare
+            val newView = vcState.createNewViewMessage(blockMetaData, prePrepares, fail(_))
+            newView.computedCertificatePerBlock.apply(
+              BlockNumber.First
+            ) shouldBe expectedCertificate
+          }
+      }
+
+      "prefer a commit certificate over a prepare certificate from a higher voting view" in {
+        val commitCertificate = createCommitCertificate(BlockNumber.First, 0L, otherId1)
+        val prepareCertificate = createPrepareCertificate(BlockNumber.First, 2L, otherId3)
+        val viewChanges = Seq(
+          ViewChange.create(blockMetaData, ViewNumber(3L), Seq(commitCertificate), otherId1),
+          ViewChange.create(blockMetaData, ViewNumber(3L), Seq(prepareCertificate), otherId2),
+        )
+
+        NewView.computeCertificatePerBlock(viewChanges) shouldBe Map(
+          BlockNumber.First -> commitCertificate
+        )
       }
 
       "produce a New View with the same set of ViewChange messages used to SignPrePrepares" in {

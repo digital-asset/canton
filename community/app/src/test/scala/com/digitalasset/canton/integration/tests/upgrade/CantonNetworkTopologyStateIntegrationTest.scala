@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrade
 
 import better.files.File
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
 import com.digitalasset.canton.config.{BatchAggregatorConfig, TopologyConfig}
@@ -159,7 +160,7 @@ final class CantonNetworkTopologyStateIntegrationTest
 
   private val enablePostgres = true
   private val toxiProxyLatency = 0 // in ms, 0 to disable
-  private val timeout = if (sys.env.contains("CI")) 5.minutes else 30.seconds
+  private val timeout = if (BaseTest.isRunningInCI) 5.minutes else 30.seconds
 
   private val participant1Proxy = "participant1-to-postgres"
   // using toxi-proxy to simulate database latency

@@ -47,6 +47,13 @@ object ValidationErrors {
       .Reject()
       .asGrpcError
 
+  def invalidHostedPartiesContinuationToken(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): StatusRuntimeException =
+    RequestValidationErrors.InvalidHostedPartiesContinuationToken
+      .Reject()
+      .asGrpcError
+
   def invalidAcsPageToken(
       message: String
   )(implicit errorLoggingContext: ErrorLoggingContext): StatusRuntimeException =

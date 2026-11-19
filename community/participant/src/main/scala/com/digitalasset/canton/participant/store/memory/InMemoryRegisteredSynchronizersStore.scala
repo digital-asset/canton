@@ -14,6 +14,7 @@ import com.digitalasset.canton.participant.store.RegisteredSynchronizersStore
 import com.digitalasset.canton.participant.store.SynchronizerAliasAndIdStore.{
   Error,
   InconsistentLogicalSynchronizerIds,
+  LogicalSynchronizerIdAlreadyAdded,
   SynchronizerIdAlreadyAdded,
 }
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -49,6 +50,12 @@ class InMemoryRegisteredSynchronizersStore(
           case (existingAlias, psids) if psids.contains(psid) => existingAlias
         }
 
+        val otherAliasForLsidO = synchronizerAliasToIds.collectFirst {
+          case (existingAlias, psids)
+              if existingAlias != alias && psids.exists(_.logical == psid.logical) =>
+            existingAlias
+        }
+
         for {
           _ <- inconsistentIdO
             .map(InconsistentLogicalSynchronizerIds(alias, psid, _))
@@ -61,6 +68,10 @@ class InMemoryRegisteredSynchronizersStore(
               SynchronizerIdAlreadyAdded(psid, existingAlias),
             )
           )
+
+          _ <- otherAliasForLsidO
+            .map(LogicalSynchronizerIdAlreadyAdded(psid, alias, _))
+            .toLeft(())
         } yield {
           synchronizerAliasToIds
             .updateWith(alias) {

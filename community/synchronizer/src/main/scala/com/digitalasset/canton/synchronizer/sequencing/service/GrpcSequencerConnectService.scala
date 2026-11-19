@@ -169,7 +169,7 @@ class GrpcSequencerConnectService(
             request.clientProtocolVersions,
             "client_protocol_versions",
             pvv,
-            ValidationParam(ProtocolVersion.v36 -> sequencerLimits.maxClientProtocolVersions),
+            ValidationParam(ProtocolVersion.minimum -> sequencerLimits.maxClientProtocolVersions),
           )
           .leftMap(err => invalidArgument(err.message))
         clientVersion <- ProtoValidation
@@ -309,7 +309,7 @@ class GrpcSequencerConnectService(
             topologyTransactions,
             "topology_transactions",
             pvv,
-            ValidationParam(ProtocolVersion.v36 -> maxOnboardingTransactions),
+            ValidationParam(ProtocolVersion.minimum -> maxOnboardingTransactions),
           )((tx, _) =>
             SignedTopologyTransaction.fromProtoV30(
               pvv,

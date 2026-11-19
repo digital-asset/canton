@@ -4,17 +4,26 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.state_service.{GetConnectedSynchronizersRequest, StateServiceGrpc}
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 
 import scala.concurrent.Future
 
 final class GetConnectedSynchronizersAuthIT
-    extends AdminOrIdpAdminOrOperateAsPartyServiceCallAuthTests {
+    extends AdminOrIdpAdminOrOperateAsPartyServiceCallAuthTests
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "StateService#GetConnectedSynchronizers"
+
+  override def apiAreaScopeBaseToken = standardToken(mainActorReadUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.partiesAllocate.area) -> true,
+    List(ClaimApiArea.partiesSelf.area) -> true,
+    List(ClaimApiArea.baseRead.area) -> false,
+  )
 
   private def request(party: String, identityProviderId: String)(implicit
       env: TestConsoleEnvironment

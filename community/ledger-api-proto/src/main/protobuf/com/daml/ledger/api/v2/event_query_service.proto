@@ -36,6 +36,8 @@ service EventQueryService {
   // No events will be returned for contracts that have been pruned because they
   // have already been archived before the latest pruning offset.
   // If the contract cannot be found for the request, or all the contract-events are filtered, a CONTRACT_EVENTS_NOT_FOUND error will be raised.
+  //
+  // Required permissions: ``ledger:read`` and ``readAs`` for the relevant parties
   rpc GetEventsByContractId(GetEventsByContractIdRequest) returns (GetEventsByContractIdResponse);
 }
 

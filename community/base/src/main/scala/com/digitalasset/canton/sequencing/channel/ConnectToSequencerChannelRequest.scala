@@ -44,7 +44,7 @@ object ConnectToSequencerChannelRequest
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(-1) -> UnsupportedProtoCodec(),
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.dev)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.sequencerChannel)(
       v30.ConnectToSequencerChannelRequest
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),

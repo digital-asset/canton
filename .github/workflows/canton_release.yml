@@ -22,7 +22,9 @@ jobs:
     steps:
       - name: Fail if RELEASE_REPOSITORY is unset
         run: |
-          echo "::error::Set the RELEASE_REPOSITORY repository variable to the repo that publishes releases, with the same value in DACH-NY/canton and digital-asset/canton."
+          msg="Set the RELEASE_REPOSITORY repository variable to the repo that publishes releases,"
+          msg+=" with the same value in DACH-NY/canton and digital-asset/canton."
+          echo "::error::$msg"
           exit 1
 
   pick_runner:

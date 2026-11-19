@@ -9,7 +9,6 @@ import cats.syntax.functor.*
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -51,15 +50,6 @@ import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
-
-object TotalNodeCountValues {
-  val SingleSequencerTotalNodeCount: PositiveInt = PositiveInt.tryCreate(1)
-
-  /** We need to allocate a range of available DbLockCounters so need to specify a maximum number of
-    * sequencer writers that can concurrently exist.
-    */
-  val MaxNodeCount = 32
-}
 
 /** Create instances for a [[sequencer.store.SequencerWriterStore]] and a predicate to know whether
   * we can recreate a sequencer writer on failures encountered potentially during storage.
@@ -325,7 +315,7 @@ class SequencerWriter(
   private def runRecovery(
       store: SequencerWriterStore,
       resetWatermarkTo: ResetWatermark,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[CantonTimestamp] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
       pastWatermarkO <- store.deleteEventsPastWatermark()
       _ <- resetWatermarkTo match {
@@ -348,10 +338,8 @@ class SequencerWriter(
           // the default value ensures that we are not ahead of BlockSequencer's timestamps, when rehydrating
           pastWatermarkO.getOrElse(CantonTimestamp.MinValue)
       }
-      onlineTimestamp <- store.goOnline(
-        goOnlineAt
-      ) // actual online timestamp depends on other instances
-    } yield onlineTimestamp
+      _ <- store.goOnline(goOnlineAt)
+    } yield ()
 
   private def startWriter(
       store: SequencerWriterStore
@@ -464,7 +452,6 @@ object SequencerWriter {
   def apply(
       writerConfig: SequencerWriterConfig,
       writerStorageFactory: SequencerWriterStoreFactory,
-      totalNodeCount: PositiveInt,
       keepAliveInterval: Option[NonNegativeFiniteDuration],
       processingTimeout: ProcessingTimeout,
       storage: Storage,
@@ -490,7 +477,6 @@ object SequencerWriter {
       )(implicit traceContext: TraceContext): RunningSequencerWriterFlow = {
         val runnableGraph = SequencerWriterSource(
           writerConfig,
-          totalNodeCount,
           keepAliveInterval,
           store,
           clock,

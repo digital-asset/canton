@@ -71,8 +71,7 @@ object DbLockCounters {
   val INDEXER_WORKER = DbLockCounter(3)
   val SEQUENCER_INIT = DbLockCounter(4)
 
-  val SEQUENCER_WRITERS_MAIN: Array[DbLockCounter] =
-    DbLockCounters.range(5, DbLockConfig.MAX_SEQUENCER_WRITERS_AVAILABLE)
+  // Counters 5-36 were used by the sequencer writers and are no longer used
   val NODE_MIGRATIONS = DbLockCounter(37)
   val MEDIATOR_WRITE = DbLockCounter(38)
 
@@ -80,8 +79,7 @@ object DbLockCounters {
   val PARTICIPANT_WRITERS = DbLockCounter(39)
   val MEDIATOR_WRITERS = DbLockCounter(40)
 
-  val SEQUENCER_WRITERS_POOL: Array[DbLockCounter] =
-    DbLockCounters.range(41, DbLockConfig.MAX_SEQUENCER_WRITERS_AVAILABLE)
+  // Counters 41-73 were used by the sequencer writers and are no longer used
 
   val SEQUENCER_PRUNING_SCHEDULER_WRITE = DbLockCounter(74)
   val SEQUENCER_PRUNING_SCHEDULER_WRITERS = DbLockCounter(75)
@@ -91,12 +89,6 @@ object DbLockCounters {
   // First counter used for testing purposes
   // This and all subsequent counters are reserved for testing.
   val FIRST_TESTING = 77
-
-  private def range(startLockCounter: Int, num: Int): Array[DbLockCounter] = {
-    require(num > 0, "must create at least one lock counter")
-
-    startLockCounter.until(startLockCounter + num).map(DbLockCounter(_)).toArray
-  }
 }
 
 /** Common Wrapper for DB lock identifier

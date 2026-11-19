@@ -82,7 +82,7 @@ object Recipients extends PrettyPrintingCompanion[Recipients] {
           proto.recipientsTree,
           "recipients_tree",
           pvv,
-          ValidationParam(ProtocolVersion.v36 -> maxRecipientsTrees),
+          ValidationParam(ProtocolVersion.minimum -> maxRecipientsTrees),
         )((element, _) => RecipientsTree.fromProtoV30(pvv, synchronizerLimits, element))
       recipientsNonEmpty <- NonEmpty
         .from(trees)

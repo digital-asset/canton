@@ -4,16 +4,26 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.admin.user_management_service.ListUsersRequest
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 
 import scala.concurrent.Future
 
-final class ListUsersAuthIT extends AdminOrIDPAdminServiceCallAuthTests with UserManagementAuth {
+final class ListUsersAuthIT
+    extends AdminOrIDPAdminServiceCallAuthTests
+    with UserManagementAuth
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "UserManagementService#ListUsers"
+
+  override def apiAreaScopeBaseToken = adminToken
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.usersRead.area) -> true,
+    List(ClaimApiArea.ledgerRead.area) -> false,
+  )
 
   override def serviceCall(context: ServiceCallContext)(implicit
       env: TestConsoleEnvironment

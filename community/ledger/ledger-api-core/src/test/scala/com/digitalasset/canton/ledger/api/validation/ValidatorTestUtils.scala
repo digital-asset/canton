@@ -4,6 +4,7 @@
 package com.digitalasset.canton.ledger.api.validation
 
 import com.daml.grpc.GrpcStatus
+import com.daml.ledger.api.v2.transaction_filter.ContractIdFilter as ProtoContractIdFilter
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.messages.update
 import com.digitalasset.canton.ledger.api.{CumulativeFilter, InterfaceFilter, TemplateFilter}
@@ -43,6 +44,13 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues with Eit
   protected val updateId = TestUpdateId("42")
   protected val ledgerEnd = Some(Offset.tryFromLong(1000))
   protected val contractId = ContractId.V1.assertFromString("00" * 32 + "0001")
+  protected val protoContractIdFilters = Seq(
+    ProtoContractIdFilter(
+      contractId = contractId.coid,
+      includeCreatedEventBlob = false,
+      includeInterfaceViews = Seq.empty,
+    )
+  )
   protected val moduleName = Ref.ModuleName.assertFromString(includedModule)
   protected val dottedName = Ref.DottedName.assertFromString(includedTemplate)
   protected val refTemplateId = Ref.Identifier(packageId, templateQualifiedName)
@@ -103,7 +111,17 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues with Eit
       request = request,
       code = Code.INVALID_ARGUMENT,
       description =
-        "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: filtersByParty and filtersForAnyParty cannot be empty simultaneously",
+        "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: filtersByParty, filtersForAnyParty and filtersByContractId cannot be empty simultaneously",
+    )
+
+  protected def mustRejectContractIdFilters(
+      request: Either[StatusRuntimeException, ?]
+  ): Assertion =
+    requestMustFailWith(
+      request = request,
+      code = Code.INVALID_ARGUMENT,
+      description =
+        "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: filtersByContractId not allowed for this type of request",
     )
 
   protected def isError(

@@ -89,7 +89,7 @@ object AcsCommitmentSummary
   override def name: String = "AcsCommitmentSummary"
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.AcsCommitmentSummary)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(v32.AcsCommitmentSummary)(
       supportedProtoVersionMemoizedPVV(_)(AcsCommitmentSummary.fromProtoV32),
       _.toProtoV32,
     )

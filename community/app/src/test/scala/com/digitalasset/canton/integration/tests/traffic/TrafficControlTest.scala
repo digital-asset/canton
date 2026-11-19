@@ -231,7 +231,10 @@ trait TrafficControlTest
       // We also need to load the vetted admin packages ahead of time otherwise P4 will try to do it upon connection
       val vettedPackages = VettedPackages.tryCreate(
         participant4.id,
-        VettedPackage.unbounded(AdminWorkflowServices.PingPackages.keys.toSeq),
+        VettedPackage.unbounded(
+          (AdminWorkflowServices.PingPackages.keys.toSeq ++
+            AdminWorkflowServices.AcsReplicationPackages.keys.toSeq).distinct
+        ),
       )
       val vettedPackagesTx = TopologyTransaction.tryCreate(
         op = Replace,
@@ -872,7 +875,11 @@ trait TrafficControlTest
     } yield {
       clue(s"check ${part.id} traffic state on ${seq.id}") {
         val trafficStatus = seq.underlying.value.sequencer.sequencer
-          .trafficStatus(Seq(part.id), TimestampSelector.LatestApproximate)
+          .trafficStatus(
+            Seq(part.id),
+            TimestampSelector.LatestApproximate,
+            includeOnboardingMembers = false,
+          )
           .futureValueUS
           .valueOrFail("failed to get traffic status")
         trafficStatus.trafficStates.get(part.id).value.baseTrafficRemainder.value should

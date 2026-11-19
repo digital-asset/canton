@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.transaction_filter.*
 import com.daml.ledger.api.v2.update_service.{GetUpdatesPageRequest, UpdateServiceGrpc}
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 
@@ -12,11 +13,18 @@ import scala.concurrent.Future
 
 final class GetUpdatesPageAuthIT
     extends ReadOnlyServiceCallAuthTests
-    with UpdateFormatAuthTestCases {
+    with UpdateFormatAuthTestCases
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "UpdateService#GetUpdatesPage"
+
+  override def apiAreaScopeBaseToken = standardToken(mainActorReadUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerRead.area) -> true,
+    List(ClaimApiArea.partiesAllocate.area) -> false,
+  )
 
   private def request(updateFormat: Option[UpdateFormat]) =
     new GetUpdatesPageRequest(

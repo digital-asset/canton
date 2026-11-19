@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
 import com.digitalasset.base.error.RpcError
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.{
   ListVettedPackagesOpts,
   ParticipantVettedPackages,
@@ -30,6 +31,7 @@ import com.digitalasset.canton.{LfPackageId, config}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.nonempty.NonEmpty
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.ExecutionContext
 
 class PackageOpsForTesting(
@@ -38,6 +40,12 @@ class PackageOpsForTesting(
 )(implicit
     ec: ExecutionContext
 ) extends PackageOps {
+
+  private val revokeVettingCallsRef =
+    new AtomicReference[Seq[PackageOpsForTesting.RevokeVettingCall]](Seq.empty)
+
+  /** All the calls to [[revokeVettingForPackages]] recorded in invocation order. */
+  def revokeVettingCalls: Seq[PackageOpsForTesting.RevokeVettingCall] = revokeVettingCallsRef.get()
 
   override def synchronizersWithVettedPackageEntry(packageIds: Set[PackageId])(implicit
       tc: TraceContext
@@ -52,13 +60,25 @@ class PackageOpsForTesting(
     EitherT.rightT(())
 
   override def revokeVettingForPackages(
-      packages: List[LfPackageId],
+      packages: Seq[LfPackageId],
       darDescriptor: PackageService.DarDescription,
       psid: PhysicalSynchronizerId,
       forceFlags: ForceFlags,
       waitToBecomeEffective: Option[config.NonNegativeFiniteDuration],
-  )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+  )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, RpcError, Unit] = {
+    revokeVettingCallsRef
+      .updateAndGet(
+        _ :+ PackageOpsForTesting.RevokeVettingCall(
+          packages,
+          darDescriptor,
+          psid,
+          forceFlags,
+          waitToBecomeEffective,
+        )
+      )
+      .discard
     EitherT.rightT(())
+  }
 
   override def vetPackages(
       packages: Seq[PackageId],
@@ -95,4 +115,14 @@ class PackageOpsForTesting(
     (Option[ParticipantVettedPackages], Option[ParticipantVettedPackages]),
   ] =
     EitherT.rightT((None, None))
+}
+
+object PackageOpsForTesting {
+  final case class RevokeVettingCall(
+      packages: Seq[LfPackageId],
+      darDescriptor: PackageService.DarDescription,
+      psid: PhysicalSynchronizerId,
+      forceFlags: ForceFlags,
+      waitToBecomeEffective: Option[config.NonNegativeFiniteDuration],
+  )
 }

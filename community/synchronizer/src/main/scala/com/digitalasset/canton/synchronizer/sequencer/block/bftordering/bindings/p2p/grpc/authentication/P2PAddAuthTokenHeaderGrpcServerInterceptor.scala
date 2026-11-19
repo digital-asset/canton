@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.authentication
 
+import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SynchronizerCrypto
@@ -121,6 +122,7 @@ private[bftordering] class P2PAddAuthTokenHeaderGrpcServerInterceptor(
         synchronizeWithClosingSync("P2PAddAuthTokenHeaderGrpcServerInterceptor.interceptCall") {
           val channel =
             createNettyClientChannelBuilder(clientChannelBuilder, p2pEndpoint.endpointConfig)
+              .valueOr(err => throw new IllegalArgumentException(s"Unable to create channel: $err"))
               .build()
 
           val authenticationServiceChannel =

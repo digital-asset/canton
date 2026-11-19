@@ -4,13 +4,13 @@
 package com.digitalasset.canton.integration.plugins
 
 import better.files.*
-import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.{CantonConfig, DefaultProcessingTimeouts}
 import com.digitalasset.canton.integration.util.BackgroundRunner
 import com.digitalasset.canton.integration.{ConfigTransform, EnvironmentSetupPlugin}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{BaseTest, UniquePortGenerator}
 import org.testcontainers.Testcontainers
 import org.testcontainers.containers.{BindMode, GenericContainer}
 
@@ -65,7 +65,7 @@ class UseHAProxy(
 
   object HAProxy {
     def apply(config: CantonConfig): HAProxy =
-      if (sys.env.contains("CI")) mkNative(config)
+      if (BaseTest.isRunningInCI) mkNative(config)
       else mkDocker(config)
 
     private def mkNative(cantonConfig: CantonConfig): HAProxy = new HAProxy {

@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.sequencer.v30
+import com.digitalasset.canton.crypto.ValidatedPemCertificate
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.grpc.{
   ClientChannelBuilder,
@@ -17,7 +18,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerAlias}
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 
 import java.net.URI
 import java.util.concurrent.Executor
@@ -46,9 +46,9 @@ sealed trait SequencerConnection extends PrettyPrinting {
 
   def sequencerAlias: SequencerAlias
 
-  def certificates: Option[ByteString]
+  def certificates: Option[ValidatedPemCertificate]
 
-  def withCertificates(certificates: ByteString): SequencerConnection
+  def withCertificates(certificates: ValidatedPemCertificate): SequencerConnection
 
   def withSequencerId(sequencerId: SequencerId): SequencerConnection
 
@@ -58,11 +58,11 @@ sealed trait SequencerConnection extends PrettyPrinting {
 final case class GrpcSequencerConnection(
     endpoints: NonEmpty[Set[Endpoint]],
     transportSecurity: Boolean,
-    customTrustCertificates: Option[ByteString],
+    customTrustCertificates: Option[ValidatedPemCertificate],
     sequencerAlias: SequencerAlias,
     sequencerId: Option[SequencerId],
 ) extends SequencerConnection {
-  override def certificates: Option[ByteString] = customTrustCertificates
+  override def certificates: Option[ValidatedPemCertificate] = customTrustCertificates
 
   def mkChannelBuilder(clientChannelBuilder: ClientChannelBuilder, params: ClientChannelParams)(
       implicit executor: Executor
@@ -72,7 +72,7 @@ final case class GrpcSequencerConnection(
       clientChannelBuilder
         .create(
           endpoints.head1,
-          transportSecurity,
+          useTls = transportSecurity,
           executor,
           customTrustCertificates,
           params,
@@ -85,7 +85,7 @@ final case class GrpcSequencerConnection(
         v30.SequencerConnection.Grpc(
           endpoints.map(_.toURI(transportSecurity).toString).toList,
           transportSecurity,
-          customTrustCertificates,
+          customTrustCertificates.map(_.toProtoPrimitive),
         )
       ),
       alias = sequencerAlias.toProtoPrimitive,
@@ -109,7 +109,7 @@ final case class GrpcSequencerConnection(
       .fromUris(NonEmpty(Seq, connection, additionalConnections*))
       .map(newEndpoints => copy(endpoints = endpoints ++ newEndpoints._1))
 
-  override def withCertificates(certificates: ByteString): SequencerConnection =
+  override def withCertificates(certificates: ValidatedPemCertificate): SequencerConnection =
     copy(customTrustCertificates = Some(certificates))
 
   override def withAlias(alias: SequencerAlias): SequencerConnection = copy(sequencerAlias = alias)
@@ -121,7 +121,7 @@ final case class GrpcSequencerConnection(
 object GrpcSequencerConnection {
   def create(
       connection: String,
-      customTrustCertificates: Option[ByteString] = None,
+      customTrustCertificates: Option[ValidatedPemCertificate] = None,
       sequencerAlias: SequencerAlias = SequencerAlias.Default,
       sequencerId: Option[SequencerId] = None,
   ): Either[String, GrpcSequencerConnection] =
@@ -169,10 +169,13 @@ object SequencerConnection {
         .leftMap(err => ProtoDeserializationError.ValueConversionError("connections", err))
       sequencerAlias <- SequencerAlias.fromProtoPrimitive(alias)
       sequencerId <- sequencerIdP.traverse(SequencerId.fromProtoPrimitive(_, "sequencer_id"))
+      customTrustCertificates <- grpcP.customTrustCertificates.traverse(
+        ValidatedPemCertificate.fromProtoPrimitive
+      )
     } yield GrpcSequencerConnection(
       endpoints._1.toSet,
       grpcP.transportSecurity,
-      grpcP.customTrustCertificates,
+      customTrustCertificates,
       sequencerAlias,
       sequencerId,
     )

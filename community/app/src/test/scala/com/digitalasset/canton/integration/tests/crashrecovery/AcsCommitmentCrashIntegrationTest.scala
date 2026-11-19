@@ -7,6 +7,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   SynchronizerConnectionConfig,
 }
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.NonNegativeProportion
@@ -27,6 +28,8 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Receiv
 import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
+// TODO(#37720): Fix this test before removing the old commitment processor with the removal of PV37
+@UnstableTest
 class AcsCommitmentCrashIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
@@ -40,6 +43,8 @@ class AcsCommitmentCrashIntegrationTest
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
+        // TODO(#35107) Disable the old processor and fix the test
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.commitmentCheckpointInterval).replace(checkpointInterval)
         ),
@@ -90,8 +95,8 @@ class AcsCommitmentCrashIntegrationTest
         passTopologyRegistrationTimeout()
       }
 
-  // TODO(#34818): Enable this test to also run for PV36 onwards
-  "checkpoints are at a grid" onlyRunWithOrLessThan ProtocolVersion.v35 in { implicit env =>
+  // TODO(#35107) Make this test work for the new commitment processing pipeline
+  "checkpoints are at a grid" onlyRunWithOrLessThan ProtocolVersion.v37 in { implicit env =>
     import env.*
 
     val simClock = environment.simClock.value

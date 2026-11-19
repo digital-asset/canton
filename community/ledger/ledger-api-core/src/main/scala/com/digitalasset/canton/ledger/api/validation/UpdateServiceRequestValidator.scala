@@ -14,6 +14,7 @@ import com.daml.ledger.api.v2.update_service.{
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.messages.update
 import com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken
+import com.digitalasset.canton.ledger.api.validation.FormatValidator.RejectContractIdFilters
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.{
   invalidArgument,
   missingField,
@@ -80,7 +81,10 @@ object UpdateServiceRequestValidator {
         ledgerEnd,
       )
       updateFormatProto <- requirePresence(req.updateFormat, "update_format")
-      updateFormat <- FormatValidator.validate(updateFormatProto)
+      updateFormat <- FormatValidator.validate(
+        updateFormatProto,
+        RejectContractIdFilters,
+      ) // TODO (#37335) implement contract id filters for update streams
     } yield {
       update.GetUpdatesRequest(
         partial.begin,
@@ -99,7 +103,7 @@ object UpdateServiceRequestValidator {
     for {
       offset <- ParticipantOffsetValidator.validatePositive(req.offset, "offset")
       updateFormatProto <- requirePresence(req.updateFormat, "update_format")
-      updateFormat <- FormatValidator.validate(updateFormatProto)
+      updateFormat <- FormatValidator.validate(updateFormatProto, RejectContractIdFilters)
     } yield {
       update.GetUpdateByOffsetRequest(
         offset = offset,
@@ -118,7 +122,7 @@ object UpdateServiceRequestValidator {
       updateIdStr <- requireLedgerString(req.updateId)
       updateId <- UpdateId.fromLedgerString(updateIdStr).left.map(e => invalidArgument(e.message))
       updateFormatProto <- requirePresence(req.updateFormat, "update_format")
-      updateFormat <- FormatValidator.validate(updateFormatProto)
+      updateFormat <- FormatValidator.validate(updateFormatProto, RejectContractIdFilters)
     } yield {
       update.GetUpdateByIdRequest(
         updateId = updateId,
@@ -145,7 +149,7 @@ object UpdateServiceRequestValidator {
           sizeLimitsConfig.publicLapiSizeConfig.getUpdateByHashRequest.transactionHashSizeLimit,
       )
       updateFormatProto <- requirePresence(req.updateFormat, "update_format")
-      updateFormat <- FormatValidator.validate(updateFormatProto)
+      updateFormat <- FormatValidator.validate(updateFormatProto, RejectContractIdFilters)
     } yield {
       update.GetUpdateByHashRequest(
         hash = req.transactionHash,
@@ -195,7 +199,10 @@ object UpdateServiceRequestValidator {
       )
     }
     updateFormatProto <- requirePresence(req.updateFormat, "update_format")
-    updateFormat <- FormatValidator.validate(updateFormatProto)
+    updateFormat <- FormatValidator.validate(
+      updateFormatProto,
+      RejectContractIdFilters,
+    ) // TODO (#37335) implement contract id filter for update streams
     continueStreamFromIncl <- token.traverse(t =>
       if (req.descendingOrder) {
         t.lowestPageOffsetExclusive.toRight(

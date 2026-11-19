@@ -10,7 +10,9 @@ import java.time.Instant
 import scala.util.{Failure, Success, Try}
 
 /** All the JWT payloads that can be used with the JWT auth service. */
-sealed abstract class AuthServiceJWTPayload extends Product with Serializable
+sealed abstract class AuthServiceJWTPayload extends Product with Serializable {
+  def scope: Option[String]
+}
 
 /** There are two JWT token formats which are currently supported by `StandardJWTPayload`. The
   * format is identified by `aud` claim.
@@ -348,7 +350,11 @@ object AuthServiceJWTCodec {
                 format = StandardJWTTokenFormat.Scope,
                 audiences =
                   List.empty, // we do not read or extract audience claims for Scope-based tokens
-                scope = Some(scopeLedgerApiFull),
+                // We used to return only scopeLedgerApiFull, but that is dangerous as the
+                // scope can impose restrictions, so dropping that could give the token
+                // holder more permissions.
+                // TODO(#33090) remove everything related to scope-only tokens.
+                scope = readAndCombineScopes(fields),
               )
             )
 

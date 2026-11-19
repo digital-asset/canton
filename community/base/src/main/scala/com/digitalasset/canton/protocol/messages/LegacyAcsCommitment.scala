@@ -109,7 +109,7 @@ object LegacyAcsCommitment
   override val name: String = "LegacyAcsCommitment"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.AcsCommitment)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(v30.AcsCommitment)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     ),

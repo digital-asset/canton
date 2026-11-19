@@ -189,6 +189,43 @@ object EncryptedMultipleViews {
     } yield EncryptedMultipleViews(viewType, encryptedViews)
   }
 
+  /** Parses the uncompressed view trees. The number of view trees is bounded by
+    * [[com.digitalasset.canton.protocol.TransactionProtocolLimits.maxViewsPerMessage]] from
+    * [[com.digitalasset.canton.version.ProtocolVersion.nextValidationBoundPV]].
+    */
+  private[messages] def deserializeViewTrees[View <: ViewTree with HasToByteString](
+      protocolVersion: ProtocolVersion,
+      limits: TransactionProtocolLimits,
+      deserialize: ByteString => Either[DeserializationError, View],
+  )(bytestring: ByteString): Either[DeserializationError, MultipleViewTrees[View]] =
+    ProtoConverter
+      .protoParser(v31.EncryptedMultipleViewsMessage.UncompressedViewTrees.parseFrom)(bytestring)
+      .leftMap(err => DefaultDeserializationError(err.message))
+      .flatMap { protoTrees =>
+        ProtoValidation
+          // Shares maxViewsPerMessage with view_hashes: one entry per view of the group, the
+          // number of views that have identical recipients in one transaction (see view_hashes
+          // below). No existing limit bounds that count on the receiver: maxTransactionRootViews
+          // is not enforced and maxTransactionSubViews is per root view and checked by the sender
+          // only.
+          .validateLength(
+            protoTrees.viewTrees,
+            "view_trees",
+            ProtocolVersionValidation.PV(protocolVersion),
+            ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxViewsPerMessage),
+          )
+          .leftMap(err => DefaultDeserializationError(err.message))
+          .flatMap(_.traverse(deserialize))
+      }
+      .flatMap { viewTrees =>
+        NonEmpty
+          .from(viewTrees)
+          .toRight(
+            DefaultDeserializationError("An empty collection of view trees is not allowed")
+          )
+      }
+      .map(MultipleViewTrees.apply)
+
   def decrypt[View <: ViewTree with HasToByteString](
       protocolVersion: ProtocolVersion,
       encryptionOps: EncryptionOps,
@@ -197,33 +234,13 @@ object EncryptedMultipleViews {
   )(
       deserialize: ByteString => Either[DeserializationError, View],
       maxBytesToDecompress: MaxBytesToDecompress,
+      limits: TransactionProtocolLimits,
   ): Either[DecryptionError, MultipleViewTrees[View]] = {
 
     def deserializeMultiView(
         bytestring: ByteString
     ): Either[DeserializationError, MultipleViewTrees[View]] =
-      ProtoConverter
-        .protoParser(v31.EncryptedMultipleViewsMessage.UncompressedViewTrees.parseFrom)(bytestring)
-        .leftMap(err => DefaultDeserializationError(err.message))
-        .flatMap { protoTrees =>
-          ProtoValidation
-            .validateLength(
-              protoTrees.viewTrees,
-              "view_trees",
-              ProtocolVersionValidation.PV(protocolVersion),
-              ProtoValidation.MaxCollectionSize,
-            )
-            .leftMap(err => DefaultDeserializationError(err.message))
-            .flatMap(_.traverse(deserialize))
-        }
-        .flatMap { viewTrees =>
-          NonEmpty
-            .from(viewTrees)
-            .toRight(
-              DefaultDeserializationError("An empty collection of view trees is not allowed")
-            )
-        }
-        .map(MultipleViewTrees.apply)
+      deserializeViewTrees(protocolVersion, limits, deserialize)(bytestring)
 
     encryptionOps
       .decryptWith(encryptedViewTrees, viewKey)(
@@ -350,7 +367,9 @@ object EncryptedViewMessage
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.EncryptedMultipleViewsMessage)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(
+      v32.EncryptedMultipleViewsMessage
+    )(
       supportedProtoVersionPVV(_)(EncryptedViewMessage.fromProtoV32),
       _.toProtoV32,
     )
@@ -396,11 +415,16 @@ object EncryptedViewMessage
       )
 
       signature <- signatureP.traverse(Signature.fromProtoV30(pvv, _))
+      // Shares maxViewsPerMessage with view_trees: both lists have one entry per view of the group
+      // and the same length on honest senders (EncryptedViewMessageFactory.encryptGroupedViews
+      // builds viewHashes as viewTrees.map(_.viewHash)). The lengths can only be compared once the
+      // view trees are decrypted (ViewMessageDecrypterImplV2.decryptMessageWithRandomness does so
+      // from nextValidationBoundPV), so each list also gets the limit on its own here.
       viewHashesSeqP <- ProtoValidation.validateLength(
         viewHashesP,
         "view_hashes",
         pvv,
-        ProtoValidation.MaxCollectionSize,
+        ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxViewsPerMessage),
       )
       viewHashes <- parseRequiredNonEmpty(
         ViewHash.fromProtoPrimitive,
@@ -593,6 +617,8 @@ object EncryptedViewMessage
           )(
             deserialize,
             maxBytesToDecompress = maxBytesToDecompress,
+            limits =
+              pureCrypto.staticSynchronizerParameters.synchronizerLimits.transactionProtocolLimits,
           )
           .leftMap(EncryptedViewMessageError.SymmetricDecryptError.apply)
       )
@@ -680,6 +706,11 @@ object EncryptedViewMessageError extends PrettyPrintingCompanion[EncryptedViewMe
 
   final case class TransparencyCheckError(
       err: String
+  ) extends EncryptedViewMessageError
+
+  final case class ViewHashesLengthMismatch(
+      numViewTrees: Int,
+      numViewHashes: Int,
   ) extends EncryptedViewMessageError
 
   final case class SyncCryptoEncryptError(

@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.admin.identity_provider_config_service.UpdateIdentityProviderConfigRequest
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.google.protobuf.field_mask.FieldMask
@@ -14,12 +15,19 @@ import scala.concurrent.Future
 
 final class UpdateIdentityProviderConfigAuthIT
     extends AdminServiceCallAuthTests
-    with IdentityProviderConfigAuth {
+    with IdentityProviderConfigAuth
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String =
     "IdentityProviderConfigService#UpdateIdentityProviderConfig"
+
+  override def apiAreaScopeBaseToken = adminToken
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.idpsWrite.area) -> true,
+    List(ClaimApiArea.idpsRead.area) -> false,
+  )
 
   override def serviceCall(
       context: ServiceCallContext

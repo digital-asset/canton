@@ -45,6 +45,7 @@ import com.digitalasset.canton.{BaseTest, UniquePortGenerator, config}
 import com.typesafe.config.ConfigValueFactory
 import monocle.macros.syntax.lens.*
 import monocle.macros.{GenLens, GenPrism}
+import org.slf4j.LoggerFactory
 
 import scala.concurrent.duration.*
 import scala.util.Random
@@ -99,39 +100,89 @@ object ConfigTransforms {
     BaseTest.testedProtocolVersion
   )
 
+  private lazy val nightlyExpensiveTest = {
+    val tmp = sys.env.get("CANTON_ENABLE_EXPENSIVE_CHECKS").map(_.toLowerCase).contains("true")
+    if (tmp) {
+      LoggerFactory
+        .getLogger(getClass)
+        .info(
+          "CANTON_ENABLE_EXPENSIVE_CHECKS is set. Enabling more expensive checks."
+        )
+    }
+    tmp
+  }
+
+  def toggleTopologyStateConsistencyChecks(enable: Boolean): ConfigTransform =
+    ConfigTransforms
+      .updateAllParticipantConfigs_(
+        _.focus(_.topology.enableTopologyStateCacheConsistencyChecks)
+          .replace(enable)
+      )
+      .compose(
+        ConfigTransforms.updateAllMediatorConfigs_(
+          _.focus(_.topology.enableTopologyStateCacheConsistencyChecks)
+            .replace(enable)
+        )
+      )
+      .compose(
+        ConfigTransforms.updateAllSequencerConfigs_(
+          _.focus(_.topology.enableTopologyStateCacheConsistencyChecks)
+            .replace(enable)
+        )
+      )
+  val increaseTimeoutsInCI: ConfigTransform = if (BaseTest.isRunningInCI) {
+    // Ensure that bounded timeouts are large enough to avoid spurious failures in CI due to resource starvation
+    _.focus(_.parameters.timeouts.console.bounded)
+      .replace(config.NonNegativeDuration.tryFromDuration(2.minutes))
+      .focus(_.parameters.timeouts.console.ping)
+      .replace(config.NonNegativeDuration.tryFromDuration(1.minutes))
+      .focus(_.parameters.timeouts.console.testingBong)
+      .replace(config.NonNegativeDuration.tryFromDuration(2.minutes))
+      .focus(_.parameters.timeouts.processing.shutdownNetwork)
+      .replace(config.NonNegativeDuration.tryFromDuration(30.seconds))
+      .focus(_.parameters.timeouts.processing.sequencerInfo)
+      .replace(config.NonNegativeDuration.tryFromDuration(60.seconds))
+      .focus(_.parameters.timeouts.processing.slowFutureWarn)
+      .replace(config.NonNegativeDuration.tryFromDuration(15.seconds))
+      .focus(_.monitoring.logging.delayLoggingThreshold)
+      .replace(config.NonNegativeFiniteDuration.ofMinutes(2))
+  } else ConfigTransforms.identity
+
   /** Config transforms to apply to heavy-weight tests using an [[EnvironmentDefinition]]. For
     * example, these transforms should be applied to toxiproxy tests.
     */
-  val heavyTestDefaults: Seq[ConfigTransform] = protocolVersionTransforms ++
-    Seq(
-      ConfigTransforms.enableAchs,
-      ConfigTransforms.uniqueH2DatabaseNames,
-      ConfigTransforms.globallyUniquePorts,
-      ConfigTransforms.enableAdvancedCommands(FeatureFlag.Preview),
-      ConfigTransforms.enableAdvancedCommands(FeatureFlag.Testing),
-      ConfigTransforms.updateAllParticipantConfigs_(
-        _.focus(_.parameters.adminWorkflow.bongTestMaxLevel)
-          .replace(NonNegativeInt.tryCreate(20))
-          .focus(_.parameters.engine.enableAdditionalConsistencyChecks)
+  val heavyTestDefaults: Seq[ConfigTransform] =
+    (increaseTimeoutsInCI +: protocolVersionTransforms) ++
+      Seq(
+        ConfigTransforms.enableAchs,
+        ConfigTransforms.uniqueH2DatabaseNames,
+        ConfigTransforms.globallyUniquePorts,
+        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Preview),
+        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Testing),
+        ConfigTransforms.updateAllParticipantConfigs_(
+          _.focus(_.parameters.adminWorkflow.bongTestMaxLevel)
+            .replace(NonNegativeInt.tryCreate(20))
+            .focus(_.parameters.engine.enableAdditionalConsistencyChecks)
+            .replace(true)
+        ),
+        toggleTopologyStateConsistencyChecks(nightlyExpensiveTest),
+        _.focus(_.parameters.enableAdditionalConsistencyChecks)
           .replace(true)
-      ),
-      _.focus(_.parameters.enableAdditionalConsistencyChecks)
-        .replace(true)
-        .focus(_.monitoring.logging.logSlowFutures)
-        .replace(true),
-      enableSlowQueryLogging(),
-      // turn off the warning message. can't set to None as None will simply be omitted
-      // when writing the configuration for the external node tests
-      _.focus(_.monitoring.logging.api.warnBeyondLoad).replace(Some(10000)),
-      // disable exit on fatal error in tests
-      ConfigTransforms.setExitOnFatalFailures(false),
-      // tests must be able to observe security alarms without the participant crashing
-      ConfigTransforms.setCrashAfterFailedValidation(false),
-      // Safe-to-prune checks rely on the indexer streams signalling offset advancements even if there is no activity.
-      ConfigTransforms.setIdleStreamOffsetCheckpointTimeout(
-        config.NonNegativeFiniteDuration.ofSeconds(1)
-      ),
-    )
+          .focus(_.monitoring.logging.logSlowFutures)
+          .replace(true),
+        enableSlowQueryLogging(),
+        // turn off the warning message. can't set to None as None will simply be omitted
+        // when writing the configuration for the external node tests
+        _.focus(_.monitoring.logging.api.warnBeyondLoad).replace(Some(10000)),
+        // disable exit on fatal error in tests
+        ConfigTransforms.setExitOnFatalFailures(false),
+        // tests must be able to observe security alarms without the participant crashing
+        ConfigTransforms.setCrashAfterFailedValidation(false),
+        // Safe-to-prune checks rely on the indexer streams signalling offset advancements even if there is no activity.
+        ConfigTransforms.setIdleStreamOffsetCheckpointTimeout(
+          config.NonNegativeFiniteDuration.ofSeconds(1)
+        ),
+      )
 
   lazy val dontWarnOnDeprecatedPV: Seq[ConfigTransform] = Seq(
     updateAllSequencerConfigs_(
@@ -719,7 +770,9 @@ object ConfigTransforms {
   /** For performance tests...
     */
   def disableAdditionalConsistencyChecks: ConfigTransform =
-    _.focus(_.parameters.enableAdditionalConsistencyChecks).replace(false)
+    toggleTopologyStateConsistencyChecks(false).compose(
+      _.focus(_.parameters.enableAdditionalConsistencyChecks).replace(false)
+    )
 
   def setParticipantMaxConnections(maxConnections: PositiveInt): ConfigTransform =
     modifyAllStorageConfigs { (nodeType, _, config) =>

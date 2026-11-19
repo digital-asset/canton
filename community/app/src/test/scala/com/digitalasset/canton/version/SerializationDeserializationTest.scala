@@ -5,7 +5,7 @@ package com.digitalasset.canton.version
 
 import cats.Id
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.crypto.{SymmetricKey, TestHash}
+import com.digitalasset.canton.crypto.{MultiHashSignature, SymmetricKey, TestHash}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.participant.GeneratorsParticipant
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
@@ -178,6 +178,9 @@ final class SerializationDeserializationTest
         implicit val getByteStringE: Either[String, ByteString] => ByteString = _.value
 
         testVersioned(SymmetricKey, version)
+        if (version >= ProtocolVersion.multiHashSignatures) {
+          testVersionedE(MultiHashSignature, version)
+        }
 
         test(StaticSynchronizerParameters, version)
         test(DynamicSynchronizerParameters, version)

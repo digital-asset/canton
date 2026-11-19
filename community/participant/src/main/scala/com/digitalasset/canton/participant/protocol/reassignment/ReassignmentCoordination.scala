@@ -20,7 +20,6 @@ import com.digitalasset.canton.participant.protocol.ReassignmentSynchronizer
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.{
   ApplicationShutdown,
   ReassignmentProcessorError,
-  ReassignmentStoreFailed,
   UnknownPhysicalSynchronizer,
   UnknownSynchronizer,
 }
@@ -294,11 +293,9 @@ class ReassignmentCoordination(
       reassignmentStore <- EitherT.fromEither[FutureUnlessShutdown](
         reassignmentStoreFor(unassignmentData.targetPsid.map(_.logical))
       )
-      _ <- reassignmentStore
-        .addUnassignmentData(unassignmentData)
-        .leftMap[ReassignmentProcessorError](
-          ReassignmentStoreFailed(unassignmentData.reassignmentId, _)
-        )
+      _ <- EitherT.right[ReassignmentProcessorError](
+        reassignmentStore.addUnassignmentData(unassignmentData)
+      )
     } yield ()
 
   /** Stores the given assignment data on the target synchronizer. */
@@ -320,17 +317,15 @@ class ReassignmentCoordination(
         reassignmentStoreFor(target)
       )
 
-      _ <- reassignmentStore
-        .addAssignmentDataIfAbsent(
+      _ <- EitherT.right[ReassignmentProcessorError](
+        reassignmentStore.addAssignmentDataIfAbsent(
           AssignmentData(
             reassignmentId = reassignmentId,
             sourceSynchronizer = source,
             contracts = contracts,
           )
         )
-        .leftMap[ReassignmentProcessorError](
-          ReassignmentStoreFailed(reassignmentId, _)
-        )
+      )
     } yield ()
 
 }

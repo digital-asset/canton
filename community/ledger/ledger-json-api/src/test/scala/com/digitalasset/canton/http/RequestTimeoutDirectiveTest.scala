@@ -154,6 +154,17 @@ class RequestTimeoutDirectiveTest
         Validated.AboveUpperBound
     }
 
+    "reject an out-of-range Long value as invalid instead of throwing" in {
+      RequestTimeoutDirective.validate(Long.MaxValue.toString) shouldBe
+        Validated.Invalid
+    }
+
+    "accept the largest millisecond value representable as a FiniteDuration" in {
+      val maxMillis = Long.MaxValue / 1000 / 1000
+      RequestTimeoutDirective.validate(maxMillis.toString) shouldBe
+        Validated.AboveUpperBound
+    }
+
     "trim surrounding whitespace" in {
       RequestTimeoutDirective.validate("  5000  ") shouldBe Validated.Enforce(5000.millis)
       RequestTimeoutDirective.validate("  5s  ") shouldBe Validated.Enforce(5.seconds)

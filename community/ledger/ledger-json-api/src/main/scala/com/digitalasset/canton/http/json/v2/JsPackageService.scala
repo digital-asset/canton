@@ -6,7 +6,7 @@ package com.digitalasset.canton.http.json.v2
 import com.daml.ledger.api.v2.admin.package_management_service
 import com.daml.ledger.api.v2.admin.package_management_service.UploadDarFileResponse
 import com.daml.ledger.api.v2.{package_reference, package_service}
-import com.digitalasset.canton.auth.AuthInterceptor
+import com.digitalasset.canton.auth.{AuthInterceptor, Authorizer, RequiredClaim}
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
 import com.digitalasset.canton.http.json.v2.Endpoints.{CallerContext, TracedInput}
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
@@ -19,14 +19,16 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
 }
 import com.digitalasset.canton.ledger.client.services.admin.PackageManagementClient
 import com.digitalasset.canton.ledger.client.services.pkg.PackageClient
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.InvalidArgument
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
 import io.circe.{Codec, Decoder, Encoder}
-import org.apache.pekko.stream.Materializer
-import org.apache.pekko.stream.scaladsl.{Source, StreamConverters}
+import org.apache.pekko.http.scaladsl.model.EntityStreamException
+import org.apache.pekko.stream.scaladsl.Source
+import org.apache.pekko.stream.{Materializer, StreamTcpException}
 import org.apache.pekko.util
 import sttp.capabilities.pekko.PekkoStreams
 import sttp.model.StatusCode
@@ -59,22 +61,28 @@ class JsPackageService(
     val executionContext: ExecutionContext,
     materializer: Materializer,
     val authInterceptor: AuthInterceptor,
+    authorizer: Authorizer,
 ) extends Endpoints {
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
   def endpoints() =
     List(
       // TODO(#27556): Extract validateDar and uploadDar in a separate service (JsDarService)
-      withServerLogic(
+      // Check the admin claim before reading the body. The gRPC Ledger API would only check it
+      // after receiving the whole DAR (#37359).
+      withRequiredClaims(
         JsPackageService.validateDar,
         validateDar,
+        RequiredClaim.Admin(),
       ),
-      withServerLogic(
+      withRequiredClaims(
         JsPackageService.uploadDar,
         upload,
+        RequiredClaim.Admin(),
       ),
-      withServerLogic(
+      withRequiredClaims(
         JsPackageService.uploadDarOld,
         upload,
+        RequiredClaim.Admin(),
       ),
       withServerLogic(
         JsPackageService.listPackagesEndpoint,
@@ -138,35 +146,57 @@ class JsPackageService(
     (tracedInput: TracedInput[(Source[util.ByteString, Any], Option[String])]) =>
       implicit val traceContext: TraceContext = caller.traceContext()
       val (bytesSource, synchronizerIdO) = tracedInput.in
-      val inputStream = bytesSource.runWith(StreamConverters.asInputStream())(materializer)
-      val bs = protobuf.ByteString.readFrom(inputStream)
-      packageManagementClient
-        .validateDarFile(
-          darFile = bs,
-          token = caller.token(),
-          synchronizerId = synchronizerIdO,
-        )
-        .resultToRight
+      readDar(bytesSource).flatMap(darFile =>
+        packageManagementClient
+          .validateDarFile(
+            darFile = darFile,
+            token = caller.token(),
+            synchronizerId = synchronizerIdO,
+          )
+          .resultToRight
+      )
   }
 
   private def upload(caller: CallerContext) = {
     (tracedInput: TracedInput[(Source[util.ByteString, Any], Option[Boolean], Option[String])]) =>
       implicit val traceContext: TraceContext = caller.traceContext()
       val (bytesSource, vetAllPackagesO, synchronizerIdO) = tracedInput.in
-      val inputStream = bytesSource.runWith(StreamConverters.asInputStream())(materializer)
-      val bs = protobuf.ByteString.readFrom(inputStream)
-      packageManagementClient
-        .uploadDarFile(
-          darFile = bs,
-          token = caller.token(),
-          vetAllPackages = vetAllPackagesO.getOrElse(true),
-          synchronizerId = synchronizerIdO,
-        )
-        .map { _ =>
-          package_management_service.UploadDarFileResponse()
-        }
-        .resultToRight
+      readDar(bytesSource).flatMap(darFile =>
+        packageManagementClient
+          .uploadDarFile(
+            darFile = darFile,
+            token = caller.token(),
+            vetAllPackages = vetAllPackagesO.getOrElse(true),
+            synchronizerId = synchronizerIdO,
+          )
+          .map { _ =>
+            package_management_service.UploadDarFileResponse()
+          }
+          .resultToRight
+      )
   }
+
+  /** Collects the DAR from the request body without blocking a dispatcher thread, so a slow client
+    * costs the node nothing but memory (#37359).
+    */
+  private def readDar(
+      body: Source[util.ByteString, Any]
+  )(implicit traceContext: TraceContext): Future[protobuf.ByteString] =
+    body
+      // Copy each chunk as it arrives, so that pekko can release it right away
+      .runFold(protobuf.ByteString.EMPTY) { (dar, chunk) =>
+        dar.concat(protobuf.ByteString.copyFrom(chunk.asByteBuffer))
+      }(materializer)
+      .recoverWith {
+        // The client closed the connection or sent a malformed body. Report it as the client's
+        // error (400) instead of an internal error.
+        case clientFault @ (_: EntityStreamException | _: StreamTcpException) =>
+          Future.failed(
+            InvalidArgument
+              .Reject(s"Could not read the DAR from the request body: ${clientFault.getMessage}")
+              .asGrpcError
+          )
+      }
 
   private def getPackage(caller: CallerContext) = { (tracedInput: TracedInput[String]) =>
     implicit val traceContext: TraceContext = caller.traceContext()

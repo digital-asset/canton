@@ -4,7 +4,10 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.jwt.{StandardJWTPayload, StandardJWTTokenFormat}
-import com.daml.ledger.api.v2.admin.package_management_service.*
+import com.daml.ledger.api.v2.admin.party_management_service.{
+  ListKnownPartiesRequest,
+  PartyManagementServiceGrpc,
+}
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.canton.auth.AccessLevel
@@ -36,8 +39,16 @@ trait PrivilegedTokenAuthIT
   protected def serviceCall(
       context: ServiceCallContext
   )(implicit env: TestConsoleEnvironment): Future[Any] =
-    stub(PackageManagementServiceGrpc.stub(channel), context.token)
-      .listKnownPackages(ListKnownPackagesRequest())
+    // This call was chosen because it requires admin-like privileges.
+    stub(PartyManagementServiceGrpc.stub(channel), context.token)
+      .listKnownParties(
+        ListKnownPartiesRequest(
+          pageToken = "",
+          pageSize = 0,
+          identityProviderId = context.identityProviderId,
+          filterParty = "",
+        )
+      )
 
   def partyCall(
       context: ServiceCallContext

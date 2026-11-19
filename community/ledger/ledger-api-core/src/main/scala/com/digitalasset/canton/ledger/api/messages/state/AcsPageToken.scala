@@ -93,7 +93,7 @@ object AcsPageToken {
       .map(_ => ValidationErrors.invalidAcsPageToken("Invalid token contents."))
     pointerToTheFirstElem <- AcsContinuationToken
       .decodeAndValidate(
-        expectedChecksum = AcsContinuationToken.emptyChecksum,
+        expectedChecksum = PageTokenUtils.emptyChecksum,
         token = proto.continuationToken,
         fieldName = "page_token",
         limit =

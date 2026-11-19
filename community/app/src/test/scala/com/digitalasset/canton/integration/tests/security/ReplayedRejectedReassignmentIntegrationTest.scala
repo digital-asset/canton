@@ -8,7 +8,7 @@ import com.daml.test.evidence.tag.Security.SecurityTest.Property.Integrity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.{LocalMediatorReference, LocalSequencerReference}
+import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCrypto}
 import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
@@ -200,27 +200,27 @@ final class ReplayedRejectedReassignmentIntegrationTest
     * responses. Returns the confirmation request sent by participant1.
     */
   private def submitAndTimeOut[Processor: ClassTag](
-      sequencer: LocalSequencerReference,
-      mediator: LocalMediatorReference,
+      sequencer: LocalSequencerReference
   )(submit: => Unit)(implicit env: TestConsoleEnvironment): SubmissionRequest = {
     import env.*
 
     val clock = environment.simClock.value
     val parameters = sequencer.topology.synchronizer_parameters
       .get_dynamic_synchronizer_parameters(sequencer.synchronizer_id)
-    val minObservationDuration =
-      mediator.underlying.value.replicaManager.mediatorRuntime.value.mediator.timeTracker.config.minObservationDuration
 
     val programmableSequencer: ProgrammableSequencer = getProgrammableSequencer(sequencer.name)
     val requestP = Promise[SubmissionRequest]()
+    val responseSentP = Promise[Unit]()
     programmableSequencer.setPolicy_(
       "capture the reassignment request and drop the confirmation responses"
     ) { request =>
       if (request.isConfirmationRequest && request.sender == participant1.id) {
         requestP.trySuccess(request)
         SendDecision.Process
-      } else if (isConfirmationResponse(request)) SendDecision.Drop
-      else SendDecision.Process
+      } else if (isConfirmationResponse(request)) {
+        if (request.sender == participant1.id) responseSentP.trySuccess(())
+        SendDecision.Drop
+      } else SendDecision.Process
     }
 
     val request = loggerFactory.assertEventuallyLogsSeq(
@@ -229,15 +229,14 @@ final class ReplayedRejectedReassignmentIntegrationTest
       {
         submit
         val request = requestP.future.futureValue
+        // participant1 tracks its response before sending it, and a tracked send times out only when a
+        // later event arrives: advancing the clock before the response is sent can leave it pending.
+        responseSentP.future.futureValue
 
         // The mediator times out the request, so the reassignment is rejected
-        clock.advance(
-          parameters.confirmationResponseTimeout.asJava
-            .plusSeconds(1)
-            .plus(parameters.mediatorReactionTimeout.asJava)
-            .plus(minObservationDuration.asJava)
-            .plusSeconds(1)
-        )
+        // Past the confirmation response deadline, but before the decision time, so that the
+        // mediator's verdict can still be sequenced and reaches participant1.
+        clock.advance(parameters.confirmationResponseTimeout.asJava.plusSeconds(1))
         request
       },
       LogEntry.assertLogSeq(
@@ -336,7 +335,7 @@ final class ReplayedRejectedReassignmentIntegrationTest
         val contract = createContract()
         val offsetAtBeginning = participant1.ledger_api.state.end()
 
-        val unassignmentRequest = submitAndTimeOut[UnassignmentProcessor](sequencer1, mediator1) {
+        val unassignmentRequest = submitAndTimeOut[UnassignmentProcessor](sequencer1) {
           participant1.ledger_api.commands.submit_unassign_async(
             signatory,
             Seq(contract.contractId),
@@ -385,7 +384,7 @@ final class ReplayedRejectedReassignmentIntegrationTest
         )
         val offsetAtBeginning = participant1.ledger_api.state.end()
 
-        val assignmentRequest = submitAndTimeOut[AssignmentProcessor](sequencer2, mediator2) {
+        val assignmentRequest = submitAndTimeOut[AssignmentProcessor](sequencer2) {
           participant1.ledger_api.commands.submit_assign_async(
             signatory,
             unassigned.reassignmentId,

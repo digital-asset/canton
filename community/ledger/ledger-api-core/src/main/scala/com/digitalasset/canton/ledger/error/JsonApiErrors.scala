@@ -18,6 +18,25 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 )
 object JsonApiErrors extends JsonApiErrorGroup {
   @Explanation(
+    "The request body is larger than the node accepts. The HTTP status of this error is 413."
+  )
+  @Resolution(
+    """Send a smaller request or increase the limit by changing the node configuration
+      |'max-inbound-message-size' of the HTTP Ledger API."""
+  )
+  object RequestBodyTooLarge
+      extends ErrorCode(
+        id = "JSON_API_REQUEST_BODY_TOO_LARGE",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Reject(limit: Long)(implicit
+        errorLogger: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause = s"The request body exceeded the size limit of $limit bytes."
+        )
+  }
+
+  @Explanation(
     "This error occurs when the Ledger JSON API server fails to find a suitable set of package-ids for decoding a given set of commands in a request."
   )
   @Resolution(
@@ -84,6 +103,48 @@ object JsonApiErrors extends JsonApiErrorGroup {
         errorLogger: ErrorLoggingContext
     ) extends DamlErrorWithDefiniteAnswer(
           cause = s"Websocket cookie authentication rejected: $cause"
+        )
+  }
+
+  @Explanation(
+    """This error occurs when a single inbound websocket message, including all of its fragments, exceeds the
+      |maximum inbound message size of the JSON Ledger API, configured with
+      |'canton.participants.<participant-id>.http-ledger-api.max-inbound-message-size'.
+      |The message is rejected before it is fully received, and the websocket connection is closed."""
+  )
+  @Resolution(
+    """Send smaller messages, or ask the participant operator to increase 'max-inbound-message-size'."""
+  )
+  object WebsocketMessageTooLarge
+      extends ErrorCode(
+        id = "JSON_API_WEBSOCKET_MESSAGE_TOO_LARGE",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Reject(maxMessageSizeBytes: Long)(implicit
+        errorLogger: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause =
+            s"The inbound websocket message exceeds the maximum size of $maxMessageSizeBytes bytes."
+        )
+  }
+
+  @Explanation(
+    """This error occurs when an inbound websocket message is in a binary format, which is not
+      |supported by the JSON Ledger API.
+      |The message is rejected, and the websocket connection is closed."""
+  )
+  @Resolution(
+    """Use a text-based format for the websocket message."""
+  )
+  object WebsocketMessageBinaryNotSupported
+      extends ErrorCode(
+        id = "JSON_API_WEBSOCKET_BINARY_MESSAGE_NOT_SUPPORTED",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Reject()(implicit
+        errorLogger: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause = "The inbound websocket message is in a binary format, which is not supported."
         )
   }
 }
