@@ -37,7 +37,6 @@ import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.PackageMetadataViewConfig
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
-import com.digitalasset.canton.config.TopologyConfigConverters.*
 import com.digitalasset.canton.console.{AmmoniteConsoleConfig, FeatureFlag}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.kms.KmsKeyId
@@ -122,6 +121,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
   WeightedDistribution,
 }
 import com.digitalasset.canton.synchronizer.sequencer.config.{
+  AlphaSequencerChannelConfig,
   AsyncWriterConfig,
   LsuRepair,
   LsuSequencingBoundsOverride,
@@ -534,6 +534,8 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
         acsCommitments = participantParameters.acsCommitments,
         deprecatedApis = participantConfig.features.deprecated,
         enableRepairService = features.enableRepairCommands,
+        alphaAcsReplicationSupport = participantParameters.alphaAcsReplicationSupport,
+        damlTopUpEnabled = participantConfig.trafficAccounting.damlTopUpEnabled,
       )
     }
 
@@ -557,8 +559,7 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
           sequencerNodeConfig.parameters.maxConfirmationRequestsBurstFactor,
         asyncWriter = sequencerNodeConfig.parameters.asyncWriter.toParameters,
         timeAdvancingTopology = sequencerNodeConfig.parameters.timeAdvancingTopology,
-        unsafeSequencerChannelSupport =
-          sequencerNodeConfig.parameters.unsafeSequencerChannelSupport,
+        alphaSequencerChannelSupport = sequencerNodeConfig.parameters.alphaSequencerChannelSupport,
         requestLimits = sequencerNodeConfig.publicApi.limits,
         maxAuthTokensPerMember = sequencerNodeConfig.publicApi.maxAuthTokensPerMember,
         maxSubscriptionsPerMember = sequencerNodeConfig.publicApi.maxSubscriptionsPerMember,
@@ -613,7 +614,38 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
       ),
     )
 
-  def dumpString: String
+  /** The config rendered with confidential values masked */
+  protected def maskedDump: ConfigValue
+
+  /** renders the config as a string (used for dumping config for diagnostic purposes) */
+  def dumpString: String =
+    "canton " + maskedDump.render(CantonConfig.defaultConfigRenderer)
+
+  /** Renders a configuration file such that we can write it to the log-file on startup.
+    *
+    * Unlike [[dumpString]], to make logs more concise and readable, this only renders the values
+    * that were set by the user. `config` is the raw merged config without defaults.
+    *
+    * Since `config` may contain confidential data, we must merge the masked values from the fully
+    * loaded config. We do so by rendering it and then merging the two trees, using `config` as a
+    * structural skeleton, that we fill in with the masked leaf values from the loaded config.
+    */
+  def dumpStringWithoutDefaults(explicitConfig: Config): String = {
+    import scala.jdk.CollectionConverters.*
+    def go(skeleton: ConfigValue, masked: ConfigValue): ConfigValue = (skeleton, masked) match {
+      case (obj: ConfigObject, maskedObj: ConfigObject) =>
+        obj.asScala.foldLeft(obj) { case (acc, (key, value)) =>
+          Option(maskedObj.get(key))
+            .fold(acc.withoutKey(key))(maskedValue => acc.withValue(key, go(value, maskedValue)))
+        }
+      case (lst: ConfigList, maskedLst: ConfigList) =>
+        ConfigValueFactory.fromIterable(lst.asScala.lazyZip(maskedLst.asScala).map(go).asJava)
+      case _ => masked
+    }
+    // Resolve config _before_ redacting confidential fields
+    go(explicitConfig.resolve().root().get("canton"), maskedDump)
+      .render(CantonConfig.defaultConfigRenderer)
+  }
 
   def mergeDynamicChanges(newConfig: Self): Self
 
@@ -672,9 +704,8 @@ final case class CantonConfig(
     features: CantonFeatures = CantonFeatures(),
 ) extends SharedCantonConfig[CantonConfig] {
 
-  /** dump config to string (without sensitive data) */
-  /** renders the config as a string (used for dumping config for diagnostic purposes) */
-  def dumpString: String = CantonConfig.makeConfidentialString(this)
+  override protected def maskedDump: ConfigValue =
+    CantonConfig.confidentialConfigWriter.to(this)
 
   /** run a validation on the current config and return possible warning messages */
   private def validate(
@@ -1315,6 +1346,10 @@ object CantonConfig {
         : ConfigReader[LsuSequencingBoundsOverride] =
       deriveReader[LsuSequencingBoundsOverride]
 
+    lazy implicit final val alphaSequencerChannelConfigReader
+        : ConfigReader[AlphaSequencerChannelConfig] =
+      deriveReader[AlphaSequencerChannelConfig]
+
     lazy implicit final val sequencerNodeParametersConfigReader
         : ConfigReader[SequencerNodeParameterConfig] =
       deriveReader[SequencerNodeParameterConfig].applyDeprecations
@@ -1547,12 +1582,12 @@ object CantonConfig {
         deriveReader[PackageMetadataViewConfig].applyDeprecations
 
       implicit val partyReplicatorTestInterceptorReader
-          : ConfigReader[AlphaOnlinePartyReplicationConfig.TestInterceptor] =
+          : ConfigReader[AlphaAcsReplicationConfig.TestInterceptor] =
         (_: ConfigCursor) =>
           sys.error("party replicator test interceptor cannot be created from pureconfig")
       implicit val onlinePartyReplicationTargetConfig
-          : ConfigReader[OnlinePartyReplicationTargetConfig] =
-        deriveReader[OnlinePartyReplicationTargetConfig]
+          : ConfigReader[AlphaOnlinePartyReplicationTargetConfig] =
+        deriveReader[AlphaOnlinePartyReplicationTargetConfig]
       implicit val alphaOnlinePartyReplicationConfig
           : ConfigReader[AlphaOnlinePartyReplicationConfig] =
         deriveReader[AlphaOnlinePartyReplicationConfig]
@@ -1565,6 +1600,14 @@ object CantonConfig {
       implicit val lsuHandshakeReader: ConfigReader[LsuHandshake] = deriveReader[LsuHandshake]
 
       implicit val lsuReader: ConfigReader[LsuConfig] = deriveReader[LsuConfig].applyDeprecations
+
+      implicit val alphaAcsReplicationSourceReader: ConfigReader[AlphaAcsReplicationSourceConfig] =
+        deriveReader[AlphaAcsReplicationSourceConfig]
+      implicit val alphaAcsReplicationTargetReader: ConfigReader[AlphaAcsReplicationTargetConfig] =
+        deriveReader[AlphaAcsReplicationTargetConfig]
+      implicit val alphaAcsReplicationReader: ConfigReader[AlphaAcsReplicationConfig] =
+        deriveReader[AlphaAcsReplicationConfig]
+
       deriveReader[ParticipantNodeParameterConfig].applyDeprecations
     }
     lazy implicit final val timeTrackerConfigReader: ConfigReader[SynchronizerTimeTrackerConfig] = {
@@ -1678,6 +1721,9 @@ object CantonConfig {
   class ConfigWriters(confidential: Boolean) {
     import BaseCantonConfig.Writers.*
     val confidentialWriter = new ConfidentialConfigWriter(confidential)
+
+    implicit def confidentialValueWriter[A: ConfigWriter]: ConfigWriter[Confidential[A]] =
+      confidentialWriter.confidentialValueWriter[A]
 
     implicit val nonNegativeDurationWriter: ConfigWriter[config.NonNegativeDuration] =
       ConfigWriter.toString { x =>
@@ -1906,9 +1952,7 @@ object CantonConfig {
 
     lazy implicit final val authServiceConfigWriter: ConfigWriter[AuthServiceConfig] = {
       implicit val authorizedUserWriter: ConfigWriter[AuthorizedUser] =
-        confidentialWriter[AuthorizedUser](
-          _.copy(userId = "****")
-        )
+        deriveWriter[AuthorizedUser]
       implicit val authServiceAccessLevelWriter: ConfigWriter[AccessLevel] =
         deriveEnumerationWriter[AccessLevel]
       implicit val authServiceConfigJwtEs256CrtWriter: ConfigWriter[AuthServiceConfig.JwtEs256Crt] =
@@ -1921,9 +1965,7 @@ object CantonConfig {
         deriveWriter[AuthServiceConfig.JwtJwks]
       implicit val authServiceConfigUnsafeJwtHmac256Writer
           : ConfigWriter[AuthServiceConfig.UnsafeJwtHmac256] =
-        confidentialWriter[AuthServiceConfig.UnsafeJwtHmac256](
-          _.copy(secret = NonEmptyString.tryCreate("****"))
-        )
+        deriveWriter[AuthServiceConfig.UnsafeJwtHmac256]
       implicit val authServiceConfigWildcardWriter: ConfigWriter[AuthServiceConfig.Wildcard.type] =
         deriveWriter[AuthServiceConfig.Wildcard.type]
       implicit val authServiceConfigPartyJwtWriter: ConfigWriter[AuthServiceConfig.PartyJwt] =
@@ -2018,16 +2060,17 @@ object CantonConfig {
     lazy implicit val publicServerConfigWriter: ConfigWriter[PublicServerConfig] =
       deriveWriter[PublicServerConfig]
 
-    lazy implicit val memoryWriter: ConfigWriter[StorageConfig.Memory] =
-      deriveWriter[StorageConfig.Memory]
-    lazy implicit val h2Writer: ConfigWriter[DbConfig.H2] =
-      confidentialWriter[DbConfig.H2](x => x.copy(config = DbConfig.hideConfidential(x.config)))
-    lazy implicit val postgresWriter: ConfigWriter[DbConfig.Postgres] =
-      confidentialWriter[DbConfig.Postgres](x =>
-        x.copy(config = DbConfig.hideConfidential(x.config))
-      )
-    lazy implicit val storageConfigWriter: ConfigWriter[StorageConfig] =
+    lazy implicit val storageConfigWriter: ConfigWriter[StorageConfig] = {
+      // the raw database config can contain confidential values (passwords, urls)
+      implicit val dbConfigWriter: ConfigWriter[Config] =
+        confidentialWriter.rawConfigWriter(DbConfig.hideConfidential)
+      implicit val memoryWriter: ConfigWriter[StorageConfig.Memory] =
+        deriveWriter[StorageConfig.Memory]
+      implicit val h2Writer: ConfigWriter[DbConfig.H2] = deriveWriter[DbConfig.H2]
+      implicit val postgresWriter: ConfigWriter[DbConfig.Postgres] =
+        deriveWriter[DbConfig.Postgres]
       deriveWriter[StorageConfig]
+    }
     lazy implicit val dbLockConfigWriter: ConfigWriter[DbLockConfig] = deriveWriter[DbLockConfig]
     lazy implicit val lockedConnectionConfigWriter: ConfigWriter[DbLockedConnectionConfig] =
       deriveWriter[DbLockedConnectionConfig]
@@ -2187,6 +2230,9 @@ object CantonConfig {
         deriveWriter[SequencerLsuConfig]
       implicit val lsuRepairConfigWriter: ConfigWriter[LsuRepair] = deriveWriter[LsuRepair]
 
+      implicit val alphaSequencerChannelConfigWriter: ConfigWriter[AlphaSequencerChannelConfig] =
+        deriveWriter[AlphaSequencerChannelConfig]
+
       deriveWriter[SequencerNodeParameterConfig]
     }
     lazy implicit final val SequencerHealthConfigWriter: ConfigWriter[SequencerHealthConfig] =
@@ -2213,8 +2259,11 @@ object CantonConfig {
     implicit val tracingConfigDisabledSpanExporterWriter
         : ConfigWriter[TracingConfig.Exporter.Disabled.type] =
       deriveWriter[TracingConfig.Exporter.Disabled.type]
-    implicit val tracingConfigOtlpSpanExporterWriter: ConfigWriter[TracingConfig.Exporter.Otlp] =
+    implicit val tracingConfigOtlpSpanExporterWriter: ConfigWriter[TracingConfig.Exporter.Otlp] = {
+      implicit val httpRequestHeadersWriter: ConfigWriter[Confidential.HttpRequestHeaders] =
+        confidentialWriter.httpRequestHeadersWriter
       deriveWriter[TracingConfig.Exporter.Otlp]
+    }
     implicit val tracingConfigSpanExporterWriter: ConfigWriter[TracingConfig.Exporter] =
       deriveWriter[TracingConfig.Exporter]
     implicit val tracingConfigAlwaysOnSamplerWriter: ConfigWriter[TracingConfig.Sampler.AlwaysOn] =
@@ -2373,11 +2422,11 @@ object CantonConfig {
       implicit val packageMetadataViewConfigWriter: ConfigWriter[PackageMetadataViewConfig] =
         deriveWriter[PackageMetadataViewConfig]
       implicit val partyReplicatorTestInterceptorWriter
-          : ConfigWriter[AlphaOnlinePartyReplicationConfig.TestInterceptor] =
+          : ConfigWriter[AlphaAcsReplicationConfig.TestInterceptor] =
         ConfigWriter.toString(_ => "None")
-      implicit val onlinePartyReplicationTargetConfigWriter
-          : ConfigWriter[OnlinePartyReplicationTargetConfig] =
-        deriveWriter[OnlinePartyReplicationTargetConfig]
+      implicit val alphaOnlinePartyReplicationTargetConfigWriter
+          : ConfigWriter[AlphaOnlinePartyReplicationTargetConfig] =
+        deriveWriter[AlphaOnlinePartyReplicationTargetConfig]
       implicit val alphaOnlinePartyReplicationConfigWriter
           : ConfigWriter[AlphaOnlinePartyReplicationConfig] =
         deriveWriter[AlphaOnlinePartyReplicationConfig]
@@ -2386,6 +2435,12 @@ object CantonConfig {
       implicit val purgeWriter: ConfigWriter[PurgeConfig] = deriveWriter[PurgeConfig]
       implicit val lsuHandshakeWriter: ConfigWriter[LsuHandshake] = deriveWriter[LsuHandshake]
       implicit val lsuWriter: ConfigWriter[LsuConfig] = deriveWriter[LsuConfig]
+      implicit val alphaAcsReplicationSourceConfig: ConfigWriter[AlphaAcsReplicationSourceConfig] =
+        deriveWriter[AlphaAcsReplicationSourceConfig]
+      implicit val alphaAcsReplicationTargetConfig: ConfigWriter[AlphaAcsReplicationTargetConfig] =
+        deriveWriter[AlphaAcsReplicationTargetConfig]
+      implicit val alphaAcsReplicationConfig: ConfigWriter[AlphaAcsReplicationConfig] =
+        deriveWriter[AlphaAcsReplicationConfig]
       deriveWriter[ParticipantNodeParameterConfig]
     }
     lazy implicit final val timeTrackerConfigWriter: ConfigWriter[SynchronizerTimeTrackerConfig] = {
@@ -2493,11 +2548,6 @@ object CantonConfig {
   private lazy val confidentialConfigWriter: ConfigWriter[CantonConfig] =
     makeWriter(confidential = true)
 
-  def makeConfidentialString(config: CantonConfig): String =
-    "canton " + confidentialConfigWriter
-      .to(config)
-      .render(CantonConfig.defaultConfigRenderer)
-
   /** Parses and merges the provided configuration files into a single
     * [[com.typesafe.config.Config]]. Also loads and merges the default config (as defined by the
     * Lightbend config library) with the provided configuration files. Unless you know that you
@@ -2538,52 +2588,6 @@ object CantonConfig {
       parsedFiles <- parseConfigs(verifiedFiles)
       combinedConfig = mergeConfigs(parsedFiles)
     } yield combinedConfig
-
-  /** Renders a configuration file such that we can write it to the log-file on startup */
-  def renderForLoggingOnStartup(config: Config): String = {
-    import scala.jdk.CollectionConverters.*
-    val replace =
-      Set("secret", "pw", "password", "ledger-api-jdbc-url", "jdbc", "token", "admin-token")
-    val blinded = ConfigValueFactory.fromAnyRef("****")
-    def goVal(key: String, c: ConfigValue): ConfigValue =
-      c match {
-        case lst: ConfigList => goLst(lst)
-        case obj: ConfigObject =>
-          goObj(obj)
-        case other =>
-          if (replace.contains(key))
-            blinded
-          else other
-      }
-    def goObj(c: ConfigObject): ConfigObject = {
-      val resolved = Try(c.isEmpty).isSuccess
-      if (resolved) {
-        c.entrySet().asScala.map(x => (x.getKey, x.getValue)).foldLeft(c) {
-          case (acc, (key, value)) =>
-            acc.withValue(key, goVal(key, value))
-        }
-      } else c
-    }
-    def goLst(c: ConfigList): ConfigList = {
-      val mapped = (0 until c.size()) map { idx =>
-        goVal("idx", c.get(idx))
-      }
-      ConfigValueFactory.fromIterable(mapped.asJava)
-    }
-    def go(c: Config): Config =
-      c
-        .root()
-        .entrySet()
-        .asScala
-        .map(x => (x.getKey, x.getValue))
-        .foldLeft(c) { case (subConfig, (key, obj)) =>
-          subConfig.withValue(key, goVal(key, obj))
-        }
-    go(config.resolve()) // Resolve config _before_ redacting confidential fields
-      .root()
-      .get("canton")
-      .render(CantonConfig.defaultConfigRenderer)
-  }
 
   private def verifyThatFilesCanBeRead(
       files: NonEmpty[Seq[File]]

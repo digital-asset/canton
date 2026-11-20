@@ -576,7 +576,7 @@ final class PreviousProtocolVersionPartyAllocationIntegrationTest
         participant1.name,
         command,
         participant1.config.clientAdminApi,
-        participant1.config.adminApi.adminTokenConfig.fixedAdminToken,
+        participant1.config.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
       )
       ._2
       .value

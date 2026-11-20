@@ -40,7 +40,6 @@ import com.digitalasset.canton.{
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 
-import java.time.Duration
 import java.util.UUID
 
 class MediatorStateTest
@@ -84,7 +83,7 @@ class MediatorStateTest
         participantId,
         salt = s(6638),
         None,
-        DeduplicationPeriod.DeduplicationDuration(Duration.ZERO),
+        DeduplicationPeriod.DeduplicationDuration.Zero,
         CantonTimestamp.MaxValue,
         None,
         hashOps,

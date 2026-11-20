@@ -57,10 +57,10 @@ object PartyManagementServiceError extends PartyManagementServiceErrorGroup {
   }
 
   @Explanation(
-    "Cannot import the party ACS because this participant either lacks a party-to-participant mapping entirely, or the existing mapping is missing the required onboarding flag."
+    "Cannot import the party ACS because this participant either lacks a party-to-participant mapping entirely, or is neither Onboarding nor Freezing in the existing mapping."
   )
   @Resolution(
-    "Authorize a party-to-participant mapping for this participant with the onboarding flag set and retry the import."
+    "Authorize a party-to-participant mapping in which this participant is Onboarding, or in which it is Freezing for a replication of the party, and retry the import."
   )
   object AcsImportMissingOnboardingMapping
       extends ErrorCode(
@@ -72,7 +72,35 @@ object PartyManagementServiceError extends PartyManagementServiceErrorGroup {
     )(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause =
-            s"Aborted ACS import for party $partyId: missing party-to-participant mapping or required onboarding flag for this participant."
+            s"Aborted ACS import for party $partyId: missing party-to-participant mapping in which this participant is Onboarding or Freezing."
+        )
+        with PartyManagementServiceError
+  }
+
+  @Explanation(
+    """The participant has processed events past the party's activation on it. Since then, it may have
+      |processed archivals or unassignments of the party's contracts that the snapshot still contains. The
+      |import then fails at such a contract, or makes an archived contract active again if its archival has
+      |been removed."""
+  )
+  @Resolution(
+    """Restore the participant from a backup taken before the activation and retry the import while it is
+      |disconnected from all synchronizers. Only if no contract in the snapshot has been archived or unassigned
+      |since the activation, import anyway with the force flag IMPORT_PARTY_ACS_FORCE_FLAG_ALLOW_IMPORT_AFTER_ACTIVATION."""
+  )
+  object AcsImportAfterActivation
+      extends ErrorCode(
+        id = "PARTY_ACS_IMPORT_AFTER_ACTIVATION",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Error(
+        partyId: PartyId,
+        activation: CantonTimestamp,
+        participantRecordTime: CantonTimestamp,
+    )(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause =
+            s"Aborted ACS import for party $partyId: this participant has processed events up to $participantRecordTime, past the party's activation at $activation."
         )
         with PartyManagementServiceError
   }
@@ -223,4 +251,47 @@ object PartyManagementServiceError extends PartyManagementServiceErrorGroup {
         with PartyManagementServiceError
   }
 
+  @Explanation(
+    "The party ACS could not be read remotely from the source participant on the synchronizer"
+  )
+  @Resolution("Refer to the cause for details.")
+  object GetRemoteAcsFailed
+      extends ErrorCode(
+        id = "GET_REMOTE_ACS_FAILED",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Error(
+        party: PartyId,
+        synchronizerId: SynchronizerId,
+        sourceParticipant: ParticipantId,
+        asOf: CantonTimestamp,
+        reason: String,
+    )(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause =
+            s"The remote ACS read via `get_remote_acs` for party $party on synchronizer $synchronizerId from source participant $sourceParticipant at $asOf failed with: $reason"
+        )
+        with PartyManagementServiceError
+  }
+
+  @Explanation(
+    "The party is not in hosting state `Freezing` on the local participant and the specified synchronizer"
+  )
+  @Resolution("Refer to the cause for details.")
+  object PartyNotInFreezingHostingState
+      extends ErrorCode(
+        id = "PARTY_NOT_IN_FREEZING_HOSTING_STATE",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Error(
+        party: PartyId,
+        synchronizerId: SynchronizerId,
+        participantId: ParticipantId,
+    )(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause =
+            s"Party $party is not in the `Freezing` hosting state on synchronizer $synchronizerId and participant $participantId"
+        )
+        with PartyManagementServiceError
+  }
 }

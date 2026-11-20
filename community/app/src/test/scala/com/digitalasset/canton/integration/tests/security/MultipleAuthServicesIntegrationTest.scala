@@ -8,6 +8,7 @@ import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authorization
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.config.AuthServiceConfig
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.console.{
   CommandFailure,
   ConsoleEnvironment,

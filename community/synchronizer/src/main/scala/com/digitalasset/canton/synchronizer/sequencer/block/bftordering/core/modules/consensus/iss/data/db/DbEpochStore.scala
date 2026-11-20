@@ -110,13 +110,20 @@ class DbEpochStore(
     GetResult { r =>
       // actual sender is not needed when reading from the store
       val prePrepare =
-        parseSignedMessage(_ => PrePrepare.fromProtoConsensusMessage(actualSender = None, _))(r)
+        parseSignedMessage(originator =>
+          PrePrepare.fromProtoConsensusMessage(
+            claimedOriginatorAndActualSender = (originator, None),
+            _,
+          )
+        )(r)
       prePrepare.message -> readEpoch(r)
     }
 
   private implicit val readCommitMessage: GetResult[SignedMessage[Commit]] = GetResult {
     // actual sender is not needed when reading from the store
-    parseSignedMessage(_ => Commit.fromProtoConsensusMessage(actualSender = None, _))
+    parseSignedMessage(originator =>
+      Commit.fromProtoConsensusMessage(claimedOriginatorAndActualSender = (originator, None), _)
+    )
   }
 
   private val insertInProgressPbftMessagesBatchAggregator =

@@ -1119,7 +1119,6 @@ class PekkoUtilTest
                     futureQueue = new PekkoSourceQueueToFutureQueue(
                       sourceQueue = sourceQueue,
                       sourceDone = sourceDone,
-                      loggerFactory = loggerFactory,
                     ),
                     fromExclusive = 0,
                   )
@@ -2357,7 +2356,6 @@ class PekkoUtilTest
                   futureQueue = new PekkoSourceQueueToFutureQueue(
                     sourceQueue = sourceQueue,
                     sourceDone = sourceDone,
-                    loggerFactory = loggerFactory,
                   ),
                   fromExclusive = sink.get().headOption.map(_._1).getOrElse(0),
                 )
@@ -2464,7 +2462,6 @@ class PekkoUtilTest
                 futureQueue = new PekkoSourceQueueToFutureQueue(
                   sourceQueue = sourceQueue,
                   sourceDone = sourceDone,
-                  loggerFactory = loggerFactory,
                 ),
                 fromExclusive = 0,
               )

@@ -39,6 +39,7 @@ on:
 permissions:
   actions: write
   contents: read
+  id-token: write
   issues: write
 
 # Experiment (PR #35868): enable the Datadog Test Optimization JUnit upload in the

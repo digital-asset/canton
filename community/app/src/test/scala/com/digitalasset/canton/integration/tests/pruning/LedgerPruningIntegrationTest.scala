@@ -27,6 +27,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.multihostedparties.DivulgenceIntegrationTestHelpers.ParticipantSimpleStreamHelper
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.OffsetOutOfRange
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.admin.data.{
   ContractImportMode,
   RepairContract,
@@ -716,6 +717,20 @@ abstract class LedgerPruningIntegrationTest
     assertEventNotFound(participant1, aliceStakeholderCreatedP1.contractId, alice)
   }
 
+  "find_safe_offset returns error when asked to find a safe offset before timestamp without canton ledger state" in {
+    implicit env =>
+      import env.*
+      loggerFactory.assertLogs(
+        a[CommandFailure] shouldBe thrownBy(
+          participant1.pruning.find_safe_offset(CantonTimestamp.Epoch.minusSeconds(60).toInstant)
+        ),
+        logEntry => {
+          logEntry.commandFailureMessage should include regex
+            "GrpcRequestRefusedByServer: FAILED_PRECONDITION/NO_INTERNAL_PARTICIPANT_DATA_BEFORE\\(9,.*\\): No internal participant data to prune up to time"
+        },
+      )
+  }
+
   "after failed repair operation the respective contract instances will be cleaned during the next pruning" in {
     implicit env =>
       import env.*
@@ -817,7 +832,9 @@ abstract class LedgerPruningIntegrationTest
                 "AcsCommitmentProcessorManager"
               ))
               logEntry.message should (
-                include("Ledger subscription PingService failed with an error") or
+                include regex "Ledger subscription (PingService|AcsReplicationAdminWorkflow) failed with an error" or
+                  include regex "Setting the ledger subscription AcsReplicationAdminWorkflow offset to a later offset .* due to pruning" or
+                  include regex "FAILED_PRECONDITION: PARTICIPANT_PRUNED_DATA_ACCESSED.* Transactions request for offset range .* precedes pruned offset" or
                   include("failed to start running digest processor")
               )
               ()
@@ -835,19 +852,20 @@ abstract class LedgerPruningIntegrationTest
 
       // cid1 should be purged from the contract store as well
       contractFor(participant1, daId, cid1).isDefined shouldBe false
-  }
 
-  "find_safe_offset returns error when asked to find a safe offset before timestamp without canton ledger state" in {
-    implicit env =>
-      import env.*
-      loggerFactory.assertLogs(
-        a[CommandFailure] shouldBe thrownBy(
-          participant1.pruning.find_safe_offset(CantonTimestamp.Epoch.minusSeconds(60).toInstant)
+      // Upon shutdown P1 may still run into the pruned data access of the AcsReplication admin workflow.
+      loggerFactory.assertLogsUnorderedOptional(
+        participant1.stop(),
+        (
+          LogEntryOptionality.Optional,
+          logEntry => {
+            logEntry.warningMessage should include(
+              "wait-for-AcsReplicationAdminWorkflow-completed finished with an error"
+            )
+            logEntry.throwable.value.getMessage should include regex
+              "FAILED_PRECONDITION: PARTICIPANT_PRUNED_DATA_ACCESSED.* Transactions request for offset range .* precedes pruned offset"
+          },
         ),
-        logEntry => {
-          logEntry.commandFailureMessage should include regex
-            "GrpcRequestRefusedByServer: FAILED_PRECONDITION/NO_INTERNAL_PARTICIPANT_DATA_BEFORE\\(9,.*\\): No internal participant data to prune up to time"
-        },
       )
   }
 }

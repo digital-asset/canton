@@ -16,6 +16,7 @@ import com.digitalasset.canton.topology.processing.{
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.store.{TopologyStoreId, ValidatedTopologyTransaction}
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
@@ -42,6 +43,71 @@ class TopologyManagerTest extends AnyWordSpec with BaseTest with HasExecutionCon
     behave like rejectingMissingSigningKeySignatures(
       createAuthorizedTopologyManager()
     )
+
+    "count only hosts with Submission or Confirmation permission against the confirming threshold" in {
+      import ParticipantPermission.{Observation, Submission}
+      val participant1c = ParticipantId(UniqueIdentifier.tryCreate("three", ns1))
+      def mkPtp(
+          op: TopologyChangeOp,
+          serial: PositiveInt,
+          hosts: (ParticipantId, ParticipantPermission)*
+      ) =
+        mkTrans(
+          TopologyTransaction.tryCreate(
+            op,
+            serial,
+            PartyToParticipant.tryCreate(
+              party1b,
+              PositiveInt.two,
+              hosts.map { case (participant, permission) =>
+                HostingParticipant(participant, permission)
+              },
+            ),
+            testedProtocolVersion,
+          )
+        )
+      val manager = createAuthorizedTopologyManager()
+      def add(tx: GenericSignedTopologyTransaction, forceFlags: ForceFlags = ForceFlags.none) =
+        manager.add(Seq(tx), forceFlags, expectFullAuthorization = true).futureValueUS
+      def addAndWait(
+          tx: GenericSignedTopologyTransaction,
+          forceFlags: ForceFlags = ForceFlags.none,
+      ) =
+        add(tx, forceFlags).value.unwrap.futureValueUS
+      addAndWait(ns1k1_k1)
+
+      val observerMakesUpTheDifference =
+        mkPtp(
+          TopologyChangeOp.Replace,
+          PositiveInt.one,
+          participant1 -> Submission,
+          participant1c -> Observation,
+        )
+      inside(add(observerMakesUpTheDifference)) { case Left(error) =>
+        error.code shouldBe TopologyManagerError.ConfirmingThresholdCannotBeReached
+        error.cause should include(
+          "Tried to set a confirming threshold (2) above the number of hosting nodes with Submission or Confirmation permission (1)"
+        )
+      }
+      addAndWait(
+        observerMakesUpTheDifference,
+        ForceFlags(ForceFlag.AllowConfirmingThresholdCanBeMet),
+      )
+
+      clue("A removal is not checked") {
+        addAndWait(
+          mkPtp(
+            TopologyChangeOp.Remove,
+            PositiveInt.two,
+            participant1 -> Submission,
+            participant1c -> Observation,
+          )
+        )
+      }
+      clue("A party without hosts that can confirm is exempt") {
+        addAndWait(mkPtp(TopologyChangeOp.Replace, PositiveInt.three, participant1 -> Observation))
+      }
+    }
   }
   "SynchronizerTopologyManager" should {
     behave like rejectingMissingSigningKeySignatures(

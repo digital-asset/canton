@@ -11,7 +11,7 @@
 //import com.daml.metrics.api.noop.NoOpMetricsFactory
 //import com.daml.metrics.api.{HistogramInventory, MetricName}
 //import com.daml.resources
-//import com.digitalasset.canton.concurrent.DirectExecutionContext
+//import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 //import com.digitalasset.canton.data.Offset
 //import com.digitalasset.canton.discard.Implicits.DiscardOps
 //import com.digitalasset.canton.ledger.api.health.{HealthStatus, Healthy}
@@ -43,8 +43,6 @@
 //class IndexerBenchmark extends NamedLogging {
 //
 //  override val loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
-//
-//  private val directEc = DirectExecutionContext(noTracingLogger)
 //
 //  def run(
 //      createUpdates: () => Future[Source[(Offset, Update), NotUsed]],
@@ -181,7 +179,7 @@
 //      .recover { case ex =>
 //        logger.error("Error running benchmark", ex)(TraceContext.empty)
 //        sys.exit(1)
-//      }(directEc)
+//      }(directExecutionContext)
 //
 //    Await.result(result, Duration(100, "hour"))
 //    println("Done.")

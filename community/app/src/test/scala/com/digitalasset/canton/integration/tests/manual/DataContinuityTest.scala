@@ -313,6 +313,13 @@ trait DataContinuityTest
     nodes.foreach(_.db.migrate())
     nodes.foreach(_.start())
     new NetworkBootstrapper(networkTopologyDescriptions*).bootstrap()
+    // When using BFT sequencer, the ordering restarts from block 0 but blocks up to the
+    // OutputModule.lastAcknowledgedBlockNumber are not delivered to the synchronizer.
+    // The participant.synchronzer.reconnect_all waits for topology to be synchronized, which might
+    // never happen if topology transactions are below last acknowledged block number.
+    // The mediator time proof only completes once a block above the last acknowledged block number
+    // is delivered to the synchronizer and the topology transactions will be above that.
+    mediators.foreach(_.testing.fetch_synchronizer_time())
     participants.foreach(_.synchronizers.reconnect_all())
     // Ensure that all participants are up-to-date with the state of
     // the topology at the given time as returned by the synchronizer

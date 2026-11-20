@@ -13,6 +13,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.participant.admin.data.ImportPartyAcsForceFlag
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 
@@ -92,11 +93,22 @@ sealed trait StreamingAcsImportIntegrationTest
       // Test acs import via the party management service
       participant2.synchronizers.disconnect(daName)
 
+      // participant2 processed the activation while connected, but no event of Alice since then.
       // Test with real ACS
-      participant2.parties.import_party_acs(daId, Some(alice), acsFile.canonicalPath)
+      participant2.parties.import_party_acs(
+        daId,
+        Some(alice),
+        acsFile.canonicalPath,
+        forceFlags = Set(ImportPartyAcsForceFlag.AllowImportAfterActivation),
+      )
 
       // Test with empty ACS
-      participant2.parties.import_party_acs(daId, Some(alice), emptyAcsFile.canonicalPath)
+      participant2.parties.import_party_acs(
+        daId,
+        Some(alice),
+        emptyAcsFile.canonicalPath,
+        forceFlags = Set(ImportPartyAcsForceFlag.AllowImportAfterActivation),
+      )
 
       participant2.synchronizers.reconnect(daName)
 

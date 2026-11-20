@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.fixture
 
 import com.digitalasset.canton.config
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.{AuthServiceConfig, PositiveDurationSeconds}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.integration.tests.ledgerapi.auth.SandboxRequiringAuthorizationFuns

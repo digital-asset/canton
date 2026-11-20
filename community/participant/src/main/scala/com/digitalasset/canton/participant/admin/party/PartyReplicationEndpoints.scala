@@ -202,16 +202,13 @@ class PartyReplicationEndpointsImpl(
     )
       .leftMap(err => toStatusRuntimeException(Status.INVALID_ARGUMENT)(err))
 
-    status <- partyReplicator
+    apiStatus <- partyReplicator
       .getAddPartyStatus(partyId, synchronizerId, targetParticipantId)
       .toRight(
         toStatusRuntimeException(Status.NOT_FOUND)(
           s"Party replication status not found for party ${request.partyId} on synchronizer ${request.synchronizerId}"
         )
       )
-
-    apiStatus = com.digitalasset.canton.participant.admin.data.PartyReplicationStatus
-      .fromInternal(status)
   } yield GetAddPartyStatusResponse(Some(apiStatus.toLapiProto))).toFuture(identity)
 
   private def toStatusRuntimeException(status: Status)(err: String): StatusRuntimeException =

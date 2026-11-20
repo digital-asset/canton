@@ -13,6 +13,7 @@ import com.daml.jwt.{
 }
 import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, PositiveInt}
 import com.digitalasset.canton.config.{AuthServiceConfig, PemFile}
 import com.digitalasset.canton.console.LocalParticipantReference

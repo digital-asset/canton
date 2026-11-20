@@ -143,7 +143,7 @@ object OpenTelemetryFactory {
       loadedCert.foreach(cert => builder.setTrustedCertificates(cert.toByteArray))
       timeout.foreach(tmo => builder.setTimeout(tmo.toJava))
       connectTimeout.foreach(ctmo => builder.setConnectTimeout(ctmo.toJava))
-      additionalHeaders
+      additionalHeaders.all
         .foldLeft(builder) { case (builder, (key, value)) => builder.addHeader(key, value) }
         .build
 

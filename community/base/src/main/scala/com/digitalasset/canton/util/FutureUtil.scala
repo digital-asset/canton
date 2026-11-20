@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -47,8 +47,7 @@ object FutureUtil {
       level: => Level = Level.ERROR,
       closeContext: Option[CloseContext] = None,
       ignorePassiveInstance: Boolean = false,
-  )(implicit loggingContext: ErrorLoggingContext): Future[T] = {
-    implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.noTracingLogger)
+  )(implicit loggingContext: ErrorLoggingContext): Future[T] =
     future.recover {
       // Catching NonFatal only, because a future cannot fail with fatal throwables.
       // Also, it may be a bad idea to run a callback after an OutOfMemoryError.
@@ -86,8 +85,7 @@ object FutureUtil {
             throw t
         }
         throw err
-    }
-  }
+    }(directExecutionContext)
 
   /** Discard `future` and log an error if it does not complete successfully. This is useful to
     * document that a `Future` is intentionally not being awaited upon.

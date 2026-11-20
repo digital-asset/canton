@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.tracing
 
+import com.digitalasset.canton.config.Confidential
 import com.digitalasset.canton.tracing.TracingConfig.{Propagation, Tracer}
 
 import scala.concurrent.duration.FiniteDuration
@@ -55,7 +56,8 @@ object TracingConfig {
         address: String = "localhost",
         port: Int = 4317,
         trustCollectionPath: Option[String] = None,
-        additionalHeaders: Map[String, String] = Map.empty,
+        // Header values are marked confidential since they can contain authorization details.
+        additionalHeaders: Confidential.HttpRequestHeaders = Confidential.HttpRequestHeaders.empty,
         timeout: Option[FiniteDuration] = None,
         connectTimeout: Option[FiniteDuration] = None,
     ) extends Exporter

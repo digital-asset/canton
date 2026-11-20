@@ -678,7 +678,7 @@ abstract class CantonNodeBootstrapImpl[
         new CantonAdminTokenDispenser(
           tokenDuration = adminTokenConfig.adminTokenDuration.asJava,
           randomOps = crypto.pureCrypto,
-          fixedToken = adminTokenConfig.fixedAdminToken,
+          fixedToken = adminTokenConfig.fixedAdminToken.map(_.unwrap),
         )
       createAdminServerRegistry(adminTokenDispenser).map { adminServerRegistry =>
         adminServerRegistry.addServiceU(bindNodeStatusService())

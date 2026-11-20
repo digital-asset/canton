@@ -3,18 +3,13 @@
 
 package com.digitalasset.canton.integration.tests
 
-import com.digitalasset.canton.SequencerAlias
-import com.digitalasset.canton.admin.api.client.data.{
-  GrpcSequencerConnection,
-  SynchronizerConnectionConfig,
-}
+import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
-import com.google.protobuf.ByteString
 
-trait SynchronizerConnectivityIsolatedIntegrationTest
+sealed trait SynchronizerConnectivityIsolatedIntegrationTest
     extends CommunityIntegrationTest
     with IsolatedEnvironments
     with HasCycleUtils {
@@ -61,11 +56,6 @@ trait SynchronizerConnectivityIsolatedIntegrationTest
       Seq(participant3, participant4).synchronizers.reconnect_all()
       Seq(participant3, participant4).foreach(_.synchronizers.active(daName) shouldBe true)
 
-      val acmeCertificate = sequencer2.sequencerConnection match {
-        case grpc: GrpcSequencerConnection =>
-          grpc.customTrustCertificates.getOrElse(ByteString.EMPTY)
-        case _ => fail()
-      }
       Seq(participant1, participant2).synchronizers
         .register(
           SynchronizerConnectionConfig(
@@ -73,7 +63,6 @@ trait SynchronizerConnectivityIsolatedIntegrationTest
             sequencer2,
             manualConnect = true,
           )
-            .withCertificates(SequencerAlias.Default, acmeCertificate)
         )
       Seq(participant1, participant2).foreach(_.synchronizers.active(acmeName) shouldBe false)
       Seq(participant1, participant2).synchronizers.reconnect(acmeName)
@@ -84,7 +73,7 @@ trait SynchronizerConnectivityIsolatedIntegrationTest
 //class SynchronizerConnectivityIsolatedReferenceIntegrationTestDefault
 //  extends SynchronizerConnectivityIsolatedIntegrationTests
 
-class SynchronizerConnectivityIsolatedBftOrderingIntegrationTestPostgres
+final class SynchronizerConnectivityIsolatedBftOrderingIntegrationTestPostgres
     extends SynchronizerConnectivityIsolatedIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(

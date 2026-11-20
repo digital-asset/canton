@@ -147,7 +147,8 @@ final class AcsImportNoSynchronizerConnectionIntegrationTest
         logEntries =>
           forEvery(logEntries) { logEntry =>
             logEntry.loggerName should include("ResilientLedgerSubscription")
-            logEntry.message should include("Ledger subscription PingService failed with an error")
+            logEntry.message should include regex
+              "Ledger subscription (PingService|AcsReplicationAdminWorkflow) failed with an error"
           },
       )
     }

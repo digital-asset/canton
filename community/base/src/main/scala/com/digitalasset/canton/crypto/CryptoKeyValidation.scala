@@ -29,7 +29,6 @@ import java.security.spec.{
 }
 import java.security.{
   AlgorithmParameters,
-  GeneralSecurityException,
   KeyFactory,
   PrivateKey as JPrivateKey,
   PublicKey as JPublicKey,
@@ -43,10 +42,11 @@ object CryptoKeyValidation {
   )
 
   // Keeps track of the public keys that have been validated.
-  private lazy val validatedPublicKeys: Cache[Fingerprint, Either[KeyParseAndValidateError, Unit]] =
+  // NOTE: Keyed by the whole public key, as keys with the same fingerprint can declare different key specs
+  private lazy val validatedPublicKeys: Cache[PublicKey, Either[KeyParseAndValidateError, Unit]] =
     cacheConfig
       .buildScaffeineWithoutExecutor()
-      .build[Fingerprint, Either[KeyParseAndValidateError, Unit]]()
+      .build[PublicKey, Either[KeyParseAndValidateError, Unit]]()
 
   private lazy val validatedPrivateKeys
       : Cache[Fingerprint, Either[KeyParseAndValidateError, Unit]] =
@@ -154,7 +154,7 @@ object CryptoKeyValidation {
       // validatePublicKeyFull returns false for invalid keys (does NOT throw),
       // so we must check the boolean return value explicitly.
       isValid <- Either
-        .catchOnly[GeneralSecurityException] {
+        .catchNonFatal {
           validatePublicKeyFull(rawKeyBytes, 0)
         }
         .leftMap(err =>
@@ -257,7 +257,7 @@ object CryptoKeyValidation {
 
       // Ensures the point lies on the elliptic curve defined by the given parameters.
       point <- Either
-        .catchOnly[GeneralSecurityException](curve.createPoint(x, y))
+        .catchNonFatal(curve.createPoint(x, y))
         .leftMap(err =>
           KeyParseAndValidateError(
             s"Failed to create point on curve '${ecKeySpec.jcaCurveName}': ${ThrowableUtil.messageWithStacktrace(err)}"
@@ -462,7 +462,7 @@ object CryptoKeyValidation {
 
     // If the result is already in the cache it means the key has already been validated.
     (if (cacheValidation)
-       validatedPublicKeys.get(publicKey.id, _ => parseRes)
+       validatedPublicKeys.get(publicKey, _ => parseRes)
      else parseRes).leftMap(err =>
       errFn(
         s"Failed to deserialize or validate ${publicKey.format} public key [${publicKey.id}]: $err"

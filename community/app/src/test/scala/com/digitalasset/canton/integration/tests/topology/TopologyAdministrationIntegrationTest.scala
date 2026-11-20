@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
+import better.files.File
 import com.digitalasset.canton.admin.api.client.data.topology.ListOwnerToKeyMappingResult
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
@@ -21,6 +22,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.participant.store.DamlPackageStore
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
@@ -33,7 +35,7 @@ import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, PartyId, Topolog
 import com.digitalasset.daml.lf.archive.DarParser
 import com.digitalasset.nonempty.NonEmpty
 
-import java.io.File
+import java.io.File as JFile
 import scala.annotation.nowarn
 
 trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnvironment {
@@ -202,6 +204,95 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
         )
         .map(_.item)
         .loneElement shouldBe rootNSD
+    }
+
+    "export a revocation signed in a temporary store and load it from a file" in { implicit env =>
+      import env.*
+      val rootNamespace = participant1.namespace
+      val password = "correct horse battery staple"
+
+      def delegationTargets(): Seq[Fingerprint] =
+        participant1.topology.namespace_delegations
+          .list(store = daId, filterNamespace = rootNamespace.toProtoPrimitive)
+          .map(_.item.target.fingerprint)
+
+      val key = participant1.keys.secret
+        .generate_signing_key("revocation_key", SigningKeyUsage.NamespaceOnly)
+      participant1.topology.namespace_delegations.propose_delegation(
+        rootNamespace,
+        key,
+        CanSignAllButNamespaceDelegations,
+        store = daId,
+      )
+
+      File.temporaryFile("encrypted-revocation", ".enc").foreach { encryptedFile =>
+        File.temporaryFile("plain-revocation", ".bin").foreach { plainFile =>
+          val temporaryStore = participant1.topology.stores
+            .create_temporary_topology_store("revocation", testedProtocolVersion)
+          participant1.topology.transactions.load(
+            participant1.topology.transactions
+              .list(
+                daId,
+                filterMappings = Seq(Code.NamespaceDelegation),
+                filterNamespace = rootNamespace.toProtoPrimitive,
+              )
+              .result
+              .map(_.transaction),
+            temporaryStore,
+          )
+          val revocation = participant1.topology.namespace_delegations.propose_revocation(
+            rootNamespace,
+            key,
+            store = temporaryStore,
+            synchronize = None,
+          )
+          participant1.topology.transactions.export_single_to_file(
+            revocation,
+            encryptedFile.pathAsString,
+            Some(password),
+          )
+          participant1.topology.transactions.export_single_to_file(
+            revocation,
+            plainFile.pathAsString,
+          )
+          participant1.topology.stores.drop_temporary_topology_store(temporaryStore)
+
+          clue("exporting does not submit the revocation") {
+            delegationTargets() should contain(key.fingerprint)
+          }
+
+          SignedTopologyTransaction
+            .readFromTrustedFile(
+              TopologyTransactionDeserializationContext(SynchronizerLimits.default),
+              plainFile.pathAsString,
+            )
+            .map(_.hash) shouldBe Right(revocation.hash)
+
+          loggerFactory.assertThrowsAndLogs[CommandFailure](
+            participant1.topology.transactions.load_single_from_file(
+              encryptedFile.pathAsString,
+              daId,
+              password = Some("wrong password"),
+            ),
+            _.errorMessage should include("Failed to decrypt with password"),
+          )
+
+          loggerFactory.assertThrowsAndLogs[CommandFailure](
+            participant1.topology.transactions
+              .load_single_from_file(encryptedFile.pathAsString, daId),
+            _.errorMessage should include("If the file is password-encrypted, pass `password`"),
+          )
+
+          participant1.topology.transactions.load_single_from_file(
+            encryptedFile.pathAsString,
+            daId,
+            password = Some(password),
+          )
+
+          // the revocation has been loaded and became effective
+          delegationTargets() should not contain key.fingerprint
+        }
+      }
     }
 
     "propose_delegation with a delegation restriction" in { implicit env =>
@@ -574,7 +665,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
     val startingSerial = startingResult.context.serial
 
     val archive = DarParser
-      .readArchiveFromFile(new File(CantonTestsPath))
+      .readArchiveFromFile(new JFile(CantonTestsPath))
       .getOrElse(fail("cannot read test dar"))
     val adds = VettedPackage.unbounded(archive.all.map(p => DamlPackageStore.readPackageId(p)))
 

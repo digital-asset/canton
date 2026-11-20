@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.checked
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.{
   DbLockedConnectionConfig,
@@ -59,7 +60,11 @@ class DbLockedConnection private (
     createConnection: () => EitherT[Future, String, KeepAliveConnection],
     createLock: KeepAliveConnection => DbLock,
     config: DbLockedConnectionConfig,
-    checkReadOnly: KeepAliveConnection => EitherT[Future, String, Boolean],
+    checkReadOnly: KeepAliveConnection => EitherT[
+      Future,
+      DbLockedConnection.ReadOnlyCheckError,
+      Boolean,
+    ],
     private[resource] val lockId: DbLockId,
     exitOnFatalFailures: Boolean,
     clock: Clock,
@@ -631,6 +636,16 @@ object DbLockedConnection {
     case object Indeterminate extends ConnectionHealth
   }
 
+  /** Why the read-only check of a connection did not produce an answer. */
+  private[resource] sealed trait ReadOnlyCheckError extends Product with Serializable
+  private[resource] object ReadOnlyCheckError {
+
+    /** The connection was taken by a regular query, so the check could not run. */
+    case object ConnectionInUse extends ReadOnlyCheckError
+
+    final case class Failed(reason: String) extends ReadOnlyCheckError
+  }
+
   /** Checks whether the connection is valid and not read-only.
     *
     * @param readOnlyCheckTimeout
@@ -638,7 +653,7 @@ object DbLockedConnection {
     */
   private def checkConnection(
       connection: KeepAliveConnection,
-      checkReadOnly: KeepAliveConnection => EitherT[Future, String, Boolean],
+      checkReadOnly: KeepAliveConnection => EitherT[Future, ReadOnlyCheckError, Boolean],
       connectionTimeout: PositiveFiniteDuration,
       readOnlyCheckTimeout: PositiveFiniteDurationConfig,
       logger: TracedLogger,
@@ -680,8 +695,15 @@ object DbLockedConnection {
           case util.Success(Right(false)) =>
             logger.trace(s"Connection $connection is not read-only")
             ConnectionHealth.Healthy
-          case util.Success(Left(err)) =>
-            logger.debug(s"Failed to check if connection $connection is read-only: $err")
+          case util.Success(Left(ReadOnlyCheckError.ConnectionInUse)) =>
+            // A regular query took the connection after the validity check: this is contention, not an
+            //  unhealthy connection, so skip the read-only check as when the connection is in use above.
+            logger.trace(
+              s"Skip read-only check of connection $connection because the connection is in use"
+            )
+            ConnectionHealth.Healthy
+          case util.Success(Left(ReadOnlyCheckError.Failed(reason))) =>
+            logger.debug(s"Failed to check if connection $connection is read-only: $reason")
             ConnectionHealth.Indeterminate
           case Failure(_: TimeoutException) =>
             logger.debug(s"Read-only check for connection $connection timed out")
@@ -836,7 +858,7 @@ object DbLockedConnection {
           // Set an explicit network timeout on the main connection as we do not run any (long) user queries on that connection
           if (isMainConnection)
             connection.setNetworkTimeout(
-              Threading.directExecutionContext(logger),
+              directExecutionContext,
               connectionConfig.healthCheckTimeout.duration.toMillis.toInt,
             )
 
@@ -921,7 +943,9 @@ object DbLockedConnection {
           writeExecutor,
         )
 
-    def checkReadOnly(connection: KeepAliveConnection): EitherT[Future, String, Boolean] =
+    def checkReadOnly(
+        connection: KeepAliveConnection
+    ): EitherT[Future, ReadOnlyCheckError, Boolean] =
       profile match {
         case Profile.Postgres(jdbc) =>
           import slick.jdbc.canton.ActionBasedSQLInterpolation.Implicits.*
@@ -945,12 +969,14 @@ object DbLockedConnection {
                 )
               )
 
-          EitherTUtil
-            .fromFuture(
-              db.run(readOnlyQuery),
-              err => show"Failed to check new connection for read-only: $err",
-            )
-            .map(_.map(_.toLowerCase).contains("on"))
+          EitherTUtil.fromFuture(
+            db.run(readOnlyQuery).map(_.map(_.toLowerCase).contains("on")),
+            {
+              case _: DbStorage.NoConnectionAvailable => ReadOnlyCheckError.ConnectionInUse
+              case err =>
+                ReadOnlyCheckError.Failed(show"Failed to check new connection for read-only: $err")
+            },
+          )
       }
 
     if (ds.keepAliveConnection) {

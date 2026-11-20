@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer.mediator.store
 import cats.data.OptionT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -128,7 +128,7 @@ private[mediator] class InMemoryFinalizedResponseStore(
     override protected val loggerFactory: NamedLoggerFactory
 ) extends FinalizedResponseStore
     with NamedLogging {
-  private implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
+  private implicit val ec: ExecutionContext = directExecutionContext
 
   import scala.jdk.CollectionConverters.*
   private val finalizedRequests =

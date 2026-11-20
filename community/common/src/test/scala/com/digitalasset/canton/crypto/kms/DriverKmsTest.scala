@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.crypto.kms
 
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ExponentialBackoffConfig, KmsConfig}
 import com.digitalasset.canton.crypto.kms.driver.api.v1.{

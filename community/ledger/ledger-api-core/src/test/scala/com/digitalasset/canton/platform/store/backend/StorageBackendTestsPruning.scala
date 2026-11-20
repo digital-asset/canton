@@ -988,7 +988,7 @@ private[backend] trait StorageBackendTestsPruning
     val contractIds = pruningFixture()
     executeSqlInTx { c =>
       SQL"""
-             CREATE LOCAL TEMPORARY TABLE lapi_pruning_contract_candidate_temp
+             CREATE LOCAL TEMPORARY TABLE lapi_pruning_contract_candidate_temp_prune
              ON COMMIT DELETE ROWS
              AS SELECT internal_contract_id
                 FROM lapi_pruning_contract_candidate
@@ -996,7 +996,7 @@ private[backend] trait StorageBackendTestsPruning
       backend.event.cleanPruningCandidates()(c, implicitly)
       SQL"""
             SELECT internal_contract_id
-            FROM lapi_pruning_contract_candidate_temp
+            FROM lapi_pruning_contract_candidate_temp_prune
             ORDER BY internal_contract_id"""
         .asVectorOf(long("internal_contract_id"))(c) shouldBe List(2, 6, 8, 9).map(contractIds)
     }

@@ -8,20 +8,21 @@ import cats.implicits.catsSyntaxOptionId
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.base.error.RpcError
-import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.ProtoDeserializationError.{
   ProtoDeserializationFailure,
   StringConversionError,
 }
 import com.digitalasset.canton.admin.participant.v30
+import com.digitalasset.canton.admin.participant.v30.UnvetDarRequest.UnvetScope
 import com.digitalasset.canton.admin.participant.v30.{
   GetPackageReferencesRequest,
   GetPackageReferencesResponse,
+  UnvetDarRequest,
 }
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.CannotAutodetectSynchronizer
@@ -35,6 +36,7 @@ import com.digitalasset.canton.participant.admin.{
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, OptionUtil}
+import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 import com.digitalasset.daml.lf.data.Ref.ModuleName
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.language.Ast.{DDataType, GenModule}
@@ -232,8 +234,9 @@ class GrpcPackageService(
     val ret = for {
       synchronizerId <- findSynchronizerId(request.synchronizerId)
       hash <- EitherT.fromEither[Future](extractMainPackageId(request.mainPackageId))
+      unsafeUnvetDarDependencies <- validateUnvetScope(request)
       _unit <- service
-        .unvetDar(hash, synchronizerId)
+        .unvetDar(hash, synchronizerId, unsafeUnvetDarDependencies)
         .leftMap(_.asGrpcError)
         .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError))
     } yield v30.UnvetDarResponse()
@@ -306,6 +309,26 @@ class GrpcPackageService(
         )
     })
   }
+
+  private def validateUnvetScope(request: UnvetDarRequest)(implicit elc: ErrorLoggingContext) =
+    request.unvetScope match {
+      case UnvetScope.UNVET_SCOPE_MAIN_PACKAGE_ONLY | UnvetScope.UNVET_SCOPE_UNSPECIFIED =>
+        EitherT.pure[Future, StatusRuntimeException](false)
+      case UnvetScope.UNVET_SCOPE_ALL_DAR_PACKAGES =>
+        EitherT.pure[Future, StatusRuntimeException](true)
+      case UnvetScope.Unrecognized(unrecognizedValue) =>
+        EitherT.leftT[Future, Boolean](
+          ProtoDeserializationFailure
+            .Wrap(
+              ProtoDeserializationError
+                .UnrecognizedEnum(
+                  request.unvetScope.companion.scalaDescriptor.fullName,
+                  unrecognizedValue,
+                )
+            )
+            .asGrpcError
+        )
+    }
 
   // custom converters as description is defined in ledger-api, while admin api proto is only accessible in app
   private def packageDescriptionToProto(desc: state.PackageDescription): v30.PackageDescription = {

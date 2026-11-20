@@ -2,31 +2,70 @@
 
 Canton CANTON_VERSION has been released on RELEASE_DATE.
 
+<!--
+Add each entry to the section and audience it affects. Write for application developers and node operators:
+what changed, why it matters to them, and what to do. A bigger topic gets its own `####` heading with the
+paragraphs Background, Specific Changes, and Impact and Migration as needed; small changes are bullets.
+A breaking change also gets a bullet in the summary of breaking changes, and its column is set to `yes`.
+Empty sections and these comments are removed when the release notes are polished.
+-->
+
 ## Summary
 
 _Write summary of release_
 
-## What’s New
+**Summary of breaking changes** (see [Breaking changes](#breaking-changes) for details and migration):
 
-### Topic A
-Template for a bigger topic
-#### Background
-#### Specific Changes
-#### Impact and Migration
+| Ledger API | Admin API and console | Protocol | Configuration |
+| :--------- | :-------------------- | :------- | :------------ |
+| no         | no                    | no       | no            |
 
-### Minor Improvements
-- The `canton-participant`, `canton-mediator`, and `canton-sequencer` Docker images now enable the HTTP readiness endpoint (`/health/ready` on port 5071) by default.
-- The `HEALTHCHECK` of the `canton-participant` Docker image now uses the HTTP readiness endpoint (`/health/ready` on port 5071) instead of the gRPC health service.
-  Readiness is now only reported once database migrations and storage initialization have completed, so after an upgrade with long-running migrations the container stays unhealthy for longer.
-  Tooling that waits for the container to become healthy (e.g., `docker compose up --wait` or `condition: service_healthy`) may need longer timeouts.
-- Bump base docker image to [1.0.19](https://github.com/canton-network/canton-base-images/releases/tag/v1.0.19) to address security vulnerabilities.
+## What's New
 
-### Preview Features
-- preview feature
+### New protocol version
 
-## Bugfixes
-- Sequencer node: fixed a resource leak, causing a spike of # of threads, CPU and memory consumption affecting the node's
-  ability to keep up with the rest of synchronizer, requiring an imminent restart of the node every few days.
+### For application developers
+
+### All node operators
+
+### Participant node operators
+
+### Synchronizer operators
+
+## Breaking changes
+
+### Ledger API (application developers)
+
+### All node operators
+
+### Participant node operators
+
+### Synchronizer operators
+
+## Deprecations
+
+<!-- The deprecated item, its replacement, and when it will be removed. -->
+
+## Minor Improvements
+
+### Ledger API
+
+### All node operators
+
+### Participant node operators
+
+### Synchronizer operators
+
+## Security and Bug Fixes
+
+<!--
+Advisories first, then the other fixes as a bullet list, including dependency updates for security vulnerabilities
+(e.g. "Dependency updates to address security vulnerabilities: jackson 2.22.4, gRPC 1.85").
+-->
+
+<!--
+Advisory for a bug fix with a severity, e.g. (25-012, Low). For a Critical or High security fix, only once the
+fix is deployed on MainNet:
 
 ### (YY-nnn, Risk): Title
 
@@ -45,6 +84,7 @@ Template for a bigger topic
 #### Likeliness
 
 #### Recommendation
+-->
 
 ## Compatibility
 

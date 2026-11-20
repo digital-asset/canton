@@ -1351,13 +1351,13 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           )
           endpointStatusMetrics
             .flatMap(
-              _.get(MetricsContext("endpoint" -> endpointLabel))
+              _.get(MetricsContext(metrics.p2p.labels.endpoint -> endpointLabel))
             )
             .flatMap(gauge => Option(gauge.getValue)) shouldBe Some(2) // Authenticated
           endpointStatusMetrics
             .getOrElse(Map.empty)
             .keys
-            .flatMap(_.labels.get("endpoint"))
+            .flatMap(_.labels.get(metrics.p2p.labels.endpoint))
             .filter(
               _.startsWith(s"${endpoint.id.url} (")
             ) should contain only endpointLabel

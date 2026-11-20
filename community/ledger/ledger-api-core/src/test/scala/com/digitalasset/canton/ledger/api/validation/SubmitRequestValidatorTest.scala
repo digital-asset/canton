@@ -25,6 +25,7 @@ import com.digitalasset.canton.ledger.api.util.{DurationConversion, TimestampCon
 import com.digitalasset.canton.ledger.api.{ApiMocks, DisclosedContract, Commands as ApiCommands}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
+import com.digitalasset.canton.platform.config.CommandServiceConfig
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.daml.lf.command.{
@@ -177,7 +178,8 @@ class SubmitRequestValidatorTest
       actAs = Set(ApiMocks.party),
       readAs = Set.empty,
       submittedAt = Time.Timestamp.assertFromInstant(submittedAt),
-      deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration(deduplicationDuration),
+      deduplicationPeriod =
+        DeduplicationPeriod.DeduplicationDuration.create(deduplicationDuration).value,
       commands = LfCommands(
         ImmArray(
           LfCommand.Create(
@@ -506,6 +508,35 @@ class SubmitRequestValidatorTest
         ) shouldEqual Right(withLedgerTime(internal.emptyCommands, minLedgerTimeAbs))
       }
 
+      "respect the minLedgerTime upper bound" in {
+        val maxDelay = CommandServiceConfig.DefaultMinLedgerTimeMaxDelay
+        val delay = maxDelay.asJava.multipliedBy(2)
+        forAll(
+          Table(
+            ("field", "commands"),
+            "min_ledger_time_abs" -> api.commands.copy(minLedgerTimeAbs =
+              Some(TimestampConversion.fromInstant(internal.ledgerTime.plus(delay)))
+            ),
+            "min_ledger_time_rel" -> api.commands
+              .copy(minLedgerTimeRel = Some(DurationConversion.toProto(delay))),
+          )
+        ) { (field, commands) =>
+          requestMustFailWith(
+            testedCommandValidator.validateCommands(
+              commands = commands,
+              currentLedgerTime = internal.ledgerTime,
+              currentUtcTime = internal.submittedAt,
+              maxDeduplicationDuration = internal.maxDeduplicationDuration,
+            ),
+            code = INVALID_ARGUMENT,
+            description =
+              s"INVALID_FIELD(8,0): The submitted command has a field with invalid value: Invalid field $field: " +
+                s"must not be more than ${maxDelay.underlying} ahead of the current ledger time",
+            metadata = Map.empty,
+          )
+        }
+      }
+
       "transform valid deduplication into correct internal structure" in {
         val deduplicationDuration = Duration.of(10, 0)
         forAll(
@@ -515,11 +546,12 @@ class SubmitRequestValidatorTest
               .DeduplicationOffset(Some(Offset.tryFromLong(12345678L))),
             DeduplicationPeriodProto.DeduplicationDuration(
               deduplicationDuration
-            ) -> DeduplicationPeriod
-              .DeduplicationDuration(JDuration.ofSeconds(10)),
-            DeduplicationPeriodProto.Empty -> DeduplicationPeriod.DeduplicationDuration(
-              internal.maxDeduplicationDuration
-            ),
+            ) -> DeduplicationPeriod.DeduplicationDuration.create(JDuration.ofSeconds(10)).value,
+            DeduplicationPeriodProto.Empty -> DeduplicationPeriod.DeduplicationDuration
+              .create(
+                internal.maxDeduplicationDuration
+              )
+              .value,
           )
         ) {
           case (
@@ -581,7 +613,7 @@ class SubmitRequestValidatorTest
           ) shouldBe Right(
             internal.emptyCommands.copy(
               deduplicationPeriod =
-                DeduplicationPeriod.DeduplicationDuration(durationSecondsExceedingMax)
+                DeduplicationPeriod.DeduplicationDuration.create(durationSecondsExceedingMax).value
             )
           )
         }
@@ -595,8 +627,9 @@ class SubmitRequestValidatorTest
           internal.maxDeduplicationDuration,
         ) shouldEqual Right(
           internal.emptyCommands.copy(
-            deduplicationPeriod =
-              DeduplicationPeriod.DeduplicationDuration(internal.maxDeduplicationDuration)
+            deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration
+              .create(internal.maxDeduplicationDuration)
+              .value
           )
         )
       }

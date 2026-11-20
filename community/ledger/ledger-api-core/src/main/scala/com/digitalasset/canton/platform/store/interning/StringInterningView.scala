@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.interning
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.Party
@@ -89,7 +89,6 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
 
   import StringInterningView.*
 
-  private val directEc = DirectExecutionContext(noTracingLogger)
   private val lock = new Mutex()
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -210,7 +209,7 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
       Future.unit
     } else {
       loadStringInterningEntries(raw.lastId, lastStringInterningId.getOrElse(0))
-        .map(updateView)(directEc)
+        .map(updateView)(directExecutionContext)
     }
 
   private def updateView(newEntries: Iterable[(Int, String)]): Unit = (lock.exclusive {

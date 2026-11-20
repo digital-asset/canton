@@ -11,9 +11,10 @@ import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authenticity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.auth.{AuthorizationChecksErrors, CantonAdminToken}
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.AuthServiceConfig
 import com.digitalasset.canton.config.AuthServiceConfig.Wildcard
 import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmptyString}
+import com.digitalasset.canton.config.Confidential.Implicits.*
+import com.digitalasset.canton.config.{AuthServiceConfig, Confidential}
 import com.digitalasset.canton.connection.v30.{ApiInfoServiceGrpc, GetApiInfoRequest}
 import com.digitalasset.canton.console.RemoteInstanceReference
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -66,6 +67,11 @@ trait AdminApiAuthorizationIntegrationTest
   private val adminToken = CantonAdminToken.create(new SymbolicPureCrypto())
   private val expirationLeeway: Long = 3600
 
+  private val hypotheticalLedgerApiToken = JwtTokenUtilities.buildUnsafeToken(
+    secret = "little-lamb",
+    userId = Some("mary"),
+  )
+
   lazy private val securityAsset: SecurityTest =
     SecurityTest(property = Authenticity, asset = "admin api client")
 
@@ -90,11 +96,13 @@ trait AdminApiAuthorizationIntegrationTest
   def remoteParticipantWithToken(
       localConfig: ParticipantNodeConfig,
       token: Option[String],
+      adminApiToken: Option[String] = None,
   ): RemoteParticipantConfig =
     RemoteParticipantConfig(
       ledgerApi = localConfig.ledgerApi.clientConfig,
       adminApi = localConfig.adminApi.clientConfig,
-      token = token,
+      token = token.map(Confidential(_)),
+      adminApiToken = adminApiToken.map(Confidential(_)),
     )
 
   def createRemoteConfigForMediator(
@@ -267,7 +275,7 @@ trait AdminApiAuthorizationIntegrationTest
               "p1-adminToken" ->
                 remoteParticipantWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "p1-noToken" ->
                 remoteParticipantWithToken(localConfig, None),
@@ -283,12 +291,34 @@ trait AdminApiAuthorizationIntegrationTest
               "p2-adminToken" ->
                 remoteParticipantWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "p2-privileged" ->
                 remoteParticipantWithToken(
                   localConfig,
                   Some(
+                    JwtTokenUtilities.buildUnsafeToken(
+                      mySecret.unwrap,
+                      scope = Some(scope),
+                    )
+                  ),
+                ),
+              "p2-overrideNoToken" ->
+                remoteParticipantWithToken(
+                  localConfig,
+                  token = None,
+                  adminApiToken = Some(
+                    JwtTokenUtilities.buildUnsafeToken(
+                      mySecret.unwrap,
+                      scope = Some(scope),
+                    )
+                  ),
+                ),
+              "p2-overrideLedgerToken" ->
+                remoteParticipantWithToken(
+                  localConfig,
+                  token = Some(hypotheticalLedgerApiToken),
+                  adminApiToken = Some(
                     JwtTokenUtilities.buildUnsafeToken(
                       mySecret.unwrap,
                       scope = Some(scope),
@@ -307,7 +337,7 @@ trait AdminApiAuthorizationIntegrationTest
               "p3-adminToken" ->
                 remoteParticipantWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "p3-privileged" ->
                 remoteParticipantWithToken(
@@ -333,7 +363,7 @@ trait AdminApiAuthorizationIntegrationTest
               "p4-adminToken" ->
                 remoteParticipantWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 )
             ),
         )
@@ -346,7 +376,7 @@ trait AdminApiAuthorizationIntegrationTest
               "m1-adminToken" ->
                 remoteMediatorWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "m1-privileged" ->
                 remoteMediatorWithToken(
@@ -369,7 +399,7 @@ trait AdminApiAuthorizationIntegrationTest
               "s1-adminToken" ->
                 remoteSequencerWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "s1-privileged" ->
                 remoteSequencerWithToken(
@@ -397,6 +427,8 @@ trait AdminApiAuthorizationIntegrationTest
             "p1-noToken",
             "p2-adminToken",
             "p2-privileged",
+            "p2-overrideNoToken",
+            "p2-overrideLedgerToken",
             "p3-adminToken",
             "p3-privileged",
             "p3-noToken",
@@ -508,6 +540,24 @@ trait AdminApiAuthorizationIntegrationTest
         ).futureValue shouldBe ()
 
         testRemote(rp("p2-privileged"))
+      }
+
+      "use admin-api with privileged token as an override to no ledger API token" taggedAs securityAsset
+        .setHappyCase(
+          "use privileged token as an override to no ledger API token"
+        ) in { implicit env =>
+        import env.*
+
+        testRemote(rp("p2-overrideNoToken"))
+      }
+
+      "use admin-api with privileged token as an override to a ledger API token" taggedAs securityAsset
+        .setHappyCase(
+          "use privileged token as an override to a ledger API token"
+        ) in { implicit env =>
+        import env.*
+
+        testRemote(rp("p2-overrideLedgerToken"))
       }
 
       "don't allow using admin-api without any token" taggedAs securityAsset.setAttack(

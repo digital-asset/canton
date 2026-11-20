@@ -10,7 +10,12 @@ import com.daml.metrics.grpc.DamlGrpcServerMetrics
 import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.auth.AsyncForwardingListener
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.config.{AdminServerConfig, ApiLoggingConfig, CantonConfig}
+import com.digitalasset.canton.config.{
+  AdminServerConfig,
+  ApiLoggingConfig,
+  CantonConfig,
+  Confidential,
+}
 import com.digitalasset.canton.integration.{EnvironmentSetupPlugin, TestConsoleEnvironment}
 import com.digitalasset.canton.lifecycle.LifeCycle.{CloseableServer, toCloseableServer}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -124,7 +129,7 @@ class UseOtlp(
         Exporter.Otlp(
           port = port.unwrap,
           trustCollectionPath = trustCollectionPath,
-          additionalHeaders = otlpHeaders,
+          additionalHeaders = Confidential.HttpRequestHeaders.fromMap(otlpHeaders),
         )
       )
       .focus(_.monitoring.tracing.tracer.batchSpanProcessor)

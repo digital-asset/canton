@@ -3062,19 +3062,19 @@ object LsuAnnouncement
 final case class GrpcConnection(
     endpoints: NonEmpty[Set[Endpoint]],
     transportSecurity: Boolean,
-    customTrustCertificates: Option[ByteString],
+    customTrustCertificates: Option[ValidatedPemCertificate],
 ) {
   def toProtoV30: v30.LsuSequencerConnectionSuccessor.SequencerConnection =
     v30.LsuSequencerConnectionSuccessor.SequencerConnection(
       endpoints = endpoints.map(_.toURI(transportSecurity).toString.toProtoUnvalidated).toSeq,
-      customTrustCertificates = customTrustCertificates,
+      customTrustCertificates = customTrustCertificates.map(_.toProtoPrimitive),
     )
 }
 
 object GrpcConnection {
   def fromProtoPrimitives(
       endpointsP: Seq[String],
-      customTrustCertificates: Option[ByteString],
+      customTrustCertificatesP: Option[ByteString],
   ): ParsingResult[GrpcConnection] = for {
     uris <- ProtoConverter.parseRequiredNonEmpty(
       (s: String) =>
@@ -3088,6 +3088,10 @@ object GrpcConnection {
       .fromUris(uris)
       .leftMap(err => ValueConversionError("endpoints", err))
     (endpoints, useTls) = endpointsAndTls
+
+    customTrustCertificates <- customTrustCertificatesP.traverse(
+      ValidatedPemCertificate.fromProtoPrimitive
+    )
 
   } yield GrpcConnection(endpoints.toSet, useTls, customTrustCertificates)
 

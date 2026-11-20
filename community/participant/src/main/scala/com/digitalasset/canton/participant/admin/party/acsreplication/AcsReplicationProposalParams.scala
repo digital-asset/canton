@@ -10,7 +10,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.nonempty.NonEmpty
 
 import scala.jdk.CollectionConverters.*
@@ -23,7 +22,6 @@ final case class AcsReplicationProposalParams private (
     targetParticipantId: ParticipantId,
     sequencerIds: NonEmpty[List[SequencerId]],
     timestamp: CantonTimestamp,
-    participantPermission: ParticipantPermission,
 )
 
 object AcsReplicationProposalParams {
@@ -67,8 +65,6 @@ object AcsReplicationProposalParams {
       timestamp <- CantonTimestamp
         .fromInstant(c.timestamp)
         .leftMap(err => s"Invalid timestamp ${c.timestamp}: $err")
-      // TODO(#35267) ACS replicator shouldn't know about party party participant permission
-      participantPermission = PartyParticipantPermission.fromDaml(c.participantPermission)
     } yield AcsReplicationProposalParams(
       contractId,
       requestId,
@@ -78,7 +74,5 @@ object AcsReplicationProposalParams {
       sequencerIdsNE,
       // TODO(#35267) replace with CantonTimestamp
       timestamp,
-      // TODO(#35267) ACS replicator shouldn't know about party party participant permission
-      participantPermission,
     )
 }

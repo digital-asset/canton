@@ -602,7 +602,7 @@ abstract class ProtocolProcessor[
           submissionData =>
             logger.debug(s"Removing sent submission $submissionId without a result.")
             steps.postProcessResult(
-              Verdict.ParticipantReject(
+              Verdict.ParticipantReject.create(
                 NonEmpty(
                   List,
                   (

@@ -4,7 +4,8 @@
 package com.digitalasset.canton.participant.ledger.api.client
 
 import com.daml.ledger.api.v2.commands.Commands
-import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
@@ -44,8 +45,6 @@ class CommandSubmitterWithRetry(
     extends NamedLogging
     with FlagCloseableAsync {
 
-  private val directEc = DirectExecutionContext(noTracingLogger)
-
   // abort retries if the remaining timeout is less than this (in case there is little chance that the command will succeed)
   // if our descendants ever get to lower latencies, they should lower this value as well
   private val DEFAULT_MINIMUM_DEADLINE = 10.millis
@@ -82,13 +81,12 @@ class CommandSubmitterWithRetry(
       future: => Future[R]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[R] =
     unlessClosing {
-      implicit val ec: ExecutionContext = directEc
       val promise = PromiseUnlessShutdown.abortOnShutdown[R](
         description = name,
         hasRunOnClosing = this,
         futureSupervisor = futureSupervisor,
       )
-      promise.completeWithUS(FutureUnlessShutdown.outcomeF(future)).discard
+      promise.completeWithUS(FutureUnlessShutdown.outcomeF(future)(directExecutionContext)).discard
       promise.futureUS
     }
 

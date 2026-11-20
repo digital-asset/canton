@@ -53,12 +53,12 @@ object Dependencies {
   lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
   lazy val dropwizard_version = "4.1.33"
   lazy val flyway_version = "12.0.2"
-  // From https://github.com/googleapis/java-cloud-bom/tree/v26.85.0
-  // kms 2.97.0 and storage 2.70.0 are within the same compatibility matrix
+  // From https://github.com/googleapis/google-cloud-java/releases/tag/libraries-bom/v26.93.0
+  // kms 2.105.0 and storage 2.78.0 are part of the same GCP Libraries BOM
   // We should switch to using the BOM versioning system for these deps
   // https://docs.cloud.google.com/java/docs/bom
-  lazy val gcp_kms_version = "2.97.0"
-  lazy val gcp_storage_version = "2.70.0"
+  lazy val gcp_kms_version = "2.105.0"
+  lazy val gcp_storage_version = "2.78.0"
   lazy val zstd_version = "1.5.7-12"
   lazy val gson_version = "2.14.0"
   lazy val gson_fire_version = "1.9.0"

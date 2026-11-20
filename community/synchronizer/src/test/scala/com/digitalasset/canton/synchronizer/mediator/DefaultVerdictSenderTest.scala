@@ -321,7 +321,7 @@ final class DefaultVerdictSenderTest
         .sendResult(
           requestId,
           informeeMessage,
-          Verdict.Approve(testedProtocolVersion),
+          Verdict.Approve.create(testedProtocolVersion),
           decisionTime,
         )
         .onShutdown(fail())

@@ -109,7 +109,7 @@ final class ClientCredentialsTokenProvider(
           Authorization(
             BasicHttpCredentials(
               config.clientId,
-              config.clientSecret,
+              config.clientSecret.unwrap,
             )
           )
         ),

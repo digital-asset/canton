@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.jsonapi
 import com.daml.jwt.{Jwt, StandardJWTPayload, StandardJWTTokenFormat}
 import com.daml.ledger.api.v2.admin.{identity_provider_config_service, user_management_service}
 import com.digitalasset.base.error.ErrorsAssertions
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.{AuthServiceConfig, CantonConfig}
 import com.digitalasset.canton.http.json.v2.JsIdentityProviderCodecs.*
 import com.digitalasset.canton.http.json.v2.JsUserManagementCodecs.*

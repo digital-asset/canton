@@ -54,6 +54,7 @@ import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import io.grpc.stub.StreamObserver
+import org.scalatest.EitherValues.*
 import org.scalatest.OptionValues.*
 
 import java.security.SecureRandom
@@ -674,7 +675,7 @@ object TestSubmissionService {
 
     def submitterInfo(maxDeduplicationDuration: Duration): SubmitterInfo = {
       val deduplicationPeriod = deduplicationPeriodO.getOrElse(
-        DeduplicationPeriod.DeduplicationDuration(maxDeduplicationDuration)
+        DeduplicationPeriod.DeduplicationDuration.create(maxDeduplicationDuration).value
       )
       SubmitterInfo(
         actAs.toList.map(_.toLf),

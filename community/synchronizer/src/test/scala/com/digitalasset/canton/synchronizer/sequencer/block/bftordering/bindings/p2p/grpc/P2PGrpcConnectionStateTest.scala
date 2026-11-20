@@ -526,6 +526,103 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
       }
     }
 
+    "actor teardown" should {
+
+      "preserve a replacement ref so endpoint removal can still close it after a failed send" in {
+        // The replacement is installed by endpoint. Until it authenticates, it has no node-ID
+        //  association, so teardown by node ID cannot resolve it. The node-ID case below therefore
+        //  uses an authenticated replacement to exercise protection of a ref reachable by that ID.
+        Table(
+          ("address", "replacement authenticated"),
+          (APeerP2PEndpointAddressId, false),
+          (APeerP2PEndpointAddressId, true),
+          (APeerP2PNodeAddressId, true),
+        ).forEvery { (address, replacementAuthenticated) =>
+          val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+          val oldRef = newNetworkRef()
+          state.addNetworkRefIfMissing(APeerP2PEndpointAddressId)(() => fail())(() => oldRef)
+          state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+          state.addSenderIfMissing(APeerBftNodeId, ASender) shouldBe true
+
+          // A send failure invalidates the sender while keeping the actor available for retries.
+          state.shutdownConnectionAndReturnPeerSender(
+            address,
+            clearNetworkRefAssociations = false,
+            closeNetworkRef = false,
+          )
+          // Concurrent teardown closes the old ref, whose actor has yet to process Close/PostStop.
+          state.shutdownConnectionAndReturnPeerSender(
+            APeerP2PEndpointAddressId,
+            clearNetworkRefAssociations = true,
+            closeNetworkRef = true,
+          )
+          verify(oldRef).close()
+
+          val replacementRef = newNetworkRef()
+          state.addNetworkRefIfMissing(APeerP2PEndpointAddressId)(() => fail())(() =>
+            replacementRef
+          )
+          if (replacementAuthenticated) {
+            state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+            state.addSenderIfMissing(APeerBftNodeId, AnotherSender) shouldBe true
+          }
+
+          // Late teardown from the old actor must not orphan the replacement or disconnect it.
+          state.shutdownConnectionAndReturnPeerSender(
+            address,
+            clearNetworkRefAssociations = true,
+            closeNetworkRef = false,
+            expectedNetworkRefO = Some(oldRef),
+          ) shouldBe (None -> Seq.empty)
+          state.getNetworkRef(APeerBftNodeId) shouldBe Option.when(replacementAuthenticated)(
+            replacementRef
+          )
+          state.getSender(address) shouldBe Option.when(replacementAuthenticated)(AnotherSender)
+          state.isDefined(APeerP2PEndpoint.id) shouldBe true
+          verifyOnlyStarted(replacementRef)
+
+          // Operator removal still finds and closes the replacement actor.
+          state.shutdownConnectionAndReturnPeerSender(
+            APeerP2PEndpointAddressId,
+            clearNetworkRefAssociations = true,
+            closeNetworkRef = true,
+          )
+          verify(replacementRef).close()
+          state.connections shouldBe empty
+        }
+      }
+
+      "clean up only once when the closing actor still owns the endpoint" in {
+        Table("authenticated", false, true).forEvery { authenticated =>
+          val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+          val ref = newNetworkRef()
+          state.addNetworkRefIfMissing(APeerP2PEndpointAddressId)(() => fail())(() => ref)
+          if (authenticated) {
+            state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+            state.addSenderIfMissing(APeerBftNodeId, ASender) shouldBe true
+          }
+
+          val (senderO, endpoints) = state.shutdownConnectionAndReturnPeerSender(
+            APeerP2PEndpointAddressId,
+            clearNetworkRefAssociations = true,
+            closeNetworkRef = false,
+            expectedNetworkRefO = Some(ref),
+          )
+          senderO shouldBe Option.when(authenticated)(ASender)
+          endpoints shouldBe Seq(APeerP2PEndpoint.id)
+          state.connections shouldBe empty
+          verifyOnlyStarted(ref)
+
+          state.shutdownConnectionAndReturnPeerSender(
+            APeerP2PEndpointAddressId,
+            clearNetworkRefAssociations = true,
+            closeNetworkRef = false,
+            expectedNetworkRefO = Some(ref),
+          ) shouldBe (None -> Seq.empty)
+        }
+      }
+    }
+
     "shutting down and cleaning up an active (incoming) connection by sender" should {
 
       "remove the sender, close the network ref and clear its associations" in {

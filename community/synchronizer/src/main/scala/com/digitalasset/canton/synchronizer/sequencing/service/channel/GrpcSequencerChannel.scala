@@ -16,6 +16,10 @@ import com.digitalasset.canton.sequencing.protocol.channel.{
   SequencerChannelMetadata,
 }
 import com.digitalasset.canton.synchronizer.sequencing.service.CloseNotification
+import com.digitalasset.canton.synchronizer.sequencing.service.channel.SequencerChannelInternalError.{
+  InvalidRequest,
+  PermissionDenied,
+}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.{LoggerUtil, SingleUseCell}
@@ -84,7 +88,7 @@ private[channel] final class GrpcSequencerChannel(
       secondMemberResponseObserver: ServerCallStreamObserver[v30.ConnectToSequencerChannelResponse]
   )(implicit
       traceContext: TraceContext
-  ): Either[String, GrpcSequencerChannelMemberMessageHandler] = {
+  ): Either[SequencerChannelInternalError, GrpcSequencerChannelMemberMessageHandler] = {
     val secondHandler = new GrpcSequencerChannelMemberMessageHandler(
       secondMember,
       secondMemberResponseObserver,
@@ -97,11 +101,13 @@ private[channel] final class GrpcSequencerChannel(
     for {
       _ <- secondMemberHandler
         .putIfAbsent(secondHandler)
-        .fold(Either.unit[String])(handler =>
+        .fold(Either.unit[SequencerChannelInternalError])(handler =>
           Either.cond(
             handler == secondHandler,
             (),
-            s"Different second member message handler for $secondMember already added",
+            InvalidRequest(
+              s"Different second member message handler for $secondMember already added"
+            ),
           )
         )
 
@@ -145,7 +151,7 @@ private[channel] trait CreatesSequencerChannelMemberMessageHandler {
       tokenExpiresAt: Option[CantonTimestamp],
       createChannel: SequencerChannelMetadata => GrpcSequencerChannel,
       traceContext: TraceContext,
-  ): Either[String, GrpcSequencerChannelMemberMessageHandler]
+  ): Either[SequencerChannelInternalError, GrpcSequencerChannelMemberMessageHandler]
 }
 
 /** Represents an "uninitialized" GRPC sequencer channel to bridge the gap until the channel
@@ -191,47 +197,41 @@ private[channel] abstract class UninitializedGrpcSequencerChannel(
               traceContext <-
                 SerializableTraceContext
                   .fromProtoV30Opt(traceContextO)
-                  .bimap(err => (err.message, Status.INVALID_ARGUMENT), _.unwrap)
+                  .bimap(err => InvalidRequest(err.message), _.unwrap)
               request <-
                 ConnectToSequencerChannelRequest
                   .fromProtoV30(ProtocolVersionValidation.PV(protocolVersion), requestP)
-                  .leftMap(err => (err.toString, Status.INVALID_ARGUMENT))
+                  .leftMap(err => InvalidRequest(err.toString))
               metadata <- request.request match {
                 case ConnectToSequencerChannelRequest.Metadata(metadata) =>
                   Right(metadata)
                 case ConnectToSequencerChannelRequest.SessionKey(_) =>
-                  Left(("received session key instead of metadata", Status.INVALID_ARGUMENT))
+                  Left(InvalidRequest("received session key instead of metadata"))
                 case ConnectToSequencerChannelRequest.SessionKeyAck(_) =>
                   Left(
-                    (
-                      "received session key acknowledgment instead of metadata",
-                      Status.INVALID_ARGUMENT,
+                    InvalidRequest(
+                      "received session key acknowledgment instead of metadata"
                     )
                   )
                 case ConnectToSequencerChannelRequest.Payload(_) =>
-                  Left(("received payload instead of metadata", Status.INVALID_ARGUMENT))
+                  Left(InvalidRequest("received payload instead of metadata"))
               }
-              _ <- authenticationCheck(metadata.initiatingMember).leftMap(
-                (_, Status.PERMISSION_DENIED)
-              )
+              _ <- authenticationCheck(metadata.initiatingMember).leftMap(PermissionDenied(_))
               channelMemberHandler <- ensureChannelAndConnect(
                 metadata,
                 UninitializedGrpcSequencerChannel.this,
                 authTokenExpiresAtO,
                 createChannel,
                 traceContext,
-              ).leftMap((_, Status.INVALID_ARGUMENT))
+              )
               _ = logger.info(
                 s"Successfully initialized channel ${metadata.channelId} from ${metadata.initiatingMember} to ${metadata.receivingMember}"
               )(traceContext)
               _ = initializedRequestStreamObserver
                 .putIfAbsent(channelMemberHandler.requestObserver)
                 .discard
-            } yield ()).leftMap { case (err, status) =>
-              propagateRequestStreamErrorToResponseStream(
-                s"Sequencer channel initialization error: $err",
-                status,
-              )(traceContext)
+            } yield ()).leftMap { channelErr =>
+              propagateRequestStreamErrorToResponseStream(channelErr)(traceContext)
             }.merge
         })(_.onNext(value))
 
@@ -262,11 +262,15 @@ private[channel] abstract class UninitializedGrpcSequencerChannel(
     }
 
   private def propagateRequestStreamErrorToResponseStream(
-      error: String,
-      errorStatus: Status,
+      err: SequencerChannelInternalError
   )(implicit traceContext: TraceContext): Unit = {
-    logger.warn(error)
-    complete(_.onError(new StatusRuntimeException(errorStatus.withDescription(error))))
+    val description = s"Sequencer channel initialization error: ${err.message}"
+    LoggerUtil.logAtLevel(err.level, description)
+    complete(
+      _.onError(
+        SequencerChannelInternalError.toGrpcError(err)
+      )
+    )
   }
 
   private def createChannel(metadata: SequencerChannelMetadata): GrpcSequencerChannel = {

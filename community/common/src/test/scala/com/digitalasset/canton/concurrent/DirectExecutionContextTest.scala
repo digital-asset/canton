@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.concurrent
 
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
@@ -37,7 +38,9 @@ class DirectExecutionContextTest extends AnyWordSpec with BaseTest with HasExecu
       future.value shouldEqual Some(Failure(testException))
     }
 
+    // Without passing in a Canton logger, the error will not be suppressed or captured
     "log exceptions from asynchronous computations" in {
+      val directExecutionContextWithCantonLogger = DirectExecutionContext(noTracingLogger)
       loggerFactory.assertLogs(
         {
           val blocker = new Semaphore(0)
@@ -51,7 +54,7 @@ class DirectExecutionContextTest extends AnyWordSpec with BaseTest with HasExecu
           longRunningFuture.onComplete { _ =>
             assertRunsNotInTestThread()
             throw testException
-          }(directExecutionContext)
+          }(directExecutionContextWithCantonLogger)
 
           blocker.release()
 
