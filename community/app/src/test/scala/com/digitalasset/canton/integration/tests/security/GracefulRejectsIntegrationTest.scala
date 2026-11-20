@@ -507,6 +507,7 @@ sealed trait GracefulRejectsIntegrationTest
                 ),
                 filtersForAnyParty = None,
                 verbose = false,
+                filtersByContractId = Seq.empty,
               )
             ),
             TRANSACTION_SHAPE_ACS_DELTA,

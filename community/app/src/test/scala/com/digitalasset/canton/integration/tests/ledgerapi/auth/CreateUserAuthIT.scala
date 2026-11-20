@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.admin.user_management_service as ums
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
   ApiUserManagementServiceSuppressionRule,
@@ -17,11 +18,19 @@ import scala.concurrent.{ExecutionContext, Future}
 final class CreateUserAuthIT
     extends AdminOrIDPAdminServiceCallAuthTests
     with UserManagementAuth
-    with GrantPermissionTest {
+    with GrantPermissionTest
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "UserManagementService#CreateUser"
+
+  override def apiAreaScopeBaseToken = adminToken
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.usersWrite.area) -> true,
+    List(ClaimApiArea.usersRead.area) -> false,
+    List(ClaimApiArea.ledgerRead.area) -> false,
+  )
 
   def serviceCallWithGrantPermission(
       context: ServiceCallContext,

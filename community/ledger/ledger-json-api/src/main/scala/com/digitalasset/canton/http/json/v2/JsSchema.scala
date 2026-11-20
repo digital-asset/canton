@@ -31,6 +31,7 @@ import io.circe.generic.extras.Configuration
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
 import io.circe.generic.semiauto.deriveCodec
 import io.circe.{Codec, Decoder, DecodingFailure, Encoder, Json}
+import io.grpc.Status
 import scalapb.{GeneratedEnumCompanion, UnknownFieldSet}
 import sttp.tapir.CodecFormat.TextPlain
 import sttp.tapir.Schema.SName
@@ -188,6 +189,7 @@ object JsSchema {
       deriveRelaxedCodec
 
     implicit val filtersRW: Codec[transaction_filter.Filters] = deriveRelaxedCodec
+    implicit val contractIdFilterRW: Codec[transaction_filter.ContractIdFilter] = deriveRelaxedCodec
     implicit val eventFormatRW: Codec[transaction_filter.EventFormat] = deriveRelaxedCodec
 
     implicit val transactionShapeEncoder: Encoder[TransactionShape] =
@@ -218,12 +220,21 @@ object JsSchema {
     implicit val participantPermissionDecoder: Decoder[state_service.ParticipantPermission] =
       stringDecoderForEnum()
 
+    implicit val hostingStateEncoder: Encoder[state_service.HostingState] =
+      stringEncoderForEnum()
+
+    implicit val hostingStateDecoder: Decoder[state_service.HostingState] =
+      stringDecoderForEnum()
+
     implicit val jsPrefetchContractKeyRW: Codec[js.PrefetchContractKey] = deriveConfiguredCodec
 
     implicit val unrecognizedShape: Schema[transaction_filter.TransactionShape.Unrecognized] =
       Schema.derived
 
     implicit val participantPermissionSchema: Schema[state_service.ParticipantPermission] =
+      stringSchemaForEnum()
+
+    implicit val hostingStateSchema: Schema[state_service.HostingState] =
       stringSchemaForEnum()
 
     implicit val transactionShapeSchema: Schema[transaction_filter.TransactionShape] =
@@ -336,22 +347,48 @@ object JsSchema {
     val ledgerApiErrorContext: String = "ledger_api_error"
     val tokenProblemError: (String, String) = (ledgerApiErrorContext -> "invalid token")
 
-    def fromErrorCode(damlError: RpcError): JsCantonError = JsCantonError(
-      code = damlError.code.id,
-      cause = damlError.cause,
-      correlationId = damlError.correlationId,
-      traceId = damlError.traceId,
-      context = damlError.context,
-      resources = damlError.resources.map { case (k, v) => (k.asString, v) },
-      errorCategory = damlError.code.category.asInt,
-      grpcCodeValue = damlError.code.category.grpcCode.map(_.value()),
-      retryInfo = damlError.code.category.retryable.map(_.duration),
-      definiteAnswer = damlError match {
-        case errorWithDefiniteAnswer: DamlErrorWithDefiniteAnswer =>
-          Some(errorWithDefiniteAnswer.definiteAnswer)
-        case _ => None
-      },
-    )
+    def redacted(
+        grpcCode: Status.Code,
+        correlationId: Option[String],
+        traceId: Option[String],
+    ): JsCantonError =
+      JsCantonError(
+        code = "NA",
+        cause = "A security-sensitive error has been received",
+        correlationId = correlationId,
+        traceId = traceId,
+        context = Map.empty,
+        resources = Seq.empty,
+        errorCategory = -1,
+        grpcCodeValue = Some(grpcCode.value()),
+        retryInfo = None,
+        definiteAnswer = None,
+      )
+
+    def fromErrorCode(damlError: RpcError): JsCantonError =
+      if (damlError.code.category.redactDetails)
+        redacted(
+          grpcCode = damlError.code.category.grpcCode.getOrElse(Status.Code.INTERNAL),
+          correlationId = damlError.correlationId,
+          traceId = damlError.traceId,
+        )
+      else
+        JsCantonError(
+          code = damlError.code.id,
+          cause = damlError.cause,
+          correlationId = damlError.correlationId,
+          traceId = damlError.traceId,
+          context = damlError.context,
+          resources = damlError.resources.map { case (k, v) => (k.asString, v) },
+          errorCategory = damlError.code.category.asInt,
+          grpcCodeValue = damlError.code.category.grpcCode.map(_.value()),
+          retryInfo = damlError.code.category.retryable.map(_.duration),
+          definiteAnswer = damlError match {
+            case errorWithDefiniteAnswer: DamlErrorWithDefiniteAnswer =>
+              Some(errorWithDefiniteAnswer.definiteAnswer)
+            case _ => None
+          },
+        )
 
     def fromUnstructuredError(
         code: String,

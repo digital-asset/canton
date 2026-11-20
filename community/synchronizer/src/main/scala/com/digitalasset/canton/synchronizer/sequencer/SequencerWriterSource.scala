@@ -8,7 +8,6 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime}
 import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -166,7 +165,6 @@ class SequencerWriterQueues private[sequencer] (
 object SequencerWriterSource {
   def apply(
       writerConfig: SequencerWriterConfig,
-      totalNodeCount: PositiveInt,
       keepAliveInterval: Option[NonNegativeFiniteDuration],
       store: SequencerWriterStore,
       clock: Clock,
@@ -184,10 +182,8 @@ object SequencerWriterSource {
     val logger = TracedLogger(SequencerWriterSource.getClass, loggerFactory)
     implicit val namedLoggingContext: NamedLoggingContext =
       NamedLoggingContext(loggerFactory, traceContext)
-    val eventTimestampGenerator =
-      new PartitionedTimestampGenerator(clock, store.instanceIndex, totalNodeCount)
-    val payloadIdGenerator =
-      new PartitionedTimestampGenerator(clock, store.instanceIndex, totalNodeCount)
+    val eventTimestampGenerator = new UniqueTimestampGenerator(clock)
+    val payloadIdGenerator = new UniqueTimestampGenerator(clock)
     // A unique discriminator for this writer stream instance, used when saving payloads (currently solely for
     // payloads) so that payload writes can be attributed to the instance that made them.
     val instanceDiscriminator = UUID.randomUUID()
@@ -195,7 +191,7 @@ object SequencerWriterSource {
     // log this instance discriminator so in the exceptionally unlikely event that we actually hit conflicts we have
     // an available approach for determining which instances were conflicting
     logger.debug(
-      s"Starting sequencer writer stream with index ${store.instanceIndex} of $totalNodeCount and instance discriminator [$instanceDiscriminator]"
+      s"Starting sequencer writer stream with index ${store.instanceIndex} and instance discriminator [$instanceDiscriminator]"
     )
 
     val eventGenerator = new SendEventGenerator(
@@ -481,7 +477,7 @@ object SequenceWritesFlow {
   def apply(
       writerConfig: SequencerWriterConfig,
       store: SequencerWriterStore,
-      eventTimestampGenerator: PartitionedTimestampGenerator,
+      eventTimestampGenerator: UniqueTimestampGenerator,
       lsuSequencingBounds: Option[LsuSequencingBounds],
       drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
       loggerFactory: NamedLoggerFactory,

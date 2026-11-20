@@ -53,6 +53,7 @@ final class WitnessesIT extends LedgerTestSuite {
                 .toMap,
               filtersForAnyParty = None,
               verbose = false,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,

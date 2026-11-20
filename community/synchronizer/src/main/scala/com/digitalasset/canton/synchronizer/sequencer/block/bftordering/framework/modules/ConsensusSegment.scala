@@ -688,7 +688,9 @@ object ConsensusSegment {
 
       private lazy val sortedViewChanges: Seq[SignedMessage[ViewChange]] = viewChanges.sorted
 
-      lazy val computedCertificatePerBlock: Map[BlockNumber, ConsensusCertificate] =
+      def computedCertificatePerBlock(implicit
+          synchronizerProtocolVersion: ProtocolVersion
+      ): Map[BlockNumber, ConsensusCertificate] =
         computeCertificatePerBlock(viewChanges.map(_.message))
 
       lazy val stored = NewViewStored(blockMetadata, viewNumber)
@@ -836,20 +838,36 @@ object ConsensusSegment {
         *   - the highest view-numbered commit certificate if it exists
         *   - else the highest view-numbered prepare certificate if it exists
         *   - if none exists, the block entry won't be in this map.
+        *
+        * Certificates are validated to contain a non-empty quorum of votes with a common view.
+        * Above PV 37, the certificate's view is the common view of its votes, rather than the
+        * originating PrePrepare's view, as a PrePrepare can be carried unchanged into later views.
+        *
+        * Through PV 37, preserve the originating-view comparison for compatibility.
         */
       def computeCertificatePerBlock(
           viewChanges: Seq[ViewChange]
+      )(implicit
+          synchronizerProtocolVersion: ProtocolVersion
       ): Map[BlockNumber, ConsensusCertificate] = viewChanges
         .flatMap(_.consensusCerts)
         .groupBy(_.prePrepare.message.blockMetadata.blockNumber)
         .fmap[ConsensusCertificate] { certs =>
           certs
             .collect { case cc: CommitCertificate => cc }
-            .maxByOption(_.prePrepare.message.viewNumber)
+            .maxByOption(cc =>
+              if (synchronizerProtocolVersion > ProtocolVersion.v37)
+                cc.commits.head.message.viewNumber
+              else cc.prePrepare.message.viewNumber
+            )
             .getOrElse[ConsensusCertificate](
               certs
                 .collect { case pc: PrepareCertificate => pc }
-                .maxBy(_.prePrepare.message.viewNumber)
+                .maxBy(pc =>
+                  if (synchronizerProtocolVersion > ProtocolVersion.v37)
+                    pc.prepares.head.message.viewNumber
+                  else pc.prePrepare.message.viewNumber
+                )
             )
         }
     }

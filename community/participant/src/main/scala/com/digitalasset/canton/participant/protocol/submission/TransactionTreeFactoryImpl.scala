@@ -13,7 +13,6 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
-import com.digitalasset.canton.data.TransactionViewDecompositionFactory.TransactionTreeDepthLimitExceeded
 import com.digitalasset.canton.data.ViewConfirmationParameters.InvalidViewConfirmationParameters
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -70,16 +69,21 @@ class TransactionTreeFactoryImpl(
   /** Check parse depth on submission, at confirmation request time the parse depth is checked using
     * the DepthCounter
     */
-  private def checkRootViewParseDepth(
+  private def checkParseDepth(
       maxTreeDepth: PositiveInt
   )(
-      parseDepth: Int
-  ): EitherT[FutureUnlessShutdown, TransactionTreeDepthLimitExceeded, Unit] =
+      rootViews: MerkleSeq[TransactionView]
+  ): EitherT[FutureUnlessShutdown, TransactionViewLimitError, Unit] = {
+    val parseDepth = rootViews.parseDepth(_.subviews.subviews)
+    metrics.treeDepth.updateValue(parseDepth)(MetricsContext.Empty)
     EitherT.cond(
       parseDepth <= maxTreeDepth.value,
       (),
-      TransactionTreeDepthLimitExceeded(parseDepth, maxTreeDepth.value),
+      TransactionViewLimitError(
+        s"The parse depth of the transaction view exceeded $maxTreeDepth"
+      ),
     )
+  }
 
   override def createTransactionTree(
       transaction: WellFormedTransaction[WithoutSuffixes],
@@ -118,17 +122,13 @@ class TransactionTreeFactoryImpl(
       protocolVersion,
     )
 
-    // Transaction view limits are applied on submission paths
-    val viewLimits = protocolLimits
-    // The synchronizer limits apply from PV36 on; before, the parse depth is unbounded
-    val maxTreeDepth = viewLimits.maxTransactionTreeDepth
     val rootViewDecompositionsF =
       transactionViewDecompositionFactory.fromTransaction(
         topologySnapshot,
         transaction,
         RollbackScope.empty,
         Some(participantId.adminParty.toLf),
-        Some(viewLimits),
+        Some(protocolLimits),
         metrics,
       )
 
@@ -184,16 +184,9 @@ class TransactionTreeFactoryImpl(
         topologySnapshot,
       )
 
-      parseDepths = rootViews.map(_.parseDepth)
-      _ = parseDepths.maxOption.foreach(pd =>
-        metrics.treeDepth.updateValue(pd)(MetricsContext.Empty)
-      )
+      rootViewsSeq = MerkleSeq.fromSeq(cryptoOps, protocolVersion)(rootViews)
 
-      _ <- MonadUtil
-        .sequentialTraverse_(parseDepths)(checkRootViewParseDepth(maxTreeDepth))
-        .leftMap[TransactionViewLimitError](
-          _.transformInto[TransactionViewLimitError]
-        )
+      _ <- checkParseDepth(protocolLimits.maxTransactionTreeDepth)(rootViewsSeq)
 
       _ <-
         if (validatePackageVettings) {
@@ -213,7 +206,7 @@ class TransactionTreeFactoryImpl(
         submitterMetadata,
         commonMetadata,
         participantMetadata,
-        MerkleSeq.fromSeq(cryptoOps, protocolVersion)(rootViews),
+        rootViewsSeq,
       )
     }
   }

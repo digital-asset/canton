@@ -148,6 +148,18 @@ class InMemorySequencerStore(
         .toSet
     )
 
+  override def onboardingMembersAt(asOf: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[Member]] =
+    FutureUnlessShutdown.pure(
+      memberMap.collect {
+        case (member, _: RegisteredMember.Onboarding) => member
+        case (member, RegisteredMember.Active(_, registeredAt))
+            if registeredAt >= asOf && memberOnboardedAt.contains(member) =>
+          member
+      }.toSet
+    )
+
   override def savePayloads(
       payloadsToInsert: NonEmpty[Seq[BytesPayload]],
       instanceDiscriminator: UUID,
@@ -457,11 +469,6 @@ class InMemorySequencerStore(
           )
       }.toSet,
     )
-
-  /** This store does not support multiple concurrent instances so will do nothing. */
-  override def markLaggingSequencersOffline(cutoffTime: CantonTimestamp)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
 
   /** Members must be registered to receive a memberId, so can typically assume they exist in this
     * structure

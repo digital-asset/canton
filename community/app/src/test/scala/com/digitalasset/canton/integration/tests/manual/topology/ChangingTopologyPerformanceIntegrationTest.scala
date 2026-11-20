@@ -53,7 +53,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
 }
 import com.digitalasset.canton.topology.{MediatorId, PhysicalSynchronizerId, SequencerId}
-import com.digitalasset.canton.{TestEssentials, config}
+import com.digitalasset.canton.{BaseTest, TestEssentials, config}
 import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.actor.{ActorSystem, Scheduler}
@@ -912,7 +912,7 @@ trait AllTopologyChaosOperations {
         s"[chaos testing] Running with operations: ${operations.map(_.name).mkString(", ")}"
       logger.info(msg)
       // On CI, print to stdout so it's easier to quickly spot in UI which operations are being run
-      if (sys.env.contains("CI")) {
+      if (BaseTest.isRunningInCI) {
         println(msg)
       }
     }

@@ -3,8 +3,17 @@
 
 package com.digitalasset.canton.integration.tests.jsonapi
 
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
+import com.daml.ledger.api.v2.transaction_filter.{
+  EventFormat,
+  Filters,
+  TransactionFormat,
+  UpdateFormat,
+}
+import com.daml.ledger.api.v2.update_service
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.ServerConfig
+import com.digitalasset.canton.http.json.v2.JsUpdateServiceCodecs.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.getResponseDataString
 import com.digitalasset.canton.integration.tests.ledgerapi.submission.BaseInteractiveSubmissionTest.ParticipantSelector
@@ -13,14 +22,19 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   TestConsoleEnvironment,
 }
+import io.circe.syntax.*
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.http.scaladsl.model.*
-import org.apache.pekko.stream.scaladsl.Source
+import org.apache.pekko.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
+import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import org.apache.pekko.util.ByteString
 import org.scalatest.Assertion
+import org.scalatest.time.{Seconds, Span}
 
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.Future
+import scala.concurrent.duration.*
 
 /** Verifies that the JSON API rejects request bodies exceeding the effective
   * `maxInboundMessageSize` with HTTP 413 (Content Too Large), exercising the different ways the
@@ -34,6 +48,9 @@ import scala.concurrent.Future
   *
   * The 413 is produced by pekko-http while parsing the request entity (from `Content-Length`), i.e.
   * before authentication and routing, so these checks do not require a valid token.
+  *
+  * The same limit bounds every single inbound websocket message: a (possibly fragmented) message
+  * exceeding it is rejected and the connection closed, before the fragments are assembled.
   */
 class JsonMaxInboundMessageSizeTest
     extends AbstractHttpServiceIntegrationTestFuns
@@ -75,6 +92,74 @@ class JsonMaxInboundMessageSizeTest
   private val noAuth: List[HttpHeader] = List.empty
 
   private def jsonOfPadding(padding: Int): String = s"""{"padding":"${"x" * padding}"}"""
+
+  private val updatesPath = Uri.Path("/v2/updates")
+
+  /** A well-formed updates request that the Ledger API rejects (negative `beginExclusive`), so the
+    * server replies with a single error message once the request was assembled and decoded. The
+    * JSON is left-padded with `padding` whitespace characters to control its size.
+    */
+  private def paddedInvalidUpdatesRequest(padding: Int): String = {
+    val json = update_service
+      .GetUpdatesRequest(
+        beginExclusive = -1,
+        endInclusive = None,
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(
+              TransactionFormat(
+                eventFormat = Some(
+                  EventFormat(
+                    filtersByParty = Map.empty,
+                    filtersForAnyParty = Some(Filters(Nil)),
+                    verbose = false,
+                    filtersByContractId = Nil,
+                  )
+                ),
+                transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+              )
+            ),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
+          )
+        ),
+        descendingOrder = false,
+      )
+      .asJson
+      .noSpaces
+    " " * padding + json
+  }
+
+  /** Sends the text as one websocket message split into many fragments (continuation frames). */
+  private def fragmented(text: String, fragmentSize: Int = 128): TextMessage =
+    TextMessage.Streamed(Source(text.grouped(fragmentSize).toList))
+
+  /** Sends a single message on a fresh websocket and returns all replies. The client never closes
+    * the connection itself, so the returned future only completes once the server closes it.
+    */
+  private def sendWebsocketMessage(
+      uri: Uri,
+      jwt: com.daml.jwt.Jwt,
+      message: Message,
+  ): Future[Seq[String]] = {
+    val (upgrade, replies) = Source
+      .single(message)
+      .concatMat(Source.maybe[Message])(Keep.left)
+      .viaMat(websocket(uri, jwt))(Keep.right)
+      .mapAsync(1) {
+        case m: TextMessage => m.toStrict(10.seconds).map(_.text)
+        case other => Future.failed(new IllegalStateException(s"unexpected message $other"))
+      }
+      .toMat(Sink.seq)(Keep.both)
+      .run()
+    upgrade.flatMap { u =>
+      u.response.status shouldBe StatusCodes.SwitchingProtocols
+      replies
+    }
+  }
+
+  private val webSocketTimeout = timeout(Span(30, Seconds))
 
   /** Sends only the request headers, with `Content-Length` set to `declaredSize`.
     *
@@ -152,6 +237,74 @@ class JsonMaxInboundMessageSizeTest
         unconfiguredLimit,
         withinLimitPadding = grpcLimit.unwrap * 2,
       )
+    }
+
+    "process a fragmented websocket message within the limit" in { implicit env =>
+      val replies = (for {
+        http <- adHocHttp(_.participant1)
+        jwt <- http.jwt(http.uri)
+        replies <- sendWebsocketMessage(
+          http.uri withPath updatesPath,
+          jwt,
+          fragmented(paddedInvalidUpdatesRequest(jsonApiLimit.unwrap / 2)),
+        )
+      } yield replies).futureValue(webSocketTimeout)
+
+      // The request was assembled, decoded and processed: the Ledger API rejects the offset.
+      inside(replies) { case Seq(error) => error should include("NEGATIVE_OFFSET") }
+    }
+
+    "reject a fragmented websocket message above the limit and close the connection" in {
+      implicit env =>
+        val message = paddedInvalidUpdatesRequest(jsonApiLimit.unwrap * 8)
+        message.length should be > jsonApiLimit.unwrap
+        val replies = (for {
+          http <- adHocHttp(_.participant1)
+          jwt <- http.jwt(http.uri)
+          replies <- sendWebsocketMessage(http.uri withPath updatesPath, jwt, fragmented(message))
+        } yield replies).futureValue(webSocketTimeout)
+
+        // Rejected before decoding (no NEGATIVE_OFFSET), and the server closed the connection.
+        inside(replies) { case Seq(error) =>
+          error should include("JSON_API_WEBSOCKET_MESSAGE_TOO_LARGE")
+          error should include(jsonApiLimit.unwrap.toString)
+        }
+    }
+
+    "close the connection on an endless fragmented websocket message" in { implicit env =>
+      val sentBytes = new AtomicLong(0L)
+      val chunk = " " * 4096
+      val endless = TextMessage.Streamed(
+        Source
+          .single("{")
+          .concat(Source.repeat(chunk).map { c =>
+            sentBytes.addAndGet(c.length.toLong)
+            c
+          })
+      )
+      val replies = (for {
+        http <- adHocHttp(_.participant1)
+        jwt <- http.jwt(http.uri)
+        replies <- sendWebsocketMessage(http.uri withPath updatesPath, jwt, endless)
+      } yield replies).futureValue(webSocketTimeout)
+
+      logger.info(s"Endless websocket message rejected after sending ${sentBytes.get()} bytes")
+      inside(replies) { case Seq(error) =>
+        error should include("JSON_API_WEBSOCKET_MESSAGE_TOO_LARGE")
+      }
+    }
+
+    "reject an endless binary websocket message and close the connection" in { implicit env =>
+      val endless = BinaryMessage.Streamed(Source.repeat(ByteString(Array.fill(4096)(' '.toByte))))
+      val replies = (for {
+        http <- adHocHttp(_.participant1)
+        jwt <- http.jwt(http.uri)
+        replies <- sendWebsocketMessage(http.uri withPath updatesPath, jwt, endless)
+      } yield replies).futureValue(webSocketTimeout)
+
+      inside(replies) { case Seq(error) =>
+        error should include("JSON_API_WEBSOCKET_BINARY_MESSAGE_NOT_SUPPORTED")
+      }
     }
   }
 }

@@ -8,7 +8,12 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, SequencerApiClientConfig}
-import com.digitalasset.canton.console.{LocalInstanceReference, LocalSequencerReference}
+import com.digitalasset.canton.console.{
+  LocalInstanceReference,
+  LocalMediatorReference,
+  LocalParticipantReference,
+  LocalSequencerReference,
+}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -31,6 +36,7 @@ import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenManagerConfig,
   AuthenticationTokenProvider,
 }
+import com.digitalasset.canton.sequencing.client.RequestSigner
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -40,6 +46,7 @@ import com.digitalasset.canton.version.{
   ReleaseVersion,
 }
 import io.grpc.*
+import org.scalatest.OptionValues.*
 
 import java.util.concurrent.Executor
 import scala.concurrent.{ExecutionContext, Future}
@@ -165,27 +172,28 @@ object SequencerTestHelper {
 
   def signSubmissionRequest(
       request: SubmissionRequest,
-      participant: LocalInstanceReference,
+      signingNode: LocalInstanceReference,
+      psid: PhysicalSynchronizerId,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[Signature] = {
-    import org.scalatest.EitherValues.*
-    import org.scalatest.OptionValues.*
-    val cryptoPrivateStore = participant.crypto.cryptoPrivateStore.toExtended.getOrElse(
-      throw new RuntimeException(s"Crypto private store does not implement all necessary methods")
-    )
+      env: TestConsoleEnvironment,
+  ): EitherT[FutureUnlessShutdown, String, SignedContent[SubmissionRequest]] = {
+    val cryptoApi = synchronizerCryptoFor(signingNode, psid)
+
     for {
-      keys <- cryptoPrivateStore
-        .listPrivateKeys(KeyPurpose.Signing, encrypted = false)
-        .value
-      someKey = keys.value.lastOption.value.id
-      hash = participant.crypto.pureCrypto
-        .digest(HashPurpose.SubmissionRequestSignature, request.getCryptographicEvidence)
-      signatureE <- participant.crypto.privateCrypto
-        .sign(hash, someKey, SigningKeyUsage.ProtocolOnly)
-        .value
-    } yield signatureE.value
+      syncCryptoApi <- EitherT.liftF(cryptoApi.currentSnapshotApproximation)
+
+      signedRequest <- RequestSigner(cryptoApi, env.loggerFactoryInternal)
+        .signRequest(
+          request = request,
+          hashPurpose = HashPurpose.SubmissionRequestSignature,
+          snapshot = syncCryptoApi,
+          signingTimestampOverrides = None,
+        )
+        .leftMap(err => s"Error signing submission request: $err")
+
+    } yield signedRequest
   }
 
   def sendSubmissionRequest(
@@ -204,5 +212,22 @@ object SequencerTestHelper {
       .sendAsync(v30.SendAsyncRequest(signedContent.toByteString))
 
     response.map(_ => ())
+  }
+
+  private def synchronizerCryptoFor(
+      instance: LocalInstanceReference,
+      psid: PhysicalSynchronizerId,
+  ): SynchronizerCryptoClient = instance match {
+    case mediator: LocalMediatorReference =>
+      mediator.underlying.value.replicaManager.mediatorRuntime.value.mediator.syncCrypto
+
+    case participant: LocalParticipantReference =>
+      participant.underlying.value.sync.connectedSynchronizerFor(psid).value.synchronizerCrypto
+
+    case sequencer: LocalSequencerReference =>
+      sequencer.underlying.value.sequencer.syncCrypto
+
+    case other =>
+      throw new IllegalStateException(s"Unsupported kind of local instance reference: $other")
   }
 }

@@ -99,5 +99,24 @@ trait RegisteredSynchronizersStoreTest extends FailOnShutdown {
       )
     }
 
+    "error if trying to add a different alias for the same logical synchronizer" in {
+      val sut = mk()
+      val psid0 = id("foo", serial = 0)
+      val psid1 = id("foo", serial = 1)
+      for {
+        _ <- valueOrFail(sut.addMapping(alias("alias"), psid0))("alias -> foo 0")
+        result <- sut.addMapping(alias("other-alias"), psid1).value
+        map <- sut.aliasToSynchronizerIdMap
+      } yield {
+        // The mapping alias <-> logical synchronizer id must be a bijection
+        result.left.value shouldBe SynchronizerAliasAndIdStore.LogicalSynchronizerIdAlreadyAdded(
+          psid1,
+          alias("other-alias"),
+          alias("alias"),
+        )
+        map shouldBe Map(alias("alias") -> NonEmpty.mk(Set, psid0))
+      }
+    }
+
   }
 }

@@ -65,7 +65,7 @@ class GetAuthenticatedUserAuthIT extends ServiceCallAuthTests {
       ) in { implicit env =>
       import env.*
       loggerFactory.suppress(AuthInterceptorSuppressionRule) {
-        expectPermissionDenied(serviceCall(canReadAsUnknownUserStandardJWT))
+        expectUnauthenticated(serviceCall(canReadAsUnknownUserStandardJWT))
       }
     }
 

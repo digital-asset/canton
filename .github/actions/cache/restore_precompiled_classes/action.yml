@@ -57,8 +57,11 @@ runs:
           **/target
         key: |-
           compile-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=${{ github.sha }}
+        # One cache key per line, cannot wrap.
+        # yamllint disable rule:line-length
         restore-keys: |-
           compile-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=
           compile-os=${{ runner.os }}-branch=branch-${{ steps.resolve_ref.outputs.base_branch }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=${{ steps.compute_base_sha.outputs.base_sha }}
           compile-os=${{ runner.os }}-branch=branch-${{ steps.resolve_ref.outputs.base_branch }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=
+        # yamllint enable rule:line-length
         # Restore keys are prefix matching on the cache keys, which we use to fallback on previous caches when not specifying an exact sha

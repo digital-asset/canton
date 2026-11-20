@@ -258,7 +258,7 @@ trait AcsCommitmentNoWaitCounterParticipantIntegrationTest
       import env.*
       checkNoWaitConfigurationsAreApplied
 
-      val (participant2Id, daId, participant2NoWaitConfig, participant2WaitConfig) =
+      val (participant2Id, daId, _, participant2WaitConfig) =
         getParticipant2WaitAndNoWaitConfiguration
       val (testId, testSynchronizer, noWaitList) = nowaitParticipantSynchronizerLazyDummy
 

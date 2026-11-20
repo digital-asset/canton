@@ -881,6 +881,9 @@ final class TransactionViewTest
         }
       }
 
+      def viewParseDepth(view: TransactionView): Int =
+        view.subviews.subviews.parseDepth(_.subviews.subviews)
+
       // Need to work with v30 structures to avoid stack overflow during serialization
       "return parsing failure when nesting is over limit" in {
 
@@ -902,7 +905,7 @@ final class TransactionViewTest
             ),
           )(bytes)
           .value
-        deserialized.parseDepth shouldBe actualDepth
+        viewParseDepth(deserialized) shouldBe actualDepth
 
         val expected = actualDepth - 1
 
@@ -939,7 +942,7 @@ final class TransactionViewTest
           )(bytes)
           .value
 
-        deserialized.parseDepth shouldBe actualDepth
+        viewParseDepth(deserialized) shouldBe actualDepth
 
         val expected = actualDepth - 1
 

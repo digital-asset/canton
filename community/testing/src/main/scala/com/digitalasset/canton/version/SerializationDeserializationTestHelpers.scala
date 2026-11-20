@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.version
 
+import cats.Id
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.{LoggerUtil, ReassignmentTag}
@@ -48,7 +49,28 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
       protocolVersion: ProtocolVersion,
       defaults: List[DefaultValueUntilExclusive[T]] = Nil,
   )(implicit arb: Arbitrary[T]): Assertion =
-    testVersionedCommon(companion, protocolVersion, companion.fromTrustedByteString, defaults)
+    testVersionedCommon[Id, T](
+      companion,
+      protocolVersion,
+      companion.fromTrustedByteString,
+      defaults,
+    )(
+      arb,
+      identity,
+    )
+
+  /** Test for classes extending `HasVersionedWrapperE` (protocol version passed to the
+    * serialization method, which can fail), without context for deserialization. Serialization must
+    * succeed for the given protocol version.
+    */
+  protected def testVersionedE[T <: HasVersionedWrapperE[?]](
+      companion: HasVersionedMessageCompanionE[T],
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      arb: Arbitrary[T],
+      getByteStringValue: Either[String, ByteString] => ByteString,
+  ): Assertion =
+    testVersionedCommon(companion, protocolVersion, companion.fromTrustedByteString, Nil)
 
   /** Test for classes extending `HasProtocolVersionedWrapper` (protocol version embedded in the
     * instance).
@@ -103,17 +125,19 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
     )
 
   /*
-    Shared test code for classes extending `HasVersionedWrapper` (protocol version passed to the serialization method),
+    Shared test code for classes extending `HasVersionedWrapperF` (protocol version passed to the serialization method),
     with/without context for deserialization.
    */
-  private def testVersionedCommon[T <: HasVersionedWrapper[?]](
-      companion: HasVersionedMessageCompanionCommon[T],
+  private def testVersionedCommon[F[_], T <: HasVersionedWrapperF[F, ?]](
+      companion: HasVersionedMessageCompanionCommonF[F, T],
       protocolVersion: ProtocolVersion,
       deserializer: ByteString => ParsingResult[T],
       defaults: List[DefaultValueUntilExclusive[T]],
-  )(implicit arb: Arbitrary[T]): Assertion =
+  )(implicit arb: Arbitrary[T], getByteStringValue: F[ByteString] => ByteString): Assertion =
     forAll { (instance: T) =>
-      val byteString1 = instance.toByteString(protocolVersion)
+      val byteString1 = clue(s"Serializing ${companion.name} for pv=$protocolVersion")(
+        getByteStringValue(instance.toByteString(protocolVersion))
+      )
 
       val deserializedInstance = clue(s"Deserializing serialized ${companion.name}")(
         deserializer(byteString1).value
@@ -124,7 +148,7 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
           if (protocolVersion < untilExclusive) transformer(instance) else instance
       }
 
-      val byteString2 = deserializedInstance.toByteString(protocolVersion)
+      val byteString2 = getByteStringValue(deserializedInstance.toByteString(protocolVersion))
 
       withClue(
         s"Comparing ${companion.name} with (de)serialization done for pv=$protocolVersion"

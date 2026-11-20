@@ -55,7 +55,7 @@ final class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasEx
     val cache = new ReassignmentCache(store, futureSupervisor, timeouts, loggerFactory)
 
     for {
-      _ <- valueOrFail(store.addUnassignmentData(reassignmentData).failOnShutdown)("add failed")
+      _ <- store.addUnassignmentData(reassignmentData).failOnShutdown
       _ <- valueOrFail(store.lookup(reassignmentData.reassignmentId).failOnShutdown)(
         "lookup did not find reassignment"
       )
@@ -74,7 +74,7 @@ final class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasEx
       val store = new HookReassignmentStore(backingStore)
       val cache = new ReassignmentCache(store, futureSupervisor, timeouts, loggerFactory)
       for {
-        _ <- valueOrFail(store.addUnassignmentData(reassignmentData))("add failed")
+        _ <- store.addUnassignmentData(reassignmentData)
         _ = store.preComplete { (reassignmentId, _) =>
           assert(reassignmentId == reassignmentData.reassignmentId)
           CheckedT(
@@ -119,7 +119,7 @@ final class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasEx
       val promise = Promise[Checked[Nothing, ReassignmentStoreError, Unit]]()
 
       for {
-        _ <- valueOrFail(store.addUnassignmentData(reassignmentData))("add failed").failOnShutdown
+        _ <- store.addUnassignmentData(reassignmentData).failOnShutdown
         _ = store.preComplete { (reassignmentId, _) =>
           assert(reassignmentId == reassignmentData.reassignmentId)
           promise.completeWith(
@@ -160,7 +160,7 @@ final class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasEx
       val promise = Promise[Checked[Nothing, ReassignmentStoreError, Unit]]()
 
       for {
-        _ <- valueOrFail(store.addUnassignmentData(reassignmentData))("add failed")
+        _ <- store.addUnassignmentData(reassignmentData)
         _ <- valueOrFail(store.completeReassignment(reassignmentData.reassignmentId, ts2))(
           "first completion failed"
         )
@@ -191,7 +191,7 @@ final class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasEx
       val promise = Promise[Assertion]()
 
       for {
-        _ <- valueOrFail(store.addUnassignmentData(reassignmentData))("add failed")
+        _ <- store.addUnassignmentData(reassignmentData)
         _ = store.preComplete { (reassignmentId, _) =>
           assert(reassignmentId == reassignmentData.reassignmentId)
           val f = for {
@@ -218,7 +218,7 @@ final class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasEx
       val cache = new ReassignmentCache(store, futureSupervisor, timeouts, loggerFactory)
 
       for {
-        _ <- valueOrFail(store.addUnassignmentData(reassignmentData))("add failed")
+        _ <- store.addUnassignmentData(reassignmentData)
         _ <- valueOrFail(
           cache.completeReassignment(reassignmentData.reassignmentId, laterTimestampedCompletion)
         )(
@@ -274,7 +274,7 @@ final class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasEx
         }
 
       for {
-        _ <- valueOrFail(store.addUnassignmentData(reassignmentData).failOnShutdown)("add failed")
+        _ <- store.addUnassignmentData(reassignmentData).failOnShutdown
 
         resultFutures = (timestamps).map { ts =>
           completeAndLookup(ts)
@@ -315,7 +315,7 @@ object ReassignmentCacheTest extends BaseTest {
 
     override def addUnassignmentData(unassignmentData: UnassignmentData)(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] =
+    ): FutureUnlessShutdown[Unit] =
       baseStore.addUnassignmentData(unassignmentData)
 
     override def addReassignmentsOffsets(
@@ -360,7 +360,7 @@ object ReassignmentCacheTest extends BaseTest {
 
     override def addAssignmentDataIfAbsent(assignmentData: AssignmentData)(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] =
+    ): FutureUnlessShutdown[Unit] =
       baseStore.addAssignmentDataIfAbsent(assignmentData)
 
     override def findAfter(

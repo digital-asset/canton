@@ -6,6 +6,7 @@ package com.digitalasset.canton.util
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
@@ -49,25 +50,23 @@ class BatchAggregatorTest
   private def aggregatorWithDefaults(
       maximumInFlight: Int = defaultMaximumInFlight,
       batchGetter: BatchGetterType,
-  ): BatchAggregatorImpl[K, V] = {
-
-    val processor =
-      new BatchAggregator.Processor[K, V] {
-        override def kind: String = "item"
-        override def logger: TracedLogger = BatchAggregatorTest.this.logger
-        override def executeBatch(items: NonEmpty[Seq[Traced[K]]])(implicit
-            traceContext: TraceContext,
-            callerCloseContext: CloseContext,
-        ): FutureUnlessShutdown[immutable.Iterable[V]] = batchGetter(items)
-        override def prettyItem: Pretty[K] = implicitly
-      }
-
+  ): BatchAggregatorImpl[K, V] =
     new BatchAggregatorImpl(
-      processor,
+      processorFor(batchGetter),
       maximumInFlight = maximumInFlight,
       maximumBatchSize = PositiveNumeric.tryCreate(defaultMaximumBatchSize),
     )
-  }
+
+  private def processorFor(batchGetter: BatchGetterType): BatchAggregator.Processor[K, V] =
+    new BatchAggregator.Processor[K, V] {
+      override def kind: String = "item"
+      override def logger: TracedLogger = BatchAggregatorTest.this.logger
+      override def executeBatch(items: NonEmpty[Seq[Traced[K]]])(implicit
+          traceContext: TraceContext,
+          callerCloseContext: CloseContext,
+      ): FutureUnlessShutdown[immutable.Iterable[V]] = batchGetter(items)
+      override def prettyItem: Pretty[K] = implicitly
+    }
 
   /** @param requestsCountPerSize
     *   Track the number of requests per size
@@ -336,6 +335,173 @@ class BatchAggregatorTest
 
         resultF.futureValueUS shouldBe Seq(List("0"), List("7"))
         requestsCountPerSize.toMap shouldBe Map(1 -> 2)
+      }
+
+      Seq(
+        BatchAggregatorConfig.Batching(
+          maximumInFlight = PositiveInt.one,
+          maximumBatchSize = PositiveInt.tryCreate(3),
+        ),
+        BatchAggregatorConfig.NoBatching(
+          maxParallelBatches = PositiveInt.one,
+          maximumBatchSize = PositiveInt.tryCreate(3),
+        ),
+      ).foreach { config =>
+        s"BatchAggregator with data-size limits and $config" should {
+          val maximumItemCount = 3
+          val maximumDataSize = PositiveInt.tryCreate(5)
+
+          // Each key doubles as its estimated data size (results are the keys rendered as strings)
+          def aggregator(
+              getter: BatchGetterType,
+              maximumDataSize: PositiveInt = maximumDataSize,
+              estimator: K => PositiveInt = PositiveInt.tryCreate,
+          ): BatchAggregator[K, V] =
+            BatchAggregator(
+              processorFor(getter),
+              config,
+              maxDataSizeHintO = Some(maximumDataSize),
+              estimateDataSizeOfItem = estimator,
+            )
+
+          "reject groups over the item-count limit but accept groups over the data-size hint" in {
+            val requests = TrieMap.empty[Vector[K], Unit]
+            val batcher =
+              aggregator { items =>
+                requests.put(items.iterator.map(_.value).toVector, ())
+                defaultBatchGetter(items)
+              }
+            val exceedsDataSizeHint = NonEmpty(Seq, Traced(3), Traced(3))
+            val exceedsItemCount = NonEmpty(Seq, Traced(1), Traced(1), Traced(1), Traced(1))
+
+            val oversizedGroup = batcher.runInSameBatch(exceedsDataSizeHint)
+            batcher.runInSameBatch(exceedsItemCount) shouldBe Left(
+              PositiveInt.tryCreate(maximumItemCount)
+            )
+            oversizedGroup.value.futureValueUS.toList shouldBe List("3", "3")
+            requests.keySet shouldBe Set(Vector(3, 3))
+          }
+
+          "process oversized single items alone through run, runInSameBatch, and runMany" in {
+            val requests = TrieMap.empty[Vector[K], Unit]
+            val batcher = aggregator { items =>
+              requests.put(items.iterator.map(_.value).toVector, ())
+              defaultBatchGetter(items)
+            }
+
+            batcher.run(6).futureValueUS shouldBe "6"
+            batcher.runInSameBatch(NonEmpty(Seq, Traced(6))).value.futureValueUS.toList shouldBe
+              List("6")
+            batcher.runMany(NonEmpty(Seq, Traced(1), Traced(6))).futureValueUS.toList shouldBe
+              List("1", "6")
+            requests.keySet shouldBe Set(Vector(6), Vector(1))
+
+            batcher.run(5).futureValueUS shouldBe "5"
+            requests.keySet should contain(Vector(5))
+          }
+
+          "split runMany by both limits and preserve result order" in {
+            // Count executions rather than only recording distinct batches: keys may repeat.
+            val executedBatchCounts = TrieMap.empty[Vector[K], Int]
+            val batcher = aggregator { items =>
+              executedBatchCounts.updateWith(items.iterator.map(_.value).toVector)(count =>
+                Some(count.getOrElse(0) + 1)
+              )
+              defaultBatchGetter(items)
+            }
+            val input =
+              NonEmpty(Seq, Traced(3), Traced(2), Traced(1), Traced(1), Traced(1), Traced(1))
+
+            // The first pair fills the data-size limit; three following ones fill the count limit.
+            //  Queued items may be repacked, so check the limits rather than a fixed batch layout.
+            batcher.runMany(input).futureValueUS.toList shouldBe List("3", "2", "1", "1", "1", "1")
+            val totalExecutedDataSize =
+              executedBatchCounts.iterator.map { case (batch, count) => batch.sum * count }.sum
+            totalExecutedDataSize shouldBe input.iterator.map(_.value).sum
+            executedBatchCounts.keys.foreach { batch =>
+              batch.size should be <= maximumItemCount
+              batch.sum should be <= maximumDataSize.value
+            }
+          }
+
+          "respect both limits when combining grouped, runMany, and single requests" in {
+            val blocker = PromiseUnlessShutdown.unsupervised[Unit]()
+            val executedBatchCounts = TrieMap.empty[Vector[K], Int]
+            val batcher = aggregator { items =>
+              executedBatchCounts.updateWith(items.iterator.map(_.value).toVector)(count =>
+                Some(count.getOrElse(0) + 1)
+              )
+              blocker.futureUS.flatMap(_ => defaultBatchGetter(items))
+            }
+            // In batching mode, occupy the only slot so all later calls exercise queue packing.
+            // NoBatching executes these calls directly, but must enforce the same limits.
+            val first = batcher.run(5)
+            val grouped = batcher.runInSameBatch(NonEmpty(Seq, Traced(2), Traced(2))).value
+            val many = batcher.runMany(NonEmpty(Seq, Traced(3), Traced(2), Traced(1)))
+            val single = batcher.run(4)
+
+            blocker.success(UnlessShutdown.unit)
+            first.futureValueUS shouldBe "5"
+            grouped.futureValueUS.toList shouldBe List("2", "2")
+            many.futureValueUS.toList shouldBe List("3", "2", "1")
+            single.futureValueUS shouldBe "4"
+            val totalExecutedDataSize =
+              executedBatchCounts.iterator.map { case (batch, count) => batch.sum * count }.sum
+            totalExecutedDataSize shouldBe 5 + (2 + 2) + (3 + 2 + 1) + 4
+            executedBatchCounts.keys.foreach { batch =>
+              batch.size should be <= maximumItemCount
+              batch.sum should be <= maximumDataSize.value
+            }
+          }
+
+          "accept same-batch data-size sums that exceed Int.MaxValue without overflowing" in {
+            val batcher =
+              aggregator(defaultBatchGetter, maximumDataSize = PositiveInt.tryCreate(Int.MaxValue))
+            batcher
+              .runInSameBatch(NonEmpty(Seq, Traced(Int.MaxValue), Traced(1)))
+              .value
+              .futureValueUS
+              .toList shouldBe List(Int.MaxValue.toString, "1")
+          }
+
+          "default to estimating one data-size unit per item" in {
+            val requests = TrieMap.empty[Vector[K], Unit]
+            val batcher = BatchAggregator(
+              processorFor { items =>
+                requests.put(items.iterator.map(_.value).toVector, ())
+                defaultBatchGetter(items)
+              },
+              config,
+              maxDataSizeHintO = Some(PositiveInt.tryCreate(2)),
+            )
+
+            // Without a custom estimator, these large key values still cost only one unit each.
+            batcher
+              .runMany(NonEmpty(Seq, Traced(100), Traced(200), Traced(300)))
+              .futureValueUS
+              .toList shouldBe
+              List("100", "200", "300")
+            requests.keys.foreach(_.size should be <= 2)
+          }
+
+          "not evaluate the estimator when the data-size limit is disabled" in {
+            val batcher = BatchAggregator(
+              processorFor(defaultBatchGetter),
+              config,
+              estimateDataSizeOfItem = (_: K) => fail("Estimator must not be evaluated"),
+            )
+
+            batcher.run(100).futureValueUS shouldBe "100"
+            batcher
+              .runInSameBatch(NonEmpty(Seq, Traced(200), Traced(300)))
+              .value
+              .futureValueUS
+              .toList shouldBe
+              List("200", "300")
+            batcher.runMany(NonEmpty(Seq, Traced(400), Traced(500))).futureValueUS.toList shouldBe
+              List("400", "500")
+          }
+        }
       }
     }
 

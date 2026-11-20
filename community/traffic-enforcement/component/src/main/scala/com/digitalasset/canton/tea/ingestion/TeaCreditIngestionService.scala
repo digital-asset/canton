@@ -68,6 +68,7 @@ final class TeaCreditIngestionService(
     filtersByParty = paymasters.map(_ -> Filters(Seq(filter))).toMap,
     filtersForAnyParty = None,
     verbose = false,
+    filtersByContractId = Seq.empty,
   )
 
   /** Offset-resume aware source factory: builds the credit delta source starting from the offset

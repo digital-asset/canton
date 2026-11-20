@@ -39,6 +39,7 @@ import com.digitalasset.canton.ledger.api.sizeconfig.v2.interactive.{
 import com.digitalasset.canton.ledger.api.sizeconfig.v2.{
   CommandsSizeConfig,
   CompletionStreamRequestSizeConfig,
+  ContractIdFilterSizeConfig,
   CreateAndExerciseCommandSizeConfig,
   CreateCommandSizeConfig,
   DisclosedContractSizeConfig,
@@ -51,9 +52,12 @@ import com.digitalasset.canton.ledger.api.sizeconfig.v2.{
   GetCompletionByHashRequestSizeConfig,
   GetCompletionsRequestSizeConfig,
   GetContractRequestSizeConfig,
+  GetHostedPartiesPageRequestSizeConfig,
+  GetHostedPartiesRequestSizeConfig,
   GetLedgerEndRequestSizeConfig,
   GetUpdateByHashRequestSizeConfig,
   GetUpdatesPageRequestSizeConfig,
+  HostedPartiesFilterSizeConfig,
   PackageMetadataFilterSizeConfig,
   ParticipantAuthorizationTopologyFormatSizeConfig,
   PrefetchContractKeySizeConfig,
@@ -82,8 +86,6 @@ import com.digitalasset.canton.ledger.api.sizeconfig.v2.{
   * @param metadataInputContractBytesSizeLimit
   *   max serialized size in bytes of each `PreparedTransaction.Metadata.InputContract`. Defaults to
   *   [[SharedSizeConfig.contractBytesSizeLimit]].
-  * @param metadataGlobalKeyMappingEntryBytesSizeLimit
-  *   max serialized size in bytes of each `PreparedTransaction.Metadata.GlobalKeyMappingEntry`
   */
 final case class LedgerApiSizeLimitsConfig(
     publicLapiSizeConfig: PublicLapiSizeConfig,
@@ -92,7 +94,6 @@ final case class LedgerApiSizeLimitsConfig(
     private val sharedSizeConfig: SharedSizeConfig,
     eventFormatTotalFiltersSizeLimit: PositiveInt,
     metadataInputContractBytesSizeLimit: PositiveInt,
-    metadataGlobalKeyMappingEntryBytesSizeLimit: PositiveInt,
 )
 
 /** Limits shared by several message-specific limits of the Ledger API
@@ -102,9 +103,11 @@ final case class LedgerApiSizeLimitsConfig(
   * @param transactionHashBytesSizeLimit
   *   shared limit of max transaction hash size of all by-hash requests
   * @param continuationTokenBytesSizeLimit
-  *   shared limit of the continuation token and page tokens of the active contracts and updates
+  *   shared limit of the continuation token and page tokens of the active contracts, updates and
+  *   hosted parties
   * @param synchronizerIdsSizeLimit
-  *   shared limit of synchronizer ids of `GetLedgerEndRequest` and `TopologyStateFilter`
+  *   shared limit of synchronizer ids of `GetLedgerEndRequest`, `TopologyStateFilter` and
+  *   `HostedPartiesFilter`
   * @param submissionCommandsSizeLimit
   *   max number of the commands of `Commands` and `PrepareSubmissionRequest`
   * @param submissionActAsSizeLimit
@@ -140,32 +143,34 @@ final case class LedgerApiSizeLimitsConfig(
   *   `UpdateIdentityProviderConfigRequest`
   * @param signaturesSizeLimit
   *   shared limit of the signatures limit of `AllocateExternalPartyRequest.SignedTransaction`,
-  *   `AllocateExternalPartyRequest` (multi hash signatures), `AuthorizePartyUpdateRequest` and
-  *   `SinglePartySignatures`
+  *   `AllocateExternalPartyRequest` (multi hash signatures), `AuthorizePartyUpdateRequest`,
+  *   `SinglePartySignatures` and the expected signatures of `CostEstimationHints`
   * @param topologyTransactionBytesSizeLimit
   *   shared limit of the serialized topology transaction limit of
   *   `AllocateExternalPartyRequest.SignedTransaction` and `AuthorizePartyUpdateRequest`
   */
 final case class SharedSizeConfig(
-    completionsRequestPartiesSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    transactionHashBytesSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    continuationTokenBytesSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    synchronizerIdsSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    submissionCommandsSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    submissionActAsSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    submissionReadAsSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    submissionDisclosedContractsSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    submissionPackageIdSelectionPreferenceSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    submissionPrefetchContractKeysSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    argumentsBytesSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    contractBytesSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    darFileBytesSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    vettedPackagesChangePackagesSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    participantUidsSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    userRightsSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    updateMaskBytesSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    signaturesSizeLimit: PositiveInt = PositiveInt.MaxValue,
-    topologyTransactionBytesSizeLimit: PositiveInt = PositiveInt.MaxValue,
+    completionsRequestPartiesSizeLimit: PositiveInt = PositiveInt.tryCreate(1_000),
+    // hashes are 32-byte raw SHA-256 digests
+    transactionHashBytesSizeLimit: PositiveInt = PositiveInt.tryCreate(100),
+    continuationTokenBytesSizeLimit: PositiveInt = PositiveInt.tryCreate(1024),
+    synchronizerIdsSizeLimit: PositiveInt = PositiveInt.tryCreate(100),
+    submissionCommandsSizeLimit: PositiveInt = PositiveInt.tryCreate(1_000),
+    submissionActAsSizeLimit: PositiveInt = PositiveInt.tryCreate(1_000),
+    submissionReadAsSizeLimit: PositiveInt = PositiveInt.tryCreate(1_000),
+    // disclosed contracts are input contracts, so keep it <= metadata.inputContractsSizeLimit
+    submissionDisclosedContractsSizeLimit: PositiveInt = PositiveInt.tryCreate(1_000),
+    submissionPackageIdSelectionPreferenceSizeLimit: PositiveInt = PositiveInt.tryCreate(1_000),
+    submissionPrefetchContractKeysSizeLimit: PositiveInt = PositiveInt.tryCreate(100),
+    argumentsBytesSizeLimit: PositiveInt = PositiveInt.tryCreate(10 * 1024 * 1024),
+    contractBytesSizeLimit: PositiveInt = PositiveInt.tryCreate(10 * 1024 * 1024),
+    darFileBytesSizeLimit: PositiveInt = PositiveInt.tryCreate(20 * 1024 * 1024),
+    vettedPackagesChangePackagesSizeLimit: PositiveInt = PositiveInt.tryCreate(1_000),
+    participantUidsSizeLimit: PositiveInt = PositiveInt.tryCreate(1_000),
+    userRightsSizeLimit: PositiveInt = PositiveInt.tryCreate(10_000),
+    updateMaskBytesSizeLimit: PositiveInt = PositiveInt.tryCreate(1024),
+    signaturesSizeLimit: PositiveInt = PositiveInt.tryCreate(1_000),
+    topologyTransactionBytesSizeLimit: PositiveInt = PositiveInt.tryCreate(1024 * 1024),
 )
 
 object LedgerApiSizeLimitsConfig {
@@ -178,9 +183,8 @@ object LedgerApiSizeLimitsConfig {
       adminLapiSizeConfig = adminLapiDefaultsWithShared(sharedSizeConfig),
       interactiveLapiSizeConfig = interactiveLapiDefaultsWithShared(sharedSizeConfig),
       sharedSizeConfig = sharedSizeConfig,
-      eventFormatTotalFiltersSizeLimit = PositiveInt.MaxValue,
+      eventFormatTotalFiltersSizeLimit = PositiveInt.tryCreate(1_000),
       metadataInputContractBytesSizeLimit = sharedSizeConfig.contractBytesSizeLimit,
-      metadataGlobalKeyMappingEntryBytesSizeLimit = PositiveInt.MaxValue,
     )
 
   private def publicLapiDefaultsWithShared(shared: SharedSizeConfig): PublicLapiSizeConfig =
@@ -203,6 +207,8 @@ object LedgerApiSizeLimitsConfig {
           shared.submissionPackageIdSelectionPreferenceSizeLimit,
         prefetchContractKeysSizeLimit = shared.submissionPrefetchContractKeysSizeLimit,
       ),
+      contractIdFilter =
+        ContractIdFilterSizeConfig(includeInterfaceViewsSizeLimit = PositiveInt.MaxValue),
       createAndExerciseCommand = CreateAndExerciseCommandSizeConfig(
         createArgumentsSizeLimit = shared.argumentsBytesSizeLimit,
         choiceArgumentSizeLimit = shared.argumentsBytesSizeLimit,
@@ -221,7 +227,7 @@ object LedgerApiSizeLimitsConfig {
         choiceArgumentSizeLimit = shared.argumentsBytesSizeLimit
       ),
       getContractRequest = GetContractRequestSizeConfig(
-        queryingPartiesSizeLimit = PositiveInt.MaxValue
+        queryingPartiesSizeLimit = PositiveInt.tryCreate(1_000)
       ),
       getActiveContractsPageRequest = GetActiveContractsPageRequestSizeConfig(
         pageTokenSizeLimit = shared.continuationTokenBytesSizeLimit
@@ -229,13 +235,26 @@ object LedgerApiSizeLimitsConfig {
       getActiveContractsRequest = GetActiveContractsRequestSizeConfig(
         streamContinuationTokenSizeLimit = shared.continuationTokenBytesSizeLimit
       ),
+      getHostedPartiesPageRequest = GetHostedPartiesPageRequestSizeConfig(
+        pageTokenSizeLimit = shared.continuationTokenBytesSizeLimit
+      ),
+      getHostedPartiesRequest = GetHostedPartiesRequestSizeConfig(
+        streamContinuationTokenSizeLimit = shared.continuationTokenBytesSizeLimit
+      ),
+      hostedPartiesFilter = HostedPartiesFilterSizeConfig(
+        partyFilterSizeLimit = PositiveInt.tryCreate(10_000),
+        synchronizerIdFilterSizeLimit = shared.synchronizerIdsSizeLimit,
+      ),
       getLedgerEndRequest = GetLedgerEndRequestSizeConfig(
         synchronizerIdSizeLimit = shared.synchronizerIdsSizeLimit
       ),
-      eventFormat = EventFormatSizeConfig(filtersByPartySizeLimit = PositiveInt.MaxValue),
-      filters = FiltersSizeConfig(cumulativeSizeLimit = PositiveInt.MaxValue),
+      eventFormat = EventFormatSizeConfig(
+        filtersByPartySizeLimit = PositiveInt.tryCreate(10_000),
+        filtersByContractIdSizeLimit = PositiveInt.tryCreate(1_000),
+      ),
+      filters = FiltersSizeConfig(cumulativeSizeLimit = PositiveInt.tryCreate(100)),
       participantAuthorizationTopologyFormat = ParticipantAuthorizationTopologyFormatSizeConfig(
-        partiesSizeLimit = PositiveInt.MaxValue
+        partiesSizeLimit = PositiveInt.tryCreate(1_000)
       ),
       getUpdateByHashRequest = GetUpdateByHashRequestSizeConfig(
         transactionHashSizeLimit = shared.transactionHashBytesSizeLimit
@@ -244,27 +263,28 @@ object LedgerApiSizeLimitsConfig {
         pageTokenSizeLimit = shared.continuationTokenBytesSizeLimit
       ),
       reassignmentCommands = ReassignmentCommandsSizeConfig(
-        commandsSizeLimit = PositiveInt.MaxValue
+        commandsSizeLimit = PositiveInt.tryCreate(1_000)
       ),
       packageMetadataFilter = PackageMetadataFilterSizeConfig(
-        packageIdsSizeLimit = PositiveInt.MaxValue,
-        packageNamePrefixesSizeLimit = PositiveInt.MaxValue,
+        packageIdsSizeLimit = PositiveInt.tryCreate(1_000),
+        packageNamePrefixesSizeLimit = PositiveInt.tryCreate(1_000),
       ),
       topologyStateFilter = TopologyStateFilterSizeConfig(
-        participantIdsSizeLimit = PositiveInt.MaxValue,
+        participantIdsSizeLimit = PositiveInt.tryCreate(1_000),
         synchronizerIdsSizeLimit = shared.synchronizerIdsSizeLimit,
       ),
       prefetchContractKey = PrefetchContractKeySizeConfig(
         contractKeySizeLimit = shared.argumentsBytesSizeLimit
       ),
-      signature = SignatureSizeConfig(signatureSizeLimit = PositiveInt.MaxValue),
-      signingPublicKey = SigningPublicKeySizeConfig(keyDataSizeLimit = PositiveInt.MaxValue),
+      signature = SignatureSizeConfig(signatureSizeLimit = PositiveInt.tryCreate(8 * 1024)),
+      signingPublicKey =
+        SigningPublicKeySizeConfig(keyDataSizeLimit = PositiveInt.tryCreate(4 * 1024)),
     )
 
   private def adminLapiDefaultsWithShared(shared: SharedSizeConfig): AdminLapiSizeConfig =
     AdminLapiSizeConfig(
       allocateExternalPartyRequest = AllocateExternalPartyRequestSizeConfig(
-        onboardingTransactionsSizeLimit = PositiveInt.MaxValue,
+        onboardingTransactionsSizeLimit = PositiveInt.tryCreate(100),
         multiHashSignaturesSizeLimit = shared.signaturesSizeLimit,
       ),
       allocateExternalPartyRequestSignedTransaction =
@@ -281,11 +301,12 @@ object LedgerApiSizeLimitsConfig {
         otherConfirmingParticipantUidsSizeLimit = shared.participantUidsSizeLimit,
         observingParticipantUidsSizeLimit = shared.participantUidsSizeLimit,
       ),
-      getPartiesRequest = GetPartiesRequestSizeConfig(partiesSizeLimit = PositiveInt.MaxValue),
+      getPartiesRequest =
+        GetPartiesRequestSizeConfig(partiesSizeLimit = PositiveInt.tryCreate(1_000)),
       grantUserRightsRequest = GrantUserRightsRequestSizeConfig(
         rightsSizeLimit = shared.userRightsSizeLimit
       ),
-      objectMeta = ObjectMetaSizeConfig(annotationsSizeLimit = PositiveInt.MaxValue),
+      objectMeta = ObjectMetaSizeConfig(annotationsSizeLimit = PositiveInt.tryCreate(100)),
       revokeUserRightsRequest = RevokeUserRightsRequestSizeConfig(
         rightsSizeLimit = shared.userRightsSizeLimit
       ),
@@ -299,8 +320,9 @@ object LedgerApiSizeLimitsConfig {
         updateMaskSizeLimit = shared.updateMaskBytesSizeLimit
       ),
       updateVettedPackagesRequest = UpdateVettedPackagesRequestSizeConfig(
-        changesSizeLimit = PositiveInt.MaxValue,
-        updateVettedPackagesForceFlagsSizeLimit = PositiveInt.MaxValue,
+        changesSizeLimit = PositiveInt.tryCreate(1_000),
+        // the UpdateVettedPackagesForceFlag enum has 2 flags
+        updateVettedPackagesForceFlagsSizeLimit = PositiveInt.tryCreate(10),
       ),
       uploadDarFileRequest = UploadDarFileRequestSizeConfig(
         darFileSizeLimit = shared.darFileBytesSizeLimit
@@ -321,22 +343,26 @@ object LedgerApiSizeLimitsConfig {
   ): InteractiveLapiSizeConfig =
     InteractiveLapiSizeConfig(
       costEstimationHints = CostEstimationHintsSizeConfig(
-        expectedSignaturesSizeLimit = PositiveInt.MaxValue
+        expectedSignaturesSizeLimit = shared.signaturesSizeLimit
       ),
       getPreferredPackagesRequest = GetPreferredPackagesRequestSizeConfig(
-        packageVettingRequirementsSizeLimit = PositiveInt.MaxValue
+        packageVettingRequirementsSizeLimit = PositiveInt.tryCreate(1_000)
       ),
       metadata = MetadataSizeConfig(
-        inputContractsSizeLimit = PositiveInt.MaxValue,
+        inputContractsSizeLimit = PositiveInt.tryCreate(1_000),
+        // deprecated and always empty: the decoder never reads it
         globalKeyMappingSizeLimit = PositiveInt.MaxValue,
       ),
       metadataSubmitterInfo = MetadataSubmitterInfoSizeConfig(
         actAsSizeLimit = shared.submissionActAsSizeLimit
       ),
       packageVettingRequirement = PackageVettingRequirementSizeConfig(
-        partiesSizeLimit = PositiveInt.MaxValue
+        partiesSizeLimit = PositiveInt.tryCreate(1_000)
       ),
-      partySignatures = PartySignaturesSizeConfig(signaturesSizeLimit = PositiveInt.MaxValue),
+      partySignatures = PartySignaturesSizeConfig(signaturesSizeLimit =
+        // should match with act_as
+        PositiveInt.tryCreate(1_000)
+      ),
       prepareSubmissionRequest = PrepareSubmissionRequestSizeConfig(
         commandsSizeLimit = shared.submissionCommandsSizeLimit,
         actAsSizeLimit = shared.submissionActAsSizeLimit,
@@ -347,7 +373,7 @@ object LedgerApiSizeLimitsConfig {
         prefetchContractKeysSizeLimit = shared.submissionPrefetchContractKeysSizeLimit,
       ),
       preparedTransaction = PreparedTransactionSizeConfig(
-        transactionSizeLimit = PositiveInt.MaxValue
+        transactionSizeLimit = PositiveInt.tryCreate(20 * 1024 * 1024)
       ),
       singlePartySignatures = SinglePartySignaturesSizeConfig(
         signaturesSizeLimit = shared.signaturesSizeLimit

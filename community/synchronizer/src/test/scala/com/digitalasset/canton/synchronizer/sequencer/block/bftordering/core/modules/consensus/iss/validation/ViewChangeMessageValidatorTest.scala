@@ -34,6 +34,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Prepare,
   ViewChange,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
@@ -397,6 +398,59 @@ class ViewChangeMessageValidatorTest extends AnyWordSpec with BftSequencerBaseTe
   }
 
   "ViewChangeMessageValidator.validateNewViewMessage" should {
+    Seq(false, true).foreach { useCommitCertificates =>
+      val certificateType = if (useCommitCertificates) "commit" else "prepare"
+
+      s"require $certificateType selection according to the protocol version when pre-prepare views disagree" in {
+        val validator = new ViewChangeMessageValidator(membership, blockNumbers)
+        val nextView = ViewNumber(3L)
+        val carriedPrePrepare = prePrepare(epochNumber, 1L, view0)
+        val olderPrePrepare = prePrepare(epochNumber, 1L, view1)
+        val voters = Seq(myId, otherId)
+
+        def certificate(
+            pp: SignedMessage[PrePrepare],
+            votingView: ViewNumber,
+        ): ConsensusCertificate =
+          if (useCommitCertificates)
+            CommitCertificate(
+              pp,
+              voters.map(node => commit(epochNumber, 1L, pp.message.hash, votingView, from = node)),
+            )
+          else
+            PrepareCertificate(
+              pp,
+              voters.map(node => prepare(epochNumber, 1L, pp.message.hash, votingView, from = node)),
+            )
+
+        val viewChanges = Seq(
+          viewChangeMsg(nextView, Seq(certificate(carriedPrePrepare, view2))).fakeSign,
+          viewChangeMsg(
+            nextView,
+            Seq(certificate(olderPrePrepare, view1)),
+            from = otherId,
+          ).fakeSign,
+        )
+        val bottomBlocks = Seq(
+          prePrepare(epochNumber, 3L, nextView),
+          prePrepare(epochNumber, 5L, nextView),
+        )
+
+        val (expectedPrePrepare, rejectedPrePrepare) =
+          if (testedProtocolVersion > ProtocolVersion.v37) (carriedPrePrepare, olderPrePrepare)
+          else (olderPrePrepare, carriedPrePrepare)
+
+        validator.validateNewViewMessage(
+          newViewMessage(nextView, viewChanges, expectedPrePrepare +: bottomBlocks)
+        ) shouldBe Right(())
+        validator.validateNewViewMessage(
+          newViewMessage(nextView, viewChanges, rejectedPrePrepare +: bottomBlocks)
+        ) shouldBe Left(
+          "pre-prepare for block 1 does not match the one expected from consensus certificate"
+        )
+      }
+    }
+
     "successfully validate new-view message with empty view-change messages" in {
       val validator = new ViewChangeMessageValidator(membership, blockNumbers)
 

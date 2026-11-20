@@ -177,6 +177,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           )
         ),
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
     )
 
@@ -304,6 +305,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 .toMap,
               filtersForAnyParty = None,
               verbose = verbose,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = transactionShape,
@@ -400,6 +402,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   filtersByParty = Map.empty,
                   filtersForAnyParty = Some(filters),
                   verbose = verbose,
+                  filtersByContractId = Seq.empty,
                 )
               )
             else
@@ -408,6 +411,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   filtersByParty = partyIds.map(_.toLf -> filters).toMap,
                   filtersForAnyParty = None,
                   verbose = verbose,
+                  filtersByContractId = Seq.empty,
                 )
               ),
           includeTransactions = None,
@@ -686,6 +690,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           filtersByParty = parties.map(_.toLf -> Filters(Nil)).toMap,
           filtersForAnyParty = Option.when(parties.isEmpty)(Filters(Nil)),
           verbose = false,
+          filtersByContractId = Seq.empty,
         )
         val updateFormat = UpdateFormat(
           includeTransactions = Some(
@@ -4103,6 +4108,7 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
         .toMap,
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
     UpdateFormat(
       includeTransactions =

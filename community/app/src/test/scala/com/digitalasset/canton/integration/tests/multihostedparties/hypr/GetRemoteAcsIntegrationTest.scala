@@ -22,7 +22,11 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError
-import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.PartyNotInFreezingHostingState
+import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.{
+  GetRemoteAcsFailed,
+  PartyNotInFreezingHostingState,
+}
+import com.digitalasset.canton.participant.admin.party.acsreplication.ReplicateAcsError
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ExternalParty, PartyId}
@@ -53,6 +57,8 @@ sealed trait GetRemoteAcsIntegrationTest extends CommunityIntegrationTest with S
   private val remoteReadFileName = s"canton-remote-acs-${this.getClass.getSimpleName}.gz"
   private val exportAcsFileName = s"canton-acs-export-${this.getClass.getSimpleName}.gz"
 
+  private var nominatedAt: CantonTimestamp = _
+
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(ConfigTransforms.enableAlphaAcsReplicationSupport()*)
@@ -68,7 +74,9 @@ sealed trait GetRemoteAcsIntegrationTest extends CommunityIntegrationTest with S
         carol = participant1.parties.enable("carol", synchronizeParticipants = Seq(participant2))
       }
 
-  private def awaitHostingState(state: HostingState)(implicit env: TestConsoleEnvironment) = {
+  private def awaitHostingState(
+      state: HostingState
+  )(implicit env: TestConsoleEnvironment): CantonTimestamp = {
     import env.*
     eventually() {
       val ptp1 = participant1.topology.party_to_participant_mappings
@@ -89,74 +97,92 @@ sealed trait GetRemoteAcsIntegrationTest extends CommunityIntegrationTest with S
         participant1.id -> HostingState.Active,
         participant2.id -> state,
       )
+
+      // Return effective timestamp, immediate successor since validFrom is exclusive (>).
+      CantonTimestamp.assertFromInstant(ptp1.context.validFrom).immediateSuccessor
     }
   }
 
-  // TODO(#37839): Switch this test to pv37 along with marking acs_replication.proto
-  //  replication protocol messages to stable/pv37
-  "Create external party with contracts" onlyRunWith ProtocolVersion.dev in { implicit env =>
-    import env.*
+  "Create external party with contracts" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
+    implicit env =>
+      import env.*
 
-    val amounts = 1 to numContractsInCreateBatch
-    ListBuffer.from(IouSyntax.createIous(participant1, carol, aliceE, amounts))
-    // Create some contracts shared with a party (Bob) on the target participant P2.
-    ListBuffer.from(IouSyntax.createIous(participant2, bob, aliceE, amounts))
+      val amounts = 1 to numContractsInCreateBatch
+      ListBuffer.from(IouSyntax.createIous(participant1, carol, aliceE, amounts))
+      // Create some contracts shared with a party (Bob) on the target participant P2.
+      ListBuffer.from(IouSyntax.createIous(participant2, bob, aliceE, amounts))
 
-    clue("Nominating Alice on P2") {
-      aliceE.topology.party_to_participant_mappings.propose_delta(
-        participant1,
-        adds = Seq(
-          participant2.id -> ParticipantPermission.Confirmation
-        ),
-        mustFullyAuthorize = true, // since submitting with external party keys on TP
-        store = daId,
-        participantStates = Map(participant2.id -> HostingState.Nominated),
-      )
-      awaitHostingState(HostingState.Nominated)
-    }
+      nominatedAt = clue("Nominating Alice on P2") {
+        aliceE.topology.party_to_participant_mappings.propose_delta(
+          participant1,
+          adds = Seq(
+            participant2.id -> ParticipantPermission.Confirmation
+          ),
+          mustFullyAuthorize = true, // since submitting with external party keys on TP
+          store = daId,
+          participantStates = Map(participant2.id -> HostingState.Nominated),
+        )
+        awaitHostingState(HostingState.Nominated)
+      }
 
-    clue("Not ready to read Alice P2 freezing time") {
-      loggerFactory.assertThrowsAndLogs[CommandFailure](
-        participant2.parties.get_party_freezing_time(aliceE, daId),
-        entry => {
-          entry shouldBeCantonErrorCode PartyNotInFreezingHostingState
-          entry.errorMessage should include(
-            PartyNotInFreezingHostingState.Error(aliceE, daId, participant2.id).cause
-          )
-        },
-      )
-    }
+      // Nominate Carol on P2 and keep her nominated to show that Carol is not considered
+      // already hosted on the TP when we remote-read Alice's ACS.
+      clue("Nominating Carol on P2") {
+        participant1.topology.party_to_participant_mappings.propose_delta(
+          carol,
+          adds = Seq(
+            participant2.id -> ParticipantPermission.Confirmation
+          ),
+          mustFullyAuthorize = true, // since only party authorization is needed for nominating
+          store = daId,
+          participantStates = Map(participant2.id -> HostingState.Nominated),
+        )
+        awaitHostingState(HostingState.Nominated)
+      }
 
-    clue("P2 freezing Alice") {
-      participant2.topology.party_to_participant_mappings.propose_delta(
-        aliceE,
-        mustFullyAuthorize = true, // since submitting with external party keys on TP
-        store = daId,
-        participantStates = Map(participant2.id -> HostingState.Freezing),
-      )
-      awaitHostingState(HostingState.Freezing)
-    }
+      clue("Not ready to read Alice P2 freezing time") {
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          participant2.parties.get_party_freezing_time(aliceE, daId),
+          entry => {
+            entry shouldBeCantonErrorCode PartyNotInFreezingHostingState
+            entry.errorMessage should include(
+              PartyNotInFreezingHostingState.Error(aliceE, daId, participant2.id).cause
+            )
+          },
+        )
+      }
+
+      clue("P2 freezing Alice") {
+        participant2.topology.party_to_participant_mappings.propose_delta(
+          aliceE,
+          mustFullyAuthorize = true, // since submitting with external party keys on TP
+          store = daId,
+          participantStates = Map(participant2.id -> HostingState.Freezing),
+        )
+        awaitHostingState(HostingState.Freezing)
+      }
   }
 
-  "get_remote_acs on P2" onlyRunWith ProtocolVersion.dev in { implicit env =>
-    import env.*
+  "get_remote_acs on P2" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
+    implicit env =>
+      import env.*
 
-    val asOf = clue("Read Alice P2 freezing time") {
-      participant2.parties.get_party_freezing_time(aliceE, daId)
-    }
+      val asOf = clue("Read Alice P2 freezing time") {
+        participant2.parties.get_party_freezing_time(aliceE, daId)
+      }
 
-    clue("P2 remote-reads from P1") {
-      participant2.parties.get_remote_acs(
-        Seq(aliceE),
-        daId,
-        participant1,
-        asOf,
-        getRemoteAcsFilePath = remoteReadFileName,
-      )
-    }
+      clue("P2 remote-reads from P1") {
+        participant2.parties.get_remote_acs(
+          Seq(aliceE),
+          daId,
+          participant1,
+          asOf,
+          getRemoteAcsFilePath = remoteReadFileName,
+        )
+      }
   }
 
-  "Invoke export_party_acs on P1 for comparison" onlyRunWith ProtocolVersion.dev in {
+  "Invoke export_party_acs on P1 for comparison" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
     implicit env =>
       import env.*
 
@@ -200,7 +226,7 @@ sealed trait GetRemoteAcsIntegrationTest extends CommunityIntegrationTest with S
       }
   }
 
-  "Result of P2.get_remote_acs(P1) matches P1.export_party_acs" onlyRunWith ProtocolVersion.dev in {
+  "Result of P2.get_remote_acs(P1) matches P1.export_party_acs" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
     _ =>
       import better.files.File
 
@@ -213,7 +239,40 @@ sealed trait GetRemoteAcsIntegrationTest extends CommunityIntegrationTest with S
       )
   }
 
-  "get_remote_acs does not accept party lists of size other than one" onlyRunWith ProtocolVersion.dev in {
+  "Not allowed to read ACS when party only nominated" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
+    implicit env =>
+      import env.*
+      val msg = "is still nominated on target participant"
+
+      clue("Not authorized to read Alice's ACS while in the nominating state") {
+        loggerFactory.assertThrowsAndLogsUnordered[CommandFailure](
+          participant2.parties.get_remote_acs(
+            Seq(aliceE),
+            daId,
+            participant1,
+            nominatedAt,
+            getRemoteAcsFilePath =
+              s"canton-remote-acs-${this.getClass.getSimpleName}-still-nominated.gz",
+          ),
+          // AcsReplicator logs "Other" error and warning as part of its background processing.
+          entry => {
+            entry shouldBeCantonErrorCode ReplicateAcsError.Other
+            entry.errorMessage should include(msg)
+          },
+          _.warningMessage should include(msg),
+          // The get_remote_acs logs the error as GetRemoteAcsFailed
+          entry => {
+            entry shouldBeCantonErrorCode GetRemoteAcsFailed
+            entry.errorMessage should include(
+              GetRemoteAcsFailed.Error(aliceE, daId, participant1, nominatedAt, "").cause
+            )
+            entry.errorMessage should include(msg)
+          },
+        )
+      }
+  }
+
+  "get_remote_acs does not accept party lists of size other than one" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
     implicit env =>
       import env.*
       loggerFactory.assertThrowsAndLogs[CommandFailure](

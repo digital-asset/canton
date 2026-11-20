@@ -326,6 +326,7 @@ abstract class AcsImportRepresentativePackageIdSelectionIntegrationTest
       ),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
 
     // We assert as follows:

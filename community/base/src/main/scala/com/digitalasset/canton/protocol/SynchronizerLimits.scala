@@ -366,6 +366,7 @@ final case class TransactionProtocolLimits(
     maxTransactionTreeDepth: PositiveInt,
     maxSignaturesPerEnvelope: PositiveInt,
     maxQuorumSize: PositiveInt,
+    maxViewsPerMessage: PositiveInt,
 ) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[TransactionProtocolLimits] =
     TransactionProtocolLimits
@@ -414,6 +415,7 @@ final case class TransactionProtocolLimits(
     maxTransactionTreeDepth = maxTransactionTreeDepth.value,
     maxSignaturesPerEnvelope = maxSignaturesPerEnvelope.value,
     maxQuorumSize = maxQuorumSize.value,
+    maxViewsPerMessage = maxViewsPerMessage.value,
   )
 }
 
@@ -523,6 +525,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
     param("max transaction tree depth", _.maxTransactionTreeDepth),
     param("max signatures per envelope", _.maxSignaturesPerEnvelope),
     param("max quorum size", _.maxQuorumSize),
+    param("max views per message", _.maxViewsPerMessage),
   )
 
   lazy val default: TransactionProtocolLimits =
@@ -540,6 +543,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionTreeDepth = PositiveInt.MaxValue,
       maxSignaturesPerEnvelope = PositiveInt.tryCreate(1_000),
       maxQuorumSize = PositiveInt.tryCreate(100_000_000),
+      maxViewsPerMessage = PositiveInt.tryCreate(100_000),
     )
 
   /** Common parsing logic for all proto versions, which only differ in whether
@@ -549,6 +553,9 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
     *   carried on v32 and later, not in v31, enforced on >= ProtocolVersion.newBoundsOnPV37
     * @param maxQuorumSize
     *   carried on v32 and later, not in v31, enforced on >= ProtocolVersion.newBoundsOnPV37
+    * @param maxViewsPerMessage
+    *   carried on v33 and later, not in v31 and v32, enforced on >=
+    *   ProtocolVersion.nextValidationBoundPV
     */
   private def fromProtoCommon(
       maxActAsP: Int,
@@ -564,6 +571,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionTreeDepthP: Int,
       maxSignaturesPerEnvelope: PositiveInt,
       maxQuorumSize: PositiveInt,
+      maxViewsPerMessage: PositiveInt,
   ): ParsingResult[TransactionProtocolLimits] =
     for {
       maxActAs <- ProtoConverter.parsePositiveInt("max_act_as", maxActAsP)
@@ -618,6 +626,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionTreeDepth = maxTransactionTreeDepth,
       maxSignaturesPerEnvelope = maxSignaturesPerEnvelope,
       maxQuorumSize = maxQuorumSize,
+      maxViewsPerMessage = maxViewsPerMessage,
     )
 
   def fromProtoV31(
@@ -653,6 +662,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxSignaturesPerEnvelope = TransactionProtocolLimits.default.maxSignaturesPerEnvelope,
       // maxQuorumSize was introduced in Proto 32
       maxQuorumSize = TransactionProtocolLimits.default.maxQuorumSize,
+      maxViewsPerMessage = TransactionProtocolLimits.default.maxViewsPerMessage,
     )
   }
 
@@ -699,6 +709,8 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
         maxTransactionTreeDepthP,
         maxSignaturesPerEnvelope,
         maxQuorumSize,
+        // maxViewsPerMessage was introduced in proto V33
+        TransactionProtocolLimits.default.maxViewsPerMessage,
       )
     } yield limits
   }
@@ -720,6 +732,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionTreeDepthP,
       maxSignaturesPerEnvelopeP,
       maxQuorumSizeP,
+      maxViewsPerMessageP,
     ) = transactionProtocolLimitsP
 
     for {
@@ -730,6 +743,10 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxQuorumSize <- ProtoConverter.parsePositiveInt(
         "max_quorum_size",
         maxQuorumSizeP,
+      )
+      maxViewsPerMessage <- ProtoConverter.parsePositiveInt(
+        "max_views_per_message",
+        maxViewsPerMessageP,
       )
 
       limits <- fromProtoCommon(
@@ -746,6 +763,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
         maxTransactionTreeDepthP,
         maxSignaturesPerEnvelope,
         maxQuorumSize,
+        maxViewsPerMessage,
       )
     } yield limits
   }

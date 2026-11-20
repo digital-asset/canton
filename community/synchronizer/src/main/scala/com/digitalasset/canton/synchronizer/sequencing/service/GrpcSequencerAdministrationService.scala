@@ -144,7 +144,7 @@ class GrpcSequencerAdministrationService(
         )
       case Right(selector) =>
         val response = sequencer
-          .trafficStatus(members, selector)
+          .trafficStatus(members, selector, request.includeOnboardingMembers)
           .flatMap { states =>
             val (errors, trafficStates) = states.trafficStatesOrErrors.partitionMap {
               case (member, trafficStateE) =>

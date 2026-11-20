@@ -293,6 +293,19 @@ private[decrypter] class ViewMessageDecrypterImplV2(
             .leftMap(err => DefaultDeserializationError(err.message))
         )
         .leftMap(Chain.one)
+        .flatMap { decryptedViews =>
+          // An honest sender emits one view hash per view tree, so a mismatch is a malformed message.
+          EitherT.cond[FutureUnlessShutdown](
+            decryptedViews.viewTrees.sizeCompare(encryptedViewsMessage.viewHashes) == 0,
+            decryptedViews,
+            Chain.one(
+              EncryptedViewMessageError.ViewHashesLengthMismatch(
+                numViewTrees = decryptedViews.viewTrees.size,
+                numViewHashes = encryptedViewsMessage.viewHashes.size,
+              ): EncryptedViewMessageError
+            ),
+          )
+        }
         .flatMap(decryptedViews =>
           if (withTransparencyChecks) {
             runTransparencyChecks(

@@ -411,7 +411,7 @@ final case class ParticipantNodeParameterConfig(
     caching: ParticipantCachingConfigs = ParticipantCachingConfigs(),
     stores: ParticipantStoreConfig = ParticipantStoreConfig(),
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
-      ParticipantProtocolVersion(ProtocolVersion.v36)
+      ParticipantProtocolVersion(ProtocolVersion.minimum)
     ),
     devVersionSupport: Boolean = false,
     alphaVersionSupport: Boolean = false,

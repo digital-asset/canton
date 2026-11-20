@@ -333,7 +333,7 @@ object Signature
   @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v36,
+      ProtocolVersion.minimum,
       supportedProtoVersion(v30.Signature)(fromProtoV30(ProtocolVersionValidation.NoValidation, _)),
       _.toProtoV30,
     )
@@ -1521,7 +1521,7 @@ object SigningPublicKey
   @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v36,
+      ProtocolVersion.minimum,
       supportedProtoVersion(v30.SigningPublicKey)(
         fromProtoV30(ProtocolVersionValidation.NoValidation, _)
       ),
@@ -1762,7 +1762,7 @@ final case class SigningPrivateKey private (
 object SigningPrivateKey extends HasVersionedMessageCompanionE[SigningPrivateKey] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v36,
+      ProtocolVersion.minimum,
       supportedProtoVersion(v30.SigningPrivateKey)(fromProtoV30),
       _.toProtoV30,
     )

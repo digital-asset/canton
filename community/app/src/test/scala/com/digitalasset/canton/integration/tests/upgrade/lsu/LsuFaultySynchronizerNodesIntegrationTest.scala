@@ -16,6 +16,7 @@ import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSeq
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import org.scalatest.Assertion
 
 import java.time.Duration
@@ -32,6 +33,7 @@ Initial topology: 4 sequencers (for BFT fault tolerance, F = 1) and correspondin
 
 LSU
 - s2 and m2 don't upgrade
+- s3 removes its successor announcement to test that it is removed from the successor connection configs
 - s1 and m1 upgrade to s5 and m5, s3 and m3 to s6 and m6, and s4 and m4 to s7 and m7; mediators upgrade is done late
   (i.e., after the upgrade time)
   - We check that a request submitted to s5 after upgrade time, but before m5 upgrades, succeeds eventually
@@ -96,7 +98,7 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
           synchronizerConnectionConfig(Seq(sequencer1, sequencer2), threshold = 1)
         )
         participant4.synchronizers.connect_by_config(
-          synchronizerConnectionConfig(Seq(sequencer1, sequencer2), threshold = 2)
+          synchronizerConnectionConfig(Seq(sequencer1, sequencer2, sequencer3), threshold = 2)
         )
 
         automaticallyUpgraded = Seq(participant1, participant3)
@@ -190,6 +192,24 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
                 s(newSequencerName).sequencerConnection.endpoints.map(_.toURI(useTls = false)),
               successorSynchronizerId = fixture.newPsid,
             )
+          }
+          // Revoke the sequencer3 successor.
+          /*
+          Because P4 is connected to s1, s2 and s3 with threshold 2, the fact that it does not upgrade automatically
+          shows that the successor connection information from s3 is removed from the config
+           */
+          val sequencer3SuccessorMapping = sequencer3.topology.lsu.sequencer_successors
+            .list(filterSequencerId = sequencer3.id.filterString)
+            .loneElement
+            .item
+          sequencer3.topology.transactions.propose(
+            sequencer3SuccessorMapping,
+            daId,
+            change = TopologyChangeOp.Remove,
+          )
+          eventually() {
+            sequencer3.topology.lsu.sequencer_successors
+              .list(filterSequencerId = sequencer3.id.filterString) shouldBe empty
           }
 
           environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)

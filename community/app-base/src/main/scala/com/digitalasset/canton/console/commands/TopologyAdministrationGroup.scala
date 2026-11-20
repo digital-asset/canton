@@ -4590,6 +4590,12 @@ class TopologyAdministrationGroup(
       ): SignedTopologyTransaction[TopologyChangeOp, LsuSequencerConnectionSuccessor] = {
         val nodeStatus = instance.health.status
 
+        val validatedCustomTrustCertificates = customTrustCertificates
+          .traverse(ValidatedPemCertificate.create)
+          .valueOr(err =>
+            consoleEnvironment.raiseError(s"Unable to build sequencer connection: $err")
+          )
+
         consoleEnvironment.run {
           adminCommand(
             TopologyAdminCommands.Write.Propose(
@@ -4605,7 +4611,7 @@ class TopologyAdministrationGroup(
                     GrpcConnection(
                       validatedEndpoints,
                       useTls,
-                      customTrustCertificates,
+                      validatedCustomTrustCertificates,
                     ),
                   )
                 },

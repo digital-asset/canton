@@ -104,12 +104,14 @@ object ConfigValidations extends NamedLogging {
       gcpKmsDestroyScheduledDurationRangeValidation,
       defaultUpdatesPageSizeMustBeLeqMaximalPageSize,
       defaultAcsPageSizeMustBeLeqMaxPageSize,
+      defaultHostedPartiesPageSizeMustBeLeqMaxPageSize,
       validateLegacyContractsV11Enabled,
       serverConfigOnlyOneGrpcControlFlowMode,
       jwksCacheMinRefreshInterval,
       clientChannelParamsOnlyOneGrpcControlFlowMode,
       sequencerChannelsRequireNonStandardConfig,
       enforceAcsReplicationSupportConstraints,
+      onlinePartyReplicationRequiresNonStandardConfig,
     ) ++ (if (ensurePortsSet) List(portsArtSet) else Nil)
 
   /** Group node configs by db access to find matching db storage configs. Overcomplicated types
@@ -976,6 +978,17 @@ object ConfigValidations extends NamedLogging {
       )
     }.toSeq)
 
+  private def defaultHostedPartiesPageSizeMustBeLeqMaxPageSize(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] =
+    toValidated(config.participants.flatMap { case (name, nodeConfig) =>
+      nodeConfig.ledgerApi.stateService.pipe(ssc =>
+        Option.when(ssc.defaultHostedPartiesPageSize > ssc.maxHostedPartiesPageSize)(
+          s"Default hosted parties page size is larger than max page size ${ssc.maxHostedPartiesPageSize} in config for participant ${name.unwrap}"
+        )
+      )
+    }.toSeq)
+
   private def validateLegacyContractsV11Enabled(
       config: CantonConfig
   ): Validated[NonEmpty[Seq[String]], Unit] =
@@ -1207,4 +1220,22 @@ object ConfigValidations extends NamedLogging {
     }
     errors.result()
   }
+
+  def onlinePartyReplicationRequiresNonStandardConfig(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = if (config.parameters.nonStandardConfig)
+    Validated.Valid(())
+  else
+    toValidated {
+      val errors = Seq.newBuilder[String]
+
+      config.participants.foreach { case (name, config) =>
+        if (config.parameters.alphaOnlinePartyReplicationSupport.nonEmpty) {
+          errors.addOne(
+            s"Participant node $name can only enable online party replication in non-standard config"
+          )
+        }
+      }
+      errors.result()
+    }
 }

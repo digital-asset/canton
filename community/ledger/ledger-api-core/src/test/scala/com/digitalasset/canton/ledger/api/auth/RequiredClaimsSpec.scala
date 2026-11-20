@@ -13,7 +13,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
   UpdateFormat,
 }
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.auth.RequiredClaim
+import com.digitalasset.canton.auth.{ClaimApiArea, RequiredClaim}
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 import scalapb.lenses.Lens
@@ -28,6 +28,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
     ),
     filtersForAnyParty = Some(Filters(Nil)),
     verbose = true,
+    filtersByContractId = Seq.empty,
   )
 
   private val eventFormat123 = EventFormat(
@@ -38,6 +39,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
     ),
     filtersForAnyParty = Some(Filters(Nil)),
     verbose = true,
+    filtersByContractId = Seq.empty,
   )
 
   behavior of "submissionClaims"
@@ -49,6 +51,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
       readAs = Set("a", "b", "c"),
       userIdL = userIdL,
     ) should contain theSameElementsAs RequiredClaims[String](
+      RequiredClaim.ApiArea(ClaimApiArea.ledgerAct.area),
       RequiredClaim.ReadAs("a"),
       RequiredClaim.ReadAs("b"),
       RequiredClaim.ReadAs("c"),
@@ -66,6 +69,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
       readAs = Set("a", "b", "c"),
       userIdL = userIdL,
     ) should contain theSameElementsAs RequiredClaims[String](
+      RequiredClaim.ApiArea(ClaimApiArea.ledgerAct.area),
       RequiredClaim.ReadAs("a"),
       RequiredClaim.ReadAs("b"),
       RequiredClaim.ReadAs("c"),
@@ -80,7 +84,8 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
       readAs = Set.empty,
       userIdL = userIdL,
     ) should contain theSameElementsAs RequiredClaims[String](
-      RequiredClaim.MatchUserId(userIdL)
+      RequiredClaim.ApiArea(ClaimApiArea.ledgerAct.area),
+      RequiredClaim.MatchUserId(userIdL),
     )
   }
 
@@ -195,6 +200,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(Filters(Nil)),
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) should contain theSameElementsAs RequiredClaims[String](
       RequiredClaim.ReadAsAnyParty()
@@ -207,6 +213,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         filtersByParty = Map.empty,
         filtersForAnyParty = None,
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe Nil
   }
@@ -480,7 +487,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
           )
         ),
       )
-    ) shouldBe List(RequiredClaim.Public[String]())
+    ) shouldBe List()
   }
 
   // The includeTransactionsAndReassignments cannot be combined with includeTransactions or includeReassignments,
@@ -511,6 +518,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
                 ),
                 filtersForAnyParty = Some(Filters(Nil)),
                 verbose = true,
+                filtersByContractId = Seq.empty,
               )
             ),
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
@@ -530,6 +538,8 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
   }
 
   it should "require only a public claim if no includeTransactions" in {
+    // Note that for all endpoints we will also include ledger:read, but we don't
+    // want to repeat this per update format.
     RequiredClaims.updateFormatClaims[String](
       UpdateFormat(
         includeTransactions = None,
@@ -537,25 +547,25 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         includeTopologyEvents = None,
         includeTransactionsAndReassignments = None,
       )
-    ) shouldBe List(RequiredClaim.Public[String]())
+    ) shouldBe List()
   }
 
-  behavior of "idpAdminClaimsAndMatchingRequestIdpId"
+  behavior of "usersWriteAndMatchingRequestIdpId"
 
   it should "compute the correct claims in the happy path" in {
     val identityProviderIdL: Lens[String, String] = Lens.unit
-    RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId[String](
+    RequiredClaims.usersWriteAndMatchingRequestIdpId[String](
       identityProviderIdL = identityProviderIdL,
       mustBeParticipantAdmin = false,
     ) should contain theSameElementsAs RequiredClaims[String](
       RequiredClaim.MatchIdentityProviderId(identityProviderIdL),
-      RequiredClaim.AdminOrIdpAdmin(),
+      RequiredClaim.ApiArea(ClaimApiArea.usersWrite.area),
     )
   }
 
   it should "compute the correct claims if must be participant admin" in {
     val identityProviderIdL: Lens[String, String] = Lens.unit
-    RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId[String](
+    RequiredClaims.usersWriteAndMatchingRequestIdpId[String](
       identityProviderIdL = identityProviderIdL,
       mustBeParticipantAdmin = true,
     ) should contain theSameElementsAs RequiredClaims[String](

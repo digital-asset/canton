@@ -19,7 +19,11 @@ import com.digitalasset.canton.platform.store.backend.{
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.SequentialWriteDaoSpec.*
 import com.digitalasset.canton.platform.store.interning.{
+  ExternalStringLookup,
+  InternalIdLookup,
   InternizingStringInterningView,
+  StringExternalizingProvider,
+  StringInternalizingProvider,
   StringInterning,
   StringInterningDomain,
   StringInterningProvider,
@@ -39,6 +43,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.sql.Connection
 import java.util.UUID
+import scala.concurrent.Future
 
 class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
 
@@ -480,6 +485,14 @@ object SequentialWriteDaoSpec {
           distinctRawStrings: Iterable[String]
       ): Iterable[(Int, String)] =
         Iterator.iterate(1)(_ + 1).zip(distinctRawStrings).toVector
+
+      override def externalize(providers: Iterable[StringExternalizingProvider])(implicit
+          traceContext: TraceContext
+      ): Future[ExternalStringLookup] = ???
+
+      override def internalize(providers: Iterable[StringInternalizingProvider])(implicit
+          traceContext: TraceContext
+      ): Future[InternalIdLookup] = ???
     }
 
   private val someConnection = mock[Connection]

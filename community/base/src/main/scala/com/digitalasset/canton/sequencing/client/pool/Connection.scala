@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.sequencing.client.pool
 
+import com.digitalasset.canton.crypto.ValidatedPemCertificate
 import com.digitalasset.canton.health.AtomicHealthElement
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasRunOnClosing}
 import com.digitalasset.canton.logging.pretty.{
@@ -15,7 +16,6 @@ import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
-import com.google.protobuf.ByteString
 
 /** A generic connection. This trait attempts to be independent of the underlying transport.
   *
@@ -68,7 +68,7 @@ object Connection {
       name: String,
       endpoint: Endpoint,
       transportSecurity: Boolean,
-      customTrustCertificates: Option[ByteString],
+      customTrustCertificates: Option[ValidatedPemCertificate],
       expectedSequencerIdO: Option[SequencerId],
   ) extends PrettyPrintingFromCompanion {
     override def prettyCompanion: PrettyPrintingCompanion[ConnectionConfig] = ConnectionConfig

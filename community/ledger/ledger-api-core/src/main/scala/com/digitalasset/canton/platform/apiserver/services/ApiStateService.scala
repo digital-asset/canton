@@ -19,6 +19,7 @@ import com.digitalasset.canton.ledger.api.messages.state.{
   AcsPageToken,
   AcsRangeInfo,
 }
+import com.digitalasset.canton.ledger.api.util.PageTokenUtils
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.requirePresence
 import com.digitalasset.canton.ledger.api.validation.{
   FieldValidator,
@@ -84,7 +85,10 @@ final class ApiStateService(
 
       val result = for {
         eventFormatProto <- requirePresence(request.eventFormat, "event_format")
-        eventFormat <- FormatValidator.validate(eventFormatProto)
+        eventFormat <- FormatValidator.validate(
+          eventFormatProto,
+          FormatValidator.RejectContractIdFilters,
+        ) // TODO (#36902) implement contract id filter for ACS requests
         checksum = AcsContinuationToken.calcChecksum(request, participantId)
         continuationPointer <- request.streamContinuationToken.traverse(token =>
           AcsContinuationToken.decodeAndValidate(
@@ -144,7 +148,10 @@ final class ApiStateService(
       LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     (for {
       eventFormatProto <- requirePresence(request.eventFormat, "event_format")
-      eventFormat <- FormatValidator.validate(eventFormatProto)
+      eventFormat <- FormatValidator.validate(
+        eventFormatProto,
+        FormatValidator.RejectContractIdFilters,
+      ) // TODO (#36902) implement contract id filter for ACS fetches
       maxPageSize <- FieldValidator.validatePageSize(
         limit = config.maxAcsPageSize.unwrap,
         defaultPageSize = config.defaultAcsPageSize.unwrap,
@@ -179,7 +186,7 @@ final class ApiStateService(
               activeAtOffset,
               rangeInfo = AcsRangeInfo(
                 continuationPointer = pointer,
-                requestChecksum = AcsContinuationToken.emptyChecksum,
+                requestChecksum = PageTokenUtils.emptyChecksum,
                 limit = Some(maxPageSize + 1L),
               ),
               configOverrides = None,
@@ -397,4 +404,19 @@ final class ApiStateService(
       )
       .thereafter(logger.logErrorsOnCall[ConvertRecordTimeToOffsetResponse])
   }
+
+  override def getHostedParties(
+      request: GetHostedPartiesRequest,
+      responseObserver: StreamObserver[GetHostedPartiesResponse],
+  ): Unit =
+    // TODO(#37978): serve the hosted parties snapshot from the index
+    responseObserver.onError(
+      new UnsupportedOperationException("GetHostedParties is not implemented yet")
+    )
+
+  override def getHostedPartiesPage(
+      request: GetHostedPartiesPageRequest
+  ): Future[GetHostedPartiesPageResponse] =
+    // TODO(#37978): serve the hosted parties page from the index
+    Future.failed(new UnsupportedOperationException("GetHostedPartiesPage is not implemented yet"))
 }

@@ -10,10 +10,10 @@ on:
         required: false
         default: ""
         description: >-
-          Distinct name of the calling leg, used to keep the run-over-run
-          "latest" aggregate artifacts separate when several legs share one
-          caller_job (as the per-protocol-version _test.yml legs do). Defaults
-          to caller_job.
+          Distinct name of the calling leg, used in the job title and to keep
+          the run-over-run "latest" aggregate artifacts separate when several
+          legs share one caller_job (as the per-protocol-version _test.yml legs
+          do). Defaults to caller_job.
         type: string
       shard_job_result:
         required: true
@@ -52,7 +52,7 @@ jobs:
   aggregate_shard_outputs:
     name: ${{ format(
         'Aggregate shard outputs for {0}{1}',
-        inputs.caller_job,
+        inputs.job_name != '' && inputs.job_name || inputs.caller_job,
         inputs.protocol_version != '' && format(' and PV={0}', inputs.protocol_version) || ''
       ) }}
     runs-on: ${{ inputs.runner }}

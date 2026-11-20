@@ -5,7 +5,12 @@ package com.digitalasset.canton.ledger.runner.common
 
 import com.daml.jwt.JwtTimestampLeeway
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, Port}
+import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeInt,
+  NonNegativeLong,
+  Port,
+  PositiveInt,
+}
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.config.*
 import com.digitalasset.canton.platform.indexer.IndexerConfig
@@ -28,6 +33,9 @@ object ArbitraryConfig {
 
   val nonNegativeIntGen: Gen[NonNegativeInt] =
     Gen.chooseNum(0, Int.MaxValue).map(NonNegativeInt.tryCreate)
+
+  val positiveIntGen: Gen[PositiveInt] =
+    Gen.chooseNum(1, Int.MaxValue).map(PositiveInt.tryCreate)
 
   val nonNegativeLongGen: Gen[NonNegativeLong] =
     Gen.chooseNum(0, Long.MaxValue).map(NonNegativeLong.tryCreate)
@@ -249,9 +257,27 @@ object ArbitraryConfig {
       transactionsProcessingParallelism = transactionsProcessingParallelism,
     )
 
+  def genHostedPartiesStreams: Gen[HostedPartiesStreamsConfig] =
+    for {
+      maxIdsPerIdPage <- positiveIntGen
+      maxPagesPerIdPagesBuffer <- positiveIntGen
+      maxPayloadsPerPayloadsPage <- positiveIntGen
+      maxParallelPayloadQueries <- positiveIntGen
+      idFilterQueryParallelism <- positiveIntGen
+      hostedPartiesProcessingParallelism <- positiveIntGen
+    } yield HostedPartiesStreamsConfig(
+      maxIdsPerIdPage = maxIdsPerIdPage,
+      maxPagesPerIdPagesBuffer = maxPagesPerIdPagesBuffer,
+      maxPayloadsPerPayloadsPage = maxPayloadsPerPayloadsPage,
+      maxParallelPayloadQueries = maxParallelPayloadQueries,
+      idFilterQueryParallelism = idFilterQueryParallelism,
+      hostedPartiesProcessingParallelism = hostedPartiesProcessingParallelism,
+    )
+
   val indexServiceConfig: Gen[IndexServiceConfig] = for {
     activeContractsServiceStreamsConfig <- genActiveContractsServiceStreamConfig
     transactionFlatStreams <- genTransactionFlatStreams
+    hostedPartiesStreams <- genHostedPartiesStreams
     eventsProcessingParallelism <- Gen.chooseNum(0, Int.MaxValue)
     bufferedStreamsPageSize <- Gen.chooseNum(0, Int.MaxValue)
     maxContractStateCacheSize <- Gen.long
@@ -267,6 +293,7 @@ object ArbitraryConfig {
     apiStreamShutdownTimeout,
     activeContractsServiceStreams = activeContractsServiceStreamsConfig,
     updatesStreams = transactionFlatStreams,
+    hostedPartiesStreams = hostedPartiesStreams,
   )
 
 }

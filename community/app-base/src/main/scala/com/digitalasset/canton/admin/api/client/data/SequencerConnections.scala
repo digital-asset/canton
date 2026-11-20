@@ -8,6 +8,7 @@ import cats.syntax.foldable.*
 import cats.{Id, Monad}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.console.ConsoleEnvironment
+import com.digitalasset.canton.crypto.ValidatedPemCertificate
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
@@ -23,7 +24,6 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.{SequencerAlias, config}
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 import io.scalaland.chimney.Transformer
 import io.scalaland.chimney.dsl.*
 
@@ -97,7 +97,7 @@ final case class SequencerConnections(
 
   def withCertificates(
       sequencerAlias: SequencerAlias,
-      certificates: ByteString,
+      certificates: ValidatedPemCertificate,
   ): SequencerConnections =
     modify(sequencerAlias, _.withCertificates(certificates))
 

@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.config
 
+import cats.syntax.traverse.*
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.tls.{TlsClientConfig, TlsClientConfigOnlyTrustFile, TlsServerConfig}
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.AdminServerConfig.defaultAddress
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
+import com.digitalasset.canton.crypto.ValidatedPemCertificate
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.{CantonServerBuilder, ClientChannelParams}
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
@@ -340,15 +342,22 @@ final case class SequencerApiClientConfig(
   def asSequencerConnection(
       sequencerAlias: SequencerAlias,
       sequencerId: Option[SequencerId],
-  ): GrpcSequencerConnection = {
+  ): Either[String, GrpcSequencerConnection] = {
     val endpoint = Endpoint(address, port)
-    GrpcSequencerConnection(
-      NonEmpty(Set, endpoint),
-      tls.exists(_.enabled),
-      tls.flatMap(_.trustCollectionFile).map(_.pemBytes),
-      sequencerAlias,
-      sequencerId = sequencerId,
-    )
+
+    tls
+      .flatMap(_.trustCollectionFile)
+      .map(_.pemBytes)
+      .traverse(ValidatedPemCertificate.create)
+      .map { customTrustCertificates =>
+        GrpcSequencerConnection(
+          NonEmpty(Set, endpoint),
+          tls.exists(_.enabled),
+          customTrustCertificates,
+          sequencerAlias,
+          sequencerId = sequencerId,
+        )
+      }
   }
 }
 

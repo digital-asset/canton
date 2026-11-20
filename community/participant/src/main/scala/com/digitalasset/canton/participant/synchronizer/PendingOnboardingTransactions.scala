@@ -67,7 +67,7 @@ object PendingOnboardingTransactions extends VersioningCompanion[PendingOnboardi
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec
-      .storage(ReleaseProtocolVersion(ProtocolVersion.v36), v30.PendingOnboardingTransactions)(
+      .storage(ReleaseProtocolVersion(ProtocolVersion.minimum), v30.PendingOnboardingTransactions)(
         supportedProtoVersion(_)(fromProtoV30),
         _.toProtoV30,
       )

@@ -4,10 +4,13 @@
 package com.digitalasset.canton.platform.store.interning
 
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.google.common.annotations.VisibleForTesting
+
+import scala.concurrent.Future
 
 /** This StringInterning implementation is interning in a transparent way everything it sees. This
   * is only for test purposes.
@@ -173,4 +176,17 @@ class MockStringInterning extends StringInterning {
   private[store] def setAutoIntern(newAutoIntern: Boolean): Unit = (lock.exclusive {
     autoIntern = newAutoIntern
   })
+
+  override def externalize(providers: Iterable[StringExternalizingProvider])(implicit
+      traceContext: TraceContext
+  ): Future[ExternalStringLookup] =
+    // TODO(#37258) will be implemented later
+    throw new UnsupportedOperationException()
+
+  override def internalize(providers: Iterable[StringInternalizingProvider])(implicit
+      traceContext: TraceContext
+  ): Future[InternalIdLookup] =
+    // TODO(#37258) will be implemented later
+    throw new UnsupportedOperationException()
+
 }

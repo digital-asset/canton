@@ -28,6 +28,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendPolicy,
 }
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.topology.store.TimeQuery
 import monocle.macros.syntax.lens.*
 
@@ -187,12 +188,26 @@ class TopologyTicksIntegrationTest
       // make sure sequencer time is caught up to sim clock time
       TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
 
+      // A synchronizer owner that does not know sequencer2's keys yet rejects the proposal below
+      // with TOPOLOGY_INSUFFICIENT_KEYS. The mediator can lag behind, because the previous test
+      // case restarted sequencer1 (#30856).
+      val synchronizerOwners = initializedSynchronizers(daName).synchronizerOwners
+      eventually() {
+        forAll(synchronizerOwners) { owner =>
+          owner.topology.owner_to_key_mappings.list(
+            store = daId,
+            filterKeyOwnerUid = sequencer2.id.filterString,
+            filterKeyOwnerType = Some(SequencerId.Code),
+          ) should not be empty
+        }
+      }
+
       // create the new sequencer's topology transaction without advancing time
       bootstrap.propose_new_sequencer_state(
         daId.logical,
         newSequencer = sequencer2,
         existingSequencer = sequencer1,
-        initializedSynchronizers(daName).synchronizerOwners,
+        synchronizerOwners,
         synchronize = None, // set to none so we don't wait for transactions to be effective
       )
       // The proposal is only dispatched at this point: wait until sequencer1 has sequenced it before

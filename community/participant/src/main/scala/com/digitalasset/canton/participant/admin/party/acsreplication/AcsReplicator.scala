@@ -274,7 +274,7 @@ final class AcsReplicator(
           // Fail any write blocked on a slow client first, as otherwise the in-flight processor
           // task cannot complete and closing the processor would time out.
           abortDestination(existingParams.acsReplicationDestination)
-          abortProcessor(requestId, processor)
+          abortProcessor(requestId, processor, s"ACS replication $requestId is being restarted")
         }
       resetStatus <- acsReplicationStateManager.resetProgress(requestId, destination)
     } yield resetStatus
@@ -284,7 +284,7 @@ final class AcsReplicator(
       traceContext: TraceContext
   ): Unit = destination match {
     case outputStream: AcsReplicationDestination.OutputStream =>
-      logger.info("Aborting output stream of superseded ACS replication")
+      logger.info("Aborting output stream of ACS replication")
       outputStream.abort()
     case AcsReplicationDestination.Persistence => ()
   }
@@ -292,11 +292,12 @@ final class AcsReplicator(
   private def abortProcessor(
       requestId: AcsReplicationRequestId,
       processor: AcsReplicationProcessor,
+      reason: String,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
     val operation = s"await channel endpoint removal of ACS replication $requestId"
     val delay = 100.millis
     for {
-      _ <- processor.abort(s"ACS replication $requestId is being restarted")
+      _ <- processor.abort(reason)
       _ <- EitherT(
         retry
           .Pause(
@@ -311,7 +312,7 @@ final class AcsReplicator(
               Either.cond(
                 !processor.hasChannelEndpoint,
                 (),
-                s"Failed to $operation before restarting it",
+                s"Failed to $operation",
               )
             ),
             retry.NoExceptionRetryPolicy,
@@ -327,6 +328,10 @@ final class AcsReplicator(
   /** Wait until get_remote_acs-based ACS replication completes successfully, fails, or has been
     * restarted.
     *
+    * If the gRPC request is cancelled, the ACS replication is stopped via [[stopRemoteRead]], so
+    * that it no longer progresses. A subsequent request for the same ACS replication can restart
+    * it.
+    *
     * @param out
     *   the output stream of the caller, closed upon returning
     */
@@ -337,17 +342,11 @@ final class AcsReplicator(
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
     val hasCompleted = true
 
-    def isSuperseded(status: AcsReplicationStatus): Boolean =
-      status.params.acsReplicationDestination match {
-        case AcsReplicationDestination.OutputStream(destination) => destination ne out
-        case AcsReplicationDestination.Persistence => true
-      }
-
     @tailrec
     def awaitDoneOrFailed(): Either[String, Unit] =
       getAcsReplicationStatus(requestId) match {
         case None => Left(s"Cannot locate remote read $requestId")
-        case Some(status) if isSuperseded(status) =>
+        case Some(status) if isRemoteReadSuperseded(status, out) =>
           val msg = s"Remote read $requestId has been restarted by another request"
           logger.info(msg)
           Left(msg)
@@ -355,9 +354,10 @@ final class AcsReplicator(
           Left(error)
         case Some(AcsReplicationStatus(_, _, _, _, `hasCompleted`, _)) =>
           Right(())
-        case Some(_) if grpcContext.isCancelled =>
+        case Some(status) if grpcContext.isCancelled =>
           val msg = "gRPC request is cancelled, not waiting for remote read result anymore"
           logger.info(msg)
+          stopRemoteRead(requestId, out, status.params.acsReplicationDestination)
           Left(msg)
         case Some(_) if isClosing =>
           val msg = "AcsReplicator is closing, not waiting for remote read result anymore"
@@ -376,6 +376,53 @@ final class AcsReplicator(
     Try(out.close()).forFailed(e => logger.info(s"Failed to close remote read stream: $e"))
 
     EitherT.fromEither[FutureUnlessShutdown](resultE)
+  }
+
+  /** Whether the get_remote_acs-based ACS replication no longer writes to the caller's stream `out`
+    * because it has been restarted by another request.
+    */
+  private def isRemoteReadSuperseded(status: AcsReplicationStatus, out: JOutputStream): Boolean =
+    status.params.acsReplicationDestination match {
+      case AcsReplicationDestination.OutputStream(destination) => destination ne out
+      case AcsReplicationDestination.Persistence => false
+    }
+
+  /** Stops the get_remote_acs-based ACS replication whose caller has cancelled the gRPC request, so
+    * that the ACS replication stops progressing and writing to the abandoned stream.
+    *
+    * The ACS replication is torn down as upon a restart: the output stream and the processor are
+    * aborted, but the sequencer channel agreement is kept, so that it can be reused if needed.
+    * Marking the ACS replication as failed stops the progress scheduling.
+    */
+  private def stopRemoteRead(
+      requestId: AcsReplicationRequestId,
+      out: JOutputStream,
+      destination: AcsReplicationDestination,
+  )(implicit traceContext: TraceContext): Unit = {
+    val reason = s"ACS replication $requestId is cancelled by the get_remote_acs caller"
+    // Fail any write blocked on the abandoned stream right away, as otherwise an in-flight processor
+    // task cannot complete and aborting the processor in the execution queue would time out.
+    abortDestination(destination)
+    executeAsync(requestId, "cancel remote read") {
+      acsReplicationStateManager.get(requestId) match {
+        case Some(status) if !isRemoteReadSuperseded(status, out) && status.isProgressExpected =>
+          logger.info(s"Stopping ACS replication $requestId: $reason")
+          for {
+            _ <- status.replicationO
+              .flatMap(_.processorO)
+              .fold(EitherTUtil.unitUS[String])(abortProcessor(requestId, _, reason))
+            // Mark as failed only after the processor has been aborted, so that the error is not
+            // overwritten by the processor disconnect.
+            _ <- acsReplicationStateManager.update_(
+              requestId,
+              _.modifyErrorO(_ => Some(AcsReplicationFailed(reason))),
+            )
+          } yield ()
+        case _ =>
+          logger.info(s"Not stopping ACS replication $requestId as it is no longer active")
+          EitherTUtil.unitUS
+      }
+    }
   }
 
   /** Activates progress scheduling once a new ACS replication request is received unless already
@@ -718,7 +765,7 @@ final class AcsReplicator(
           .withFilter { x =>
             val ptp = x.mapping
             ptp.partyId != except &&
-            ptp.participants.exists(_.participantId == participantId)
+            ptp.participants.exists(hp => hp.participantId == participantId && hp.state.canHost)
           }
           .map(_.mapping.partyId)
           .toSet

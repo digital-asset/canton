@@ -79,7 +79,6 @@ trait ReliabilityPerformanceIntegrationTest extends BasePerformanceIntegrationTe
       "timed out at 20", // covers timeout logged by AbstractMessageProcessor and ProtocolProcessor
       "has exceeded the max-sequencing",
       "UNAVAILABLE",
-      "Detected late processing (or clock skew) of batch",
       "failed with INTERNAL/head of empty stream",
       "failed with INTERNAL/sql-ledger: Dispatcher is closed",
       "UNKNOWN / missing GRPC status in response", // can happen during shutdown

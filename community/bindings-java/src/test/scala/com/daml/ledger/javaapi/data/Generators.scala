@@ -1389,16 +1389,30 @@ object Generators {
       .setLimit(limit)
       .build()
 
+  val contractIdFilterGen: Gen[TransactionFilterOuterClass.ContractIdFilter] =
+    for {
+      contractId <- contractIdValueGen.map(_.getContractId)
+      includeCreatedEventBlob <- Arbitrary.arbBool.arbitrary
+      includeInterfaceViews <- Gen.listOf(identifierGen)
+    } yield TransactionFilterOuterClass.ContractIdFilter
+      .newBuilder()
+      .setContractId(contractId)
+      .setIncludeCreatedEventBlob(includeCreatedEventBlob)
+      .addAllIncludeInterfaceViews(includeInterfaceViews.asJava)
+      .build()
+
   val eventFormatGen: Gen[TransactionFilterOuterClass.EventFormat] =
     for {
       filtersByParty <- Gen.mapOf(partyWithFiltersGen)
       filterForAnyPartyO <- Gen.option(filtersGen)
       verbose <- Gen.oneOf(true, false)
+      contractIdFilters <- Gen.listOf(contractIdFilterGen)
     } yield {
       val builder = TransactionFilterOuterClass.EventFormat
         .newBuilder()
         .putAllFiltersByParty(filtersByParty.asJava)
         .setVerbose(verbose)
+        .addAllFiltersByContractId(contractIdFilters.asJava)
 
       filterForAnyPartyO match {
         case None =>

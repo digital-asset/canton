@@ -589,12 +589,20 @@ object SynchronizerConnectionConfigStore {
     override def message: String =
       s"No active synchronizer connection found for `$alias`."
   }
-  final case class SynchronizerIdAlreadyAdded(
-      synchronizerId: PhysicalSynchronizerId,
+  final case class LogicalSynchronizerIdAlreadyAdded(
+      psid: PhysicalSynchronizerId,
+      alias: SynchronizerAlias,
       existingAlias: SynchronizerAlias,
   ) extends Error {
     val message =
-      s"Synchronizer with id $synchronizerId is already registered with alias $existingAlias"
+      s"Synchronizer with id $psid cannot be registered with alias $alias because logical synchronizer ${psid.logical} is already registered with alias $existingAlias"
+  }
+  final case class SynchronizerIdAlreadyAdded(
+      psid: PhysicalSynchronizerId,
+      existingAlias: SynchronizerAlias,
+  ) extends Error {
+    val message =
+      s"Synchronizer with id $psid is already registered with alias $existingAlias"
   }
   final case class UnknownAlias(
       alias: SynchronizerAlias

@@ -433,6 +433,7 @@ private[events] object TransactionLogUpdatesConversions {
                   exercisedEvent.templateId.toFullIdentifier(
                     exercisedEvent.packageName
                   ),
+                  exercisedEvent.contractId,
                 ),
               )
             )
@@ -514,6 +515,7 @@ private[events] object TransactionLogUpdatesConversions {
                     exercisedEvent.templateId.toFullIdentifier(
                       exercisedEvent.packageName
                     ),
+                    exercisedEvent.contractId,
                   )
                 else Nil,
               acsDelta = flatEventWitnesses.nonEmpty,
@@ -797,7 +799,7 @@ private[events] object TransactionLogUpdatesConversions {
           nodeId = added.nodeId,
           eventSequentialId = 0L,
           contractId = contractInstance.contractId,
-          ledgerEffectiveTime = recordTime,
+          ledgerEffectiveTime = contractInstance.createdAt.time,
           templateId = added.templateId,
           representativePackageId = added.representativePackageId match {
             case SameAsContractPackageId => contractInstance.templateId.packageId
@@ -846,7 +848,11 @@ private[events] object TransactionLogUpdatesConversions {
       updateId = updateId,
       commandId = "",
       workflowId = workflowId,
-      effectiveAt = recordTime,
+      effectiveAt = events
+        .collectFirst { case c: TransactionLogUpdate.CreatedEvent =>
+          c.ledgerEffectiveTime
+        }
+        .getOrElse(recordTime),
       offset = participantEventUpdate.offset,
       events = events,
       completionStreamResponseO = None,

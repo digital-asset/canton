@@ -17,6 +17,7 @@ import com.daml.ledger.api.v2.admin.user_management_service.Right.{
   ParticipantAdmin,
 }
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.{
   ConfigTransforms,
   EnvironmentDefinition,
@@ -28,7 +29,9 @@ import monocle.Monocle.toAppliedFocusOps
 
 import scala.concurrent.Future
 
-final class ListAccountsAuthIT extends ServiceCallWithMainActorAuthTests {
+final class ListAccountsAuthIT
+    extends ServiceCallWithMainActorAuthTests
+    with ApiAreaScopeServiceCallAuthTests {
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition.addConfigTransform(
       ConfigTransforms.updateParticipantConfig("participant1")(
@@ -37,6 +40,13 @@ final class ListAccountsAuthIT extends ServiceCallWithMainActorAuthTests {
     )
 
   override def serviceCallName: String = "TrafficService#ListAccounts"
+
+  override def apiAreaScopeBaseToken = adminToken
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.trafficRead.area) -> true,
+    List(ClaimApiArea.trafficSelf.area) -> false,
+    List(ClaimApiArea.partiesAllocate.area) -> false,
+  )
 
   override def serviceCall(
       context: ServiceCallContext

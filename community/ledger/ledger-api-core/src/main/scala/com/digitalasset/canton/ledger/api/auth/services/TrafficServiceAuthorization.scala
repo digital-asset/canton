@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.ledger.api.auth.services
 
-import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
+import com.digitalasset.canton.auth.{Authorizer, ClaimApiArea, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficService
@@ -35,23 +35,29 @@ final class TrafficServiceAuthorization(
 
   override def getAccount(request: GetAccountRequest): Future[GetAccountResponse] =
     authorizer.rpc(service.getAccount)(
-      RequiredClaim.AdminOrDebitTrafficFrom(request.accountId, acceptExecuteRights = true)
+      RequiredClaim.ReadTrafficFrom(request.accountId, acceptExecuteRights = true)
     )(request)
 
   override def updateAccount(request: UpdateAccountRequest): Future[UpdateAccountResponse] =
-    authorizer.rpc(service.updateAccount)(RequiredClaim.Admin())(request)
+    authorizer.rpc(service.updateAccount)(
+      RequiredClaim.ApiArea(ClaimApiArea.trafficWrite.area)
+    )(request)
 
   override def listAccounts(request: ListAccountsRequest): Future[ListAccountsResponse] =
     authorizer.rpc(service.listAccounts)(
-      RequiredClaim.AdminOrListTrafficAccounts(acceptExecuteRights = true)
+      RequiredClaim.ListTrafficAccounts(acceptExecuteRights = true)
     )(request)
 
   override def prune(request: PruneRequest): Future[PruneResponse] =
-    authorizer.rpc(service.prune)(RequiredClaim.Admin())(request)
+    authorizer.rpc(service.prune)(
+      RequiredClaim.ApiArea(ClaimApiArea.trafficWrite.area)
+    )(request)
 
   @nowarn("cat=deprecation")
   override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] =
-    authorizer.rpc(service.pruneEvents)(RequiredClaim.Admin())(request)
+    authorizer.rpc(service.pruneEvents)(
+      RequiredClaim.ApiArea(ClaimApiArea.trafficWrite.area)
+    )(request)
 
   override def bindService(): ServerServiceDefinition =
     TrafficServiceGrpc.bindService(this, executionContext)

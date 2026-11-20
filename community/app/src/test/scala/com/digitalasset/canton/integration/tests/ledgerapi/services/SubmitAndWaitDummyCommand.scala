@@ -67,6 +67,7 @@ trait SubmitAndWaitDummyCommandHelpers extends TestCommands {
               filtersByParty = Map(party -> Filters(Nil)),
               filtersForAnyParty = None,
               verbose = false,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

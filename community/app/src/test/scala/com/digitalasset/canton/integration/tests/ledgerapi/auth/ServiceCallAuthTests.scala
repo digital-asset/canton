@@ -68,6 +68,7 @@ trait ServiceCallAuthTests
       filtersByParty = Map(party -> Filters(Nil)),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
   protected def updateFormat(
@@ -94,6 +95,7 @@ trait ServiceCallAuthTests
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(Filters(Nil)),
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     )
 

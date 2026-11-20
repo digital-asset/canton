@@ -92,6 +92,10 @@
 
         <!--
             TESTING REWRITE RULES
+
+            Add <skipInSuppression>true</skipInSuppression> to a rule to also drop matching entries
+            from the log entries recorded by SuppressingLogger, so that log assertions in tests
+            don't need to account for them. Only use it for messages no test needs to assert on.
         -->
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>io.grpc.netty.shaded.io.grpc.netty.NettyServerStream</logger>
@@ -265,19 +269,22 @@
             <contains></contains>
             <maxLevel>INFO</maxLevel>
             <testing>true</testing>
+            <skipInSuppression>true</skipInSuppression>
         </rewrite>
-        <!-- Suppress delay logger during tests -->
+        <!-- Suppress delay logger during tests; it depends on the load of the test machine -->
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>com.digitalasset.canton.participant.sync.ConnectedSynchronizer</logger>
-            <contains>Late processing (or clock skew) of batch with counter</contains>
+            <contains>Detected late processing (or clock skew) of batch</contains>
             <maxLevel>INFO</maxLevel>
             <testing>true</testing>
+            <skipInSuppression>true</skipInSuppression>
         </rewrite>
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>com.digitalasset.canton.synchronizer.mediator.Mediator</logger>
-            <contains>Late processing (or clock skew) of batch with counter</contains>
+            <contains>Detected late processing (or clock skew) of batch</contains>
             <maxLevel>INFO</maxLevel>
             <testing>true</testing>
+            <skipInSuppression>true</skipInSuppression>
         </rewrite>
 
         <!-- TODO(#13107): Clock/InstrumentedExecutorServiceMetrics do not yet support FlagCloseable -->

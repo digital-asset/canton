@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.jsonapi
 
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
+import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.auth.{AuthInterceptor, AuthServiceWildcard}
 import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
@@ -60,7 +61,15 @@ class JsonErrorHandlingTest
 
   private val port = UniquePortGenerator.next.unwrap
 
-  private val LEDGER_API_INTERNAL_ERROR_CODE = "LEDGER_API_INTERNAL_ERROR"
+  private def assertRedacted(error: JsCantonError, expectedGrpcCode: Status.Code): Unit = {
+    val expected = DecodedCantonError.redacted(expectedGrpcCode, None, None)
+    error.code should be(expected.code.id)
+    error.errorCategory should be(expected.code.category.asInt)
+    error.cause should be(expected.cause)
+    error.context should be(empty)
+    error.resources should be(empty)
+    error.grpcCodeValue should be(Some(expectedGrpcCode.value()))
+  }
 
   private lazy val host = "localhost"
   private lazy val route: Route = PekkoHttpServerInterpreter().toRoute(service.endpoints())
@@ -86,10 +95,10 @@ class JsonErrorHandlingTest
         body <- extractBodyFromResponse(response)
       } yield {
         val error: JsCantonError = body.value
-        error.grpcCodeValue should be(Some(Status.INTERNAL.getCode.value()))
-        error.cause should be(
-          "INTERNAL: outer error"
-        )
+        // the description of a legacy INTERNAL error must not reach the client
+        error.cause should not include "outer error"
+        assertRedacted(error, Status.INTERNAL.getCode)
+        succeed
       }
     }
 
@@ -105,11 +114,10 @@ class JsonErrorHandlingTest
         body <- extractBodyFromResponse(response)
       } yield {
         val error: JsCantonError = body.value
-        error.code should be(LEDGER_API_INTERNAL_ERROR_CODE)
-        error.grpcCodeValue should be(Some(Status.INTERNAL.getCode.value()))
-        error.cause should be(
-          "unexpected situation"
-        )
+        // the error is logged in full above, but nothing of it may reach the client
+        error.cause should not include "unexpected situation"
+        assertRedacted(error, Status.INTERNAL.getCode)
+        succeed
       }
     }
 
@@ -120,10 +128,22 @@ class JsonErrorHandlingTest
         body <- extractBodyFromResponse(response)
       } yield {
         val error: JsCantonError = body.value
-        error.grpcCodeValue should be(Some(Status.INTERNAL.getCode.value()))
-        error.cause should be(
-          "INTERNAL"
+        assertRedacted(error, Status.INTERNAL.getCode)
+        succeed
+      }
+    }
+
+    "keep the details of a legacy error whose status code is not security sensitive" in {
+      for {
+        response <- call(
+          s"/v2/test/parametrized-status-runtime-exception?code=${Status.Code.INVALID_ARGUMENT.value()}",
+          port,
         )
+        body <- extractBodyFromResponse(response)
+      } yield {
+        val error: JsCantonError = body.value
+        error.grpcCodeValue should be(Some(Status.Code.INVALID_ARGUMENT.value()))
+        error.cause should be("INVALID_ARGUMENT")
         error.code should be("Status description not available")
       }
     }

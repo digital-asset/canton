@@ -792,12 +792,14 @@ final class SingleParticipantTestContext private[participant] (
           filtersByParty = Map.empty,
           filtersForAnyParty = Some(fs),
           verbose = verbose,
+          filtersByContractId = Seq.empty,
         )
       case Some(parties) =>
         EventFormat(
           filtersByParty = parties.map(party => party.getValue -> fs).toMap,
           filtersForAnyParty = None,
           verbose = verbose,
+          filtersByContractId = Seq.empty,
         )
     }
   }
@@ -1509,6 +1511,7 @@ final class SingleParticipantTestContext private[participant] (
               filtersByParty = actAs.map(_.getValue -> Filters(Nil)).toMap,
               filtersForAnyParty = None,
               verbose = true,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = toProto(transactionShape),
