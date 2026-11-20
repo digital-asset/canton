@@ -77,6 +77,7 @@ import com.digitalasset.daml.lf.value.Value
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status as StatusProto
 import io.grpc.Status
+import org.scalatest.EitherValues.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks.*
 import org.scalatest.wordspec.AnyWordSpec
@@ -2300,7 +2301,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         None,
       ),
       (
-        Some(DeduplicationDuration(Duration.ofDays(1L).plusNanos(100 * 1000))),
+        Some(DeduplicationDuration.create(Duration.ofDays(1L).plusNanos(100 * 1000)).value),
         None,
         Some(Duration.ofDays(1L).toMinutes * 60L),
         Some(100 * 1000),

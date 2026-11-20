@@ -95,12 +95,14 @@ object TrafficEnforcementErrors extends TrafficEnforcementErrorGroup {
   }
 
   @Explanation(
-    "This error indicates that a traffic purchase was committed on the ledger, but its traffic was not" +
-      " credited because its choice result does not have the shape TEA expects."
+    "This error indicates that a credit was published on the ledger through PublishCredit, but" +
+      " its traffic was not credited because its arguments or acting parties do not match what" +
+      " TEA expects."
   )
   @Resolution(
-    "Check that the TEA version matches the deployed traffic purchase Daml model, then credit the" +
-      " affected account through the TEA API. The error metadata contains `update_id` and `offset`."
+    "Check that the TEA version matches the deployed traffic credit Daml model and verify the credit's" +
+      " validity before crediting the affected account through the TEA API. The error metadata" +
+      " contains `update_id` and `offset`."
   )
   object TopUpNotCredited
       extends ErrorCode(

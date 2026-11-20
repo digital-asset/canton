@@ -1171,7 +1171,7 @@ class ConfirmationRequestAndResponseProcessorTest
       } yield {
         inside(finalState) {
           case Some(FinalizedResponse(`requestId`, `informeeMessage`, `ts2`, verdict, _)) =>
-            assert(verdict === Approve(testedProtocolVersion))
+            assert(verdict === Approve.create(testedProtocolVersion))
         }
       }
     }

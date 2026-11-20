@@ -10,6 +10,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.examples.java as M
 import com.digitalasset.canton.integration.*
+import com.digitalasset.canton.integration.HasSimClockUtils.advanceClockInStepsTo
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.examples.IouSyntax.testIou
@@ -26,7 +27,7 @@ import com.digitalasset.canton.participant.admin.party.PartyManagementServiceErr
   OnboardingClearanceMissingMapping,
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessor
-import com.digitalasset.canton.time.DelegatingSimClock
+import com.digitalasset.canton.time.{DelegatingSimClock, PositiveFiniteDuration}
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{Party, PartyKind, PhysicalSynchronizerId}
@@ -195,19 +196,14 @@ trait OfflinePartyReplicationIntegrationTestBase
       totalDuration: Duration,
       sourceNode: LocalParticipantReference,
       targetNode: LocalParticipantReference,
-  ): Unit = {
-    val maxStepSize = Duration.ofSeconds(30)
-    // Chunk total duration into smaller advancements
-    val fullSteps = (totalDuration.toMillis / maxStepSize.toMillis).toInt
-    val remainder = Duration.ofMillis(totalDuration.toMillis % maxStepSize.toMillis)
-    // Creates Seq(30s, 30s, 30s, 30s, 10s) for 2 min 10 sec wait time and max step sise 30 sec
-    val steps = Seq.fill(fullSteps)(maxStepSize) ++ Option.when(!remainder.isZero)(remainder)
-
-    steps.foreach { step =>
-      clock.advance(step)
+  ): Unit =
+    advanceClockInStepsTo(
+      clock,
+      clock.now.plus(totalDuration),
+      maxStep = PositiveFiniteDuration.tryOfSeconds(30),
+    ) {
       sourceNode.health.ping(targetNode.id)
     }
-  }
 
   /** Reconnects to synchronizer and unilaterally clears the onboarding flag. */
   protected[offpr] def reconnectAndEnsureOnboardingClearance(

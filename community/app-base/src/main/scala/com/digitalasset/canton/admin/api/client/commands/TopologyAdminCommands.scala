@@ -1155,6 +1155,17 @@ object TopologyAdminCommands {
         new ProposalMappingSerializer(mapping, Nil)
     }
 
+    /** Adds signed topology transactions to a topology store.
+      *
+      * @param transactions
+      *   The signed topology transactions to add.
+      * @param store
+      *   The topology store to add the transactions to.
+      * @param forceChanges
+      *   Force specific changes even if dangerous.
+      * @param waitToBecomeEffective
+      *   Timeout to wait for the transactions to become effective in the store.
+      */
     final case class AddTransactions(
         transactions: Seq[GenericSignedTopologyTransaction],
         store: TopologyStoreId,

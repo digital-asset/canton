@@ -10,9 +10,10 @@ import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authenticity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.auth.{AuthorizationChecksErrors, AuthorizedUser, CantonAdminToken}
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.AuthServiceConfig
 import com.digitalasset.canton.config.AuthServiceConfig.Wildcard
 import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmptyString}
+import com.digitalasset.canton.config.Confidential.Implicits.*
+import com.digitalasset.canton.config.{AuthServiceConfig, Confidential}
 import com.digitalasset.canton.connection.v30.{ApiInfoServiceGrpc, GetApiInfoRequest}
 import com.digitalasset.canton.console.RemoteInstanceReference
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -94,7 +95,7 @@ trait AdminApiUserConfigAuthorizationIntegrationTest
     RemoteParticipantConfig(
       ledgerApi = localConfig.ledgerApi.clientConfig,
       adminApi = localConfig.adminApi.clientConfig,
-      token = token,
+      token = token.map(Confidential(_)),
     )
 
   def testRemote[T <: RemoteInstanceReference](remote: T): Assertion =
@@ -162,7 +163,7 @@ trait AdminApiUserConfigAuthorizationIntegrationTest
               "p1-admin-token" ->
                 remoteParticipantWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "p1-user-config" ->
                 remoteParticipantWithToken(
@@ -187,7 +188,7 @@ trait AdminApiUserConfigAuthorizationIntegrationTest
               "p2-admin-token" ->
                 remoteParticipantWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "p2-user-config" ->
                 remoteParticipantWithToken(
@@ -213,7 +214,7 @@ trait AdminApiUserConfigAuthorizationIntegrationTest
               "p3-admin-token" ->
                 remoteParticipantWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "p3-user-config" ->
                 remoteParticipantWithToken(

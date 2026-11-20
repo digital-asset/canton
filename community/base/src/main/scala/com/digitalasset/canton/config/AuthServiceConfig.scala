@@ -56,7 +56,7 @@ object AuthServiceConfig {
     * EXCLUSIVELY FOR TESTING
     */
   final case class UnsafeJwtHmac256(
-      secret: NonEmptyString,
+      secret: Confidential[NonEmptyString],
       override val targetAudience: Option[String],
       override val targetScope: Option[String],
       override val privileged: Boolean = false,
@@ -68,7 +68,7 @@ object AuthServiceConfig {
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         maxTokenLife: Option[Long],
     ): JwtVerifier =
-      HMAC256Verifier(secret.unwrap, jwtTimestampLeeway, maxTokenLife).fold(
+      HMAC256Verifier(secret.unwrap.unwrap, jwtTimestampLeeway, maxTokenLife).fold(
         err =>
           throw new IllegalArgumentException(
             s"Failed to create HMAC256 verifier (secret: $secret): $err"

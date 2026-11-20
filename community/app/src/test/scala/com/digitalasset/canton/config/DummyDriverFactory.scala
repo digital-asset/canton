@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.config
 
+import com.digitalasset.canton.config.Confidential
 import com.digitalasset.canton.config.DummyDriverFactory.DummyConfig
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.block.{SequencerDriver, SequencerDriverFactory}
@@ -26,8 +27,11 @@ class DummyDriverFactory extends SequencerDriverFactory {
 
   override def configWriter(confidential: Boolean): ConfigWriter[DummyConfig] = {
     import pureconfig.generic.semiauto.*
-    implicit val passwordWriter: ConfigWriter[Password] =
-      new ConfidentialConfigWriter(confidential)[Password](_.copy(pw = "****"))
+
+    val confidentialWriter = new ConfidentialConfigWriter(confidential)
+    implicit def confidentialValueWriter[A: ConfigWriter]: ConfigWriter[Confidential[A]] =
+      confidentialWriter.confidentialValueWriter[A]
+
     deriveWriter[DummyConfig]
   }
 
@@ -45,5 +49,5 @@ class DummyDriverFactory extends SequencerDriverFactory {
 }
 
 object DummyDriverFactory {
-  final case class DummyConfig(password: Password, value: String)
+  final case class DummyConfig(password: Confidential[String], value: String)
 }

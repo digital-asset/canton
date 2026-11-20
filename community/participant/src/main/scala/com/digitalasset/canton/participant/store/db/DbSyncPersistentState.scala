@@ -11,8 +11,12 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
-import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
+import com.digitalasset.canton.participant.protocol.party.FreezingToOnboardingOperation.PendingFreezingToOnboardingStore
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
+import com.digitalasset.canton.participant.protocol.party.{
+  FreezingToOnboardingOperation,
+  OnboardingClearanceOperation,
+}
 import com.digitalasset.canton.participant.store.{
   AcsCommitmentPeriodStore,
   AcsCommitmentSenderWatermarkStore,
@@ -152,6 +156,15 @@ class DbLogicalSyncPersistentState(
       SynchronizerId.fromString,
     )
 
+  override val pendingFreezingToOnboardingStore: PendingFreezingToOnboardingStore =
+    PendingOperationStore(
+      storage,
+      timeouts,
+      loggerFactory,
+      FreezingToOnboardingOperation,
+      SynchronizerId.fromString,
+    )
+
   override val partyReplicationIndexingStoreIfOnPREnabled: Option[DbPartyReplicationIndexingStore] =
     parameters.alphaOnlinePartyReplicationSupport.map(cfg =>
       new DbPartyReplicationIndexingStore(
@@ -171,6 +184,7 @@ class DbLogicalSyncPersistentState(
       acsCommitmentPeriodStore,
       reassignmentStore,
       pendingOnboardingClearanceStore,
+      pendingFreezingToOnboardingStore,
     ) ++ partyReplicationIndexingStoreIfOnPREnabled.toList
     LifeCycle.close(toClose)(logger)
   }

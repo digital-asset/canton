@@ -58,7 +58,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
     EnvironmentDefinition.P2S1M1_Manual
       .addConfigTransforms(
         ConfigTransforms
-          .enableAlphaOnlinePartyReplicationSupport(enableUnsafeSequencerChannelSupport = true)*
+          .enableAlphaAcsReplicationSupport()*
       )
       .withNetworkBootstrap { implicit env =>
         import env.*
@@ -78,9 +78,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
         participants.local.synchronizers.connect_local(sequencer1, daName)
       }
 
-  // OnlinePartyReplication messages require dev protocol version for added safety
-  // to ensure that they aren't accidentally used in production.
-  "Participants able to perform empty conversation via sequencer channel" onlyRunWith ProtocolVersion.dev in {
+  "Participants able to perform empty conversation via sequencer channel" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
     implicit env =>
       import env.*
 
@@ -91,8 +89,8 @@ sealed trait SequencerChannelProtocolIntegrationTest
       )
 
       clue("Both sequencer channel clients can ping the sequencer") {
-        asyncExec("ping1")(client1.ping(sequencer1.id))
-        asyncExec("ping2")(client2.ping(sequencer1.id))
+        asyncExec("ping1")(client1.ping(sequencer1.id, ignorePoolCapacityExhaustion = false))
+        asyncExec("ping2")(client2.ping(sequencer1.id, ignorePoolCapacityExhaustion = false))
       }
 
       val channelId = SequencerChannelId("empty channel")
@@ -160,7 +158,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
       }
   }
 
-  "Participants receive each other's messages via sequencer channel" onlyRunWith ProtocolVersion.dev in {
+  "Participants receive each other's messages via sequencer channel" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
     implicit env =>
       import env.*
 
@@ -266,7 +264,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
       }
   }
 
-  "Participant can cancel channel when connection takes too long" onlyRunWith ProtocolVersion.dev in {
+  "Participant can cancel channel when connection takes too long" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
     implicit env =>
       import env.*
       val channelClient = participant1.testing.state_inspection
@@ -324,7 +322,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
       )
   }
 
-  "Participant can reuse channel processor for multiple connections" onlyRunWith ProtocolVersion.dev in {
+  "Participant can reuse channel processor for multiple connections" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
     implicit env =>
       import env.*
       val channelClient = participant1.testing.state_inspection

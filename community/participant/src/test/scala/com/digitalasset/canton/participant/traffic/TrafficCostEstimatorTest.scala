@@ -269,7 +269,7 @@ class TrafficCostEstimatorTest extends FixtureAnyWordSpec with BaseTest with Has
     readAs = List.empty,
     userId = Ref.UserId.assertFromString("traffic-cost-estimator-spec"),
     commandId = Ref.CommandId.assertFromString("command-id"),
-    deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration(java.time.Duration.ZERO),
+    deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration.Zero,
     submissionId = None,
     externallySignedSubmission = None,
     transactionHash = None,

@@ -22,8 +22,8 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
-import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor
+import com.digitalasset.canton.participant.party.AcsReplicationTestInterceptorImpl
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencerPolicies,
@@ -72,8 +72,8 @@ sealed trait OnlinePartyReplicationFileBasedTest
   // Use the test interceptor to block OnPR until a concurrent exercise is processed by the SP
   // in such a way that the exercised contract is imported between exercise phases 3 and 7
   // to produce a race in the TP ConflictDetector in-memory state.
-  private def createTargetParticipantTestInterceptor(): PartyReplicationTestInterceptor =
-    PartyReplicationTestInterceptorImpl.targetParticipantProceedsIf { progress =>
+  private def createTargetParticipantTestInterceptor(): AcsReplicationTestInterceptor =
+    AcsReplicationTestInterceptorImpl.targetParticipantProceedsIf { progress =>
       // Allow importing the first batch that contains the contract that this test exercises,
       // but stop before the second batch, so that we can ensure that the exercised contracts is
       // imported while the exercise is inflight.

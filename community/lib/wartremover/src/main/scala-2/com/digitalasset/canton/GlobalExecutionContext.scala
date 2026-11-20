@@ -31,7 +31,7 @@ object GlobalExecutionContext extends WartTraverser {
 
   val messageGlobal: String = "The global execution context should not be used."
   val messageParasitic: String =
-    "Use a DirectExecutionContext instead of ExecutionContext.parasitic."
+    "Use DirectExecutionContext.directExecutionContext instead of ExecutionContext.parasitic."
 
   def apply(u: WartUniverse): u.Traverser = {
     import u.universe.*

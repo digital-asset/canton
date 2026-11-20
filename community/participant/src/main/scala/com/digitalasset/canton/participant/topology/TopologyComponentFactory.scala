@@ -17,16 +17,17 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.crypto.SynchronizerCrypto
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.party.{
+  FreezingToOnboardingScheduler,
   OnboardingClearanceScheduler,
   PartyReplicationTriggers,
 }
 import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
-import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
+import com.digitalasset.canton.participant.ledger.api.{LedgerApiIndexer, LedgerApiStore}
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
@@ -102,8 +103,10 @@ class TopologyComponentFactory(
       missingKeysAlerter: MissingKeysAlerter,
       sequencerConnectionSuccessorListener: SequencerConnectionSuccessorListener,
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
+      freezingToOnboardingScheduler: FreezingToOnboardingScheduler,
       topologyClient: SynchronizerTopologyClientWithInit,
       recordOrderPublisher: RecordOrderPublisher,
+      ledgerApiIndexer: LedgerApiIndexer,
       pendingLsuOperationsStore: PendingLsuOperation.Store,
       synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
       pendingOnboardingClearanceStore: PendingOnboardingClearanceStore,
@@ -111,6 +114,7 @@ class TopologyComponentFactory(
       synchronizerPredecessor: Option[SynchronizerPredecessor],
       ledgerApiStore: LedgerApiStore,
       partyReplicationTriggersO: Option[PartyReplicationTriggers],
+      participantShutdownFlagCloseable: FlagCloseable,
       metrics: ParticipantMetrics,
   ): TopologyTransactionProcessor.Factory = new TopologyTransactionProcessor.Factory {
     override def create(
@@ -118,10 +122,12 @@ class TopologyComponentFactory(
     )(implicit
         traceContext: TraceContext,
         executionContext: ExecutionContext,
+        materializer: Materializer,
     ): FutureUnlessShutdown[TopologyTransactionProcessor] = {
 
       val participantTerminateProcessing = new ParticipantTopologyTerminateProcessing(
         recordOrderPublisher,
+        ledgerApiIndexer,
         topologyStore,
         initialRecordTime = recordOrderPublisher.initTimestamp,
         participantId,
@@ -150,6 +156,7 @@ class TopologyComponentFactory(
               topologyEventPublishedOnInitialRecordTime.isDefined,
             traceContextForSequencedEvent = sequencedEventStore.traceContext(_),
             parallelism = batching.parallelism,
+            flagCloseable = participantShutdownFlagCloseable,
           )
         } yield participantTerminateProcessing
 
@@ -169,6 +176,7 @@ class TopologyComponentFactory(
         processor.subscribe(missingKeysAlerter.attachToTopologyProcessor())
         processor.subscribe(sequencerConnectionSuccessorListener)
         processor.subscribe(onboardingClearanceScheduler)
+        processor.subscribe(freezingToOnboardingScheduler)
         processor.subscribe(topologyClient)
         processor
       }

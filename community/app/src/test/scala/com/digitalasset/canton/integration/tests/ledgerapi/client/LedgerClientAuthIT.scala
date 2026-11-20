@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.client
 
 import com.daml.grpc.GrpcException
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{

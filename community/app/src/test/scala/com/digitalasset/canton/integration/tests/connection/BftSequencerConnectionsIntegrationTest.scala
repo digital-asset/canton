@@ -175,6 +175,7 @@ sealed trait BftSequencerConnectionsIntegrationTest
         GrpcSequencerConnection.fromInternal(
           s.config.publicApi
             .asSequencerConnection(SequencerAlias.tryCreate(s.name), sequencerId = None)
+            .value
         )
       )
       val delays = SequencerConnectionPoolDelays.default.copy(warnValidationDelay =

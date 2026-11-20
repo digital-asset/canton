@@ -22,7 +22,10 @@ import com.digitalasset.canton.store.IndexedTopologyStoreId
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.*
-import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
+import com.digitalasset.canton.topology.store.StoredTopologyTransaction.{
+  GenericStoredTopologyTransaction,
+  PositiveStoredTopologyTransaction,
+}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.{
   GenericStoredTopologyTransactions,
   NegativeStoredTopologyTransactions,
@@ -916,7 +919,7 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
         includeRejected = true,
         selectFields = TxHashWithIdFields,
         transform = identity,
-      ).runFold(TopologyStateHash.build())(_.add(_)).map(_.finish().hash)
+      ).runFold(TopologyStateHash.build())(_.add(_))(materializer).map(_.finish().hash)
     )
 
   override def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
@@ -1320,8 +1323,15 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
   }
 
   private def typeFilter(types: Set[TopologyMapping.Code]): SQLActionBuilderChain =
-    NonEmpty
-      .from(types)
+    typeFilter(
+      NonEmpty
+        .from(types)
+    )
+
+  private def typeFilter(
+      types: Option[NonEmpty[Set[TopologyMapping.Code]]]
+  ): SQLActionBuilderChain =
+    types
       .map(typesNE => sql" AND " ++ DbStorage.toInClause("transaction_type", typesNE))
       .getOrElse(sql"")
 
@@ -1592,9 +1602,79 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       deleted > 0
     }
 
+  override def findEffectiveStateChangesAtTopologyInit(
+      fromExclusive: EffectiveTime,
+      toInclusive: EffectiveTime,
+      filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]],
+  )(implicit
+      traceContext: TraceContext
+  ): Source[PositiveStoredTopologyTransaction, NotUsed] = {
+    logger.debug(
+      s"Querying latest state between fromExclusive=$fromExclusive and toInclusive=$toInclusive"
+    )
+
+    val timeFilter =
+      sql" AND valid_from > ${fromExclusive.value} AND valid_from <= ${toInclusive.value}"
+
+    def minMaxRowQuery(orderBy: String) = {
+      val query = buildQueryForTransactionsWithId[Option[Long]](
+        selectFields = sql"id, null",
+        timeFilter,
+        includeRejected = false,
+        limit = storage.limit(1),
+        orderBy = orderBy,
+      )
+      storage
+        .query(query, operationName = s"$functionFullName-min-max-id")
+        .map(_.headOption.map { case (id, _null) => id })
+    }
+
+    val sourceOT = for {
+      minId <- OptionT(minMaxRowQuery(orderBy = " order by valid_from asc, id asc"))
+      maxId <- OptionT(minMaxRowQuery(orderBy = " order by valid_from desc, id desc"))
+    } yield {
+      Source(minId to maxId by batchingConfig.maxItemsInBatch.value.toLong)
+        .mapAsync(batchingConfig.parallelism.value) { fromIdInclusive =>
+          val toIdExclusive =
+            math.min(fromIdInclusive + batchingConfig.maxItemsInBatch.value, maxId + 1)
+          logger.debug(
+            s"find latest state fromIdInclusive=$fromIdInclusive toIdExclusive=$toIdExclusive"
+          )
+          val query = buildQueryForTransactionsWithId[QueryResult](
+            selectFields = TxEntryWithIdFields,
+            // Note: timeFilter is already covered by the bounds
+            sql""" AND id >= $fromIdInclusive AND id < $toIdExclusive
+                       AND (valid_until IS NULL OR valid_until > ${toInclusive.value})
+                       AND is_proposal = false
+                       AND operation = ${TopologyChangeOp.Replace}
+                """ ++ typeFilter(filterTypes.map(_.toSet)),
+            includeRejected = false,
+            limit = storage.limit(batchingConfig.maxItemsInBatch.value),
+            // the correctness of the query relies on id being monotonic relative to (valid_from, batch_idx).
+            // the efficiency of the overall queries relies on the initial topology state to be stored with dense ids.
+            orderBy = " order by id",
+          )
+          storage
+            .query(query, operationName = "latestState")
+            .map { rows =>
+              val (_, txData) = rows.unzip
+              toStoredTopologyTransactions(txData).result
+            }
+            .failOnShutdownToAbortException("fetch latest state")
+        }
+    }
+
+    Source
+      .futureSource(
+        sourceOT.getOrElse(Source.empty).failOnShutdownToAbortException(functionFullName)
+      )
+      .mapConcat(_.flatMap(_.selectOp[TopologyChangeOp.Replace]))
+      .mapMaterializedValue(_ => NotUsed)
+  }
+
   override def findEffectiveStateChanges(
       fromEffectiveInclusive: CantonTimestamp,
-      filterTypes: Option[Seq[TopologyMapping.Code]],
+      filterTypes: Option[NonEmpty[Seq[TopologyMapping.Code]]],
       onlyAtEffective: Boolean,
   )(implicit
       traceContext: TraceContext
@@ -1608,7 +1688,7 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
              )
              AND (valid_until IS NULL OR valid_from != valid_until)
              AND is_proposal = false """ ++
-        typeFilter(filterTypes.fold(Set.empty[TopologyMapping.Code])(_.toSet))
+        typeFilter(filterTypes.map(_.toSet))
 
     toStoredTopologyTransactions(
       storage.query(

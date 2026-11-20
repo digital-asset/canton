@@ -47,7 +47,7 @@ trait DbTopologyStoreHelper {
       maxTopologyWriteBatchSize = PositiveInt.tryCreate(2),
     )
 
-  private lazy val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 10)
+  private lazy val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 100)
 
   protected def mkStore(
       synchronizerId: PhysicalSynchronizerId,

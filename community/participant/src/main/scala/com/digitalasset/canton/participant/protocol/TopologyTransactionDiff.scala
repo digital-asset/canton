@@ -82,11 +82,8 @@ private[protocol] object TopologyTransactionDiff {
         }
     }
 
-    val abortingOnboardingLocalParty = before.exists {
-      case ((partyId, participantId), (_, onboardingBefore)) =>
-        onboardingBefore &&
-        participantId == localParticipantId.toLf &&
-        !after.contains(partyId -> participantId)
+    val revokingLocalParty = before.exists { case ((partyId, participantId), _) =>
+      participantId == localParticipantId.toLf && !after.contains(partyId -> participantId)
     }
 
     val changedSynchronizerParam =
@@ -103,7 +100,7 @@ private[protocol] object TopologyTransactionDiff {
         updateId(psid, oldRelevantState, currentRelevantState),
         onboardingLocalParty = onboarding.exists(_.participant == localParticipantId.toLf),
         clearingOnboardingLocalParty = clearingOnboardingLocalParty,
-        abortingOnboardingLocalParty = abortingOnboardingLocalParty,
+        revokingLocalParty = revokingLocalParty,
         genericTopologyEvents = changedSynchronizerParam.toList,
       )
     }
@@ -209,6 +206,6 @@ private[protocol] final case class TopologyTransactionDiff(
     updateId: UpdateId,
     onboardingLocalParty: Boolean,
     clearingOnboardingLocalParty: Boolean,
-    abortingOnboardingLocalParty: Boolean,
+    revokingLocalParty: Boolean,
     genericTopologyEvents: Seq[GenericTopologyEvent],
 )

@@ -28,7 +28,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
-import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
+import com.digitalasset.canton.participant.party.AcsReplicationTestInterceptorImpl
 import com.digitalasset.canton.protocol.LocalRejectError
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.time.PositiveSeconds
@@ -80,7 +80,7 @@ sealed trait OnlinePartyReplicationCascadingRepetitionsTest
 
   // Use the test interceptor to block OnPR until a concurrent exercise is processed by the SP.
   private def createSourceParticipantTestInterceptor() =
-    PartyReplicationTestInterceptorImpl.sourceParticipantProceedsIf(_ => canSourceProceedWithOnPR)
+    AcsReplicationTestInterceptorImpl.sourceParticipantProceedsIf(_ => canSourceProceedWithOnPR)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition
@@ -100,7 +100,6 @@ sealed trait OnlinePartyReplicationCascadingRepetitionsTest
             "participant3" -> (() => createSourceParticipantTestInterceptor()),
             "participant4" -> (() => createSourceParticipantTestInterceptor()),
           ),
-          enableUnsafeSequencerChannelSupport = true,
           pauseIndexer = false,
         )*
       )

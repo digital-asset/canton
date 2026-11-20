@@ -43,8 +43,15 @@ object CanonicalCommitSet {
   def fromProto(canonicalCommitSet: v30.CanonicalCommitSet): ParsingResult[CanonicalCommitSet] =
     canonicalCommitSet.canonicalCommits
       .traverse(
-        SignedMessage.fromProto(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
-          Commit.fromProtoConsensusMessage(actualSender = None, _)
+        SignedMessage.fromProtoWithNodeId(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
+          claimedOriginator =>
+            Commit.fromProtoConsensusMessage(
+              // Since the commits in the canonical commit set are nested messages of PrePrepares,
+              //  we set their actual sender to `None` as the sender is set in the outer message
+              //  and is unused for nested messages.
+              claimedOriginatorAndActualSender = (claimedOriginator, None),
+              _,
+            )
         )
       )
       .map(x => CanonicalCommitSet(SortedSet.from(x)))

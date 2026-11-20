@@ -12,6 +12,7 @@ log.txt
 /test-reports
 /test-output
 /.ci_credentials
+/gha-creds-*.json
 *~
 tmp
 gen-*.conf

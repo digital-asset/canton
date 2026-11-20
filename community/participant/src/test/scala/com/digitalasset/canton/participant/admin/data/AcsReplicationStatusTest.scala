@@ -8,7 +8,6 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus as InternalStatus
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
@@ -26,7 +25,6 @@ class AcsReplicationStatusTest extends AnyWordSpec with BaseTest {
     sourceParticipantId = ParticipantId.tryFromProtoPrimitive("PAR::source::1220abcd"),
     targetParticipantId = ParticipantId.tryFromProtoPrimitive("PAR::target::1220abcd"),
     timestamp = CantonTimestamp.now(),
-    participantPermission = ParticipantPermission.Submission,
     acsReplicationDestination =
       InternalStatus.AcsReplicationParameters.AcsReplicationDestination.Persistence,
   )

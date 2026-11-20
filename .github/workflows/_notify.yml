@@ -48,7 +48,7 @@ jobs:
         # Only alert when there is a nameable non-test failure. If the failed
         # list is empty, stay silent instead of posting an "unknown" alert.
         if: steps.failed-jobs.outputs.result != ''
-        uses: ./.github/actions/slack/slack_red_main_with_volunteer
+        uses: ./.github/actions/slack/slack_notify_failure_with_volunteer
         with:
           webhook_url: ${{ secrets.SLACK_WEBHOOK_TEAM_CANTON_INTERNAL }}
           failed_job: ${{ steps.failed-jobs.outputs.result }}

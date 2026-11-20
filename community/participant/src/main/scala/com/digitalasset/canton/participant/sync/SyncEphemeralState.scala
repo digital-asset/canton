@@ -16,7 +16,10 @@ import com.digitalasset.canton.health.{
 }
 import com.digitalasset.canton.lifecycle.{LifeCycle, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.admin.party.{
+  FreezingToOnboardingScheduler,
+  OnboardingClearanceScheduler,
+}
 import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
@@ -59,6 +62,7 @@ class SyncEphemeralState(
     val inFlightSubmissionSynchronizerTracker: InFlightSubmissionSynchronizerTracker,
     val acsCommitmentSender: AcsCommitmentSender,
     val onboardingClearanceScheduler: OnboardingClearanceScheduler,
+    val freezingToOnboardingScheduler: FreezingToOnboardingScheduler,
     persistentState: SyncPersistentState,
     val ledgerApiIndexer: LedgerApiIndexer,
     val contractStore: ContractStore,
@@ -172,6 +176,7 @@ class SyncEphemeralState(
       reassignmentSynchronizer,
       sessionKeyStore,
       onboardingClearanceScheduler,
+      freezingToOnboardingScheduler,
     )(logger)
 
 }

@@ -5,7 +5,6 @@ package com.digitalasset.canton.config
 
 import better.files.*
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.AuthServiceConfig.UnsafeJwtHmac256
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.ConfigErrors.{
   CannotParseFilesError,
@@ -22,6 +21,12 @@ import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.config.ExtensionServiceAuthConfig
+import com.digitalasset.canton.platform.config.{
+  TopUpConfig,
+  TrafficAccountingConfig,
+  TrafficEnforcementServerConfig,
+}
+import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import com.digitalasset.canton.version.{
   ApiDeprecation,
@@ -157,6 +162,51 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
         loggerFactory.assertLogs(
           loadFiles(Seq(simpleConfPath, "invalid-configs/negative-port.conf")),
           _.errorMessage should (include("negative-port.conf") and include("Unable to create Port")),
+        )
+      result.left.value shouldBe a[GenericConfigError.Error]
+    }
+  }
+
+  "the traffic accounting top-up configuration" should {
+
+    def damlTopUp(cfg: TrafficAccountingConfig): Option[TopUpConfig.DamlCredit] =
+      Some(cfg.trafficEnforcementServer).flatMap {
+        case internal: TrafficEnforcementServerConfig.Internal =>
+          Some(internal.topUp).collect { case damlCredit: TopUpConfig.DamlCredit => damlCredit }
+      }
+
+    "default to disabled" in {
+      val config = loadFiles(Seq(simpleConfPath)).value
+      config.participants.values.map(cfg =>
+        damlTopUp(cfg.trafficAccounting)
+      ) should contain only None
+    }
+
+    "load the Daml credit top-up" in {
+      val config =
+        loadFiles(Seq(simpleConfPath, "traffic-accounting-daml-top-up.conf")).value
+      val participant = config.participants.get(InstanceName.tryCreate("participant1")).value
+      damlTopUp(participant.trafficAccounting) shouldBe Some(
+        TopUpConfig.DamlCredit(
+          paymasters = NonEmpty(
+            Set,
+            PartyId.tryFromProtoPrimitive("paymaster::1220aa"),
+            PartyId.tryFromProtoPrimitive("paymaster::1220bb"),
+          ),
+          initialOffsetBeginExclusive = Some(42L),
+        )
+      )
+    }
+
+    "reject a Daml credit top-up without paymasters" in {
+      val result =
+        loggerFactory.assertLogs(
+          loadFiles(
+            Seq(simpleConfPath, "invalid-configs/traffic-accounting-empty-paymasters.conf")
+          ),
+          _.errorMessage should (include("traffic-accounting-empty-paymasters.conf") and include(
+            "paymasters"
+          )),
         )
       result.left.value shouldBe a[GenericConfigError.Error]
     }
@@ -459,48 +509,148 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
   }
 
   "dumping config" should {
-    def assertNoLeakage(configMapOverride: Map[String, String] = Map.empty) = {
-      val config =
-        CantonConfig.parseAndLoadOrExit(
-          files,
-          Some(DefaultPorts.create()),
-        )
 
+    /** Loads the base config plus `configOverride`, then asserts that none of the `canaries` show
+      * up either in the startup log rendering or the config dump.
+      */
+    def assertNoLeakage(canaries: Seq[String], configOverride: String = "") = {
       val configFromCliOnly = CantonConfig
         .parseAndMergeJustCLIConfigs(NonEmpty.from(files).value)
         .valueOrFail("config should be loaded")
-      val configFromMap = ConfigFactory.parseMap(configMapOverride.asJava)
-      val finalConfig = CantonConfig.mergeConfigs(configFromCliOnly, Seq(configFromMap))
-      val rawConfig = CantonConfig.renderForLoggingOnStartup(finalConfig)
-      val dump = config.dumpString
-      val participant1Config = config.participantsByString("participant")
-      val secret = participant1Config.ledgerApi.authServices.head match {
-        case UnsafeJwtHmac256(secret, _, _, _, _, _, _) => secret
-        case x =>
-          fail(s"Invalid participant config: $x from files $files")
+      val mergedConfig =
+        CantonConfig.mergeConfigs(configFromCliOnly, Seq(ConfigFactory.parseString(configOverride)))
+      val cantonConfig = CantonConfig
+        .loadAndValidate(
+          mergedConfig.withFallback(ConfigFactory.load()),
+          Some(DefaultPorts.create()),
+        )
+        .valueOrFail("config should be valid")
+
+      // Sanity check that the canaries were actually picked up
+      val unredacted = mergedConfig.resolve().root().render()
+      clue("canaries should be in the unredacted config") {
+        canaries.filterNot(unredacted.contains) shouldBe empty
       }
-      val storageConfig = participant1Config.storage.config
-      // test db password
-      storageConfig.getString("properties.password") shouldBe "supersafe"
 
-      // test jwt secret
-      dump should not include storageConfig.getString("properties.password")
-      dump should not include secret.unwrap
-
-      rawConfig should not include storageConfig.getString("properties.password")
-      rawConfig should not include secret.unwrap
+      val renderings = Seq(
+        "startup log rendering" -> cantonConfig.dumpStringWithoutDefaults(mergedConfig),
+        "config dump" -> cantonConfig.dumpString,
+      )
+      val leaks = for {
+        (name, rendered) <- renderings
+        canary <- canaries if rendered.contains(canary)
+      } yield s"$name contains $canary"
+      if (leaks.nonEmpty) fail(leaks.mkString("\n"))
     }
 
     "not leak confidential information" in {
-      assertNoLeakage()
+      // Secrets from the base config files
+      val dbPassword = "supersafe"
+      val jwtSecret = "not-safe-for-production"
+      assertNoLeakage(Seq(dbPassword, jwtSecret))
       clue("with password override") {
         assertNoLeakage(
+          Seq(dbPassword, jwtSecret),
           // Test with specifically overridden password as well (typically provided via -C on the CLI)
-          Map(
-            "canton.participants.participant.storage.config.properties.password" -> "supersafe"
-          )
+          s"""canton.participants.participant.storage.config.properties.password = "$dbPassword"""",
         )
       }
+    }
+
+    "not leak fixed admin tokens, OTLP client secrets or tracing headers" in {
+      val fixedAdminToken = "fixed-admin-token-leak-canary"
+      val clientSecret = "otlp-client-secret-leak-canary"
+      val tracingHeader = "Bearer tracing-header-leak-canary"
+
+      assertNoLeakage(
+        Seq(fixedAdminToken, clientSecret, tracingHeader),
+        s"""
+           |canton.participants.participant {
+           |  ledger-api.admin-token-config.fixed-admin-token = "$fixedAdminToken"
+           |  admin-api.admin-token-config.fixed-admin-token = "$fixedAdminToken"
+           |}
+           |canton.monitoring.metrics.reporters = [{
+           |  type = otlp
+           |  auth {
+           |    type = oauth-client-credentials
+           |    token-url = "https://auth.example.com/token"
+           |    client-id = "canton"
+           |    client-secret = "$clientSecret"
+           |  }
+           |}]
+           |canton.monitoring.tracing.tracer.exporter {
+           |  type = otlp
+           |  additional-headers { "Authorization" = "$tracingHeader" }
+           |}
+           |""".stripMargin,
+      )
+    }
+
+    "not leak remote node tokens, JDBC URL passwords or DAR download headers" in {
+      val remoteToken = "remote-participant-token-leak-canary"
+      val jdbcUrlPassword = "jdbc-url-password-leak-canary"
+      val darHeader = "Bearer dar-header-leak-canary"
+
+      assertNoLeakage(
+        Seq(remoteToken, jdbcUrlPassword, darHeader),
+        s"""
+           |canton.remote-participants.remote {
+           |  admin-api.port = 10012
+           |  ledger-api.port = 10011
+           |  token = "$remoteToken"
+           |}
+           |canton.participants.participant {
+           |  storage.config.properties.url =
+           |    "jdbc:postgresql://localhost:5432/canton?user=canton&password=$jdbcUrlPassword"
+           |  alpha-dynamic.dars = [{
+           |    location = "https://example.com/my.dar"
+           |    request-headers { "Authorization" = "$darHeader" }
+           |  }]
+           |}
+           |""".stripMargin,
+      )
+    }
+
+    "not leak database passwords with in-memory storage" in {
+      val dbPassword = "memory-storage-password-leak-canary"
+
+      assertNoLeakage(
+        Seq(dbPassword),
+        s"""
+           |canton.participants.participant.storage {
+           |  type = memory
+           |  config.properties.password = "$dbPassword"
+           |}
+           |""".stripMargin,
+      )
+    }
+
+    "not include all of the default values on startup" in {
+      val configFromCliOnly = CantonConfig
+        .parseAndMergeJustCLIConfigs(NonEmpty.from(files).value)
+        .valueOrFail("config should be merged")
+      val mergedConfig =
+        CantonConfig.mergeConfigs(
+          configFromCliOnly,
+          Seq(
+            ConfigFactory.parseString(
+              s"""
+           |canton.remote-participants.remote {
+           |  admin-api.port = 10012
+           |  ledger-api.port = 10011
+           |  token = "hunter2"
+           |}
+           |""".stripMargin
+            )
+          ),
+        )
+      val config = CantonConfig.parseAndLoadOrExit(files, Some(DefaultPorts.create()))
+      val defaultOnlyKey = "log-config-with-defaults"
+
+      config.dumpString should include(defaultOnlyKey)
+      val rendered = config.dumpStringWithoutDefaults(mergedConfig)
+      rendered should not include defaultOnlyKey
+      rendered should include("remote-participants")
     }
   }
 

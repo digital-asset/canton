@@ -5,24 +5,23 @@ package com.digitalasset.canton.tea.ingestion
 
 import com.daml.ledger.api.v2.event.{CreatedEvent, Event, ExercisedEvent}
 import com.daml.ledger.api.v2.offset_checkpoint.{OffsetCheckpoint, SynchronizerTime}
+import com.daml.ledger.api.v2.reassignment.{AssignedEvent, Reassignment, ReassignmentEvent}
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.CumulativeFilter.IdentifierFilter
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
-import com.daml.ledger.api.v2.transaction_filter.{EventFormat, TransactionShape}
+import com.daml.ledger.api.v2.transaction_filter.{EventFormat, InterfaceFilter, TransactionShape}
 import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
-import com.daml.ledger.api.v2.value.{
-  Identifier,
-  Record,
-  RecordField,
-  Value,
-  Optional as DamlOptional,
-}
+import com.daml.ledger.api.v2.value.{Identifier, Record, RecordField, Value}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.client.services.state.StateServiceClient
 import com.digitalasset.canton.ledger.client.services.updates.UpdateServiceClient
-import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
+import com.digitalasset.canton.platform.config.TopUpConfig
 import com.digitalasset.canton.tea.TrafficEnforcementErrors.TopUpNotCredited
-import com.digitalasset.canton.tea.ingestion.TrafficPurchaseModel.Template
+import com.digitalasset.canton.tea.daml.java.canton.api.traffic.creditv1.{
+  Metadata,
+  TrafficCreditReporter,
+  TrafficCreditReporter_PublishCredit,
+}
 import com.digitalasset.canton.tea.projection.{
   AccountDelta,
   AccountId,
@@ -44,6 +43,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
+import scala.jdk.CollectionConverters.*
 
 class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
@@ -62,12 +62,16 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
   private val recordTime: CantonTimestamp = CantonTimestamp.ofEpochSecond(1000)
 
   private val paymaster = PartyId.tryFromProtoPrimitive("paymaster::default")
-  private val defaultConfig = ProjectionConfig(topUpPaymasters = Set(paymaster))
+  private val purchaser = PartyId.tryFromProtoPrimitive("purchaser::default")
+  private val defaultConfig = TopUpConfig.DamlCredit(paymasters = NonEmpty(Set, paymaster))
+  private val interfaceId =
+    Identifier.fromJavaProto(TrafficCreditReporter.INTERFACE_ID_WITH_PACKAGE_ID.toProto)
+  private val issuerTemplateId = Identifier("b" * 64, "Wallet", "TrafficPurchaser")
 
   private def serviceWith(
       updates: Seq[GetUpdatesResponse] = Seq.empty,
       prunedUpTo: Long = 0L,
-      projectionConfig: ProjectionConfig = defaultConfig,
+      topUpConfig: TopUpConfig.DamlCredit = defaultConfig,
   ): (TeaCreditIngestionService, UpdateServiceClient, StateServiceClient) = {
     val updateServiceClient = mock[UpdateServiceClient]
     val stateServiceClient = mock[StateServiceClient]
@@ -88,61 +92,69 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
     val service = new TeaCreditIngestionService(
       updateServiceClient,
       stateServiceClient,
-      projectionConfig,
+      topUpConfig,
       loggerFactory,
     )
     (service, updateServiceClient, stateServiceClient)
   }
 
-  private def record(fields: (String, Value)*): Value =
-    Value(Value.Sum.Record(Record(fields = fields.map { case (label, value) =>
-      RecordField(label, Some(value))
-    })))
-
   private def text(value: String): Value = Value(Value.Sum.Text(value))
   private def numeric(value: String): Value = Value(Value.Sum.Numeric(value))
   private def int64(value: Long): Value = Value(Value.Sum.Int64(value))
 
-  /** Mimics the shape of `TrafficPurchasedResult`. */
-  private def topUpResult(
-      account: String,
-      trafficAmount: Value,
-      paymasterParty: String = paymaster.toProtoPrimitive,
-  ): Value =
-    record(
-      "paymaster" -> Value(Value.Sum.Party(paymasterParty)),
-      "purchaser" -> Value(Value.Sum.Party("purchaser::default")),
-      "targetAccount" -> record("accountId" -> text(account), "scope" -> text("tenant")),
-      "paymentAsset" -> Value(Value.Sum.Optional(DamlOptional(None))),
-      "trafficAmount" -> trafficAmount,
-      "requestId" -> text("request-1"),
-    )
+  private def record(value: com.daml.ledger.javaapi.data.DamlRecord): Value =
+    Value(Value.Sum.Record(Record.fromJavaProto(value.toProtoRecord)))
 
-  private def exercised(
+  private val emptyMetadata: Metadata = new Metadata(Map.empty[String, String].asJava)
+
+  private def published(
       nodeId: Int,
-      result: Option[Value],
-      choice: String = Template.ChoiceName,
-  ): Event =
-    Event(
-      Event.Event.Exercised(
-        ExercisedEvent.defaultInstance.copy(
-          nodeId = nodeId,
-          templateId = Some(
-            Identifier(
-              packageId = "#some-package-id",
-              moduleName = Template.ModuleName,
-              entityName = Template.TemplateName,
-            )
-          ),
-          choice = choice,
-          exerciseResult = result,
-          packageName = Template.PackageName,
+      account: String = "alice",
+      amount: Long = 1L,
+      purchaserParty: String = purchaser.toProtoPrimitive,
+      paymasterParty: String = paymaster.toProtoPrimitive,
+      observers: Seq[String] = Seq.empty,
+      metadata: Metadata = emptyMetadata,
+  ): ExercisedEvent =
+    ExercisedEvent.defaultInstance.copy(
+      nodeId = nodeId,
+      contractId = s"issuer-$nodeId",
+      templateId = Some(issuerTemplateId),
+      interfaceId = Some(interfaceId),
+      choice = TrafficCreditReporter.CHOICE_TrafficCreditReporter_PublishCredit.name,
+      consuming = false,
+      choiceArgument = Some(
+        record(
+          new TrafficCreditReporter_PublishCredit(
+            account,
+            amount,
+            purchaserParty,
+            observers.asJava,
+            metadata,
+          ).toValue
         )
-      )
+      ),
+      actingParties = Seq(paymasterParty),
+      witnessParties = paymasterParty +: observers,
+      exerciseResult = Some(Value(Value.Sum.Unit(com.google.protobuf.empty.Empty()))),
+      packageName = "test-wallet",
     )
 
-  private def topUp(nodeId: Int, account: String, trafficAmount: Value): Event =
-    exercised(nodeId, Some(topUpResult(account, trafficAmount)))
+  private def asEvent(exercised: ExercisedEvent): Event =
+    Event(Event.Event.Exercised(exercised))
+
+  private def topUp(nodeId: Int, account: String, amount: Long): Event =
+    asEvent(published(nodeId, account, amount))
+
+  private def withArgumentFields(
+      exercised: ExercisedEvent,
+      update: Seq[RecordField] => Seq[RecordField],
+  ): ExercisedEvent = {
+    val arguments = exercised.getChoiceArgument.getRecord
+    exercised.copy(choiceArgument =
+      Some(Value(Value.Sum.Record(arguments.copy(fields = update(arguments.fields)))))
+    )
+  }
 
   private def transaction(offset: Long, events: Event*): GetUpdatesResponse =
     TraceContext.withNewTraceContext("test-tc") { tc =>
@@ -195,9 +207,74 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
 
   "TeaCreditIngestionService" should {
 
-    "credit the account with the traffic amount of a top-up choice result" in {
-      decode(transaction(10L, topUp(nodeId = 3, "alice", int64(1000L)))) shouldBe Seq(
+    "credit the account with the amount of a PublishCredit exercise" in {
+      decode(transaction(10L, topUp(nodeId = 3, "alice", 1000L))) shouldBe Seq(
         projectionEvent(10L, 3 -> credit(alice, 1000L))
+      )
+    }
+
+    "read the credit from the choice argument" in {
+      val exercised = published(nodeId = 3, amount = 1000L).copy(exerciseResult = None)
+      decode(transaction(10L, asEvent(exercised))) shouldBe Seq(
+        projectionEvent(10L, 3 -> credit(alice, 1000L))
+      )
+    }
+
+    "credit the account when additional observers are specified" in {
+      val exercised =
+        published(nodeId = 3, amount = 1000L, observers = Seq("observer::one", "observer::two"))
+      decode(transaction(10L, asEvent(exercised))) shouldBe Seq(
+        projectionEvent(10L, 3 -> credit(alice, 1000L))
+      )
+    }
+
+    "ignore creates and other choices on an implementing template" in {
+      val credit = published(nodeId = 0)
+      val otherChoice = credit.copy(
+        nodeId = 1,
+        interfaceId = None,
+        choice = "TrafficPurchaser_PurchaseCredits",
+        choiceArgument = Some(Value(Value.Sum.Record(Record.defaultInstance))),
+      )
+      decode(
+        transaction(
+          10L,
+          Event(
+            Event.Event.Created(
+              CreatedEvent.defaultInstance.copy(nodeId = 2, templateId = Some(issuerTemplateId))
+            )
+          ),
+          asEvent(otherChoice),
+          // A template choice that happens to have the same name as the interface choice
+          asEvent(otherChoice.copy(nodeId = 3, choice = credit.choice)),
+          asEvent(credit.copy(nodeId = 4, choice = "Archive", consuming = true)),
+          asEvent(credit),
+        )
+      ) shouldBe Seq(projectionEvent(10L, 0 -> this.credit(alice, 1L)))
+    }
+
+    "ignore reassignment of an implementing contract" in {
+      val reassignment = Reassignment.defaultInstance.copy(
+        offset = 10L,
+        events = Seq(
+          ReassignmentEvent(
+            ReassignmentEvent.Event.Assigned(
+              AssignedEvent.defaultInstance.copy(createdEvent =
+                Some(CreatedEvent.defaultInstance.copy(templateId = Some(issuerTemplateId)))
+              )
+            )
+          )
+        ),
+      )
+      decode(
+        GetUpdatesResponse(GetUpdatesResponse.Update.Reassignment(reassignment))
+      ) shouldBe empty
+    }
+
+    "decode arguments without record labels" in {
+      val credit = withArgumentFields(published(nodeId = 3), _.map(_.copy(label = "")))
+      decode(transaction(10L, asEvent(credit))) shouldBe Seq(
+        projectionEvent(10L, 3 -> this.credit(alice, 1L))
       )
     }
 
@@ -205,10 +282,10 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
       decode(
         transaction(
           10L,
-          topUp(nodeId = 0, "alice", int64(1L)),
-          topUp(nodeId = 1, "bob", int64(2L)),
+          topUp(nodeId = 0, "alice", 1L),
+          topUp(nodeId = 1, "bob", 2L),
         ),
-        transaction(11L, topUp(nodeId = 0, "alice", int64(3L))),
+        transaction(11L, topUp(nodeId = 0, "alice", 3L)),
       ) shouldBe Seq(
         projectionEvent(10L, 0 -> credit(alice, 1L), 1 -> credit(bob, 2L)),
         projectionEvent(11L, 0 -> credit(alice, 3L)),
@@ -219,8 +296,8 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
       val events = decode(
         transaction(
           10L,
-          topUp(nodeId = 2, "alice", int64(1L)),
-          topUp(nodeId = 7, "alice", int64(1L)),
+          topUp(nodeId = 2, "alice", 1L),
+          topUp(nodeId = 7, "alice", 1L),
         )
       )
 
@@ -232,55 +309,95 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
       )
     }
 
-    "ignore events that are not a top-up choice" in {
-      val result = Some(topUpResult("alice", int64(1L)))
-      decode(
-        transaction(
-          10L,
-          Event(Event.Event.Created(CreatedEvent.defaultInstance)),
-          exercised(0, result, choice = "TrafficPurchaser_GrantTraffic"),
-        ),
-        GetUpdatesResponse(
-          GetUpdatesResponse.Update.OffsetCheckpoint(OffsetCheckpoint.defaultInstance)
-        ),
-      ) shouldBe empty
-    }
-
-    "skip top-ups with an invalid result and keep the valid ones" in {
+    "skip invalid credits and keep the valid ones" in {
+      def withArgument(
+          credit: ExercisedEvent,
+          index: Int,
+          value: Option[Value],
+      ): ExercisedEvent =
+        withArgumentFields(
+          credit,
+          fields => fields.updated(index, fields(index).copy(value = value)),
+        )
       val tooLongAccount = "a" * 256
-      loggerFactory.assertLogsUnordered(
-        decode(
-          transaction(
-            10L,
-            topUp(nodeId = 0, "alice", numeric("1000.0")),
-            topUp(nodeId = 1, "alice", int64(0L)),
-            topUp(nodeId = 2, "alice", int64(-3L)),
-            topUp(nodeId = 3, tooLongAccount, int64(1L)),
-            topUp(nodeId = 4, "alice", text("10")),
-            exercised(5, Some(record("trafficAmount" -> int64(1L)))),
-            exercised(6, result = None),
-            topUp(nodeId = 7, "bob", int64(5L)),
-            exercised(8, Some(record("paymaster" -> text(paymaster.toProtoPrimitive)))),
-          )
-        ) shouldBe Seq(projectionEvent(10L, 7 -> credit(bob, 5L))),
-        _.errorMessage should include("node 0: expected an Int64 traffic amount"),
+      val credits = Seq(
+        withArgument(published(nodeId = 0), 1, Some(numeric("1000.0"))),
+        published(nodeId = 1, amount = 0L),
+        published(nodeId = 2, amount = -3L),
+        published(nodeId = 3, account = tooLongAccount),
+        withArgument(published(nodeId = 4), 1, Some(text("10"))),
+        published(nodeId = 5).copy(choiceArgument = Some(Value(Value.Sum.Record(Record())))),
+        published(nodeId = 6).copy(choiceArgument = None),
+        published(nodeId = 7, account = "bob", amount = 5L),
+        published(nodeId = 8).copy(choiceArgument = Some(text("alice"))),
+        published(nodeId = 9, account = ""),
+        withArgument(published(nodeId = 10), 1, None),
+        withArgument(published(nodeId = 11), 1, Some(Value.defaultInstance)),
+        withArgument(published(nodeId = 12), 0, Some(int64(1L))),
+        published(nodeId = 13, account = "\ud800\udc00" * 128),
+        published(nodeId = 14, account = "\u00e9" * 256),
+      )
+      loggerFactory.assertLogs(
+        decode(transaction(10L, credits.map(asEvent)*)) shouldBe Seq(
+          projectionEvent(10L, 7 -> credit(bob, 5L))
+        ),
+        _.errorMessage should include(
+          "node 0: cannot decode: Expected field to be of type com.daml.ledger.javaapi.data.Int64"
+        ),
         _.errorMessage should include("node 1: traffic amount must be positive, got 0"),
         _.errorMessage should include("node 2: traffic amount must be positive, got -3"),
         _.errorMessage should include("node 3: invalid account id"),
-        _.errorMessage should include("node 4: expected an Int64 traffic amount"),
-        _.errorMessage should include("node 5: missing field 'paymaster'"),
-        _.errorMessage should include("node 6: missing exercise result"),
-        _.errorMessage should include("node 8: expected a party"),
+        _.errorMessage should include(
+          "node 4: cannot decode: Expected field to be of type com.daml.ledger.javaapi.data.Int64"
+        ),
+        _.errorMessage should include("node 5: cannot decode: Expected 5 fields, got 0"),
+        _.errorMessage should include("node 6: missing choice argument"),
+        _.errorMessage should include(
+          "node 8: cannot decode: Contracts must be constructed from Records"
+        ),
+        _.errorMessage should include("node 9: account id must not be empty"),
+        _.errorMessage should include("node 10: cannot decode: Sum not set for value"),
+        _.errorMessage should include("node 11: cannot decode: Sum not set for value"),
+        _.errorMessage should include(
+          "node 12: cannot decode: Expected field to be of type com.daml.ledger.javaapi.data.Text"
+        ),
+        _.errorMessage should include("node 13: invalid account id"),
+        _.errorMessage should include("node 14: invalid account id"),
       )
     }
 
-    "skip top-ups made on a contract of a paymaster that is not configured" in {
+    "reject credits without exactly one acting party as invalid" in {
+      val credit = published(nodeId = 0)
       loggerFactory.assertLogs(
         decode(
           transaction(
             10L,
-            exercised(0, Some(topUpResult("alice", int64(1L), paymasterParty = "intruder::x"))),
-            topUp(nodeId = 1, "bob", int64(2L)),
+            asEvent(credit.copy(actingParties = Seq.empty)),
+            asEvent(
+              credit.copy(
+                nodeId = 1,
+                actingParties = Seq(paymaster.toProtoPrimitive, "paymaster::other"),
+              )
+            ),
+          )
+        ) shouldBe empty,
+        _.errorMessage should include("node 0: expected exactly one acting party, got "),
+        _.errorMessage should include(
+          s"node 1: expected exactly one acting party, got ${paymaster.toProtoPrimitive}, paymaster::other"
+        ),
+      )
+    }
+
+    "skip credits from unconfigured paymasters, even when a trusted party is a witness" in {
+      val untrustedCredit = published(nodeId = 0, paymasterParty = "intruder::x").copy(
+        witnessParties = Seq("intruder::x", paymaster.toProtoPrimitive)
+      )
+      loggerFactory.assertLogs(
+        decode(
+          transaction(
+            10L,
+            asEvent(untrustedCredit),
+            topUp(nodeId = 1, "bob", 2L),
           )
         ) shouldBe Seq(projectionEvent(10L, 1 -> credit(bob, 2L))),
         _.warningMessage should include(
@@ -291,7 +408,7 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
 
     "emit no event for a transaction without valid top-ups" in {
       loggerFactory.assertLogs(
-        decode(transaction(10L, topUp(nodeId = 0, "alice", int64(0L)))) shouldBe empty,
+        decode(transaction(10L, topUp(nodeId = 0, "alice", 0L))) shouldBe empty,
         entry => {
           entry.errorMessage should include("node 0: traffic amount must be positive, got 0")
           entry.shouldBeCantonError(
@@ -305,10 +422,10 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
       )
     }
 
-    "subscribe to the configured template for the paymasters with verbose ledger effects" in {
+    "subscribe to TrafficCreditReporter by package name for the paymasters with non-verbose ledger effects" in {
       val otherPaymaster = PartyId.tryFromProtoPrimitive("paymaster::other")
-      val (service, updateServiceClient, _) = serviceWith(projectionConfig =
-        ProjectionConfig(topUpPaymasters = Set(paymaster, otherPaymaster))
+      val (service, updateServiceClient, _) = serviceWith(topUpConfig =
+        TopUpConfig.DamlCredit(paymasters = NonEmpty(Set, paymaster, otherPaymaster))
       )
       runEvents(service.grpcSource(beginOffset = Some(1L)))
 
@@ -322,19 +439,22 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
       )(any[TraceContext])
 
       val format = formatCaptor.getValue
-      format.verbose shouldBe true
+      format.verbose shouldBe false
       format.filtersForAnyParty shouldBe empty
       format.filtersByParty.keySet shouldBe Set(paymaster, otherPaymaster).map(_.toProtoPrimitive)
       forAll(format.filtersByParty.values) { filters =>
-        val templateIds = filters.cumulative
-          .map(_.identifierFilter)
-          .collect { case IdentifierFilter.TemplateFilter(filter) => filter.templateId }
-        templateIds shouldBe Seq(
-          Some(
-            Identifier(
-              packageId = s"#${Template.PackageName}",
-              moduleName = Template.ModuleName,
-              entityName = Template.TemplateName,
+        filters.cumulative.map(_.identifierFilter) shouldBe Seq(
+          IdentifierFilter.InterfaceFilter(
+            InterfaceFilter(
+              Some(
+                Identifier(
+                  "#canton-api-traffic-credit-v1",
+                  "Canton.Api.Traffic.CreditV1",
+                  "TrafficCreditReporter",
+                )
+              ),
+              includeInterfaceView = false,
+              includeCreatedEventBlob = false,
             )
           )
         )
@@ -360,7 +480,7 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
     "use the configured initial offset" in {
       val (service, updateServiceClient, stateServiceClient) = serviceWith(
         prunedUpTo = 42L,
-        projectionConfig = defaultConfig.copy(initialTopUpOffsetBeginExclusive = Some(31380L)),
+        topUpConfig = defaultConfig.copy(initialOffsetBeginExclusive = Some(31380L)),
       )
       runEvents(service.grpcSource(beginOffset = None))
 

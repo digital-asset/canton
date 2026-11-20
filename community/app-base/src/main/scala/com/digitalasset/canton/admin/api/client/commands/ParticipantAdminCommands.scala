@@ -31,6 +31,7 @@ import com.digitalasset.canton.admin.participant.v30.PingServiceGrpc.PingService
 import com.digitalasset.canton.admin.participant.v30.PruningServiceGrpc.PruningServiceStub
 import com.digitalasset.canton.admin.participant.v30.ResourceManagementServiceGrpc.ResourceManagementServiceStub
 import com.digitalasset.canton.admin.participant.v30.SynchronizerConnectivityServiceGrpc.SynchronizerConnectivityServiceStub
+import com.digitalasset.canton.admin.participant.v30.UnvetDarRequest.UnvetScope
 import com.digitalasset.canton.admin.participant.v30.{
   PerformManualLsuRequest,
   RepairCommitmentsUsingAcsRequest,
@@ -51,6 +52,7 @@ import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.admin.data.{
   AcsReplicationStatus,
   ContractImportMode,
+  ImportPartyAcsForceFlag,
   PartyReplicationStatus,
   RepresentativePackageIdOverride,
 }
@@ -477,11 +479,18 @@ object ParticipantAdminCommands {
 
     // TODO(#14432): Add `synchronize` flag which makes the call block until the unvetting operation
     //               is observed by the participant on all connected synchronizers.
-    final case class UnvetDar(mainPackageId: String, synchronizerId: Option[SynchronizerId])
-        extends PackageCommand[v30.UnvetDarRequest, v30.UnvetDarResponse, Unit] {
+    final case class UnvetDar(
+        mainPackageId: String,
+        synchronizerId: Option[SynchronizerId],
+        unvetScope: UnvetScope,
+    ) extends PackageCommand[v30.UnvetDarRequest, v30.UnvetDarResponse, Unit] {
 
       override protected def createRequest(): Either[String, v30.UnvetDarRequest] = Right(
-        v30.UnvetDarRequest(mainPackageId, synchronizerId.map(_.toProtoPrimitive))
+        v30.UnvetDarRequest(
+          mainPackageId,
+          synchronizerId.map(_.toProtoPrimitive),
+          unvetScope,
+        )
       )
 
       override protected def submitRequest(
@@ -758,6 +767,7 @@ object ParticipantAdminCommands {
         contractImportMode: ContractImportMode,
         representativePackageIdOverride: RepresentativePackageIdOverride,
         party: Option[PartyId],
+        forceFlags: Set[ImportPartyAcsForceFlag] = Set.empty,
     )(implicit ec: ExecutionContext, loggingContext: ErrorLoggingContext)
         extends GrpcAdminCommand[
           Unit,
@@ -792,6 +802,7 @@ object ParticipantAdminCommands {
               representativePackageIdOverride =
                 Option.when(isFirst)(representativePackageIdOverride.toProtoV30),
               partyId = Option.when(isFirst)(party.map(_.toProtoPrimitive)).flatten,
+              forceFlags = if (isFirst) forceFlags.toSeq.map(_.toProtoV30) else Seq.empty,
             )
           },
           new FileInputStream(file),
@@ -838,6 +849,82 @@ object ParticipantAdminCommands {
           response: v30.ClearPartyOnboardingFlagResponse
       ): Either[String, admin.PartyOnboardingFlagStatus] =
         admin.PartyOnboardingFlagStatus.fromProtoV30(response).leftMap(_.message)
+    }
+
+    final case class GetRemoteAcs(
+        parties: Seq[PartyId],
+        synchronizerId: SynchronizerId,
+        sourceParticipantId: ParticipantId,
+        asOf: CantonTimestamp,
+        observer: StreamObserver[v30.GetRemoteAcsResponse],
+    ) extends GrpcAdminCommand[
+          v30.GetRemoteAcsRequest,
+          CancellableContext,
+          CancellableContext,
+        ] {
+
+      override type Svc = PartyManagementServiceStub
+
+      override def createService(channel: ManagedChannel): PartyManagementServiceStub =
+        v30.PartyManagementServiceGrpc.stub(channel)
+
+      override protected def createRequest(): Either[String, v30.GetRemoteAcsRequest] =
+        Right(
+          v30.GetRemoteAcsRequest(
+            parties.map(_.toProtoPrimitive),
+            synchronizerId.toProtoPrimitive,
+            sourceParticipantId.uid.toProtoPrimitive,
+            Some(asOf.toProtoTimestamp),
+          )
+        )
+
+      override protected def submitRequest(
+          service: PartyManagementServiceStub,
+          request: v30.GetRemoteAcsRequest,
+      ): Future[CancellableContext] = {
+        val context = Context.current().withCancellation()
+        context.run(() => service.getRemoteAcs(request, observer))
+        Future.successful(context)
+      }
+
+      override protected def handleResponse(
+          response: CancellableContext
+      ): Either[String, CancellableContext] = Right(response)
+
+      override def timeoutType: GrpcAdminCommand.TimeoutType =
+        GrpcAdminCommand.DefaultUnboundedTimeout
+    }
+
+    final case class GetPartyFreezingTime(
+        party: PartyId,
+        synchronizerId: SynchronizerId,
+    ) extends GrpcAdminCommand[
+          v30.GetPartyFreezingTimeRequest,
+          v30.GetPartyFreezingTimeResponse,
+          CantonTimestamp,
+        ] {
+      override type Svc = PartyManagementServiceStub
+
+      override def createService(channel: ManagedChannel): PartyManagementServiceStub =
+        v30.PartyManagementServiceGrpc.stub(channel)
+
+      override protected def createRequest(): Either[String, v30.GetPartyFreezingTimeRequest] =
+        Right(
+          v30.GetPartyFreezingTimeRequest(party.toProtoPrimitive, synchronizerId.toProtoPrimitive)
+        )
+
+      override protected def submitRequest(
+          service: PartyManagementServiceStub,
+          request: v30.GetPartyFreezingTimeRequest,
+      ): Future[v30.GetPartyFreezingTimeResponse] = service.getPartyFreezingTime(request)
+
+      override protected def handleResponse(
+          response: v30.GetPartyFreezingTimeResponse
+      ): Either[String, CantonTimestamp] = for {
+        tsP <- response.timestamp.toRight("Expected timestamp")
+        ts <- CantonTimestamp.fromProtoTimestamp(tsP).leftMap(_.message)
+      } yield ts
+
     }
   }
 

@@ -10,11 +10,8 @@ import com.digitalasset.canton.BaseTest.{
   defaultStaticSynchronizerParameters,
   testedReleaseProtocolVersion,
 }
-import com.digitalasset.canton.concurrent.{
-  DirectExecutionContext,
-  FutureSupervisor,
-  HasFutureSupervision,
-}
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
+import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{CachingConfigs, CryptoConfig, DefaultProcessingTimeouts}
 import com.digitalasset.canton.crypto.*
@@ -145,7 +142,6 @@ final case class TestingTopology(
     externalParties: Map[PartyId, (ParticipantId, SigningKeysWithThreshold)] = Map.empty,
     cryptoConfig: CryptoConfig = CryptoConfig(),
     freshKeys: AtomicBoolean = new AtomicBoolean(false),
-    // TODO(#36492): Check if this could be integrated in `PartyInfo` (`topology` field)
     hostingStates: Map[LfPartyId, Map[ParticipantId, HostingState]] = Map.empty,
 ) {
   def mediators: Seq[MediatorId] = mediatorGroups.toSeq.flatMap(_.all)
@@ -439,8 +435,7 @@ class TestingIdentityFactory(
     cryptoConfig: CryptoConfig = CryptoConfig(),
 ) extends NamedLogging
     with FutureHelpers {
-  protected implicit val directExecutionContext: ExecutionContext =
-    DirectExecutionContext(noTracingLogger)
+  protected implicit val directExecutionContextImplicit: ExecutionContext = directExecutionContext
 
   @VisibleForTesting
   def getTopology(): TestingTopology = this.topology
@@ -488,8 +483,7 @@ class TestingIdentityFactory(
 
         override protected def futureSupervisor: FutureSupervisor = FutureSupervisor.Noop
 
-        override protected val executionContext: ExecutionContext =
-          TestingIdentityFactory.this.directExecutionContext
+        override protected val executionContext: ExecutionContext = directExecutionContext
 
         override def await(condition: TopologySnapshot => Future[Boolean], timeout: Duration)(
             implicit traceContext: TraceContext

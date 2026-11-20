@@ -37,6 +37,7 @@ import com.digitalasset.canton.console.{
   SequencerReference,
 }
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.provider.jce.JcePasswordBasedEncryption
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonError
@@ -519,7 +520,11 @@ class TopologyAdministrationGroup(
       }
 
     @Help.Summary("Loads topology transactions from a file into the specified topology store")
-    @Help.Description("The file must contain data serialized by SignedTopologyTransaction.")
+    @Help.Description(
+      """The file must contain data serialized by SignedTopologyTransaction. If `password` is
+        |set, the file must contain it encrypted with the password, as written by
+        |`export_single_to_file`. The console decrypts it."""
+    )
     def load_single_from_file(
         file: String,
         store: TopologyStoreId,
@@ -527,17 +532,31 @@ class TopologyAdministrationGroup(
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.unbounded
         ),
+        password: Option[String] = None,
     ): Unit = {
-      val transaction = SignedTopologyTransaction
-        .readFromTrustedFile(
-          TopologyTransactionDeserializationContext(SynchronizerLimits.default),
-          file,
+      val context = TopologyTransactionDeserializationContext(SynchronizerLimits.default)
+      val transactionE = password match {
+        case Some(password) =>
+          for {
+            bytes <- BinaryFileUtil.readByteStringFromFile(file)
+            encrypted <- PasswordBasedEncrypted.fromTrustedByteString(bytes).leftMap(_.toString)
+            serialized <- JcePasswordBasedEncryption
+              .decryptWithPassword(encrypted, password)(Right(_))
+              .leftMap(err => s"Failed to decrypt with password: $err")
+            transaction <- SignedTopologyTransaction
+              .fromTrustedByteString(context)(serialized)
+              .leftMap(_.toString)
+          } yield transaction
+        case None =>
+          SignedTopologyTransaction
+            .readFromTrustedFile(context, file)
+            .leftMap(err => s"$err. If the file is password-encrypted, pass `password`.")
+      }
+      val transaction = transactionE.valueOr { err =>
+        consoleEnvironment.run(
+          CommandErrors.GenericCommandError(s"Unable to read from `$file`: $err")
         )
-        .valueOr { err =>
-          consoleEnvironment.run(
-            CommandErrors.GenericCommandError(s"Unable to read from `$file`: $err")
-          )
-        }
+      }
 
       consoleEnvironment.run {
         adminCommand(
@@ -545,6 +564,37 @@ class TopologyAdministrationGroup(
             .AddTransactions(Seq(transaction), store, forceFlags, synchronize)
         )
       }
+    }
+
+    @Help.Summary("Exports a signed topology transaction to a file")
+    @Help.Description(
+      """Writes the signed topology transaction to a file, encrypted with the password if one
+        |is set. To load the file, use `load_single_from_file` with the same password.
+        |
+        |Parameters:
+        |- transaction: The signed topology transaction to export.
+        |- file: The file to write the signed transaction to.
+        |- password: Optional password. If set, the console encrypts the transaction with it.
+        |  We recommend that the name of an encrypted file ends with `.enc`.
+        """
+    )
+    def export_single_to_file(
+        transaction: GenericSignedTopologyTransaction,
+        file: String,
+        password: Option[String] = None,
+    ): Unit = {
+      val serialized = transaction.toByteString
+      val bytes = password.fold(serialized) { password =>
+        JcePasswordBasedEncryption
+          .encryptWithPassword(serialized, password)
+          .map(_.toByteString(ProtocolVersion.latest))
+          .valueOr(err =>
+            consoleEnvironment.run(
+              CommandErrors.GenericCommandError(s"Failed to encrypt with password: $err")
+            )
+          )
+      }
+      writeToFile(file, bytes)
     }
 
     @Help.Summary(
@@ -4540,6 +4590,12 @@ class TopologyAdministrationGroup(
       ): SignedTopologyTransaction[TopologyChangeOp, LsuSequencerConnectionSuccessor] = {
         val nodeStatus = instance.health.status
 
+        val validatedCustomTrustCertificates = customTrustCertificates
+          .traverse(ValidatedPemCertificate.create)
+          .valueOr(err =>
+            consoleEnvironment.raiseError(s"Unable to build sequencer connection: $err")
+          )
+
         consoleEnvironment.run {
           adminCommand(
             TopologyAdminCommands.Write.Propose(
@@ -4555,7 +4611,7 @@ class TopologyAdministrationGroup(
                     GrpcConnection(
                       validatedEndpoints,
                       useTls,
-                      customTrustCertificates,
+                      validatedCustomTrustCertificates,
                     ),
                   )
                 },

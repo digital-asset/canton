@@ -156,7 +156,7 @@ sealed trait InvalidReassignmentIdIntegrationTest
           targetId,
           sequencer2,
           mediator2,
-          withMediatorVerdict(Verdict.Approve(testedProtocolVersion)),
+          withMediatorVerdict(Verdict.Approve.create(testedProtocolVersion)),
         ) {
           loggerFactory.assertLoggedWarningsAndErrorsSeq(
             {

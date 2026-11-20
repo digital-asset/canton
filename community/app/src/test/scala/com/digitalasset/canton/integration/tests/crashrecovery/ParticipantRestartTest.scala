@@ -2213,7 +2213,8 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
             // Explicitly set a massive deduplication window (1 day) to guarantee
             // that all 6 retries across all 3 node restarts are caught by the same
             // deduplication boundary, rather than being treated as fresh commands.
-            deduplicationPeriod = Some(DeduplicationDuration(java.time.Duration.ofDays(1))),
+            deduplicationPeriod =
+              Some(DeduplicationDuration.create(java.time.Duration.ofDays(1)).value),
           )
         },
         { (result: Either[CommandFailure, ?]) =>

@@ -16,6 +16,7 @@ import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicat
   AlreadyExists,
   DeduplicationFailed,
   DeduplicationPeriodTooEarly,
+  InvalidDeduplicationDuration,
 }
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.CommandDeduplicationStore.OffsetAndPublicationTime
@@ -77,6 +78,8 @@ object CommandDeduplicator {
       requested: DeduplicationPeriod,
       earliestDeduplicationStart: DeduplicationPeriod,
   ) extends DeduplicationFailed
+
+  final case class InvalidDeduplicationDuration(reason: String) extends DeduplicationFailed
 }
 
 class CommandDeduplicatorImpl(
@@ -162,10 +165,11 @@ class CommandDeduplicatorImpl(
               logger.info(s"Deduplication period underflow: $err")
               val longestDeduplicationPeriod =
                 java.time.Duration.between(CantonTimestamp.MinValue.toInstant, baseline)
-              DeduplicationPeriodTooEarly(
-                deduplicationPeriod,
-                DeduplicationPeriod.DeduplicationDuration(longestDeduplicationPeriod),
-              )
+              DeduplicationPeriod.DeduplicationDuration.create(longestDeduplicationPeriod) match {
+                case Left(reason) => InvalidDeduplicationDuration(reason)
+                case Right(longestPeriod) =>
+                  DeduplicationPeriodTooEarly(deduplicationPeriod, longestPeriod)
+              }
           }
         )
         dedupEntryO <- EitherT.right(store.value.lookup(changeIdHash).value)

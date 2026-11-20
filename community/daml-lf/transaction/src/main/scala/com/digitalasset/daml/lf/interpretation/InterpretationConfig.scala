@@ -9,25 +9,25 @@ import com.google.common.annotations.VisibleForTesting
 
 case class InterpretationConfig(
     allowedLanguageVersions: List[LanguageVersion],
-    errorOnContractKeyMismatch: Boolean,
+    errorOnContractKeyHashMismatch: Boolean,
 )
 
 object InterpretationConfig {
   val V36: InterpretationConfig = InterpretationConfig(
     allowedLanguageVersions =
       List(LanguageVersion.v2_1, LanguageVersion.v2_2, LanguageVersion.v2_3, LanguageVersion.v2_4),
-    errorOnContractKeyMismatch = false,
+    errorOnContractKeyHashMismatch = false,
   )
   val V37: InterpretationConfig = InterpretationConfig(
     allowedLanguageVersions =
       List(LanguageVersion.v2_1, LanguageVersion.v2_2, LanguageVersion.v2_3, LanguageVersion.v2_4),
-    errorOnContractKeyMismatch = true,
+    errorOnContractKeyHashMismatch = true,
   )
   val Dev: InterpretationConfig = InterpretationConfig(
     allowedLanguageVersions = LanguageVersion.allLfVersions,
-    errorOnContractKeyMismatch = true,
+    errorOnContractKeyHashMismatch = true,
   )
-  def Default = V36
+  def Default = V37
   @VisibleForTesting
   def Stable = Default
 }

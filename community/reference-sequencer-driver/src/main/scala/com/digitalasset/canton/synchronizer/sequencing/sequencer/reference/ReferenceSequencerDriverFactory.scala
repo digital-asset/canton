@@ -4,7 +4,12 @@
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.reference
 
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, StorageConfig}
+import com.digitalasset.canton.config.{
+  ConfidentialConfigWriter,
+  DbConfig,
+  ProcessingTimeout,
+  StorageConfig,
+}
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{Storage, StorageSingleSetup}
@@ -13,6 +18,7 @@ import com.digitalasset.canton.synchronizer.block.{SequencerDriver, SequencerDri
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.store.ReferenceBlockOrderingStore
 import com.digitalasset.canton.time.{Clock, TimeProvider, TimeProviderClock}
 import com.digitalasset.canton.tracing.TraceContext
+import com.typesafe.config.Config
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.stream.Materializer
 import pureconfig.{ConfigReader, ConfigWriter}
@@ -48,6 +54,9 @@ class ReferenceSequencerDriverFactory extends SequencerDriverFactory {
     import pureconfig.generic.semiauto.*
     import com.digitalasset.canton.config.BaseCantonConfig.Writers.*
 
+    // the raw database config can contain confidential values (passwords, urls)
+    implicit val dbConfigWriter: ConfigWriter[Config] =
+      new ConfidentialConfigWriter(confidential).rawConfigWriter(DbConfig.hideConfidential)
     implicit val enterpriseMemoryStorageConfigWriter: ConfigWriter[StorageConfig.Memory] =
       deriveWriter[StorageConfig.Memory]
     implicit val enterpriseH2StorageConfigWriter: ConfigWriter[DbConfig.H2] =

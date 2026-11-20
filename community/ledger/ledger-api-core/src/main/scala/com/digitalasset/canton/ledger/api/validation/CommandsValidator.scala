@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
+import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.commands.Command.Command.{
   Create as ProtoCreate,
@@ -17,6 +18,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   PrepareSubmissionRequest,
 }
 import com.daml.ledger.api.v2.reassignment_commands.{ReassignmentCommand, ReassignmentCommands}
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.ledger.api.messages.command.submission
@@ -28,6 +30,7 @@ import com.digitalasset.canton.ledger.api.validation.CommandsValidator.{
 import com.digitalasset.canton.ledger.api.{CommandId, Commands}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.platform.config.CommandServiceConfig
 import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -47,6 +50,8 @@ final class CommandsValidator(
     validateUpgradingPackageResolutions: ValidateUpgradingPackageResolutions,
     validateDisclosedContracts: ValidateDisclosedContracts = ValidateDisclosedContracts,
     topologyAwarePackageSelectionEnabled: Boolean = false,
+    minLedgerTimeMaxDelay: NonNegativeFiniteDuration =
+      CommandServiceConfig.DefaultMinLedgerTimeMaxDelay,
 ) {
 
   import FieldValidator.*
@@ -93,7 +98,7 @@ final class CommandsValidator(
       readAs = submitters.readAs,
       submittedAt = Time.Timestamp.assertFromInstant(currentUtcTime),
       // Unused for transaction preparation
-      deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration(Duration.ZERO),
+      deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration.Zero,
       commands = ApiCommands(
         commands = validatedCommands.to(ImmArray),
         ledgerEffectiveTime = ledgerEffectiveTimestamp,
@@ -135,6 +140,7 @@ final class CommandsValidator(
         currentLedgerTime,
         commands.minLedgerTimeAbs,
         commands.minLedgerTimeRel,
+        maxDelay = Some(minLedgerTimeMaxDelay),
       )
       deduplicationPeriod <- validateDeduplicationPeriod(
         commands.deduplicationPeriod,
@@ -244,15 +250,27 @@ final class CommandsValidator(
       currentTime: Instant,
       minLedgerTimeAbs: Option[Timestamp],
       minLedgerTimeRel: Option[DurationP],
+      maxDelay: Option[NonNegativeFiniteDuration] = None,
   )(implicit
       errorLoggingContext: ErrorLoggingContext
-  ): Either[StatusRuntimeException, Time.Timestamp] =
+  ): Either[StatusRuntimeException, Time.Timestamp] = {
+    def bounded(fieldName: String, ledgerTime: Instant) = maxDelay match {
+      case Some(delay) if ledgerTime > currentTime.plus(delay.asJava) =>
+        Left(
+          invalidField(
+            fieldName,
+            s"must not be more than ${delay.underlying} ahead of the current ledger time",
+          )
+        )
+      case _ => Right(ledgerTime)
+    }
     for {
       ledgerEffectiveTime <- (minLedgerTimeAbs, minLedgerTimeRel) match {
         case (None, None) => Right(currentTime)
         case (Some(minAbs), None) =>
-          Right(currentTime.max(TimestampConversion.toInstant(minAbs)))
-        case (None, Some(minRel)) => Right(currentTime.plus(DurationConversion.fromProto(minRel)))
+          bounded("min_ledger_time_abs", TimestampConversion.toInstant(minAbs)).map(currentTime.max)
+        case (None, Some(minRel)) =>
+          bounded("min_ledger_time_rel", currentTime.plus(DurationConversion.fromProto(minRel)))
         case (Some(_), Some(_)) =>
           Left(
             invalidArgument(
@@ -270,6 +288,7 @@ final class CommandsValidator(
         )
 
     } yield ledgerEffectiveTimestamp
+  }
 
   // Public because it is used by Canton.
   def validateInnerCommands(
@@ -393,12 +412,20 @@ final class CommandsValidator(
   ): Either[StatusRuntimeException, DeduplicationPeriod] =
     deduplicationPeriod match {
       case ProtoCommands.DeduplicationPeriod.Empty =>
-        Right(DeduplicationPeriod.DeduplicationDuration(maxDeduplicationDuration))
+        DeduplicationPeriod.DeduplicationDuration
+          .create(maxDeduplicationDuration)
+          .leftMap(error => invalidField("deduplication_period", error))
+
       case ProtoCommands.DeduplicationPeriod.DeduplicationDuration(duration) =>
         val deduplicationDuration = DurationConversion.fromProto(duration)
         DeduplicationPeriodValidator
           .validateNonNegativeDuration(deduplicationDuration)
-          .map(DeduplicationPeriod.DeduplicationDuration.apply)
+          .flatMap(duration =>
+            DeduplicationPeriod.DeduplicationDuration
+              .create(duration)
+              .leftMap(error => invalidField("deduplication_period", error))
+          )
+
       case ProtoCommands.DeduplicationPeriod.DeduplicationOffset(offset) =>
         if (offset < 0L)
           Left(
@@ -418,7 +445,6 @@ final class CommandsValidator(
             )
           )
     }
-
   private def validatePrefetchContractKeys(
       keys: Seq[PrefetchContractKey]
   )(implicit

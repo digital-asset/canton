@@ -780,7 +780,7 @@ final class TopologyManagementIntegrationTest
             store = daId,
           ),
           _.message should include(
-            "Tried to set a confirming threshold (2) above the number of hosting nodes (1)"
+            "Tried to set a confirming threshold (2) above the number of hosting nodes with Submission or Confirmation permission (1)"
           ),
         )
     }

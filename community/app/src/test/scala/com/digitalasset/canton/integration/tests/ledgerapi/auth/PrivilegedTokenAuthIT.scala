@@ -9,6 +9,7 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.canton.auth.AccessLevel
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.{AuthServiceConfig, CantonConfig}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthServiceJWTSuppressionRule

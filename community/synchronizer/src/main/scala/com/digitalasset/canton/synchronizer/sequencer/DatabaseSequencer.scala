@@ -544,7 +544,11 @@ class DatabaseSequencer(
       cryptoApi,
     )(logger)
 
-  override def trafficStatus(members: Seq[Member], selector: TimestampSelector)(implicit
+  override def trafficStatus(
+      members: Seq[Member],
+      selector: TimestampSelector,
+      includeOnboardingMembers: Boolean,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficControlError, SequencerTrafficStatus] =
     throw new UnsupportedOperationException(

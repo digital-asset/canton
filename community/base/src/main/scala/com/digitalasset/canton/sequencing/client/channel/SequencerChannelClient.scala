@@ -148,13 +148,18 @@ final class SequencerChannelClient(
 
   /** Ping the sequencer to check if the sequencer with the provided SequencerId supports sequencer
     * channels.
+    *
+    * @param ignorePoolCapacityExhaustion
+    *   If true, a sequencer whose channel pool is currently full still counts as supporting
+    *   channels (the ping succeeds). If false, a full pool fails the ping, e.g. to avoid a
+    *   reconnect attempt that would be rejected anyway.
     */
-  def ping(sequencerId: SequencerId)(implicit
+  def ping(sequencerId: SequencerId, ignorePoolCapacityExhaustion: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = for {
     transport <- EitherT.fromEither[FutureUnlessShutdown](clientState.transport(sequencerId))
-    _ <- transport.ping()
-  } yield ()
+    pingResult <- transport.ping(ignorePoolCapacityExhaustion)
+  } yield pingResult
 
   override protected def onClosed(): Unit = clientState.close()
 }

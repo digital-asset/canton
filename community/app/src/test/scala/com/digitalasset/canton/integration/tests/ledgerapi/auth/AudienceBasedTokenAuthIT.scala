@@ -7,6 +7,7 @@ import com.daml.jwt.{StandardJWTPayload, StandardJWTTokenFormat}
 import com.daml.ledger.api.v2.admin.package_management_service.*
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.base.error.ErrorsAssertions
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.{AuthServiceConfig, CantonConfig}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{

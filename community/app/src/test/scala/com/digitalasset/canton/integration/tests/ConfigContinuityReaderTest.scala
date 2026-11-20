@@ -77,6 +77,12 @@ final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3
         "canton.mediators.mediator1.sequencer-client.enable-immediate-sync-rejection-send-tracker-cleanup",
       )
     ),
+    (3, 7, 3) -> Transforms(
+      Seq(
+        // replaced by the explicit top-up config in #36795
+        "canton.participants.participant1.traffic-accounting.traffic-enforcement-server.projection.top-up-paymasters"
+      )
+    ),
   )
 
   /** Make the config parsable by applying some transformations. It basically makes some breaking

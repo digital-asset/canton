@@ -10,6 +10,7 @@ import com.daml.test.evidence.tag.Security.SecurityTest.Property.*
 import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmptyString}
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
@@ -105,7 +106,10 @@ class CantonAdminTokenIntegrationTest(elevatedRights: Boolean)
         val invalid1 = noToken1.copy(token =
           Some(
             JwtTokenUtilities
-              .buildUnsafeToken("invalid", Some(UserManagementStore.DefaultParticipantAdminUserId))
+              .buildUnsafeToken(
+                "invalid",
+                Some(UserManagementStore.DefaultParticipantAdminUserId),
+              )
           )
         )
         config

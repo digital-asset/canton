@@ -1,0 +1,80 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- | Interface for a paymaster to report traffic credits
+-- to Canton's Traffic Enforcement App (TEA).
+--
+-- Use this to integrate your custom credit purchase workflows
+-- with TEA.
+module Canton.Api.Traffic.CreditV1
+  ( Metadata(..)
+  , emptyMetadata
+  , TrafficCreditReporterView(..)
+  , TrafficCreditReporter
+  , trafficCreditReporter_publishCreditImpl
+  , TrafficCreditReporter_PublishCredit(..)
+  , TrafficCreditReporter_PublishCreditResult(..)
+  ) where
+
+import DA.TextMap as TextMap
+
+-- | Metadata to pass in with a traffic credit.
+data Metadata = Metadata with
+    values : TextMap Text
+      -- ^ Key-value pairs of metadata entries.
+  deriving (Eq, Ord, Show)
+
+-- | Empty metadata.
+emptyMetadata : Metadata
+emptyMetadata = Metadata with values = mempty
+
+-- | Result of publishing a traffic credit. Provided for extensibility
+-- in a future where interfaces are upgradeable.
+data TrafficCreditReporter_PublishCreditResult = TrafficCreditReporter_PublishCreditResult {}
+  deriving (Serializable)
+
+-- | The view of a `TrafficCreditReporter`.
+data TrafficCreditReporterView = TrafficCreditReporterView with
+    paymaster : Party
+      -- ^ The party paying for the traffic. Must be a configured top-up
+      -- paymaster of the TEA that ingests the credit.
+    meta : Metadata
+      -- ^ Metadata. Used for extensibility.
+
+-- | A contract for a `paymaster` to report traffic credits.
+interface TrafficCreditReporter where
+  viewtype TrafficCreditReporterView
+
+  trafficCreditReporter_publishCreditImpl
+    : ContractId TrafficCreditReporter
+    -> TrafficCreditReporter_PublishCredit
+    -> Update TrafficCreditReporter_PublishCreditResult
+
+  -- | Report a credit of `trafficAmount` traffic bytes to `accountId`.
+  --
+  -- Requires the authority of the paymaster, e.g. by being exercised from a
+  -- choice on the implementing contract that the paymaster signs. Any choice
+  -- that exercises `PublishCredit` with the authority of the paymaster can
+  -- credit traffic, so such choices must only do so once the traffic has been
+  -- paid for.
+  --
+  -- Implementations MUST reject invalid account ids and non-positive traffic
+  -- amounts in `trafficCreditReporter_publishCreditImpl`.
+  nonconsuming choice TrafficCreditReporter_PublishCredit : TrafficCreditReporter_PublishCreditResult
+    with
+      accountId : Text
+        -- ^ The TEA account to credit. Must be valid account-id as defined by the TEA app.
+      trafficAmount : Int
+        -- ^ Traffic to credit, in bytes.
+      purchaser : Party
+        -- ^ The party that purchased the traffic. This is for auditing and
+        -- reporting purposes only, and is not used for authorization.
+      observers : [Party]
+        -- ^ Additional parties notified of the credit. May be empty.
+        -- Being an observer does not grant authority to publish credits.
+      metadata : Metadata
+        -- ^ Additional metadata to pass in.
+        -- Use `emptyMetadata` if no metadata is needed.
+    observer observers
+    controller (view this).paymaster
+    do trafficCreditReporter_publishCreditImpl this self arg

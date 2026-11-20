@@ -6,6 +6,7 @@ package com.digitalasset.canton.config
 import better.files.*
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.Confidential
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
 
 class SequencerDriverConfigTest extends BaseTestWordSpec {
@@ -32,7 +33,7 @@ class SequencerDriverConfigTest extends BaseTestWordSpec {
         case SequencerConfig.External(`driverName`, _, configCursor) =>
           val config =
             valueOrFail(driverFactory.configParser.from(configCursor))("parsing driver config")
-          config shouldBe (DummyDriverFactory.DummyConfig(Password(password), "something"))
+          config shouldBe (DummyDriverFactory.DummyConfig(Confidential(password), "something"))
         case _ => fail("expected an external sequencer config")
       }
     }
@@ -43,7 +44,7 @@ class SequencerDriverConfigTest extends BaseTestWordSpec {
           Some(DefaultPorts.create()),
         )
       val cantonConfig = valueOrFail(configE)("loading dummy sequencer config")
-      val confString = CantonConfig.makeConfidentialString(cantonConfig)
+      val confString = cantonConfig.dumpString
       confString should not include (password)
     }
   }

@@ -16,7 +16,7 @@ trait PasswordBasedEncryptionTest extends FailOnShutdown {
   def pbeProvider(
       supportedPbkdfSchemes: Set[PbkdfScheme],
       supportedSymmetricKeySchemes: Set[SymmetricKeyScheme],
-      newCrypto: => FutureUnlessShutdown[PasswordBasedEncryptionOps & EncryptionOps],
+      newCrypto: => FutureUnlessShutdown[PasswordBasedEncryptionOps & SymmetricEncryptionOps],
   ): Unit =
     s"encrypt with passwords" should {
 

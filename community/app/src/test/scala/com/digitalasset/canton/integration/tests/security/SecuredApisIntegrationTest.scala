@@ -18,6 +18,7 @@ import com.daml.tls.{
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmptyString}
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.console.{
   CommandFailure,
@@ -259,7 +260,10 @@ trait SecuredApisIntegrationTest
           ledgerApi = p1.ledgerApi.clientConfig,
           token = Some(
             JwtTokenUtilities
-              .buildUnsafeToken("invalid", Some(UserManagementStore.DefaultParticipantAdminUserId))
+              .buildUnsafeToken(
+                "invalid",
+                Some(UserManagementStore.DefaultParticipantAdminUserId),
+              )
           ),
         )
         val v1 = copyWith(iv1, mySecret.unwrap)

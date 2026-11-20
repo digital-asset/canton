@@ -6,13 +6,12 @@ package com.digitalasset.canton.networking.grpc.ratelimiting
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.config.RateLimitConfig
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.RateLimitMetrics
 import com.digitalasset.canton.util.PekkoUtil
-import com.typesafe.scalalogging.Logger
 import io.grpc.{Status, StatusRuntimeException}
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
@@ -22,7 +21,6 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Seconds, Span}
 import org.scalatest.wordspec.AnyWordSpec
-import org.slf4j.LoggerFactory
 
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
@@ -45,10 +43,8 @@ class TokenBucketRateLimiterTest
   // either (even in Test scope) would be a circular module dependency. This reproduces just the
   // handful of lines HasActorSystem itself needs, using primitives (PekkoUtil, Materializer)
   // already in community-base's own main sources.
-  private implicit val ec: DirectExecutionContext =
-    DirectExecutionContext(Logger(LoggerFactory.getLogger(getClass)))
   private implicit lazy val actorSystem: ActorSystem =
-    PekkoUtil.createActorSystem(getClass.getSimpleName)
+    PekkoUtil.createActorSystem(getClass.getSimpleName)(directExecutionContext)
   private implicit lazy val materializer: Materializer = Materializer(actorSystem)
 
   override def afterAll(): Unit =

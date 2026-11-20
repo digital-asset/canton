@@ -8,7 +8,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.RefinedDuration
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
-import slick.jdbc.GetResult
+import slick.jdbc.{GetResult, SetParameter}
 
 final case class EffectiveTime(value: CantonTimestamp) {
   def toApproximate: ApproximateTime = ApproximateTime(value)
@@ -32,6 +32,8 @@ object EffectiveTime {
     GetResult(r => EffectiveTime(CantonTimestamp.assertFromLong(r.nextLong())))
   implicit val getResultOptionEffectiveTime: GetResult[Option[EffectiveTime]] =
     GetResult(r => r.nextLongOption().map(ts => EffectiveTime(CantonTimestamp.assertFromLong(ts))))
+  implicit val setParameterEffectiveTime: SetParameter[EffectiveTime] = (v, pp) =>
+    pp.setLong(v.value.toMicros)
 }
 
 final case class ApproximateTime(value: CantonTimestamp)

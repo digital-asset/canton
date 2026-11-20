@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing.handlers
 
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.SequencedEventHandler
@@ -28,7 +28,7 @@ class EventTimestampCapture(
     * sense to wrap a single handler however this is not enforced.
     */
   def apply[E](handler: SequencedEventHandler[E]): SequencedEventHandler[E] = {
-    implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
+    implicit val ec: ExecutionContext = directExecutionContext
     event => {
       implicit val traceContext: TraceContext = event.traceContext
       for {

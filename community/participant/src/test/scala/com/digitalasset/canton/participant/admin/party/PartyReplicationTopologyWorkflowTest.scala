@@ -11,6 +11,7 @@ import com.digitalasset.canton.crypto.{Fingerprint, Hash, HashAlgorithm, TestHas
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow.FreezingToOnboardingStatus
 import com.digitalasset.canton.protocol.TestSynchronizerParameters
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.client.{
@@ -26,6 +27,7 @@ import com.digitalasset.canton.topology.store.{
   TopologyStoreTestData,
   ValidatedTopologyTransaction,
 }
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
@@ -46,8 +48,14 @@ import com.digitalasset.canton.topology.{
   TopologyManager,
   TopologyManagerError,
 }
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
+import com.digitalasset.canton.{
+  BaseTest,
+  HasExecutionContext,
+  ProtocolVersionChecksAsyncWordSpec,
+  SequencerCounter,
+}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.util.chaining.scalaUtilChainingOps
@@ -55,6 +63,7 @@ import scala.util.chaining.scalaUtilChainingOps
 class PartyReplicationTopologyWorkflowTest
     extends AsyncWordSpec
     with BaseTest
+    with ProtocolVersionChecksAsyncWordSpec
     with HasExecutionContext {
   private val requestId =
     Hash.build(TestHash.testHashPurpose, HashAlgorithm.Sha256).addInt(0).finish()
@@ -427,6 +436,128 @@ class PartyReplicationTopologyWorkflowTest
           isOnboardedAfterFirstSafeCall shouldBe false
           isOnboardedAfterSecondSafeCall shouldBe true
         }
+      }.failOnShutdown
+
+      "not take the mapping of another party whose identifier starts with the party's" in {
+        val tw = topologyWorkflow()
+        val topologyStore = newTopologyStore()
+        val topologyContext = mockTopologyContext(
+          topologyStore,
+          mockTopologyManager(),
+          tTracker = mockSynchronizerTimeTracker(None),
+        )
+        // Same namespace as the party, and the party's identifier is a prefix of its identifier
+        val otherParty = PartyId.tryFromProtoPrimitive("onboarding-2::namespace")
+        val otherPartyOnboarding = PartyToParticipant.tryCreate(
+          partyId = otherParty,
+          threshold = PositiveInt.one,
+          participants = ptpProposal.participants,
+        )
+
+        for {
+          _ <- add(topologyStore)(tsSerialMinusOne, serialBefore, otherPartyOnboarding)
+          err <- tw
+            .authorizeClearingOnboardingFlag(
+              params,
+              EffectiveTime(tsSerialMinusOne),
+              topologyContext,
+            )
+            .leftOrFail("expect the party not to be hosted")
+        } yield {
+          err should include regex "Party .* is not hosted by target participant"
+        }
+      }.failOnShutdown
+    }
+
+    "moving from Freezing to Onboarding" should {
+      def withTargetIn(state: HostingState): PartyToParticipant = PartyToParticipant.tryCreate(
+        partyId = partyId,
+        threshold = PositiveInt.one,
+        participants = Seq(
+          HostingParticipant(sp, ParticipantPermission.Submission),
+          HostingParticipant(tp, participantPermission, state),
+        ),
+      )
+
+      "propose the move at the next serial, signed by the target alone, and not again at that serial" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+        val tw = topologyWorkflow()
+        val topologyStore = newTopologyStore()
+        val topologyManager = mockTopologyManager()
+        val onboarding = withTargetIn(HostingState.Onboarding)
+        def proposeOnboarding() = topologyManager.proposeAndAuthorize(
+          op = TopologyChangeOp.Replace,
+          mapping = onboarding,
+          serial = Some(serial),
+          signingKeys = Seq.empty,
+          namespacesToSignFor = Seq(tp.namespace),
+          protocolVersion = testedProtocolVersion,
+          expectFullAuthorization = true,
+          forceChanges = ForceFlags.none,
+          waitToBecomeEffective = None,
+        )
+        when(proposeOnboarding()).thenReturn(
+          EitherT.rightT[FutureUnlessShutdown, TopologyManagerError](
+            topologyStoreTestData.makeSignedTx(onboarding, serial = serial)(
+              topologyStoreTestData.p1Key
+            ): GenericSignedTopologyTransaction
+          )
+        )
+        val topologyContext = mockTopologyContext(topologyStore, topologyManager)
+
+        for {
+          _ <- add(topologyStore)(
+            tsSerialMinusOne,
+            serialBefore,
+            withTargetIn(HostingState.Freezing),
+          )
+          proposed <- tw
+            .moveFreezingToOnboarding(partyId, proposedAt = None, topologyContext)
+            .valueOrFail("propose the move")
+          proposedBefore <- tw
+            .moveFreezingToOnboarding(partyId, proposedAt = Some(serial), topologyContext)
+            .valueOrFail("keep the proposal")
+        } yield {
+          proposed shouldBe FreezingToOnboardingStatus.Proposed(serial)
+          proposedBefore shouldBe FreezingToOnboardingStatus.Proposed(serial)
+          verify(topologyManager, times(1)).proposeAndAuthorize(
+            op = TopologyChangeOp.Replace,
+            mapping = onboarding,
+            serial = Some(serial),
+            signingKeys = Seq.empty,
+            namespacesToSignFor = Seq(tp.namespace),
+            protocolVersion = testedProtocolVersion,
+            expectFullAuthorization = true,
+            forceChanges = ForceFlags.none,
+            waitToBecomeEffective = None,
+          )
+          succeed
+        }
+      }.failOnShutdown
+
+      "report how the move has ended once the target is no longer Freezing" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+        val tw = topologyWorkflow()
+        val cases = Seq(
+          withTargetIn(HostingState.Onboarding) -> FreezingToOnboardingStatus.Moved,
+          withTargetIn(HostingState.Active) -> FreezingToOnboardingStatus.Moved,
+          withTargetIn(HostingState.Nominated) ->
+            FreezingToOnboardingStatus.Aborted(Some(HostingState.Nominated)),
+          // The target's entry has been removed
+          ptpBefore -> FreezingToOnboardingStatus.Aborted(None),
+        )
+
+        MonadUtil
+          .sequentialTraverse(cases) { case (mapping, expected) =>
+            val topologyStore = newTopologyStore()
+            // An unstubbed topology manager fails any proposal
+            val topologyContext = mockTopologyContext(topologyStore, mockTopologyManager())
+            for {
+              _ <- add(topologyStore)(tsSerialMinusOne, serialBefore, mapping)
+              status <- tw
+                .moveFreezingToOnboarding(partyId, proposedAt = None, topologyContext)
+                .valueOrFail(s"report the end for $mapping")
+            } yield status shouldBe expected
+          }
+          .map(_ => succeed)
       }.failOnShutdown
     }
   }

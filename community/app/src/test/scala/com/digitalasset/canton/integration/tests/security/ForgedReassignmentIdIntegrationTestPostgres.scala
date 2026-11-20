@@ -204,7 +204,7 @@ final class ForgedReassignmentIdIntegrationTestPostgres
       acmeId,
       sequencer2,
       mediator2,
-      withMediatorVerdict(Verdict.Approve(testedProtocolVersion)),
+      withMediatorVerdict(Verdict.Approve.create(testedProtocolVersion)),
     ) {
       maliciousP1.submitAssignmentRequest(signatory.toLf, data).futureValueUS.value
       synchronize
@@ -247,7 +247,7 @@ final class ForgedReassignmentIdIntegrationTestPostgres
           acmeId,
           sequencer2,
           mediator2,
-          withMediatorVerdict(Verdict.Approve(testedProtocolVersion)),
+          withMediatorVerdict(Verdict.Approve.create(testedProtocolVersion)),
         ) {
           participant1.ledger_api.commands
             .submit_assign(signatory, unassigned.reassignmentId, daId, acmeId)

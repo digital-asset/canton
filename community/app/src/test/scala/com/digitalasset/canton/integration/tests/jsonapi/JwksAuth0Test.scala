@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.jsonapi
 
 import com.auth0.jwk.UrlJwkProvider
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.{AuthServiceConfig, CantonConfig}
 import com.digitalasset.canton.crypto.{SignatureFormat, SigningAlgorithmSpec}
 import com.digitalasset.canton.integration.{

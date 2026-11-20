@@ -92,6 +92,44 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
       }
     }.failOnShutdown
 
+    "store a deleted key again under a different name" in {
+      val store = newStore
+      val newName = Some(KeyName.tryCreate("renamed"))
+      for {
+        _ <- store.storeSigningKey(sigKey1, sigKey1WithName.name)
+        _ <- store.storeEncryptionKey(encKey1, encKey1WithName.name)
+        _ <- store.deleteKey(sigKey1.id)
+        _ <- store.deleteKey(encKey1.id)
+        _ <- store.storeSigningKey(sigKey1, newName)
+        _ <- store.storeEncryptionKey(encKey1, newName)
+        listed <- store.publicKeysWithName
+        sigKeyWithName <- store.signingKeyWithName(sigKey1.id).value
+        encKeyWithName <- store.encryptionKeyWithName(encKey1.id).value
+      } yield {
+        listed shouldEqual Set(
+          SigningPublicKeyWithName(sigKey1, newName),
+          EncryptionPublicKeyWithName(encKey1, newName),
+        )
+        sigKeyWithName shouldEqual Some(SigningPublicKeyWithName(sigKey1, newName))
+        encKeyWithName shouldEqual Some(EncryptionPublicKeyWithName(encKey1, newName))
+      }
+    }.failOnShutdown
+
+    "not look up deleted keys" in {
+      val store = newStore
+      for {
+        _ <- store.storeSigningKey(sigKey1, sigKey1WithName.name)
+        _ <- store.storeEncryptionKey(encKey1, encKey1WithName.name)
+        _ <- store.deleteKey(sigKey1.id)
+        _ <- store.deleteKey(encKey1.id)
+        sigKey <- store.signingKey(sigKey1.id).value
+        encKey <- store.encryptionKey(encKey1.id).value
+      } yield {
+        sigKey shouldBe None
+        encKey shouldBe None
+      }
+    }.failOnShutdown
+
     "idempotent store of encryption keys" in {
       val store = newStore
       for {
