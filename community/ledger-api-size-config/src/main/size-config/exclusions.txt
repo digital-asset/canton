@@ -12,10 +12,13 @@ com.daml.ledger.api.v2.GetActiveContractsPageResponse
 com.daml.ledger.api.v2.GetActiveContractsResponse
 com.daml.ledger.api.v2.GetCompletionByHashResponse
 com.daml.ledger.api.v2.GetConnectedSynchronizersResponse
+com.daml.ledger.api.v2.GetHostedPartiesPageResponse
+com.daml.ledger.api.v2.GetHostedPartiesResponse
 com.daml.ledger.api.v2.GetJwksResponse
 com.daml.ledger.api.v2.GetLedgerEndResponse
 com.daml.ledger.api.v2.GetPackageResponse
 com.daml.ledger.api.v2.GetUpdatesPageResponse
+com.daml.ledger.api.v2.HostedParty
 com.daml.ledger.api.v2.ListPackagesResponse
 com.daml.ledger.api.v2.ListVettedPackagesResponse
 com.daml.ledger.api.v2.OffsetCheckpoint

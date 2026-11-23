@@ -191,6 +191,7 @@ class JsonUpgradingTests extends HttpTestFuns with HttpServiceUserFixture.UserTo
             )
           ),
           verbose = false,
+          filtersByContractId = Seq.empty,
         )
         endOffset = env.participant1.ledger_api.state.end()
         messagesStream <- fixture.getStream(

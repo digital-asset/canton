@@ -156,6 +156,7 @@ object ReassignmentValidation {
 
   /** The assignment exclusivity timeout is only enforced up to protocol version 36.
     */
+  // TODO(#37616): Remove the assignment exclusivity timeout
   def isAssignmentExclusivityEnforced(psid: PhysicalSynchronizerId): Boolean =
     psid.protocolVersion <= ProtocolVersion.v36
 

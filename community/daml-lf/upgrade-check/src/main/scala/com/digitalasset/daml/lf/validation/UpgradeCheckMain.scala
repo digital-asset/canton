@@ -131,7 +131,7 @@ final case class UpgradeCheckMain(
         throw new IllegalArgumentException("No resolution file found, must be run through DPM")
       )
       // Need own running path to find resolution (in case its run from a package)
-      val runPath = Paths.get(".").toAbsolutePath.normalize
+      val runPath = Paths.get(Paths.get(".").toAbsolutePath.normalize.toString().toLowerCase())
       val source = scala.io.Source.fromFile(resPath)
       val content =
         try source.mkString
@@ -166,7 +166,7 @@ final case class UpgradeCheckMain(
               .map(e => e.getMessage)
           // Search for package in resolution, must use `Path.equals` else windows will break
           resObj = allPackages.toList
-            .map { case (p, j) => (Paths.get(p), j) }
+            .map { case (p, j) => (Paths.get(p.toLowerCase()), j) }
             .find { case (p, _) => runPath.equals(p) }
             .fold(defaultResolution)(_._2)
           // Grab the actual binary path

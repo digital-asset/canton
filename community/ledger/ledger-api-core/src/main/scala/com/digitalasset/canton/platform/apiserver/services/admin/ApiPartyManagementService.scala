@@ -30,7 +30,7 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
 }
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.auth.AuthorizationChecksErrors
+import com.digitalasset.canton.auth.{AuthorizationChecksErrors, ClaimApiArea}
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.v30.{SigningKeyScheme, SigningKeyUsage}
@@ -86,7 +86,7 @@ import com.digitalasset.canton.platform.apiserver.services.logging
 import com.digitalasset.canton.platform.apiserver.services.tracking.StreamTracker
 import com.digitalasset.canton.platform.apiserver.update
 import com.digitalasset.canton.platform.apiserver.update.PartyRecordUpdateMapper
-import com.digitalasset.canton.protocol.TopologyLimits
+import com.digitalasset.canton.protocol.TopologyLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.*
@@ -377,9 +377,12 @@ private[apiserver] final class ApiPartyManagementService private (
                   authenticatedUserContextF,
                   maxSelfAllocatedParties.unwrap,
                 )
-                _ <- verifyPartyIsNonExistentOrInIdp(
-                  identityProviderId,
-                  partyId.toLf,
+                _ <- verifyPartyIsNonExistentOrCanReallocate(
+                  identityProviderId = identityProviderId,
+                  party = partyId.toLf,
+                  authenticatedUserContextF = authenticatedUserContextF,
+                  targetUserRights = userInfo.map(_.rights),
+                  externalAllocation = false,
                 )
                 allocated <- partyAllocationTracker
                   .track(
@@ -642,28 +645,74 @@ private[apiserver] final class ApiPartyManagementService private (
     }
   }
 
-  // Check if party either doesn't exist or exists and belongs to the requested Identity Provider
-  private def verifyPartyIsNonExistentOrInIdp(
+  // Check if party either doesn't exist, or exists and belongs to the requested Identity Provider.
+  // Re-allocating an existing party of the identity provider (e.g. on another synchronizer) grants
+  // the caller's user rights on it, so only (identity provider) admins and users that can already
+  // act as the party may do that.
+  private def verifyPartyIsNonExistentOrCanReallocate(
       identityProviderId: IdentityProviderId,
       party: Ref.Party,
+      authenticatedUserContextF: Future[AuthenticatedUserContext],
+      targetUserRights: Option[Set[UserRight]],
+      externalAllocation: Boolean,
   )(implicit
       loggingContextWithTrace: LoggingContextWithTrace,
       errorLoggingContext: ErrorLoggingContext,
-  ): Future[Unit] =
+  ): Future[Unit] = {
+    def differentIdp(): Future[Unit] =
+      Future.failed(
+        AuthorizationChecksErrors.PermissionDenied
+          .Reject(
+            s"Party $party belongs to an identity provider that differs from the one specified in the request"
+          )
+          .asGrpcError
+      )
+
+    def requireAdminOrIdpAdminOrActAs(): Future[Unit] =
+      if (targetUserRights.exists(_.contains(UserRight.CanActAs(party))))
+        // The auth layer already guarantees that for self-service users, targetUser == authenticatedUser
+        Future.unit
+      else
+        authenticatedUserContextF.flatMap { context =>
+          if (context.isParticipantAdmin) Future.unit
+          else if (
+            identityProviderId != IdentityProviderId.Default &&
+            context.claims.canAccessApiArea(ClaimApiArea.partiesWrite.area).isRight
+          )
+            // We have already matched the IDP in the auth layer.
+            // Check that the user has some authority to write in this IDP.
+            Future.unit
+          else
+            Future.failed(
+              AuthorizationChecksErrors.PermissionDenied
+                .Reject(
+                  s"Party $party already exists, only a participant admin, an identity provider admin or a user that can act as the party may allocate it again"
+                )
+                .asGrpcError
+            )
+        }
+
     partyRecordStore
       .getPartyRecordO(party)
       .flatMap(handlePartyRecordStoreResult("retrieving a party record")(_))
       .flatMap {
-        case Some(party) if party.identityProviderId != identityProviderId =>
-          Future.failed(
-            AuthorizationChecksErrors.PermissionDenied
-              .Reject(
-                s"Party $party belongs to an identity provider that differs from the one specified in the request"
-              )
-              .asGrpcError
-          )
-        case _ => Future.unit
+        case Some(record) if record.identityProviderId != identityProviderId => differentIdp()
+        case Some(_) => requireAdminOrIdpAdminOrActAs()
+        // Missing party record, but the party may still exist.  Perhaps it was
+        // created using the admin API.
+        case None =>
+          partyManagementService
+            .getParties(Seq(party))
+            .flatMap { details =>
+              if (details.isEmpty) Future.unit
+              else if (externalAllocation && !details.exists(_.isLocal)) Future.unit
+              else if (identityProviderId != IdentityProviderId.Default)
+                // Parties that exist locally but do not have a record implicitly belong to the default IDP.
+                differentIdp()
+              else requireAdminOrIdpAdminOrActAs()
+            }
       }
+  }
 
   private def fetchPartyRecords(
       partyDetails: List[IndexerPartyDetails]
@@ -779,7 +828,7 @@ private[apiserver] final class ApiPartyManagementService private (
           // The validation admits the topology transactions of the protocol versions that the
           // synchronizer admits, e.g. those of protocol version 36 on protocol version 37
           ProtocolVersionValidation(protocolVersion),
-          TopologyTransactionDeserializationContext(TopologyLimits.default),
+          TopologyTransactionDeserializationContext(TopologyLimitsView.default),
           signedTransaction.transaction,
         )
         .leftMap(error =>
@@ -925,9 +974,12 @@ private[apiserver] final class ApiPartyManagementService private (
                 authenticatedUserContextF,
                 maxSelfAllocatedParties.unwrap,
               )
-              _ <- verifyPartyIsNonExistentOrInIdp(
-                identityProviderId,
-                externalPartyOnboardingDetails.partyId.toLf,
+              _ <- verifyPartyIsNonExistentOrCanReallocate(
+                identityProviderId = identityProviderId,
+                party = externalPartyOnboardingDetails.partyId.toLf,
+                authenticatedUserContextF = authenticatedUserContextF,
+                targetUserRights = userInfo.map(_.rights),
+                externalAllocation = true,
               )
               // Only track the party if we expect it to be fully authorized (and it hasn't explicitly been disabled in the request)
               // Otherwise the party won't be fully onboarded here so this would time out

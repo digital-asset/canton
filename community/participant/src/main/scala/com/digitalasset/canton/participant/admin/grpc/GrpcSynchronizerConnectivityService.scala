@@ -40,7 +40,7 @@ import com.digitalasset.canton.participant.synchronizer.{
   SynchronizerRegistryError,
   SynchronizerRegistryHelpers,
 }
-import com.digitalasset.canton.protocol.TopologyLimits
+import com.digitalasset.canton.protocol.TopologyLimitsView
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.transaction.{
@@ -324,7 +324,7 @@ class GrpcSynchronizerConnectivityService(
           .traverse(
             SignedTopologyTransaction.fromByteString(
               expectedProtocolVersion,
-              TopologyTransactionDeserializationContext(TopologyLimits.default),
+              TopologyTransactionDeserializationContext(TopologyLimitsView.default),
               _,
             )
           )
@@ -382,7 +382,7 @@ class GrpcSynchronizerConnectivityService(
             .traverse(
               SignedTopologyTransaction.fromByteString(
                 protocolVersionValidation,
-                TopologyTransactionDeserializationContext(TopologyLimits.default),
+                TopologyTransactionDeserializationContext(TopologyLimitsView.default),
                 _,
               )
             )

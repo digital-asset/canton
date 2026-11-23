@@ -71,6 +71,7 @@ import com.digitalasset.canton.synchronizer.sequencer.admin.grpc.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.config.{
+  LsuSequencingBoundsOverride,
   SequencerNodeConfig,
   SequencerNodeParameters,
 }
@@ -133,11 +134,63 @@ import org.apache.pekko.stream.scaladsl.Source
 
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.ExecutionContext
 import scala.util.chaining.*
 
 object SequencerNodeBootstrap {
 
   val LoggerFactoryKeyName: String = "sequencer"
+
+  private[sequencer] def validateLsuSuccessorInitialization(
+      isLsuSuccessorInit: Boolean,
+      ignoreLsuPsidCheck: Boolean,
+      boundsOverrideO: Option[LsuSequencingBoundsOverride],
+      psid: PhysicalSynchronizerId,
+      synchronizerTopologyStore: TopologyStore[SynchronizerStore],
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    (isLsuSuccessorInit, ignoreLsuPsidCheck, boundsOverrideO) match {
+      case (true, true, None) =>
+        EitherT.leftT[FutureUnlessShutdown, Unit](
+          "Ignoring the LSU PSID check requires an LSU sequencing bounds override"
+        )
+      case (true, true, Some(boundsOverride)) =>
+        // LSU roll forward DR successor init: allow bypassing
+        //  the LSU announcement topology snapshot check.
+        LsuSequencingBounds
+          .create(boundsOverride, synchronizerTopologyStore)
+          .map(_ => ())
+      case (true, _, boundsOverrideO) =>
+        // All other LSU successor init cases require an announcement and
+        //  sequencing bounds derived for the initialized successor.
+        for {
+          _ <- synchronizerTopologyStore
+            .requireLsuAnnouncement(psid)
+            .leftSemiflatMap(err => FutureUnlessShutdown.failed(err.asGrpcError))
+          // Check the store's explicit predecessor-announcement lookup rather than inferring
+          //  announcement presence from the optional result of bounds derivation.
+          _ <- EitherT.fromOptionF(
+            synchronizerTopologyStore.findUpgradeTimeFromPredecessor(),
+            s"The topology snapshot does not contain an LSU announcement for successor $psid",
+          )
+          _ <- boundsOverrideO match {
+            case Some(_) =>
+              // This path requires an LSU announcement, so a configured override always
+              //  conflicts. Reject it before persisting initialization.
+              EitherT.leftT[FutureUnlessShutdown, Unit](
+                "LsuSequencingBoundsOverride cannot be set if an LSU announcement exists in the topology store"
+              )
+            case None =>
+              // The topology-derived bounds have already been validated above.
+              EitherT.rightT[FutureUnlessShutdown, String](())
+          }
+        } yield ()
+      case _ =>
+        // Non-LSU: skip the LSU announcement check.
+        EitherT.rightT[FutureUnlessShutdown, String](())
+    }
 }
 
 class SequencerNodeBootstrap(
@@ -340,6 +393,7 @@ class SequencerNodeBootstrap(
               topologyStore,
               topologyAndSequencerSnapshot = None,
               ignoreLsuPsidCheck = false,
+              isLsuSuccessorInit = false,
             )
           )
 
@@ -402,7 +456,8 @@ class SequencerNodeBootstrap(
           result.synchronizerTopologyStore,
           nonInitializedSequencerNodeServer.getAndSet(None),
           result.topologyAndSequencerSnapshot,
-          result.ignoreLsuPsidCheck,
+          ignoreLsuPsidCheck = result.ignoreLsuPsidCheck,
+          isLsuSuccessorInit = result.isLsuSuccessorInit,
           () =>
             finalizeInitialization(
               result.synchronizerTopologyStore.storeId.psid,
@@ -455,6 +510,7 @@ class SequencerNodeBootstrap(
             topologyStore,
             Some(request.topologySnapshot -> request.sequencerSnapshot),
             ignoreLsuPsidCheck = request.ignoreLsuPsidCheck,
+            isLsuSuccessorInit = request.isLsuSuccessorInit,
           )
         }.map { _ =>
           InitializeSequencerResponse(replicated = config.replication.exists(_.isEnabled))
@@ -462,6 +518,15 @@ class SequencerNodeBootstrap(
       }
   }
 
+  /** Validates and applies the initialization snapshot, then starts the sequencer runtime.
+    *
+    * Initialization is finalized only after snapshot validation and runtime setup succeed.
+    *
+    * @param ignoreLsuPsidCheck
+    *   whether to skip LSU PSID consistency validation for disaster recovery initialization.
+    * @param isLsuSuccessorInit
+    *   whether the sequencer is being initialized as an LSU successor.
+    */
   private class StartupNode(
       storage: Storage,
       indexedStringStore: IndexedStringStore,
@@ -479,6 +544,7 @@ class SequencerNodeBootstrap(
         (Source[GenericStoredTopologyTransaction, NotUsed], Option[SequencerSnapshot])
       ],
       ignoreLsuPsidCheck: Boolean,
+      isLsuSuccessorInit: Boolean,
       finalizeInitialization: () => EitherT[FutureUnlessShutdown, String, Unit],
       healthReporter: GrpcHealthReporter,
       healthService: DependenciesHealthService,
@@ -534,6 +600,13 @@ class SequencerNodeBootstrap(
                     }
                   )
 
+                  _ <- SequencerNodeBootstrap.validateLsuSuccessorInitialization(
+                    isLsuSuccessorInit = isLsuSuccessorInit,
+                    ignoreLsuPsidCheck = ignoreLsuPsidCheck,
+                    config.parameters.lsuRepair.lsuSequencingBoundsOverride,
+                    psid,
+                    synchronizerTopologyStore,
+                  )
                   _ <- MonadUtil.when(config.topology.checkInitialTopologySnapshotConsistency)(
                     synchronizerTopologyStore
                       .checkConsistency(
@@ -775,15 +848,18 @@ class SequencerNodeBootstrap(
               synchronizerLoggerFactory,
             )
 
-          sequencerChannelServiceO = parameters.alphaSequencerChannelSupport.map(channelsConfig =>
-            GrpcSequencerChannelService(
-              authenticationConfig.check,
-              clock,
-              staticSynchronizerParameters.protocolVersion,
-              parameters.processingTimeouts,
-              channelsConfig,
-              loggerFactory,
-            )
+          sequencerChannelServiceO = parameters.alphaSequencerChannelSupport.flatMap(
+            channelsConfig =>
+              Option.when(psid.protocolVersion >= ProtocolVersion.sequencerChannel)(
+                GrpcSequencerChannelService(
+                  authenticationConfig.check,
+                  clock,
+                  staticSynchronizerParameters.protocolVersion,
+                  parameters.processingTimeouts,
+                  channelsConfig,
+                  loggerFactory,
+                )
+              )
           )
 
           sequencerServiceCell = new SingleUseCell[GrpcSequencerService]
@@ -1054,6 +1130,7 @@ class SequencerNodeBootstrap(
         (Source[GenericStoredTopologyTransaction, NotUsed], Option[SequencerSnapshot])
       ],
       ignoreLsuPsidCheck: Boolean,
+      isLsuSuccessorInit: Boolean,
   )
 
   // Deferred health component for the sequencer health, created during initialization

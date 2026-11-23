@@ -31,7 +31,7 @@ object AcsReplicationTargetParticipantMessage
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(-1) -> UnsupportedProtoCodec(),
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.dev)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.sequencerChannel)(
       v30.AcsReplicationTargetParticipantMessage
     )(
       supportedProtoVersion(_)(fromProtoV30),

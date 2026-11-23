@@ -10,6 +10,7 @@ import com.digitalasset.canton.admin.api.client.commands.VaultAdminCommands
 import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.{AuthServiceConfig, PositiveFiniteDuration}
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.crypto.admin.grpc.BaseVaultRequest

@@ -1,0 +1,136 @@
+name: Unstable Test Slow
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+      protocol_version:
+        required: true
+        type: string
+      job_name:
+        description: Name reported to the flaky-test pipeline. Empty falls back to this workflow's own job id.
+        default: ""
+        type: string
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+      SLACK_BOT_QA_NOTIFICATIONS:
+        required: false
+      GCLOUD_SHEETS_SA_KEY:
+        required: false
+      GCLOUD_SERVICE_KEY:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SESSION_TOKEN:
+        required: false
+      AWS_REGION:
+        required: false
+
+permissions:
+  actions: write
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  unstable_test_slow:
+    name: Unstable Test Slow
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 260
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
+      SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
+      SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS: ${{ vars.SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS }}
+      # Sheet key the alert's rota mention needs (select_rota.py), same job-level reason.
+      GCLOUD_SHEETS_SA_KEY: ${{ secrets.GCLOUD_SHEETS_SA_KEY }}
+      GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_RETRY_MODE: adaptive
+      AWS_MAX_ATTEMPTS: "10"
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+      CANTON_CI_JOB_NAME: ${{ inputs.job_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Start Postgres container
+        id: postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: 0
+
+      - name: Start Toxiproxy container
+        id: start_toxiproxy
+        uses: ./.github/actions/utils/toxiproxy/start_toxiproxy_container
+        with:
+          shard-index: 0
+          network-mode: host
+
+      - name: Set Canton Protocol Version
+        uses: ./.github/actions/test/set_canton_protocol_version
+        with:
+          protocol_version: ${{ inputs.protocol_version }}
+
+      - name: Download test file
+        uses: actions/download-artifact@v7
+        with:
+          name: test-full-class-names
+          path: .
+
+      # Unlike unstable_test, this runs every UnstableTest suite (not only integration tests)
+      # and needs no packaged release. Unsharded, as on CircleCI: the splitter cannot see the
+      # UnstableTest tag, so it cannot balance these suites across shards.
+      - name: Run Unstable Tests Slow
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: "dumpClassPath \"testOnly * -- -n UnstableTest -n com.digitalasset.canton.annotations.UnstableTest\""
+          execution_context_size: '8'
+          fail_on_error_in_output: 'false'
+          num_parallel_tasks: '1'
+          num_test_buckets: '0'
+          succeed_on_error: 'true'
+          job_name: ${{ inputs.job_name }}
+          # The 240m of CircleCI. Must stay below the job's timeout-minutes (260) with room for
+          # the setup steps before sbt starts and the cleanup/bundle upload after it. Otherwise
+          # GitHub cancels the job first, so the sbt wrapper never reports the timeout and the
+          # cleanup steps gated by !cancelled() are skipped.
+          timeout: '240m'
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}
+
+      - name: Stop Toxiproxy container
+        if: always()
+        uses: ./.github/actions/utils/toxiproxy/stop_toxiproxy_container
+        with:
+          container-name: ${{ steps.start_toxiproxy.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: unstable_test_slow
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: unstable_test_slow
+      job_name: ${{ inputs.job_name }}
+      shard_job_result: ${{ needs.unstable_test_slow.result }}
+      runner: ${{ inputs.runner }}
+      protocol_version: ${{ inputs.protocol_version }}
+      # The set of tests marked with @UnstableTest can legitimately be empty, in which case no
+      # JUnit testcases (and hence no timings) are produced. The timings are not used for
+      # sharding here (num_test_buckets: 0), so an empty result must not fail the leg.
+      allow_empty_current_timings: true

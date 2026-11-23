@@ -7,7 +7,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
   AcsChangeSequencedUpdate,
   EmptyAcsPublicationRequired,
   LsuTimeReached,
-  OnPRReassignmentAccepted,
+  OnlinePartyReplicationParticipantEventUpdate,
 }
 import com.digitalasset.canton.ledger.participant.state.{
   AcsChangeFactory,
@@ -48,12 +48,12 @@ class AcsChangePublicationPostProcessor(
       }
 
     update match {
-      case updateWithAcsChangeFactory: OnPRReassignmentAccepted =>
+      case onlinePartyReplicatopnParticipantUpdate: OnlinePartyReplicationParticipantEventUpdate =>
         publishAcsChange(
-          updateWithAcsChangeFactory.synchronizerId,
-          updateWithAcsChangeFactory.synchronizerIndex,
-          Some(updateWithAcsChangeFactory.acsChangeFactory),
-          Some(updateWithAcsChangeFactory.watermark),
+          onlinePartyReplicatopnParticipantUpdate.synchronizerId,
+          onlinePartyReplicatopnParticipantUpdate.synchronizerIndex,
+          Some(onlinePartyReplicatopnParticipantUpdate.acsChangeFactory),
+          Some(onlinePartyReplicatopnParticipantUpdate.watermark),
         )
 
       case updateWithAcsChangeFactory: AcsChangeSequencedUpdate =>

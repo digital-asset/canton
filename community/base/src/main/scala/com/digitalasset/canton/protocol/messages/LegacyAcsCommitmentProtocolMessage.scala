@@ -74,7 +74,7 @@ object LegacyAcsCommitmentProtocolMessage
     )(LegacyAcsCommitmentProtocolMessage.protocolVersionRepresentativeFor(protocolVersion))
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(
       v30.AcsCommitmentProtocolMessage
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),

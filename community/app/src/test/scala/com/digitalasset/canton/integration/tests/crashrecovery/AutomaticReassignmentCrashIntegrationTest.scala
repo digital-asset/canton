@@ -100,6 +100,7 @@ final class AutomaticReassignmentCrashIntegrationTest
           _.topology.synchronizer_parameters
             .propose_update(
               initializedSynchronizer.synchronizerId,
+              // only relevant for PV36 or lower
               _.update(assignmentExclusivityTimeout = 5 seconds),
             )
         )
@@ -126,38 +127,44 @@ final class AutomaticReassignmentCrashIntegrationTest
       val exerciseCmd = aggregate.id.exerciseCountAll().commands.asScala.toSeq
 
       logger.info(s"Exercise count all")
-      val autoReassignmentF =
-        loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-          Future {
+      // The log assertion must stay open until the sequencer policy is reset: participant2's
+      // automatic assignment might race with reset of the sequencer policy
+      loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+        {
+          val autoReassignmentF = Future {
             a[CommandFailure] should be thrownBy
               remoteP1.ledger_api.javaapi.commands.submit(Seq(party1Id), exerciseCmd)
-          },
-          LogEntry.assertLogSeq(
-            Seq(
-              (
-                _.errorMessage should include(AutomaticReassignmentForTransactionFailure.id),
-                "the transaction is rejected because the automatic reassignment of its inputs failed",
-              )
+          }
+          eventually() {
+            val incomplete = remoteP1.ledger_api.state.acs.incomplete_unassigned_of_party(party1Id)
+
+            incomplete.map(r => r.contractId).toSet shouldBe Set(
+              createP2.toLf.coid,
+              aggregate.id.toLf.coid,
+            )
+          }
+
+          autoReassignmentF.futureValue
+        },
+        LogEntry.assertLogSeq(
+          Seq(
+            (
+              _.errorMessage should include(AutomaticReassignmentForTransactionFailure.id),
+              "the transaction is rejected because the automatic reassignment of its inputs failed",
             ),
-            // the exclusivity timeout may have elapsed, in which case participant2 hits the blocked sequencer too
+            // wait until the automatic assignment from participant2 gets blocked as well.
+            // while participant1 also logs the warning, it is only observable as debug log to
+            // this loggerFactory, because participant1 runs in an external process.
             // untracked reassignments log the first message, tracked ones the second
-            mayContain = Seq(
+            (
               _.warningMessage should (include("Failed to submit submission") or include(
                 "Failed to submit assignment"
-              ))
+              )),
+              "assignment",
             ),
-          ),
-        )
-      eventually() {
-        val incomplete = remoteP1.ledger_api.state.acs.incomplete_unassigned_of_party(party1Id)
-
-        incomplete.map(r => r.contractId).toSet shouldBe Set(
-          createP2.toLf.coid,
-          aggregate.id.toLf.coid,
-        )
-      }
-
-      autoReassignmentF.futureValue
+          )
+        ),
+      )
 
       logger.info(s"Restarting participant 1")
       external.kill(remoteP1.name)

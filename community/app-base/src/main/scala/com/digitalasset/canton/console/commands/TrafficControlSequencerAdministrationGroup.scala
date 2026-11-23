@@ -15,8 +15,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.sequencer.admin.v30.TrafficSummary
-import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
-import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.ThroughputCapByMessageTypeConfig
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerTrafficStatus,
   TimestampSelector,
@@ -35,14 +34,21 @@ class TrafficControlSequencerAdministrationGroup(
   @Help.Description(
     """Use this command to get the traffic state of a list of members at the latest safe
       |timestamp.
+      |Set includeOnboardingMembers to true to also return members that traffic was purchased
+      |for before they joined the synchronizer.
       """
   )
   def traffic_state_of_members(
-      members: Seq[Member]
+      members: Seq[Member],
+      includeOnboardingMembers: Boolean = false,
   ): SequencerTrafficStatus =
     consoleEnvironment.run(
       runner.adminCommand(
-        SequencerAdminCommands.GetTrafficControlState(members, TimestampSelector.LatestSafe)
+        SequencerAdminCommands.GetTrafficControlState(
+          members,
+          TimestampSelector.LatestSafe,
+          includeOnboardingMembers,
+        )
       )
     )
 
@@ -53,16 +59,21 @@ class TrafficControlSequencerAdministrationGroup(
       |
       |CAREFUL: The returned state is only an approximation in the future and might not be the
       |actual correct state by the time this timestamp is reached by the synchronizer.
+      |
+      |Set includeOnboardingMembers to true to also return members that traffic was purchased
+      |for before they joined the synchronizer.
       """
   )
   def traffic_state_of_members_approximate(
-      members: Seq[Member]
+      members: Seq[Member],
+      includeOnboardingMembers: Boolean = false,
   ): SequencerTrafficStatus =
     consoleEnvironment.run(
       runner.adminCommand(
         SequencerAdminCommands.GetTrafficControlState(
           members,
           TimestampSelector.LatestApproximate,
+          includeOnboardingMembers,
         )
       )
     )
@@ -71,34 +82,44 @@ class TrafficControlSequencerAdministrationGroup(
   @Help.Description(
     """Use this command to get the last traffic state update of each member. It will be last
       |updated when a member consumed traffic.
+      |Set includeOnboardingMembers to true to also return members that traffic was purchased
+      |for before they joined the synchronizer.
+      |Such members have not consumed traffic yet, so their state does not show the purchase.
       """
   )
   def last_traffic_state_update_of_members(
-      members: Seq[Member]
+      members: Seq[Member],
+      includeOnboardingMembers: Boolean = false,
   ): SequencerTrafficStatus =
     consoleEnvironment.run(
       runner.adminCommand(
         SequencerAdminCommands.GetTrafficControlState(
           members,
           TimestampSelector.LastUpdatePerMember,
+          includeOnboardingMembers,
         )
       )
     )
 
   @Help.Summary("Return the traffic state of the given members at a specific timestamp")
   @Help.Description(
-    """Use this command to get the traffic state of specified members at a given timestamp."""
+    """Use this command to get the traffic state of specified members at a given timestamp.
+      |Set includeOnboardingMembers to true to also return members that traffic was purchased
+      |for before they joined the synchronizer.
+      """
   )
   // TODO(#25930): Make this command return what its name suggests, i.e., the traffic state exactly at the given timestamp.
   def traffic_state_of_members_at_timestamp(
       members: Seq[Member],
       timestamp: CantonTimestamp,
+      includeOnboardingMembers: Boolean = false,
   ): SequencerTrafficStatus =
     consoleEnvironment.run(
       runner.adminCommand(
         SequencerAdminCommands.GetTrafficControlState(
           members,
           TimestampSelector.ExactTimestamp(timestamp),
+          includeOnboardingMembers,
         )
       )
     )
@@ -110,10 +131,13 @@ class TrafficControlSequencerAdministrationGroup(
       |base traffic) at the latest possible timestamp the sequencer can calculate it. This an
       |approximation only because the sequencer may use its wall clock which could be beyond
       |the synchronizer time.
+      |Set includeOnboardingMembers to true to also return members that traffic was purchased
+      |for before they joined the synchronizer.
       """
   )
   def traffic_state_of_all_members(
-      latestApproximate: Boolean = false
+      latestApproximate: Boolean = false,
+      includeOnboardingMembers: Boolean = false,
   ): SequencerTrafficStatus =
     consoleEnvironment.run(
       runner.adminCommand(
@@ -121,6 +145,7 @@ class TrafficControlSequencerAdministrationGroup(
           Seq.empty,
           if (latestApproximate) TimestampSelector.LatestApproximate
           else TimestampSelector.LatestSafe,
+          includeOnboardingMembers,
         )
       )
     )
@@ -215,52 +240,56 @@ class TrafficControlSequencerAdministrationGroup(
   @Help.Description(
     """Throughput caps set general limits on the number of requests being accepted
        | to protect the general availability of the system.
-       Supported request types are: "confirmation request" and "topology transaction"
+       | Settings are identified by name and specify the message type and observation period.
        Note that this option has only an effect if the caps are enabled. Upon restart,
        | the caps will be reset to their original configuration settings.
       """
   )
   def set_throughput_cap(
-      requestType: SubmissionRequestType,
-      config: IndividualThroughputCapConfig,
+      name: String,
+      config: ThroughputCapByMessageTypeConfig,
   ): Unit = consoleEnvironment.run(
     runner.adminCommand(
-      SequencerAdminCommands.SetThroughputCap(requestType, Some(config))
+      SequencerAdminCommands.SetThroughputCap(name, Some(config))
     )
   )
 
   @Help.Summary("Delete a request throughput cap")
-  def unset_throughput_cap(requestType: SubmissionRequestType): Unit =
+  def unset_throughput_cap(name: String): Unit =
     consoleEnvironment.run(
       runner.adminCommand(
-        SequencerAdminCommands.SetThroughputCap(requestType, None)
+        SequencerAdminCommands.SetThroughputCap(name, None)
       )
     )
 
   @Help.Summary("Get the current configured request throughput cap")
   def get_throughput_cap(
-      requestType: SubmissionRequestType
-  ): Option[IndividualThroughputCapConfig] = consoleEnvironment.run(
+      name: String
+  ): Option[ThroughputCapByMessageTypeConfig] = consoleEnvironment.run(
     runner.adminCommand(
-      SequencerAdminCommands.GetThroughputCap(requestType)
+      SequencerAdminCommands.GetThroughputCap(name)
     )
   )
 
+  @Help.Summary("List all named throughput cap settings")
+  def list_throughput_caps(): Map[String, ThroughputCapByMessageTypeConfig] =
+    consoleEnvironment.run(runner.adminCommand(SequencerAdminCommands.ListThroughputCaps()))
+
   @Help.Summary("Update the current configured request throughput cap")
   def update_throughput_cap(
-      requestType: SubmissionRequestType,
-      update: IndividualThroughputCapConfig => IndividualThroughputCapConfig,
+      name: String,
+      update: ThroughputCapByMessageTypeConfig => ThroughputCapByMessageTypeConfig,
   ): Unit =
     consoleEnvironment.runE {
       for {
         currentO <- runner
           .adminCommand(
-            SequencerAdminCommands.GetThroughputCap(requestType)
+            SequencerAdminCommands.GetThroughputCap(name)
           )
           .toEither
-        current <- currentO.toRight(s"Cap of type $requestType is not configured")
+        current <- currentO.toRight(s"Cap '$name' is not configured")
         _ <- runner
-          .adminCommand(SequencerAdminCommands.SetThroughputCap(requestType, Some(update(current))))
+          .adminCommand(SequencerAdminCommands.SetThroughputCap(name, Some(update(current))))
           .toEither
       } yield ()
     }

@@ -18,15 +18,24 @@ final case class SynchronizerLimits(
     topologyLimits: TopologyLimits,
     acsCommitmentLimits: AcsCommitmentLimits,
     bftOrdererLimits: BftOrdererLimits,
+    maxSequencersPerSynchronizer: PositiveInt,
 ) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[SynchronizerLimits] = SynchronizerLimits
+
+  /** Narrow views for components that need limits shared across `SynchronizerLimits`. */
+  def topologyLimitsView: TopologyLimitsView =
+    TopologyLimitsView(topologyLimits, maxSequencersPerSynchronizer)
+
+  def bftOrdererLimitsView: BftOrdererLimitsView =
+    BftOrdererLimitsView(bftOrdererLimits, maxSequencersPerSynchronizer)
 
   // v31 has no topology limits, so they fall back to the default on the way back in
   def toProtoV31: protoV31.SynchronizerLimits = protoV31.SynchronizerLimits(
     transactionProtocolLimits = Some(transactionProtocolLimits.toProtoV31)
   )
 
-  // v31 and v32 have no BFT orderer limits, so they fall back to the default on the way back in
+  // v31 and v32 have no BFT orderer limits or max sequencers per synchronizer, so they fall back to
+  // the default on the way back in
   def toProtoV32: protoV32.SynchronizerLimits = protoV32.SynchronizerLimits(
     transactionProtocolLimits = Some(transactionProtocolLimits.toProtoV32),
     topologyLimits = Some(topologyLimits.toProtoV32),
@@ -38,6 +47,7 @@ final case class SynchronizerLimits(
     topologyLimits = Some(topologyLimits.toProtoV33),
     acsCommitmentLimits = Some(acsCommitmentLimits.toProtoV33),
     bftOrdererLimits = Some(bftOrdererLimits.toProtoV33),
+    maxSequencersPerSynchronizer = maxSequencersPerSynchronizer.value,
   )
 }
 
@@ -48,12 +58,13 @@ object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
     param("topology limits", _.topologyLimits),
     param("acs commitment limits", _.acsCommitmentLimits),
     param("bft orderer limits", _.bftOrdererLimits),
+    param("max sequencers per synchronizer", _.maxSequencersPerSynchronizer),
   )
 
-  /** Upper bound on the number of sequencers in a synchronizer. This is a constant for one protocol
-    * version 38, may be changed for later versions.
+  /** Default upper bound on the number of sequencers in a synchronizer, used where the value is not
+    * serialized (proto versions before v33).
     */
-  val MaxSequencersInSynchronizer: PositiveInt = PositiveInt.tryCreate(1000)
+  val DefaultMaxSequencersPerSynchronizer: PositiveInt = PositiveInt.tryCreate(1000)
 
   /** The same on every protocol version: each limit check states the protocol version it applies
     * from through its ValidationParam. Applied where no synchronizer can be asked for its own
@@ -65,6 +76,7 @@ object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
       topologyLimits = TopologyLimits.default,
       acsCommitmentLimits = AcsCommitmentLimits.default,
       bftOrdererLimits = BftOrdererLimits.default,
+      maxSequencersPerSynchronizer = DefaultMaxSequencersPerSynchronizer,
     )
 
   def fromProtoV31(
@@ -81,6 +93,7 @@ object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
       TopologyLimits.default,
       AcsCommitmentLimits.default,
       BftOrdererLimits.default,
+      DefaultMaxSequencersPerSynchronizer,
     )
   }
 
@@ -109,6 +122,7 @@ object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
       topologyLimits,
       acsCommitmentLimits,
       BftOrdererLimits.default,
+      DefaultMaxSequencersPerSynchronizer,
     )
   }
 
@@ -120,6 +134,7 @@ object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
       topologyLimitsP,
       acsCommitmentLimitsP,
       bftOrdererLimitsP,
+      maxSequencersPerSynchronizerP,
     ) =
       synchronizerLimitsP
 
@@ -136,11 +151,16 @@ object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
       bftOrdererLimits <- ProtoConverter
         .required("bft_orderer_limits", bftOrdererLimitsP)
         .flatMap(BftOrdererLimits.fromProtoV33)
+      maxSequencersPerSynchronizer <- ProtoConverter.parsePositiveInt(
+        "max_sequencers_per_synchronizer",
+        maxSequencersPerSynchronizerP,
+      )
     } yield SynchronizerLimits(
       transactionProtocolLimits,
       topologyLimits,
       acsCommitmentLimits,
       bftOrdererLimits,
+      maxSequencersPerSynchronizer,
     )
   }
 }
@@ -160,9 +180,6 @@ object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
   * @param maxVettedPackagesPerParticipant
   *   the largest number of packages a participant can vet in a
   *   [[com.digitalasset.canton.topology.transaction.VettedPackages]]
-  * @param maxSequencersPerSynchronizer
-  *   the largest number of active and observer sequencers in a
-  *   [[com.digitalasset.canton.topology.transaction.SequencerSynchronizerState]]
   * @param maxMediatorsPerGroup
   *   the largest number of active and observer mediators in a
   *   [[com.digitalasset.canton.topology.transaction.MediatorSynchronizerState]]
@@ -185,7 +202,6 @@ final case class TopologyLimits(
     maxOwnersPerDecentralizedNamespace: PositiveInt,
     maxHostingParticipantsPerParty: PositiveInt,
     maxVettedPackagesPerParticipant: PositiveInt,
-    maxSequencersPerSynchronizer: PositiveInt,
     maxMediatorsPerGroup: PositiveInt,
     maxSignaturesPerTransaction: PositiveInt,
     maxTransactionHashesPerMultiSignature: PositiveInt,
@@ -194,7 +210,7 @@ final case class TopologyLimits(
 ) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[TopologyLimits] = TopologyLimits
 
-  // v32 has no max vetted packages, sequencers, mediators, signatures, transaction hashes,
+  // v32 has no max vetted packages, mediators, signatures, transaction hashes,
   // transactions per broadcast or endpoints, so they fall back to the default on the way back in
   def toProtoV32: protoV32.TopologyLimits = protoV32.TopologyLimits(
     maxSigningKeysPerEntity = maxSigningKeysPerEntity.value,
@@ -207,13 +223,44 @@ final case class TopologyLimits(
     maxOwnersPerDecentralizedNamespace = maxOwnersPerDecentralizedNamespace.value,
     maxHostingParticipantsPerParty = maxHostingParticipantsPerParty.value,
     maxVettedPackagesPerParticipant = maxVettedPackagesPerParticipant.value,
-    maxSequencersPerSynchronizer = maxSequencersPerSynchronizer.value,
     maxMediatorsPerGroup = maxMediatorsPerGroup.value,
     maxSignaturesPerTransaction = maxSignaturesPerTransaction.value,
     maxTransactionHashesPerMultiSignature = maxTransactionHashesPerMultiSignature.value,
     maxTransactionsPerBroadcast = maxTransactionsPerBroadcast.value,
     maxEndpointsPerSequencerConnection = maxEndpointsPerSequencerConnection.value,
   )
+}
+
+/** The topology limits together with the limits shared across [[SynchronizerLimits]]. */
+final case class TopologyLimitsView(
+    limits: TopologyLimits,
+    maxSequencersPerSynchronizer: PositiveInt,
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[TopologyLimitsView] = TopologyLimitsView
+
+  val maxSigningKeysPerEntity: PositiveInt = limits.maxSigningKeysPerEntity
+  val maxOwnersPerDecentralizedNamespace: PositiveInt = limits.maxOwnersPerDecentralizedNamespace
+  val maxHostingParticipantsPerParty: PositiveInt = limits.maxHostingParticipantsPerParty
+  val maxVettedPackagesPerParticipant: PositiveInt = limits.maxVettedPackagesPerParticipant
+  val maxMediatorsPerGroup: PositiveInt = limits.maxMediatorsPerGroup
+  val maxSignaturesPerTransaction: PositiveInt = limits.maxSignaturesPerTransaction
+  val maxTransactionHashesPerMultiSignature: PositiveInt =
+    limits.maxTransactionHashesPerMultiSignature
+  val maxTransactionsPerBroadcast: PositiveInt = limits.maxTransactionsPerBroadcast
+  val maxEndpointsPerSequencerConnection: PositiveInt = limits.maxEndpointsPerSequencerConnection
+}
+
+object TopologyLimitsView extends PrettyPrintingCompanion[TopologyLimitsView] {
+  override protected val pretty: Pretty[TopologyLimitsView] = prettyOfClass(
+    param("limits", _.limits),
+    param("max sequencers per synchronizer", _.maxSequencersPerSynchronizer),
+  )
+
+  lazy val default: TopologyLimitsView =
+    TopologyLimitsView(
+      TopologyLimits.default,
+      SynchronizerLimits.DefaultMaxSequencersPerSynchronizer,
+    )
 }
 
 object TopologyLimits extends PrettyPrintingCompanion[TopologyLimits] {
@@ -223,7 +270,6 @@ object TopologyLimits extends PrettyPrintingCompanion[TopologyLimits] {
     param("max owners per decentralized namespace", _.maxOwnersPerDecentralizedNamespace),
     param("max hosting participants per party", _.maxHostingParticipantsPerParty),
     param("max vetted packages per participant", _.maxVettedPackagesPerParticipant),
-    param("max sequencers per synchronizer", _.maxSequencersPerSynchronizer),
     param("max mediators per group", _.maxMediatorsPerGroup),
     param("max signatures per transaction", _.maxSignaturesPerTransaction),
     param("max transaction hashes per multi signature", _.maxTransactionHashesPerMultiSignature),
@@ -236,7 +282,6 @@ object TopologyLimits extends PrettyPrintingCompanion[TopologyLimits] {
     maxOwnersPerDecentralizedNamespace = PositiveInt.tryCreate(100),
     maxHostingParticipantsPerParty = PositiveInt.tryCreate(100),
     maxVettedPackagesPerParticipant = PositiveInt.tryCreate(10_000),
-    maxSequencersPerSynchronizer = PositiveInt.tryCreate(100),
     maxMediatorsPerGroup = PositiveInt.tryCreate(100),
     maxSignaturesPerTransaction = PositiveInt.tryCreate(1000),
     maxTransactionHashesPerMultiSignature = PositiveInt.tryCreate(1000),
@@ -271,7 +316,6 @@ object TopologyLimits extends PrettyPrintingCompanion[TopologyLimits] {
       maxOwnersPerDecentralizedNamespace,
       maxHostingParticipantsPerParty,
       default.maxVettedPackagesPerParticipant,
-      default.maxSequencersPerSynchronizer,
       default.maxMediatorsPerGroup,
       default.maxSignaturesPerTransaction,
       default.maxTransactionHashesPerMultiSignature,
@@ -288,7 +332,6 @@ object TopologyLimits extends PrettyPrintingCompanion[TopologyLimits] {
       maxOwnersPerDecentralizedNamespaceP,
       maxHostingParticipantsPerPartyP,
       maxVettedPackagesPerParticipantP,
-      maxSequencersPerSynchronizerP,
       maxMediatorsPerGroupP,
       maxSignaturesPerTransactionP,
       maxTransactionHashesPerMultiSignatureP,
@@ -312,10 +355,6 @@ object TopologyLimits extends PrettyPrintingCompanion[TopologyLimits] {
       maxVettedPackagesPerParticipant <- ProtoConverter.parsePositiveInt(
         "max_vetted_packages_per_participant",
         maxVettedPackagesPerParticipantP,
-      )
-      maxSequencersPerSynchronizer <- ProtoConverter.parsePositiveInt(
-        "max_sequencers_per_synchronizer",
-        maxSequencersPerSynchronizerP,
       )
       maxMediatorsPerGroup <- ProtoConverter.parsePositiveInt(
         "max_mediators_per_group",
@@ -342,7 +381,6 @@ object TopologyLimits extends PrettyPrintingCompanion[TopologyLimits] {
       maxOwnersPerDecentralizedNamespace,
       maxHostingParticipantsPerParty,
       maxVettedPackagesPerParticipant,
-      maxSequencersPerSynchronizer,
       maxMediatorsPerGroup,
       maxSignaturesPerTransaction,
       maxTransactionHashesPerMultiSignature,
@@ -366,6 +404,7 @@ final case class TransactionProtocolLimits(
     maxTransactionTreeDepth: PositiveInt,
     maxSignaturesPerEnvelope: PositiveInt,
     maxQuorumSize: PositiveInt,
+    maxViewsPerMessage: PositiveInt,
 ) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[TransactionProtocolLimits] =
     TransactionProtocolLimits
@@ -414,6 +453,7 @@ final case class TransactionProtocolLimits(
     maxTransactionTreeDepth = maxTransactionTreeDepth.value,
     maxSignaturesPerEnvelope = maxSignaturesPerEnvelope.value,
     maxQuorumSize = maxQuorumSize.value,
+    maxViewsPerMessage = maxViewsPerMessage.value,
   )
 }
 
@@ -523,6 +563,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
     param("max transaction tree depth", _.maxTransactionTreeDepth),
     param("max signatures per envelope", _.maxSignaturesPerEnvelope),
     param("max quorum size", _.maxQuorumSize),
+    param("max views per message", _.maxViewsPerMessage),
   )
 
   lazy val default: TransactionProtocolLimits =
@@ -540,6 +581,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionTreeDepth = PositiveInt.MaxValue,
       maxSignaturesPerEnvelope = PositiveInt.tryCreate(1_000),
       maxQuorumSize = PositiveInt.tryCreate(100_000_000),
+      maxViewsPerMessage = PositiveInt.tryCreate(100_000),
     )
 
   /** Common parsing logic for all proto versions, which only differ in whether
@@ -549,6 +591,9 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
     *   carried on v32 and later, not in v31, enforced on >= ProtocolVersion.newBoundsOnPV37
     * @param maxQuorumSize
     *   carried on v32 and later, not in v31, enforced on >= ProtocolVersion.newBoundsOnPV37
+    * @param maxViewsPerMessage
+    *   carried on v33 and later, not in v31 and v32, enforced on >=
+    *   ProtocolVersion.nextValidationBoundPV
     */
   private def fromProtoCommon(
       maxActAsP: Int,
@@ -564,6 +609,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionTreeDepthP: Int,
       maxSignaturesPerEnvelope: PositiveInt,
       maxQuorumSize: PositiveInt,
+      maxViewsPerMessage: PositiveInt,
   ): ParsingResult[TransactionProtocolLimits] =
     for {
       maxActAs <- ProtoConverter.parsePositiveInt("max_act_as", maxActAsP)
@@ -618,6 +664,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionTreeDepth = maxTransactionTreeDepth,
       maxSignaturesPerEnvelope = maxSignaturesPerEnvelope,
       maxQuorumSize = maxQuorumSize,
+      maxViewsPerMessage = maxViewsPerMessage,
     )
 
   def fromProtoV31(
@@ -653,6 +700,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxSignaturesPerEnvelope = TransactionProtocolLimits.default.maxSignaturesPerEnvelope,
       // maxQuorumSize was introduced in Proto 32
       maxQuorumSize = TransactionProtocolLimits.default.maxQuorumSize,
+      maxViewsPerMessage = TransactionProtocolLimits.default.maxViewsPerMessage,
     )
   }
 
@@ -699,6 +747,8 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
         maxTransactionTreeDepthP,
         maxSignaturesPerEnvelope,
         maxQuorumSize,
+        // maxViewsPerMessage was introduced in proto V33
+        TransactionProtocolLimits.default.maxViewsPerMessage,
       )
     } yield limits
   }
@@ -720,6 +770,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionTreeDepthP,
       maxSignaturesPerEnvelopeP,
       maxQuorumSizeP,
+      maxViewsPerMessageP,
     ) = transactionProtocolLimitsP
 
     for {
@@ -730,6 +781,10 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxQuorumSize <- ProtoConverter.parsePositiveInt(
         "max_quorum_size",
         maxQuorumSizeP,
+      )
+      maxViewsPerMessage <- ProtoConverter.parsePositiveInt(
+        "max_views_per_message",
+        maxViewsPerMessageP,
       )
 
       limits <- fromProtoCommon(
@@ -746,6 +801,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
         maxTransactionTreeDepthP,
         maxSignaturesPerEnvelope,
         maxQuorumSize,
+        maxViewsPerMessage,
       )
     } yield limits
   }
@@ -754,11 +810,11 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
 /** Size limits on the `repeated` fields of the BFT ordering service's internal P2P protocol.
   *
   * Only three values are configured. All other limits are derived from them and from
-  * [[SynchronizerLimits.MaxSequencersInSynchronizer]], as the legitimate size of every collection
-  * is bounded by the number of sequencers, the segment length, or the sequencing parameters.
-  * Synchronizer owners must not configure topology values (number of sequencers, segment length,
-  * requests per batch, batches per block proposal) above the limits applied here, otherwise honest
-  * messages are rejected as malformed.
+  * [[SynchronizerLimits.maxSequencersPerSynchronizer]] in [[BftOrdererLimitsView]], as the
+  * legitimate size of every collection is bounded by the number of sequencers, the segment length,
+  * or the sequencing parameters. Synchronizer owners must not configure topology values (number of
+  * sequencers, segment length, requests per batch, batches per block proposal) above the limits
+  * applied here, otherwise honest messages are rejected as malformed.
   *
   * @param maxSegmentLength
   *   upper bound on the number of blocks in an ISS segment
@@ -772,32 +828,8 @@ final case class BftOrdererLimits(
     maxSegmentLength: PositiveInt,
     maxOrderingRequests: PositiveInt,
     maxProofs: PositiveInt,
-    // Not serialized: always SynchronizerLimits.MaxSequencersInSynchronizer outside of tests
-    maxSequencersInSynchronizer: PositiveInt = SynchronizerLimits.MaxSequencersInSynchronizer,
 ) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[BftOrdererLimits] = BftOrdererLimits
-
-  // Limits bounded by the number of sequencers
-  val maxSegments: PositiveInt = maxSequencersInSynchronizer
-  val maxViewChangeMessagesPresent: PositiveInt = maxSequencersInSynchronizer
-  val maxPreparesPresent: PositiveInt = maxSequencersInSynchronizer
-  val maxCommitsPresent: PositiveInt = maxSequencersInSynchronizer
-  val maxAcks: PositiveInt = maxSequencersInSynchronizer
-  val maxViewChanges: PositiveInt = maxSequencersInSynchronizer
-  val maxCanonicalCommits: PositiveInt = maxSequencersInSynchronizer
-  val maxPrepares: PositiveInt = maxSequencersInSynchronizer
-  val maxCommits: PositiveInt = maxSequencersInSynchronizer
-
-  private val maxBlocksInEpoch: PositiveInt = PositiveInt.tryCreate(
-    (maxSegmentLength.value.toLong * maxSequencersInSynchronizer.value).min(Int.MaxValue).toInt
-  )
-
-  // Limits bounded by the number of blocks in an epoch (segment length * number of sequencers)
-  val maxAreBlocksComplete: PositiveInt = maxBlocksInEpoch
-  val maxBlockStatuses: PositiveInt = maxBlocksInEpoch
-  val maxConsensusCerts: PositiveInt = maxBlocksInEpoch
-  val maxPrePrepares: PositiveInt = maxBlocksInEpoch
-  val maxCommitCertificates: PositiveInt = maxBlocksInEpoch
 
   def toProtoV33: protoV33.BftOrdererLimits = protoV33.BftOrdererLimits(
     maxSegmentLength = maxSegmentLength.value,
@@ -806,10 +838,60 @@ final case class BftOrdererLimits(
   )
 }
 
+/** The BFT orderer limits together with the limits shared across [[SynchronizerLimits]], and all
+  * limits derived from them.
+  */
+final case class BftOrdererLimitsView(
+    limits: BftOrdererLimits,
+    maxSequencersPerSynchronizer: PositiveInt,
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[BftOrdererLimitsView] =
+    BftOrdererLimitsView
+
+  val maxSegmentLength: PositiveInt = limits.maxSegmentLength
+  val maxOrderingRequests: PositiveInt = limits.maxOrderingRequests
+  val maxProofs: PositiveInt = limits.maxProofs
+
+  // Limits bounded by the number of sequencers
+  val maxSegments: PositiveInt = maxSequencersPerSynchronizer
+  val maxViewChangeMessagesPresent: PositiveInt = maxSequencersPerSynchronizer
+  val maxPreparesPresent: PositiveInt = maxSequencersPerSynchronizer
+  val maxCommitsPresent: PositiveInt = maxSequencersPerSynchronizer
+  val maxAcks: PositiveInt = maxSequencersPerSynchronizer
+  val maxViewChanges: PositiveInt = maxSequencersPerSynchronizer
+  val maxCanonicalCommits: PositiveInt = maxSequencersPerSynchronizer
+  val maxPrepares: PositiveInt = maxSequencersPerSynchronizer
+  val maxCommits: PositiveInt = maxSequencersPerSynchronizer
+
+  private val maxBlocksInEpoch: PositiveInt = PositiveInt.tryCreate(
+    (maxSegmentLength.value.toLong * maxSequencersPerSynchronizer.value).min(Int.MaxValue).toInt
+  )
+
+  // Limits bounded by the number of blocks in an epoch (segment length * number of sequencers)
+  val maxAreBlocksComplete: PositiveInt = maxBlocksInEpoch
+  val maxBlockStatuses: PositiveInt = maxBlocksInEpoch
+  val maxConsensusCerts: PositiveInt = maxBlocksInEpoch
+  val maxPrePrepares: PositiveInt = maxBlocksInEpoch
+  val maxCommitCertificates: PositiveInt = maxBlocksInEpoch
+}
+
+object BftOrdererLimitsView extends PrettyPrintingCompanion[BftOrdererLimitsView] {
+
+  override protected val pretty: Pretty[BftOrdererLimitsView] = prettyOfClass(
+    param("limits", _.limits),
+    param("max sequencers per synchronizer", _.maxSequencersPerSynchronizer),
+  )
+
+  lazy val default: BftOrdererLimitsView =
+    BftOrdererLimitsView(
+      BftOrdererLimits.default,
+      SynchronizerLimits.DefaultMaxSequencersPerSynchronizer,
+    )
+}
+
 object BftOrdererLimits extends PrettyPrintingCompanion[BftOrdererLimits] {
 
   override protected val pretty: Pretty[BftOrdererLimits] = prettyOfClass(
-    param("max sequencers in synchronizer", _.maxSequencersInSynchronizer),
     param("max segment length", _.maxSegmentLength),
     param("max ordering requests", _.maxOrderingRequests),
     param("max proofs", _.maxProofs),

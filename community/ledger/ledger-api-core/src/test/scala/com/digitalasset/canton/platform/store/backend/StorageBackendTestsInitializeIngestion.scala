@@ -18,6 +18,7 @@ import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   PaginationFromTo,
   PaginationInput,
 }
+import com.digitalasset.canton.platform.store.dao.events.DecomposedTemplatePartyFilter
 import com.digitalasset.canton.protocol.UpdateId
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.ByteString
@@ -402,8 +403,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     executeSql(
       backend.event.updateStreamingQueries
         .variousWitnessIds(
-          witnessO = Some(someParty),
-          templateIdO = None,
+          DecomposedTemplatePartyFilter(party = Some(someParty), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.NonConsumingExercise))
         .fetchPage(_)(
@@ -415,8 +415,8 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     executeSql(
       backend.event.updateStreamingQueries
         .deactivateWitnessesIds(
-          witnessO = Some(someParty),
-          templateIdO = None,
+          templatePartyFilter =
+            DecomposedTemplatePartyFilter(party = Some(someParty), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.ConsumingExercise))
         .fetchPage(_)(
@@ -427,9 +427,8 @@ private[backend] trait StorageBackendTestsInitializeIngestion
   private def fetchIdsConsumingStakeholder(): Vector[Long] =
     executeSql(
       backend.event.updateStreamingQueries
-        .deactivateStakeholderIds(
-          witnessO = Some(someParty),
-          templateIdO = None,
+        .deactivateIds(
+          DecomposedTemplatePartyFilter(party = Some(someParty), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.ConsumingExercise))
         .fetchPage(_)(
@@ -441,8 +440,8 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     executeSql(
       backend.event.updateStreamingQueries
         .activateWitnessesIds(
-          witnessO = Some(someParty),
-          templateIdO = None,
+          templatePartyFilter =
+            DecomposedTemplatePartyFilter(party = Some(someParty), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.Create))
         .fetchPage(_)(
@@ -453,9 +452,8 @@ private[backend] trait StorageBackendTestsInitializeIngestion
   private def fetchIdsCreateStakeholder(): Vector[Long] =
     executeSql(
       backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(someParty),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(someParty), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.Create))
         .fetchPage(_)(
@@ -466,9 +464,8 @@ private[backend] trait StorageBackendTestsInitializeIngestion
   private def fetchIdsAssignStakeholder(): Vector[Long] =
     executeSql(
       backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(someParty),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(someParty), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.Assign))
         .fetchPage(_)(

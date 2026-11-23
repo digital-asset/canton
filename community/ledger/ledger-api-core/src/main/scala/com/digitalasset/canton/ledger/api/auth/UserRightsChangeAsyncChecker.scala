@@ -5,10 +5,10 @@ package com.digitalasset.canton.ledger.api.auth
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.auth.{ClaimSet, UserBasedClaimResolver}
+import com.digitalasset.canton.auth.{Claim, ClaimSet, UserBasedClaimResolver}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.user.store.{IdentityProviderConfigStore, UserManagementStore}
-import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId, User, UserRight}
+import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId, User}
 import com.digitalasset.daml.lf.data.Ref
 import org.apache.pekko.actor.Scheduler
 
@@ -54,7 +54,7 @@ private[auth] final class UserRightsChangeAsyncChecker(
       pekkoScheduler.scheduleWithFixedDelay(initialDelay = delay, delay = delay) { () =>
         val idpId = IdentityProviderId.fromOptionalLedgerString(identityProviderId)
         val userState: Future[
-          Either[String, (User, Set[UserRight], Option[IdentityProviderConfig])]
+          Either[String, (User, Seq[Claim], Option[IdentityProviderConfig])]
         ] =
           for {
             userRightsResult <- userManagementStore.listUserRights(userId, idpId)
@@ -65,21 +65,25 @@ private[auth] final class UserRightsChangeAsyncChecker(
           } yield {
             for {
               userRights <- userRightsResult.leftMap(_.toString)
+              userClaims <- Claim
+                .restrict(
+                  UserBasedClaimResolver.convertUserRightsToClaims(userRights, idpId),
+                  originalClaims.appliedRestriction,
+                )
+                .leftMap(_.toString)
               user <- userResult.leftMap(_.toString)
               idpConfigO <- idpConfigOResult.sequence.leftMap(_.toString)
-            } yield (user, userRights, idpConfigO)
+            } yield (user, userClaims, idpConfigO)
           }
         userState
           .onComplete {
             case Failure(_) | Success(Left(_)) =>
               userClaimsMismatchCallback()
-            case Success(Right((user, userRights, idpConfig))) =>
-              val updatedClaims =
-                UserBasedClaimResolver.convertUserRightsToClaims(userRights, idpId)
+            case Success(Right((user, userClaims, idpConfig))) =>
               if (
                 idpConfig.exists(_.isDeactivated) ||
                 user.isDeactivated ||
-                updatedClaims.toSet != originalClaims.claims.toSet
+                userClaims.toSet != originalClaims.claims.toSet
               ) {
                 userClaimsMismatchCallback()
               }

@@ -59,16 +59,24 @@ enum HashFunction {
 // Allows clients to query the Daml-LF packages that are supported by the server.
 service PackageService {
   // Returns the identifiers of all supported packages.
+  //
+  // Required permissions: ``ledger:read``
   rpc ListPackages(ListPackagesRequest) returns (ListPackagesResponse);
 
   // Returns the contents of a single package.
+  //
+  // Required permissions: ``ledger:read``
   rpc GetPackage(GetPackageRequest) returns (GetPackageResponse);
 
   // Returns the status of a single package.
+  //
+  // Required permissions: ``ledger:read``
   rpc GetPackageStatus(GetPackageStatusRequest) returns (GetPackageStatusResponse);
 
   // Lists which participant node vetted what packages on which synchronizer.
   // Can be called by any authenticated user.
+  //
+  // Required permissions: ``ledger:read``
   rpc ListVettedPackages(ListVettedPackagesRequest) returns (ListVettedPackagesResponse);
 }
 

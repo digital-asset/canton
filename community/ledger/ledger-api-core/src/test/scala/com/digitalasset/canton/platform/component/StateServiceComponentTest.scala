@@ -112,7 +112,7 @@ class StateServiceComponentTest extends AnyWordSpec with IndexComponentTest {
       val realCreate =
         creates(nextRecordTime, payloadLength = 10, synchronizer = synchronizer1)(size = 1)
       val repairCreate1 =
-        repairCreates(() => realCreate._1.recordTime, payloadLength = 10)(size = 1)
+        participantEventCreate(() => realCreate._1.recordTime, payloadLength = 10)(size = 1)
 
       val realOffset = ingestUpdates(realCreate)
       @unused

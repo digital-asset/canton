@@ -11,7 +11,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -175,7 +175,7 @@ final case class OrderingRequestBatch private (
 }
 
 object OrderingRequestBatch
-    extends VersioningCompanionContext[OrderingRequestBatch, BftOrdererLimits] {
+    extends VersioningCompanionContext[OrderingRequestBatch, BftOrdererLimitsView] {
 
   // TODO(#24736): make this possible to change
   val BatchValidityDurationEpochs = 500
@@ -194,7 +194,7 @@ object OrderingRequestBatch
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       batch: v30.Batch,
   ): ParsingResult[OrderingRequestBatch] =
     for {

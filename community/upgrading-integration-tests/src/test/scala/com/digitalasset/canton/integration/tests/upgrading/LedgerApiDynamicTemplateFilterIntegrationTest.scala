@@ -197,6 +197,7 @@ abstract class LedgerApiDynamicTemplateFilterIntegrationTest
           ),
           filtersForAnyParty = None,
           verbose = true,
+          filtersByContractId = Seq.empty,
         )
       ),
       transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

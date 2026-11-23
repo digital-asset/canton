@@ -42,6 +42,15 @@ _Write summary of release_
 
 ### Synchronizer operators
 
+### Removal of deprecated features
+
+<!-- Features deprecated in an earlier release that this release removes: the feature, the release that deprecated
+it, and its replacement. -->
+
+### Removal of protocol versions
+
+<!-- Protocol versions no longer supported: the versions, and how to upgrade synchronizers still on them. -->
+
 ## Deprecations
 
 <!-- The deprecated item, its replacement, and when it will be removed. -->
@@ -56,11 +65,12 @@ _Write summary of release_
 
 ### Synchronizer operators
 
-## Security and Bug Fixes
+## Security Fixes
 
 <!--
-Advisories first, then the other fixes as a bullet list, including dependency updates for security vulnerabilities
-(e.g. "Dependency updates to address security vulnerabilities: jackson 2.22.4, gRPC 1.85").
+Advisories first, then the other security fixes as a bullet list, including dependency updates for security
+vulnerabilities (e.g. "Dependency updates to address security vulnerabilities: jackson 2.22.4, gRPC 1.85").
+Remove this section if there are no security fixes.
 -->
 
 <!--
@@ -85,6 +95,10 @@ fix is deployed on MainNet:
 
 #### Recommendation
 -->
+
+## Bug Fixes
+
+<!-- The other bug fixes as a bullet list, not split by audience. -->
 
 ## Compatibility
 

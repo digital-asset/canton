@@ -173,7 +173,7 @@ trait AcsCommitmentMetricsIntegrationTest
 
     for (_ <- 1 to intervalCount) {
       simClock.advance(interval)
-      participant1.health.ping(participant1)
+      participant1.health.ping(participant1, synchronizerId = Some(daId))
       participants.all.filter(_.health.is_running()).foreach(_.testing.fetch_synchronizer_times())
     }
     val end = simClock.now

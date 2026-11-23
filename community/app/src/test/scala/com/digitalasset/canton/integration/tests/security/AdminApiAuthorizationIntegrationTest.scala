@@ -8,9 +8,10 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authenticity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.auth.CantonAdminToken
-import com.digitalasset.canton.config.AuthServiceConfig
 import com.digitalasset.canton.config.AuthServiceConfig.Wildcard
 import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmptyString}
+import com.digitalasset.canton.config.Confidential.Implicits.*
+import com.digitalasset.canton.config.{AuthServiceConfig, Confidential}
 import com.digitalasset.canton.console.RemoteInstanceReference
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
@@ -81,8 +82,8 @@ trait AdminApiAuthorizationIntegrationTest
     RemoteParticipantConfig(
       ledgerApi = localConfig.ledgerApi.clientConfig,
       adminApi = localConfig.adminApi.clientConfig,
-      token = token,
-      adminApiToken = adminApiToken,
+      token = token.map(Confidential(_)),
+      adminApiToken = adminApiToken.map(Confidential(_)),
     )
 
   def createRemoteConfigForMediator(
@@ -255,7 +256,7 @@ trait AdminApiAuthorizationIntegrationTest
               "p1-adminToken" ->
                 remoteParticipantWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "p1-noToken" ->
                 remoteParticipantWithToken(localConfig, None),
@@ -271,7 +272,7 @@ trait AdminApiAuthorizationIntegrationTest
               "p2-adminToken" ->
                 remoteParticipantWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "p2-privileged" ->
                 remoteParticipantWithToken(
@@ -317,7 +318,7 @@ trait AdminApiAuthorizationIntegrationTest
               "p3-adminToken" ->
                 remoteParticipantWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "p3-privileged" ->
                 remoteParticipantWithToken(
@@ -343,7 +344,7 @@ trait AdminApiAuthorizationIntegrationTest
               "p4-adminToken" ->
                 remoteParticipantWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 )
             ),
         )
@@ -356,7 +357,7 @@ trait AdminApiAuthorizationIntegrationTest
               "m1-adminToken" ->
                 remoteMediatorWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "m1-privileged" ->
                 remoteMediatorWithToken(
@@ -379,7 +380,7 @@ trait AdminApiAuthorizationIntegrationTest
               "s1-adminToken" ->
                 remoteSequencerWithToken(
                   localConfig,
-                  localConfig.adminApi.adminTokenConfig.fixedAdminToken,
+                  localConfig.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
                 ),
               "s1-privileged" ->
                 remoteSequencerWithToken(

@@ -74,6 +74,7 @@ trait MultiPartyServiceCallAuthTests extends SecuredServiceCallAuthTests {
   protected override def prerequisiteUsers: List[PrerequisiteUser] = List(
     PrerequisiteUser(singlePartyReadUser, readAsParties = List(singleParty)),
     PrerequisiteUser(singlePartyActUser, actAsParties = List(singleParty)),
+    PrerequisiteUser(noPartyUser),
     PrerequisiteUser(superUser, actAsParties = actAs, readAsParties = readAs),
     PrerequisiteUser(superActorUser, actAsParties = actAs ++ readAs),
     PrerequisiteUser(superReaderUser, readAsParties = actAs ++ readAs),

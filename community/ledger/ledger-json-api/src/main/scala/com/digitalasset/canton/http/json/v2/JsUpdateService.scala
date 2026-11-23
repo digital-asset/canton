@@ -8,7 +8,6 @@ import com.daml.ledger.api.v2 as lapi
 import com.daml.ledger.api.v2.transaction_filter.ParticipantAuthorizationTopologyFormat
 import com.daml.ledger.api.v2.{offset_checkpoint, transaction_filter, update_service}
 import com.digitalasset.canton.auth.AuthInterceptor
-import com.digitalasset.canton.http.WebsocketConfig
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
 import com.digitalasset.canton.http.json.v2.Endpoints.{CallerContext, TracedInput}
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
@@ -19,6 +18,7 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
   OneOfSchemaExtension,
 }
 import com.digitalasset.canton.http.json.v2.damldefinitionsservice.Schema.Codecs.*
+import com.digitalasset.canton.http.{ServerRequestTimeout, WebsocketConfig}
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -47,6 +47,7 @@ class JsUpdateService(
     val executionContext: ExecutionContext,
     esf: ExecutionSequencerFactory,
     wsConfig: WebsocketConfig,
+    serverRequestTimeout: ServerRequestTimeout,
     materializer: Materializer,
     val authInterceptor: AuthInterceptor,
 ) extends Endpoints

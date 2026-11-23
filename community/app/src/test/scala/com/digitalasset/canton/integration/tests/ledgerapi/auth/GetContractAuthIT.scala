@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.contract_service.{ContractServiceGrpc, GetContractRequest}
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.UseBftSequencer
 import io.grpc.Status
@@ -11,10 +12,18 @@ import org.scalatest.Assertion
 
 import scala.concurrent.{ExecutionContext, Future}
 
-final class GetContractAuthIT extends SuperReaderServiceCallAuthTests {
+final class GetContractAuthIT
+    extends SuperReaderServiceCallAuthTests
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "ContractService#GetContract"
+
+  override def apiAreaScopeBaseToken = standardToken(mainActorReadUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerRead.area) -> true,
+    List(ClaimApiArea.partiesAllocate.area) -> false,
+  )
 
   override def successfulBehavior(f: Future[Any])(implicit ec: ExecutionContext): Assertion =
     expectFailure(f, Status.Code.INVALID_ARGUMENT)

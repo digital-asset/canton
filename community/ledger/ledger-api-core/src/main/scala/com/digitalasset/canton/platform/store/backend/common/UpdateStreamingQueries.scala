@@ -5,9 +5,9 @@ package com.digitalasset.canton.platform.store.backend.common
 
 import anorm.SqlParser.long
 import anorm.~
-import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.platform.store.backend.PersistentEventType
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
+  CompositConcatenationOps,
   CompositeSql,
   SqlStringInterpolation,
 }
@@ -24,9 +24,12 @@ import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   PaginationFromTo,
   PaginationInput,
 }
+import com.digitalasset.canton.platform.store.dao.events.{
+  DecomposedContractIdFilter,
+  DecomposedFilter,
+  DecomposedTemplatePartyFilter,
+}
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.data.Ref.NameTypeConRef
 
 import java.sql.Connection
 
@@ -47,106 +50,114 @@ class UpdateStreamingQueries(
     queryStrategy: QueryStrategy,
 ) {
 
-  def activateStakeholderIds(
-      witnessO: Option[Party],
-      templateIdO: Option[NameTypeConRef],
+  def activateIds(
+      decomposedFilter: DecomposedFilter
   ): UpdateIdPageQueryBuilder =
     new UpdateIdPageQueryBuilder(
       eventTypeFilter = idFilter("lapi_events_activate_contract"),
-      idPageQueryBuilder = UpdateStreamingQueries.fetchEventIds(
-        tableName = "lapi_filter_activate_stakeholder",
-        witnessO = witnessO,
-        templateIdO = templateIdO,
-        stringInterning = stringInterning,
-        hasFirstPerSequentialId = true,
-      ),
+      idPageQueryBuilder = decomposedFilter match {
+        case filter: DecomposedTemplatePartyFilter =>
+          UpdateStreamingQueries.fetchEventIds(
+            tableName = "lapi_filter_activate_stakeholder",
+            decomposedFilter = filter,
+            stringInterning = stringInterning,
+            hasFirstPerSequentialId = true,
+          )
+        case filter: DecomposedContractIdFilter =>
+          UpdateStreamingQueries.fetchEventIds(
+            tableName = "lapi_events_activate_contract",
+            decomposedFilter = filter,
+            stringInterning = stringInterning,
+            // the event tables do not have the first_per_sequential_id column
+            hasFirstPerSequentialId = false,
+          )
+      },
     )
 
   def activateWitnessesIds(
-      witnessO: Option[Party],
-      templateIdO: Option[NameTypeConRef],
+      templatePartyFilter: DecomposedTemplatePartyFilter
   ): UpdateIdPageQueryBuilder =
     new UpdateIdPageQueryBuilder(
       eventTypeFilter = idFilter("lapi_events_activate_contract"),
       idPageQueryBuilder = UpdateStreamingQueries.fetchEventIds(
         tableName = "lapi_filter_activate_witness",
-        witnessO = witnessO,
-        templateIdO = templateIdO,
+        decomposedFilter = templatePartyFilter,
         stringInterning = stringInterning,
         hasFirstPerSequentialId = true,
       ),
     )
 
-  def deactivateStakeholderIds(
-      witnessO: Option[Party],
-      templateIdO: Option[NameTypeConRef],
+  def deactivateIds(
+      decomposedFilter: DecomposedFilter
   ): UpdateIdPageQueryBuilder =
     new UpdateIdPageQueryBuilder(
       eventTypeFilter = idFilter("lapi_events_deactivate_contract"),
-      idPageQueryBuilder = UpdateStreamingQueries.fetchEventIds(
-        tableName = "lapi_filter_deactivate_stakeholder",
-        witnessO = witnessO,
-        templateIdO = templateIdO,
-        stringInterning = stringInterning,
-        hasFirstPerSequentialId = true,
-      ),
+      idPageQueryBuilder = decomposedFilter match {
+        case filter: DecomposedTemplatePartyFilter =>
+          UpdateStreamingQueries.fetchEventIds(
+            tableName = "lapi_filter_deactivate_stakeholder",
+            decomposedFilter = filter,
+            stringInterning = stringInterning,
+            hasFirstPerSequentialId = true,
+          )
+        case filter: DecomposedContractIdFilter =>
+          UpdateStreamingQueries.fetchEventIds(
+            tableName = "lapi_events_deactivate_contract",
+            decomposedFilter = filter,
+            stringInterning = stringInterning,
+            // the event tables do not have the first_per_sequential_id column
+            hasFirstPerSequentialId = false,
+          )
+      },
     )
 
   def deactivateWitnessesIds(
-      witnessO: Option[Party],
-      templateIdO: Option[NameTypeConRef],
+      templatePartyFilter: DecomposedTemplatePartyFilter
   ): UpdateIdPageQueryBuilder =
     new UpdateIdPageQueryBuilder(
       eventTypeFilter = idFilter("lapi_events_deactivate_contract"),
       idPageQueryBuilder = UpdateStreamingQueries.fetchEventIds(
         tableName = "lapi_filter_deactivate_witness",
-        witnessO = witnessO,
-        templateIdO = templateIdO,
+        decomposedFilter = templatePartyFilter,
         stringInterning = stringInterning,
         hasFirstPerSequentialId = true,
       ),
     )
 
   def variousWitnessIds(
-      witnessO: Option[Party],
-      templateIdO: Option[NameTypeConRef],
+      filter: DecomposedTemplatePartyFilter
   ): UpdateIdPageQueryBuilder =
     new UpdateIdPageQueryBuilder(
       eventTypeFilter = idFilter("lapi_events_various_witnessed"),
-      idPageQueryBuilder = UpdateStreamingQueries.fetchEventIds(
+      UpdateStreamingQueries.fetchEventIds(
         tableName = "lapi_filter_various_witness",
-        witnessO = witnessO,
-        templateIdO = templateIdO,
+        decomposedFilter = filter,
         stringInterning = stringInterning,
         hasFirstPerSequentialId = true,
       ),
     )
 
   def fetchActiveIds(
-      stakeholderO: Option[Ref.Party],
-      templateIdO: Option[NameTypeConRef],
+      templatePartyFilter: DecomposedTemplatePartyFilter,
       activeAtEventSeqId: Long,
   ): IdFilterPageQuery =
     UpdateStreamingQueries
       .fetchEventIds(
         tableName = "lapi_filter_activate_stakeholder",
-        witnessO = stakeholderO,
-        templateIdO = templateIdO,
+        decomposedFilter = templatePartyFilter,
         stringInterning = stringInterning,
         hasFirstPerSequentialId = true,
       )
       .toFiltered(eventNotDeactivated(activeAtEventSeqId))
 
   def fetchAchsIds(
-      stakeholderO: Option[Ref.Party],
-      templateIdO: Option[NameTypeConRef],
+      templatePartyFilter: DecomposedTemplatePartyFilter,
       activeAtEventSeqId: Long,
   ): IdFilterPageQuery =
     UpdateStreamingQueries
       .fetchEventIds(
         tableName = "lapi_filter_achs_stakeholder",
-        witnessO = stakeholderO,
-        templateIdO = templateIdO,
+        decomposedFilter = templatePartyFilter,
         stringInterning = stringInterning,
         hasFirstPerSequentialId = true,
       )
@@ -164,31 +175,30 @@ class UpdateStreamingQueries(
 
 object UpdateStreamingQueries {
 
-  // TODO(i22416): Rename the arguments of this function, as witnessO and templateIdO are inadequate for party topology events.
   /** @param tableName
-    *   one of the filter tables for create, consuming or non-consuming events
-    * @param witnessO
-    *   the party for which to fetch the event ids, if None the event ids for all the parties should
-    *   be fetched
-    * @param templateIdO
-    *   NOTE: this parameter is not applicable for tree tx stream only oriented filters
+    *   one of the filter tables for create, consuming or non-consuming events, or one of the event
+    *   tables having the internal_contract_id column indexed together with the event_sequential_id
+    *   if a DecomposedContractIdFilter is used
+    * @param decomposedFilter
+    *   the filter selecting the events. For DecomposedTemplatePartyFilter: if the party is None,
+    *   the event ids for all the parties are fetched; the template id is not applicable for tree tx
+    *   stream only oriented filters. For DecomposedContractIdFilter: all the event ids of the given
+    *   internal contract id are fetched
     * @param stringInterning
     *   the string interning instance to use for internalizing the party and template id
     * @param hasFirstPerSequentialId
-    *   true if the table has the first_per_sequential_id column, false otherwise. If true and
-    *   witnessO is None, only a single row per event_sequential_id will be fetched and thus only
-    *   unique event ids will be returned
+    *   true if the table has the first_per_sequential_id column, false otherwise. If true and the
+    *   party of a DecomposedTemplatePartyFilter is None, only a single row per event_sequential_id
+    *   will be fetched and thus only unique event ids will be returned
     */
   def fetchEventIds(
       tableName: String,
-      witnessO: Option[Ref.Party],
-      templateIdO: Option[NameTypeConRef],
+      decomposedFilter: DecomposedFilter,
       stringInterning: StringInterning,
       hasFirstPerSequentialId: Boolean,
   ): IdPageQueryBuilder =
     filterTableClauses(
-      witnessO = witnessO,
-      templateIdO = templateIdO,
+      decomposedFilter = decomposedFilter,
       stringInterning = stringInterning,
       hasFirstPerSequentialId = hasFirstPerSequentialId,
     ).map(clauses =>
@@ -198,66 +208,122 @@ object UpdateStreamingQueries {
       )
     ).getOrElse(new EmptyIdPageQuery)
 
+  /** @param decomposedFilter
+    *   the filter to create the filter table clauses for
+    * @param stringInterning
+    *   the string interning instance to use for internalizing the party and template id
+    * @param hasFirstPerSequentialId
+    *   true if the table has the first_per_sequential_id column, false otherwise. Only applicable
+    *   to [[DecomposedTemplatePartyFilter]]s.
+    * @return
+    *   None if the filter cannot match any event (the party or template id was never seen)
+    */
   private def filterTableClauses(
-      witnessO: Option[Ref.Party],
-      templateIdO: Option[NameTypeConRef],
+      decomposedFilter: DecomposedFilter,
       stringInterning: StringInterning,
       hasFirstPerSequentialId: Boolean,
-  ): Option[FilterTableClauses] = {
-    val partyIdFilterO = witnessO match {
-      case Some(witness) =>
-        stringInterning.party
-          .tryInternalize(witness) match {
-          case Some(internedPartyFilter) =>
-            // use ordering by party_id even though we are restricting the query to a single party_id
-            // to ensure that the correct db index is used
-            Some((cSQL"AND filters.party_id = $internedPartyFilter", cSQL"filters.party_id,"))
-          case None => None // partyFilter never seen
+  ): Option[FilterTableClauses] =
+    decomposedFilter match {
+      case DecomposedContractIdFilter(internalContractId) =>
+        Some(FilterTableClauses.contractId(internalContractId))
+
+      case DecomposedTemplatePartyFilter(witnessO, templateIdO) =>
+        // None if the party was never seen, Some(None) if we do not filter by party
+        val internedPartyIdO: Option[Option[Int]] = witnessO match {
+          case Some(witness) => stringInterning.party.tryInternalize(witness).map(Some(_))
+          case None => Some(None)
         }
-      case None =>
-        // do not filter by party, fetch event for all parties
-        Some((cSQL"", cSQL""))
-    }
-
-    val templateIdFilterO = templateIdO.map(stringInterning.templateId.tryInternalize) match {
-      case Some(None) => None // templateIdFilter never seen
-      case internedTemplateIdFilterNested =>
-        internedTemplateIdFilterNested.flatten // flatten works for both None, Some(Some(x)) case, Some(None) excluded before
-        match {
-          case Some(internedTemplateId) =>
-            // use ordering by template_id even though we are restricting the query to a single template_id
-            // to ensure that the correct db index is used
-            Some((cSQL"AND filters.template_id = $internedTemplateId", cSQL"filters.template_id,"))
-          case None => Some((cSQL"", cSQL""))
+        // None if the template id was never seen, Some(None) if we do not filter by template id
+        val internedTemplateIdO: Option[Option[Int]] = templateIdO match {
+          case Some(templateId) =>
+            stringInterning.templateId.tryInternalize(templateId).map(Some(_))
+          case None => Some(None)
         }
+        for {
+          internedPartyId <- internedPartyIdO
+          internedTemplateId <- internedTemplateIdO
+        } yield FilterTableClauses.partyTemplate(
+          internedPartyIdO = internedPartyId,
+          internedTemplateIdO = internedTemplateId,
+          // if we do not filter by party and the table has first_per_sequential_id column, we only fetch a single row per event_sequential_id
+          firstPerSequentialIdOnly = witnessO.isEmpty && hasFirstPerSequentialId,
+        )
     }
 
-    // if we do not filter by party and the table has first_per_sequential_id column, we only fetch a single row per event_sequential_id
-    val firstPerSequentialIdClause = witnessO match {
-      case None if hasFirstPerSequentialId =>
-        cSQL"AND filters.first_per_sequential_id = true"
-      case _ => cSQL""
-    }
-
-    for {
-      (partyIdFilterClause, partyIdOrderingClause) <- partyIdFilterO
-      (templateIdFilterClause, templateIdOrderingClause) <- templateIdFilterO
-    } yield FilterTableClauses(
-      partyIdFilterClause = partyIdFilterClause,
-      partyIdOrderingClause = partyIdOrderingClause,
-      templateIdFilterClause = templateIdFilterClause,
-      templateIdOrderingClause = templateIdOrderingClause,
-      firstPerSequentialIdClause = firstPerSequentialIdClause,
-    )
-  }
-
+  /** Clauses for querying the filter table.
+    *
+    * @param filterClauses
+    *   additional conditions to be appended to the WHERE clause. Either empty or a conjunction
+    *   starting with " AND ".
+    * @param orderingClauses
+    *   additional ordering columns to be prepended to the ORDER BY event_sequential_id clause.
+    *   Either empty or a comma-separated list of columns ending with ", ".
+    */
   final case class FilterTableClauses(
-      partyIdFilterClause: CompositeSql,
-      partyIdOrderingClause: CompositeSql,
-      templateIdFilterClause: CompositeSql,
-      templateIdOrderingClause: CompositeSql,
-      firstPerSequentialIdClause: CompositeSql,
+      filterClauses: CompositeSql,
+      orderingClauses: CompositeSql,
   )
+
+  object FilterTableClauses {
+
+    private def fromSeqs(
+        filterClauses: Seq[CompositeSql],
+        orderingClauses: Seq[CompositeSql],
+    ): FilterTableClauses =
+      FilterTableClauses(
+        filterClauses =
+          if (filterClauses.isEmpty) cSQL""
+          else filterClauses.mkComposite(" AND ", " AND ", ""),
+        orderingClauses =
+          if (orderingClauses.isEmpty) cSQL""
+          else orderingClauses.mkComposite("", ", ", ", "),
+      )
+
+    /** Clauses for filtering by party and/or template id.
+      *
+      * @param internedPartyIdO
+      *   the interned party id to filter by, if None events for all parties are fetched
+      * @param internedTemplateIdO
+      *   the interned template id to filter by, if None events for all templates are fetched
+      * @param firstPerSequentialIdOnly
+      *   if true, only a single row per event_sequential_id is fetched
+      */
+    def partyTemplate(
+        internedPartyIdO: Option[Int],
+        internedTemplateIdO: Option[Int],
+        firstPerSequentialIdOnly: Boolean,
+    ): FilterTableClauses = {
+      // use ordering by party_id and template_id even though we are restricting the query to a
+      // single party_id and template_id to ensure that the correct db index is used
+      val party =
+        internedPartyIdO.map(partyId => (cSQL"filters.party_id = $partyId", cSQL"filters.party_id"))
+      val template = internedTemplateIdO.map(templateId =>
+        (cSQL"filters.template_id = $templateId", cSQL"filters.template_id")
+      )
+
+      val (filterClauses, orderingClauses) = (party.toList ++ template.toList).unzip
+
+      val firstPerSequentialId =
+        Option.when(firstPerSequentialIdOnly)(cSQL"filters.first_per_sequential_id = true")
+      fromSeqs(
+        filterClauses = filterClauses ++ firstPerSequentialId.toList,
+        orderingClauses = orderingClauses,
+      )
+    }
+
+    /** Clauses for filtering by internal contract id.
+      *
+      * @param internalContractId
+      *   the internal contract id for which all the event ids should be fetched
+      */
+    def contractId(internalContractId: Long): FilterTableClauses =
+      fromSeqs(
+        filterClauses = Seq(cSQL"filters.internal_contract_id = $internalContractId"),
+        // use ordering by internal_contract_id even though we are restricting the query to a single
+        // internal_contract_id to ensure that the correct db index is used
+        orderingClauses = Seq(cSQL"filters.internal_contract_id"),
+      )
+  }
 
   private def filterTableSelect(
       tableName: String,
@@ -273,19 +339,17 @@ object UpdateStreamingQueries {
         cSQL"${paginationFromTo.eventSeqIdRange.startInclusive} <= filters.event_sequential_id AND filters.event_sequential_id <= ${paginationFromTo.eventSeqIdRange.endInclusive}"
     val idOrderDirectionSQL = if (paginationFromTo.descending) cSQL"DESC" else cSQL"ASC"
     val limitSQL = limit.map(l => cSQL"LIMIT $l").getOrElse(cSQL"")
+    val whereSQL = cSQL"$idBoundsSQL ${filterTableClauses.filterClauses}"
+    val orderBySQL =
+      cSQL"${filterTableClauses.orderingClauses} filters.event_sequential_id $idOrderDirectionSQL"
     val baseSQL =
       cSQL"""
             FROM
               #$tableName filters
             WHERE
-              $idBoundsSQL
-              ${filterTableClauses.partyIdFilterClause}
-              ${filterTableClauses.templateIdFilterClause}
-              ${filterTableClauses.firstPerSequentialIdClause}
+              $whereSQL
             ORDER BY
-              ${filterTableClauses.partyIdOrderingClause}
-              ${filterTableClauses.templateIdOrderingClause}
-              filters.event_sequential_id $idOrderDirectionSQL -- deliver in index order"""
+              $orderBySQL -- deliver in index order"""
     idFilterO match {
       case None =>
         cSQL"""

@@ -30,7 +30,7 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
-import com.digitalasset.canton.topology.{ParticipantId, PartyId}
+import com.digitalasset.canton.topology.{ParticipantId, PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import org.slf4j.event.Level
@@ -147,7 +147,11 @@ final class Phase7ReassigningParticipantIntegrationTest
   }
 
   /** Unassignment request declaring `declared` as the reassigning participants. */
-  private def unassignDeclaring(contract: ContractInstance, declared: Set[ParticipantId])(implicit
+  private def unassignDeclaring(
+      contract: ContractInstance,
+      declared: Set[ParticipantId],
+      target: Option[PhysicalSynchronizerId] = None,
+  )(implicit
       env: TestConsoleEnvironment
   ): Unit = {
     import env.*
@@ -160,7 +164,7 @@ final class Phase7ReassigningParticipantIntegrationTest
     val helpers = ReassignmentDataHelpers(
       contract = contract,
       sourceSynchronizer = Source(daId),
-      targetSynchronizer = Target(acmeId),
+      targetSynchronizer = Target(target.getOrElse(acmeId)),
       pureCrypto = crypto,
       targetTimestamp = Target(environment.clock.now),
     )
@@ -263,6 +267,44 @@ final class Phase7ReassigningParticipantIntegrationTest
         participant2.testing
           .acs_search(acmeName, exactId = contract.contractId.coid)
           .map(_.contractId.coid) should contain(contract.contractId.coid)
+    }
+  }
+
+  "A reassigning participant that knows the target only under another physical id" should {
+    "keep processing when the verdict is an approve" in { implicit env =>
+      import env.*
+
+      val unknownPsid = acmeId.copy(serial = NonNegativeInt.one)
+      participant1.underlying.value.sync.syncPersistentStateManager.get(unknownPsid) shouldBe empty
+
+      val contract = createContract()
+
+      loggerFactory.assertLogsSeq(
+        SuppressionRule.LoggerNameContains("UnassignmentProcessingSteps") &&
+          SuppressionRule.Level(Level.INFO)
+      )(
+        {
+          replacingConfirmationResult(
+            daId,
+            sequencer1,
+            mediator1,
+            withMediatorVerdict(mediatorApprove),
+          ) {
+            unassignDeclaring(contract, Set(participant1.id, participant2.id), Some(unknownPsid))
+
+            // Keeps the send policy installed until the unassignment result has gone through it.
+            participant2.health.ping(participant3)
+          }.discard
+
+          // Proves that participant1 still commits on da after the result.
+          participant1.health.ping(participant3)
+        },
+        entries =>
+          forAtLeast(1, entries) { entry =>
+            entry.loggerName should include("participant=participant1")
+            entry.message should include("is not triggered")
+          },
+      )
     }
   }
 

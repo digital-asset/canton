@@ -16,7 +16,12 @@ import com.digitalasset.canton.crypto.{
   v30 as cryptoV30,
 }
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.{TestSynchronizerParameters, TopologyLimits, v30}
+import com.digitalasset.canton.protocol.{
+  TestSynchronizerParameters,
+  TopologyLimits,
+  TopologyLimitsView,
+  v30,
+}
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.*
@@ -454,7 +459,9 @@ final class TopologyTransactionTest
     "decentralized namespace owners bounded by the synchronizer's topology limits" should {
 
       val limits =
-        TopologyLimits.default.copy(maxOwnersPerDecentralizedNamespace = PositiveInt.three)
+        TopologyLimitsView.default.copy(limits =
+          TopologyLimits.default.copy(maxOwnersPerDecentralizedNamespace = PositiveInt.three)
+        )
       val max = limits.maxOwnersPerDecentralizedNamespace.unwrap
 
       def definitionP(ownerCount: Int): v30.DecentralizedNamespaceDefinition =
@@ -535,7 +542,9 @@ final class TopologyTransactionTest
             .futureValueUS
         )
 
-      val limits = TopologyLimits.default.copy(maxSigningKeysPerEntity = PositiveInt.three)
+      val limits = TopologyLimitsView.default.copy(limits =
+        TopologyLimits.default.copy(maxSigningKeysPerEntity = PositiveInt.three)
+      )
 
       def ownerToKeyP(keys: Seq[SigningPublicKey]): v30.OwnerToKeyMapping =
         v30.OwnerToKeyMapping(
@@ -596,7 +605,9 @@ final class TopologyTransactionTest
       "bound the keys to MaxKeys until ProtocolVersion.newBoundsOnPV37" in {
         val keys = signingKeys(MaxKeys.unwrap + 1)
         val higher =
-          TopologyLimits.default.copy(maxSigningKeysPerEntity = PositiveInt.tryCreate(keys.size))
+          TopologyLimitsView.default.copy(limits =
+            TopologyLimits.default.copy(maxSigningKeysPerEntity = PositiveInt.tryCreate(keys.size))
+          )
         val exceeded =
           s"repeated or map field has ${keys.size} elements, exceeding the maximum of $MaxKeys"
 
@@ -658,7 +669,9 @@ final class TopologyTransactionTest
       "take the limit from the caller, not from a constant" in {
         val keys = signingKeys(limits.maxSigningKeysPerEntity.unwrap + 1)
         val higher =
-          TopologyLimits.default.copy(maxSigningKeysPerEntity = PositiveInt.tryCreate(keys.size))
+          TopologyLimitsView.default.copy(limits =
+            TopologyLimits.default.copy(maxSigningKeysPerEntity = PositiveInt.tryCreate(keys.size))
+          )
 
         OwnerToKeyMapping
           .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, higher, ownerToKeyP(keys))
@@ -709,7 +722,9 @@ final class TopologyTransactionTest
 
     "hosting participants bounded by the synchronizer's topology limits" should {
 
-      val limits = TopologyLimits.default.copy(maxHostingParticipantsPerParty = PositiveInt.three)
+      val limits = TopologyLimitsView.default.copy(limits =
+        TopologyLimits.default.copy(maxHostingParticipantsPerParty = PositiveInt.three)
+      )
       val max = limits.maxHostingParticipantsPerParty.unwrap
 
       def mappingP(participantCount: Int): v30.PartyToParticipant =
@@ -769,7 +784,9 @@ final class TopologyTransactionTest
 
     "vetted packages bounded by the synchronizer's topology limits" should {
 
-      val limits = TopologyLimits.default.copy(maxVettedPackagesPerParticipant = PositiveInt.three)
+      val limits = TopologyLimitsView.default.copy(limits =
+        TopologyLimits.default.copy(maxVettedPackagesPerParticipant = PositiveInt.three)
+      )
       val max = limits.maxVettedPackagesPerParticipant.unwrap
 
       def mappingP(packageIdCount: Int, packageCount: Int): v30.VettedPackages =
@@ -837,7 +854,7 @@ final class TopologyTransactionTest
 
     "sequencer synchronizer state bounded by the synchronizer's topology limits" should {
 
-      val limits = TopologyLimits.default.copy(maxSequencersPerSynchronizer = PositiveInt.three)
+      val limits = TopologyLimitsView.default.copy(maxSequencersPerSynchronizer = PositiveInt.three)
       val max = limits.maxSequencersPerSynchronizer.unwrap
 
       def sequencers(prefix: String, count: Int): Seq[SequencerId] =
@@ -893,7 +910,9 @@ final class TopologyTransactionTest
 
     "mediator synchronizer state bounded by the synchronizer's topology limits" should {
 
-      val limits = TopologyLimits.default.copy(maxMediatorsPerGroup = PositiveInt.three)
+      val limits = TopologyLimitsView.default.copy(limits =
+        TopologyLimits.default.copy(maxMediatorsPerGroup = PositiveInt.three)
+      )
       val max = limits.maxMediatorsPerGroup.unwrap
 
       def mediators(prefix: String, count: Int): Seq[MediatorId] =
@@ -950,9 +969,11 @@ final class TopologyTransactionTest
 
     "signed topology transaction signatures bounded by the synchronizer's topology limits" should {
 
-      val limits = TopologyLimits.default.copy(
-        maxSignaturesPerTransaction = PositiveInt.three,
-        maxTransactionHashesPerMultiSignature = PositiveInt.two,
+      val limits = TopologyLimitsView.default.copy(limits =
+        TopologyLimits.default.copy(
+          maxSignaturesPerTransaction = PositiveInt.three,
+          maxTransactionHashesPerMultiSignature = PositiveInt.two,
+        )
       )
       val maxSignatures = limits.maxSignaturesPerTransaction.unwrap
       val maxHashes = limits.maxTransactionHashesPerMultiSignature.unwrap
@@ -1085,7 +1106,9 @@ final class TopologyTransactionTest
 
     "signed topology transactions bounded by the synchronizer's topology limits" should {
 
-      val limits = TopologyLimits.default.copy(maxTransactionsPerBroadcast = PositiveInt.three)
+      val limits = TopologyLimitsView.default.copy(limits =
+        TopologyLimits.default.copy(maxTransactionsPerBroadcast = PositiveInt.three)
+      )
       val max = limits.maxTransactionsPerBroadcast.unwrap
       val signedTx = SignedTopologyTransaction.withSignatures(
         mk(NamespaceDelegation.tryCreate(uid.namespace, publicKey, CanSignAllMappings)),
@@ -1139,7 +1162,9 @@ final class TopologyTransactionTest
     "lsu sequencer connection successor endpoints bounded by the synchronizer's topology limits" should {
 
       val limits =
-        TopologyLimits.default.copy(maxEndpointsPerSequencerConnection = PositiveInt.three)
+        TopologyLimitsView.default.copy(limits =
+          TopologyLimits.default.copy(maxEndpointsPerSequencerConnection = PositiveInt.three)
+        )
       val max = limits.maxEndpointsPerSequencerConnection.unwrap
 
       def successorP(endpointCount: Int): v30.LsuSequencerConnectionSuccessor =

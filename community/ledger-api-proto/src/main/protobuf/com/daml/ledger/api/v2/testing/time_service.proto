@@ -17,9 +17,13 @@ option csharp_namespace = "Com.Daml.Ledger.Api.V2.Testing";
 service TimeService {
 
   // Returns the current time according to the ledger server.
+  //
+  // Required permissions: ``ledger:read``
   rpc GetTime (GetTimeRequest) returns (GetTimeResponse);
 
   // Allows clients to change the ledger's clock in an atomic get-and-set operation.
+  //
+  // Required permissions: ``time:write``
   rpc SetTime (SetTimeRequest) returns (google.protobuf.Empty);
 }
 

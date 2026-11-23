@@ -15,7 +15,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
-import com.digitalasset.canton.protocol.TopologyLimits
+import com.digitalasset.canton.protocol.TopologyLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId as AdminTopologyStoreId
@@ -171,13 +171,13 @@ class GrpcTopologyManagerWriteService(
             case v30.AuthorizeRequest.Proposal.Mapping.V30(value) =>
               TopologyMapping.fromProtoV30(
                 ProtocolVersionValidation.AlwaysValidation,
-                TopologyLimits.default,
+                TopologyLimitsView.default,
                 value,
               )
             case v30.AuthorizeRequest.Proposal.Mapping.V31(value) =>
               TopologyMapping.fromProtoV31(
                 ProtocolVersionValidation.AlwaysValidation,
-                TopologyLimits.default,
+                TopologyLimitsView.default,
                 value,
               )
             case v30.AuthorizeRequest.Proposal.Mapping.Empty =>
@@ -264,7 +264,7 @@ class GrpcTopologyManagerWriteService(
       )((tx, _) =>
         SignedTopologyTransaction.fromProtoV30(
           ProtocolVersionValidation.AlwaysValidation,
-          TopologyTransactionDeserializationContext(TopologyLimits.default),
+          TopologyTransactionDeserializationContext(TopologyLimitsView.default),
           tx,
         )
       )
@@ -334,7 +334,7 @@ class GrpcTopologyManagerWriteService(
           )((tx, _) =>
             SignedTopologyTransaction.fromProtoV30(
               protocolVersionValidation,
-              TopologyTransactionDeserializationContext(TopologyLimits.default),
+              TopologyTransactionDeserializationContext(TopologyLimitsView.default),
               tx,
             )
           )
@@ -547,13 +547,13 @@ class GrpcTopologyManagerWriteService(
             case v30.GenerateTransactionsRequest.Proposal.Mapping.V30(value) =>
               TopologyMapping.fromProtoV30(
                 ProtocolVersionValidation.AlwaysValidation,
-                TopologyLimits.default,
+                TopologyLimitsView.default,
                 value,
               )
             case v30.GenerateTransactionsRequest.Proposal.Mapping.V31(value) =>
               TopologyMapping.fromProtoV31(
                 ProtocolVersionValidation.AlwaysValidation,
-                TopologyLimits.default,
+                TopologyLimitsView.default,
                 value,
               )
             case v30.GenerateTransactionsRequest.Proposal.Mapping.Empty =>

@@ -108,6 +108,7 @@ trait LedgerApiOtelITBase
               filtersByParty = Map(party -> Filters(Nil)),
               filtersForAnyParty = None,
               verbose = false,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
@@ -436,6 +437,7 @@ class LedgerApiOtelIT extends LedgerApiOtelITBase {
                 filtersByParty = Map(party -> Filters.defaultInstance),
                 filtersForAnyParty = None,
                 verbose = false,
+                filtersByContractId = Seq.empty,
               )
             ),
             transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,

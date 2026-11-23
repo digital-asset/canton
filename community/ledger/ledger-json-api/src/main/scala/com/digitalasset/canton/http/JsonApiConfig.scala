@@ -69,6 +69,8 @@ object JsonApiConfig {
   val defaultRequestTimeoutUpperBound: FiniteDuration = 60.seconds
 }
 
+final case class ServerRequestTimeout(duration: FiniteDuration)
+
 /** Bounds for the client-supplied per-request timeout carried in the `Request-Timeout` header.
   *
   * See [[RequestTimeoutDirective]] for how these bounds are enforced.
@@ -104,12 +106,13 @@ final case class WebsocketConfig(
     heartbeatPeriod: FiniteDuration = WSC.DefaultHeartbeatPeriod, // v1 only
     httpListMaxElementsLimit: Long = WSC.DefaultHttpListMaxElementsLimit,
     httpListWaitTime: FiniteDuration = WSC.DefaultHttpListWaitTime,
+    httpListMaxWaitTime: FiniteDuration = WSC.DefaultHttpListMaxWaitTime,
     cookieAuthAllowedOrigins: Seq[String] = WSC.DefaultCookieAuthAllowedOrigins,
 )
 
 object WebsocketConfig {
   implicit val showInstance: Show[WebsocketConfig] = Show.show(c =>
-    s"WebsocketConfig(httpListMaxElementsLimit=${c.httpListMaxElementsLimit}, httpListWaitTime=${c.httpListWaitTime}, cookieAuthAllowedOrigins=${c.cookieAuthAllowedOrigins
+    s"WebsocketConfig(httpListMaxElementsLimit=${c.httpListMaxElementsLimit}, httpListWaitTime=${c.httpListWaitTime}, httpListMaxWaitTime=${c.httpListMaxWaitTime}, cookieAuthAllowedOrigins=${c.cookieAuthAllowedOrigins
         .mkString("[", ", ", "]")})"
   )
 
@@ -122,6 +125,7 @@ object WebsocketConfig {
   // Canton transactions can be quite big (20kb) so we keep max number of returned transactions in list low by default
   val DefaultHttpListMaxElementsLimit: Long = 200
   val DefaultHttpListWaitTime: FiniteDuration = 0.5.seconds
+  val DefaultHttpListMaxWaitTime: FiniteDuration = 5.seconds
   // Secure by default: cookie authentication is disabled until origins are explicitly allowed
   val DefaultCookieAuthAllowedOrigins: Seq[String] = Seq.empty
 }

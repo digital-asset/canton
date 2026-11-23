@@ -9,6 +9,7 @@ import com.daml.test.evidence.tag.Security.Attack
 import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.canton
 import com.digitalasset.canton.auth.CantonAdminToken
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.{AuthServiceConfig, CantonConfig, NonNegativeDuration}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.http.json.Circe

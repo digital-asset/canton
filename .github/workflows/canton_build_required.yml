@@ -6,7 +6,8 @@ on:
       - 'release-line*'
     tags:
       - 'v*'
-  pull_request: {}
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
   workflow_dispatch:
   workflow_call:
@@ -20,8 +21,9 @@ on:
 
 # On main and release-line branches, each run gets a unique concurrency group (based on run_id),
 # so runs never cancel or wait for each other.
-# On all other branches, runs are grouped by workflow and branch, so a newer push cancels
-# any in-progress run for the same branch.
+# Any PR event (a push, or marking the PR ready for review) cancels the PR's active run.
+# The planner reuses results only from completed runs, so marking a PR ready while its
+# draft run is still going reruns those tests.
 concurrency:
   group: >-
     ${{
@@ -56,18 +58,109 @@ jobs:
       - id: pick_runner
         uses: ./.github/actions/utils/pick_runner
 
+  plan_ci:
+    name: Plan CI
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    env:
+      DRAFT_ONLY: >-
+        ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && !contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+      # Keyed on the PR head, not GitHub's merge commit, so main moving on its own does not
+      # discard earlier results. Merging main into the branch is a push and gets a new key.
+      RECEIPT_NAME: draft-ci-v1-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+    outputs:
+      draft-only: ${{ steps.plan.outputs.draft-only }}
+      receipt-name: ${{ env.RECEIPT_NAME }}
+      reuse-test-37: ${{ steps.plan.outputs.reuse-test-37 }}
+      reuse-crash-recovery-37: ${{ steps.plan.outputs.reuse-crash-recovery-37 }}
+    steps:
+      - name: Find earlier test results for this PR head
+        id: lookup
+        if: >-
+          github.event_name == 'pull_request' && github.event.action == 'ready_for_review' &&
+          !contains(github.event.pull_request.labels.*.name, 'ci:full')
+        continue-on-error: true
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              ...context.repo,
+              workflow_id: 'canton_build_required.yml',
+              event: 'pull_request',
+              head_sha: pr.head.sha,
+              status: 'completed',
+              per_page: 10,
+            });
+            for (const run of data.workflow_runs) {
+              if (run.id === context.runId || run.head_repository?.id !== pr.head.repo.id || run.head_branch !== pr.head.ref) continue;
+              const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
+                ...context.repo, run_id: run.id, name: process.env.RECEIPT_NAME,
+              });
+              if (artifacts.artifacts.some(artifact => artifact.name === process.env.RECEIPT_NAME && !artifact.expired)) {
+                core.setOutput('run-id', String(run.id));
+                break;
+              }
+            }
+
+      - name: Download earlier test results
+        id: download
+        if: steps.lookup.outputs.run-id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ env.RECEIPT_NAME }}
+          path: ${{ runner.temp }}/canton-draft-ci
+          run-id: ${{ steps.lookup.outputs.run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Select tests and report reused results
+        id: plan
+        uses: actions/github-script@v9
+        env:
+          RECEIPT_RUN: ${{ steps.download.outcome == 'success' && steps.lookup.outputs.run-id || '' }}
+          RECEIPT_PATH: ${{ runner.temp }}/canton-draft-ci/passed.json
+        with:
+          script: |
+            const fs = require('node:fs');
+            let passed = [];
+            if (process.env.RECEIPT_RUN) {
+              try {
+                const receipt = JSON.parse(fs.readFileSync(process.env.RECEIPT_PATH, 'utf8'));
+                if (receipt.key === process.env.RECEIPT_NAME && Array.isArray(receipt.passed)) passed = receipt.passed;
+              } catch (error) {
+                core.warning(`Could not read earlier test results: ${error.message}`);
+              }
+            }
+            const reuse = {
+              'test-37': passed.includes('test_37'),
+              'crash-recovery-37': passed.includes('crash_recovery_test_37'),
+            };
+            core.setOutput('draft-only', process.env.DRAFT_ONLY);
+            for (const [job, reused] of Object.entries(reuse)) core.setOutput(`reuse-${job}`, String(reused));
+            core.summary.addHeading(process.env.DRAFT_ONLY === 'true' ? 'Draft CI' : 'Full CI');
+            const reused = Object.keys(reuse).filter(job => reuse[job]);
+            if (reused.length) {
+              const url = `${context.serverUrl}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.RECEIPT_RUN}`;
+              core.summary.addRaw(`Reused ${reused.join(', ')} from [an earlier run](${url}).`, true);
+            }
+            await core.summary.write();
+
   setup_and_validation:
     name: Setup nix and Validate skip-ci label and yaml files
-    needs: pick_runner
+    needs: [pick_runner, plan_ci]
     uses: ./.github/workflows/_setup_and_validation.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+      draft_only: ${{ needs.plan_ci.outputs.draft-only == 'true' }}
 
   static_tests:
     name: Static Tests
-    needs: [pick_runner, setup_and_validation]
+    needs: [pick_runner, plan_ci, setup_and_validation]
     if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
       needs.setup_and_validation.outputs.docs-only != 'true' &&
       needs.setup_and_validation.outputs.should-skip != 'true' &&
       (inputs.test_to_run_many_times != true || github.event_name != 'workflow_call') &&
@@ -106,8 +199,10 @@ jobs:
 
   test_36:
     name: Test protocol version 36
-    needs: [pick_runner, compile]
-    if: github.event_name != 'merge_group'
+    needs: [pick_runner, plan_ci, compile]
+    if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
+      github.event_name != 'merge_group'
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
@@ -119,8 +214,9 @@ jobs:
 
   test_36_requires_external_kms:
     name: Test protocol version 36 (RequiresExternalKms)
-    needs: [pick_runner, compile]
+    needs: [pick_runner, plan_ci, compile]
     if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
       github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository)
@@ -169,8 +265,10 @@ jobs:
 
   build_scaladoc:
     name: Build Scaladoc
-    needs: [pick_runner, compile]
-    if: github.event_name != 'merge_group'
+    needs: [pick_runner, plan_ci, compile]
+    if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
+      github.event_name != 'merge_group'
     uses: ./.github/workflows/_build_scaladoc.yml
     secrets: inherit
     with:
@@ -178,8 +276,11 @@ jobs:
 
   crash_recovery_test_37:
     name: Crash Recovery Test 37
-    needs: [pick_runner, compile]
-    if: github.event_name != 'merge_group'
+    needs: [pick_runner, plan_ci, compile]
+    # Part of draft PR coverage; skipped when a passing result for this PR head is reused.
+    if: |
+      needs.plan_ci.outputs.reuse-crash-recovery-37 != 'true' &&
+      github.event_name != 'merge_group'
     uses: ./.github/workflows/_crash_recovery_test.yml
     secrets: inherit
     with:
@@ -188,8 +289,9 @@ jobs:
 
   crash_recovery_test_37_requires_external_kms:
     name: Crash Recovery Test 37 (RequiresExternalKms)
-    needs: [pick_runner, compile]
+    needs: [pick_runner, plan_ci, compile]
     if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
       github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository)
@@ -219,8 +321,10 @@ jobs:
 
   package_community:
     name: Package Community
-    needs: [pick_runner, compile]
-    if: github.event_name != 'merge_group'
+    needs: [pick_runner, plan_ci, compile]
+    if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
+      github.event_name != 'merge_group'
     uses: ./.github/workflows/_package_community.yml
     secrets: inherit
     with:
@@ -230,13 +334,15 @@ jobs:
 
   protobuf_continuity:
     name: Protobuf Continuity
-    needs: [pick_runner, compile]
+    needs: [pick_runner, plan_ci, compile]
     # Intentional: keep this job branch-only.
     # Protobuf continuity is a static source-level check (`sbt protobufContinuityCheck`), so
     # running it again on a release tag would be redundant with the branch/release-line commit
     # that the tag points to. We still exclude merge-queue branches, matching the historical
     # CircleCI behavior that was migrated to GitHub Actions.
-    if: github.event_name != 'merge_group' && github.ref_type != 'tag'
+    if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
+      github.event_name != 'merge_group' && github.ref_type != 'tag'
     uses: ./.github/workflows/_protobuf_continuity.yml
     secrets: inherit
     with:
@@ -244,11 +350,13 @@ jobs:
 
   size_config_up_to_date:
     name: Size Config Up To Date
-    needs: [pick_runner, compile]
+    needs: [pick_runner, plan_ci, compile]
     # Regenerates the size-config classes and compares them with the checked-in ones, so the result
     # depends only on the commit's sources. It is not rerun on release tags (the tagged commit was
     # already checked on its branch) nor in the merge queue (conflicts should be rare).
-    if: github.event_name != 'merge_group' && github.ref_type != 'tag'
+    if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
+      github.event_name != 'merge_group' && github.ref_type != 'tag'
     uses: ./.github/workflows/_size_config_up_to_date.yml
     secrets: inherit
     with:
@@ -256,12 +364,14 @@ jobs:
 
   protocol_continuity_test_latest:
     name: Protocol Continuity Test Latest
-    needs: [pick_runner, compile]
+    needs: [pick_runner, plan_ci, compile]
     # Intentional: unlike protobuf_continuity, this integration-style continuity job also runs on
     # release tags. Release tags are part of the published release validation flow, so we keep the
     # explicit `v*` tag clause here, matching the historical CircleCI behavior that was migrated to
     # GitHub Actions.
-    if: github.event_name != 'merge_group'
+    if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
+      github.event_name != 'merge_group'
     uses: ./.github/workflows/_protocol_continuity_test_latest.yml
     secrets: inherit
     with:
@@ -269,7 +379,8 @@ jobs:
 
   scalafix:
     name: Scalafix
-    needs: [pick_runner, compile]
+    needs: [pick_runner, plan_ci, compile]
+    if: needs.plan_ci.outputs.draft-only != 'true'
     uses: ./.github/workflows/_scalafix.yml
     secrets: inherit
     with:
@@ -296,8 +407,10 @@ jobs:
 
   test_data_continuity_dumps:
     name: Test Data Continuity Dumps
-    needs: [pick_runner, compile]
-    if: github.event_name != 'merge_group' && github.ref_type != 'tag'
+    needs: [pick_runner, plan_ci, compile]
+    if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
+      github.event_name != 'merge_group' && github.ref_type != 'tag'
     uses: ./.github/workflows/_test_data_continuity_dumps.yml
     # Full coverage on main and release-line branches, scoped down on regular PR branches. A PR
     # targeting a release-line still gets full coverage from the push to the release-line branch
@@ -314,8 +427,10 @@ jobs:
 
   test_docker_images:
     name: Test Docker Images
-    needs: [pick_runner, package_community]
-    if: github.event_name != 'merge_group'
+    needs: [pick_runner, plan_ci, package_community]
+    if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
+      github.event_name != 'merge_group'
     uses: ./.github/workflows/_test_docker_images.yml
     secrets: inherit
     with:
@@ -323,8 +438,10 @@ jobs:
 
   test_37:
     name: Test Protocol Version 37
-    needs: [pick_runner, compile]
-    if: github.event_name != 'merge_group' && github.ref_type != 'tag'
+    needs: [pick_runner, plan_ci, compile]
+    if: |
+      needs.plan_ci.outputs.reuse-test-37 != 'true' &&
+      github.event_name != 'merge_group' && github.ref_type != 'tag'
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
@@ -334,8 +451,9 @@ jobs:
 
   test_37_requires_external_kms:
     name: Test Protocol Version 37 (RequiresExternalKms)
-    needs: [pick_runner, compile]
+    needs: [pick_runner, plan_ci, compile]
     if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
       github.event_name != 'merge_group' &&
       github.ref_type != 'tag'  &&
       (github.event_name != 'pull_request' ||
@@ -361,8 +479,10 @@ jobs:
 
   toxiproxy_test_fast_37:
     name: Toxiproxy Test Fast 37
-    needs: [pick_runner, compile]
-    if: github.event_name != 'merge_group'
+    needs: [pick_runner, plan_ci, compile]
+    if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
+      github.event_name != 'merge_group'
     uses: ./.github/workflows/_toxiproxy_test_fast.yml
     secrets: inherit
     with:
@@ -371,8 +491,9 @@ jobs:
 
   toxiproxy_test_fast_37_requires_external_kms:
     name: Toxiproxy Test Fast 37 (RequiresExternalKms)
-    needs: [pick_runner, compile]
+    needs: [pick_runner, plan_ci, compile]
     if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
       github.event_name != 'merge_group'  &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository)
@@ -406,8 +527,10 @@ jobs:
 
   variations_test_37_selected_users:
     name: Variations Test 37 (Selected Users)
-    needs: [pick_runner, compile]
-    if: github.event_name == 'pull_request'
+    needs: [pick_runner, plan_ci, compile]
+    if: |
+      needs.plan_ci.outputs.draft-only != 'true' &&
+      github.event_name == 'pull_request'
     uses: ./.github/workflows/_variations_test.yml
     secrets: inherit
     with:
@@ -415,10 +538,41 @@ jobs:
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '37'
 
+  publish_draft_results:
+    name: Publish test results for reuse
+    needs: [plan_ci, test_37, crash_recovery_test_37]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'pull_request' &&
+          (needs.test_37.result == 'success' || needs.crash_recovery_test_37.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Record completed test families
+        shell: bash
+        env:
+          RECEIPT_NAME: ${{ needs.plan_ci.outputs.receipt-name }}
+          TEST_37: ${{ needs.test_37.result }}
+          CRASH_RECOVERY_37: ${{ needs.crash_recovery_test_37.result }}
+        run: |
+          jq -n --arg key "$RECEIPT_NAME" --arg test "$TEST_37" --arg crash "$CRASH_RECOVERY_37" \
+            '{key: $key, passed: ({test_37: $test, crash_recovery_test_37: $crash} | to_entries | map(select(.value == "success").key))}' \
+            > "$RUNNER_TEMP/passed.json"
+
+      - name: Upload test results for reuse
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          name: ${{ needs.plan_ci.outputs.receipt-name }}
+          path: ${{ runner.temp }}/passed.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
   notify:
     name: Notify on Failure
     needs:
       - pick_runner
+      - plan_ci
       - setup_and_validation
       - static_tests
       - compile
@@ -447,6 +601,7 @@ jobs:
       - unstable_test_37
       - variations_test_37
       - variations_test_37_selected_users
+      - publish_draft_results
     if: |
       always() &&
       github.event_name == 'push' &&
@@ -460,9 +615,18 @@ jobs:
       needs_json: ${{ toJSON(needs) }}
 
   canton_build_required_gate:
-    name: Canton Build Required Gate
+    # Draft-only runs report separately so their partial coverage cannot satisfy branch protection.
+    # A ci:full draft run has full coverage, so it reports as the required gate.
+    name: >-
+      ${{
+        case(
+          needs.plan_ci.outputs.draft-only == 'true', 'Canton Draft Build Gate',
+          'Canton Build Required Gate'
+        )
+      }}
     needs:
       - pick_runner
+      - plan_ci
       - setup_and_validation
       - static_tests
       - compile
@@ -491,6 +655,7 @@ jobs:
       - unstable_test_37
       - variations_test_37
       - variations_test_37_selected_users
+      - publish_draft_results
     if: ${{ always() }}
     # Keep required-gate runner selection independent from pick_runner output to avoid
     # stalling merge queue if pick_runner fails before emitting outputs.
@@ -512,6 +677,7 @@ jobs:
         uses: ./.github/actions/nix/nix_script_run
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
+          IS_PR: ${{ github.event_name == 'pull_request' }}
         with:
           command: |
             python3 <<'PY'
@@ -548,6 +714,18 @@ jobs:
                 for job_name, result in failed_or_interrupted.items():
                     print(f" - {job_name}: {result}")
                 sys.exit(1)
+
+            if os.environ["IS_PR"] == "true":
+                plan = needs["plan_ci"]["outputs"]
+                required = {
+                    "compile": True,
+                    "test_37": plan.get("reuse-test-37") != "true",
+                    "crash_recovery_test_37": plan.get("reuse-crash-recovery-37") != "true",
+                }
+                missing = [job for job, run in required.items() if run and needs[job]["result"] != "success"]
+                if missing:
+                    print(f"Missing required PR coverage: {', '.join(missing)}")
+                    sys.exit(1)
 
             print("All required canton_build_required jobs either succeeded or were skipped.")
             sys.exit(0)

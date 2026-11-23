@@ -98,19 +98,28 @@ final case class PerClientIpRateLimitConfig(
   * `apps/common/src/main/scala/org/lfdecentralizedtrust/splice/config/RateLimitersConfig.scala`,
   * unchanged. That way splice's
   * `apps/common/src/main/scala/org/lfdecentralizedtrust/splice/http/HttpRateLimiter.scala` and
-  * canton's `IpRateLimitInterceptor` can both be configured the same way from the same type.
+  * canton's `IpAwareRateLimitInterceptor` can both be configured the same way from the same type.
   *
   * @param default
-  *   Overall rate limiter applied per operation (per gRPC method, for `IpRateLimitInterceptor`).
-  *   Used when there is no operation-specific override in `rateLimiters`. The embedded
-  *   `perClientIp` limiter is disabled by default; enable it to additionally limit per client IP.
+  *   Overall rate limiter applied per operation (per gRPC method, for
+  *   `IpAwareRateLimitInterceptor`). Used when there is no operation-specific override in
+  *   `rateLimiters`. The embedded `perClientIp` limiter is disabled by default; enable it to
+  *   additionally limit per client IP.
   * @param rateLimiters
   *   Per-operation overrides of the overall `default` rate limiter.
   * @param clientIpHeaders
   *   Names of the headers from which the client IP used for per-client-IP rate limiting is
   *   extracted, in order of precedence: the first header that is present and whose value (or, for
   *   comma separated lists such as `X-Forwarded-For`, whose first entry) parses as an IP literal is
-  *   used. Set to an empty list to disable per-client-IP rate limiting.
+  *   used. What an empty list means depends on the consumer:
+  *   - canton (`ConfigValidations`): at least one header has to be named, a node whose
+  *     `rate-limiting` section names none refuses to start.
+  *   - splice (`ClientIpDirectives.extractClientIp`): no header is read -> no fallback, the IP
+  *     stays `None` -> `markRun(None)` admits everything -> per-client-IP limiting is off.
+  *
+  * Per-client-IP rate limiting is turned off with `per-client-ip.enabled = false` on every
+  * [[PerClientIpRateLimitConfig]], i.e. on `global`, on `default`, and on each entry of
+  * `rate-limiters`, not by clearing this list.
   *
   * Note that the default headers are client-controlled and can hence be spoofed unless they are
   * overwritten by infrastructure the client cannot bypass. In deployments with a trusted reverse

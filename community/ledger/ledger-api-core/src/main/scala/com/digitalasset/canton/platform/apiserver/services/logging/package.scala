@@ -26,6 +26,9 @@ package object logging {
   private[services] def parties(partyNames: Iterable[Party]): LoggingEntry =
     "parties" -> partyNames
 
+  private[services] def partiesOpt(partyNames: Option[Iterable[Party]]): LoggingEntry =
+    "parties" -> partyNames
+
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private[services] def partyStrings(partyNames: Iterable[String]): LoggingEntry =
     parties(partyNames.asInstanceOf[Iterable[Party]])

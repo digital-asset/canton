@@ -38,7 +38,13 @@ class UserBasedClaimResolver(
       errorLoggingContext: ErrorLoggingContext,
   ): Future[ClaimSet] =
     claimSet match {
-      case ClaimSet.AuthenticatedUser(identityProviderId, userIdStr, participantId, expiration) =>
+      case ClaimSet.AuthenticatedUser(
+            identityProviderId,
+            userIdStr,
+            participantId,
+            expiration,
+            restriction,
+          ) =>
         val idpId = IdentityProviderId.fromOptionalLedgerString(identityProviderId)
         for {
           userManagementStore <- getUserManagementStore(userManagementStoreO)
@@ -46,29 +52,37 @@ class UserBasedClaimResolver(
           user <- verifyUserIsActive(userManagementStore, userId, idpId)
           _ <- verifyUserIsWithinIdentityProvider(idpId, user)
           userRightsResult <- userManagementStore.listUserRights(userId, idpId)
-          claimsSet <- userRightsResult match {
+          userClaims <- userRightsResult match {
             case Left(msg) =>
               Future.failed(
-                AuthorizationChecksErrors.PermissionDenied
-                  .Reject(
+                AuthorizationChecksErrors.Unauthenticated
+                  .UserBasedAuthenticationFailed(
                     s"Could not resolve rights for user '$userId' due to '$msg'"
                   )
                   .asGrpcError
               )
             case Right(userRights: Set[UserRight]) =>
-              Future.successful(
-                ClaimSet.Claims(
-                  claims = convertUserRightsToClaims(userRights, idpId),
-                  participantId = participantId,
-                  userId = Some(userId),
-                  expiration = expiration,
-                  resolvedFromUser = true,
-                  identityProviderId = identityProviderId,
-                )
-              )
+              Future.successful(convertUserRightsToClaims(userRights, idpId))
           }
+          restrictedUserClaims <- Claim
+            .restrict(userClaims, restriction)
+            .fold(
+              err =>
+                Future.failed(
+                  AuthorizationChecksErrors.PermissionDenied.Reject(err.reason).asGrpcError
+                ),
+              Future.successful(_),
+            )
         } yield {
-          claimsSet
+          ClaimSet.Claims(
+            claims = restrictedUserClaims,
+            participantId = participantId,
+            userId = Some(userId),
+            expiration = expiration,
+            resolvedFromUser = true,
+            identityProviderId = identityProviderId,
+            appliedRestriction = restriction,
+          )
         }
       case _ => Future.successful(claimSet)
     }
@@ -100,8 +114,8 @@ class UserBasedClaimResolver(
       value <- userResult match {
         case Left(msg) =>
           Future.failed(
-            AuthorizationChecksErrors.PermissionDenied
-              .Reject(
+            AuthorizationChecksErrors.Unauthenticated
+              .UserBasedAuthenticationFailed(
                 s"Could not resolve is_deactivated status for user '$userId' and identity_provider_id '$identityProviderId' due to '$msg'"
               )
               .asGrpcError
@@ -109,8 +123,8 @@ class UserBasedClaimResolver(
         case Right(user: User) =>
           if (user.isDeactivated) {
             Future.failed(
-              AuthorizationChecksErrors.PermissionDenied
-                .Reject(
+              AuthorizationChecksErrors.Unauthenticated
+                .UserBasedAuthenticationFailed(
                   s"User $userId is deactivated"
                 )
                 .asGrpcError
@@ -157,26 +171,32 @@ object UserBasedClaimResolver {
       identityProviderId: IdentityProviderId,
   ): Seq[Claim] =
     userRights.view
-      .map(userRightToClaim)
-      .toList
-      .prepended(ClaimPublic)
       .filter {
         // There is no such thing as being an IDP admin for the default IDP:
         // the default IDP indicates a lack of an IDP, rather than behaving like a real one.
-        case ClaimIdentityProviderAdmin if identityProviderId == IdentityProviderId.Default => false
+        case UserRight.IdentityProviderAdmin if identityProviderId == IdentityProviderId.Default =>
+          false
         case _ => true
       }
+      .flatMap(userRightToClaim)
+      .toList
+      .prependedAll(ClaimApiArea.user)
 
-  private[this] def userRightToClaim(r: UserRight): Claim = r match {
-    case UserRight.CanActAs(p) => ClaimActAsParty(Ref.Party.assertFromString(p))
-    case UserRight.CanReadAs(p) => ClaimReadAsParty(Ref.Party.assertFromString(p))
-    case UserRight.CanExecuteAs(p) => ClaimExecuteAsParty(Ref.Party.assertFromString(p))
-    case UserRight.IdentityProviderAdmin => ClaimIdentityProviderAdmin
-    case UserRight.ParticipantAdmin => ClaimAdmin
-    case UserRight.CanReadAsAnyParty => ClaimReadAsAnyParty
-    case UserRight.CanExecuteAsAnyParty => ClaimExecuteAsAnyParty
-    case UserRight.CanActAsAnyParty => ClaimActAsAnyParty
-    case UserRight.CanDebitTrafficFrom(a) => ClaimDebitTrafficFromAccount(a)
-    case UserRight.CanDebitTrafficFromAnyAccount => ClaimDebitTrafficFromAnyAccount
+  private[this] def userRightToClaim(r: UserRight): Seq[Claim] = r match {
+    case UserRight.CanActAs(p) => Seq(ClaimActAsParty(Ref.Party.assertFromString(p)))
+    case UserRight.CanReadAs(p) => Seq(ClaimReadAsParty(Ref.Party.assertFromString(p)))
+    case UserRight.CanExecuteAs(p) => Seq(ClaimExecuteAsParty(Ref.Party.assertFromString(p)))
+    case UserRight.IdentityProviderAdmin => ClaimApiArea.idpAdmin
+    case UserRight.ParticipantAdmin =>
+      // TODO(#37552): It would be nice if we could get rid of the ClaimAdmin here,
+      // but there are some legitimate use cases, most prominently the Admin API.
+      // Consider removing it by a new claim which specifically applies to the,
+      // and use more granular claims in other places.
+      Seq[Claim](ClaimAdmin) ++ ClaimApiArea.admin
+    case UserRight.CanReadAsAnyParty => Seq(ClaimReadAsAnyParty)
+    case UserRight.CanExecuteAsAnyParty => Seq(ClaimExecuteAsAnyParty)
+    case UserRight.CanActAsAnyParty => Seq(ClaimActAsAnyParty)
+    case UserRight.CanDebitTrafficFrom(a) => Seq(ClaimDebitTrafficFromAccount(a))
+    case UserRight.CanDebitTrafficFromAnyAccount => Seq(ClaimDebitTrafficFromAnyAccount)
   }
 }

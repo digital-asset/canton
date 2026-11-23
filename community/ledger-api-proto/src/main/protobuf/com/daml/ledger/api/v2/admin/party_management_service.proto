@@ -40,15 +40,22 @@ service PartyManagementService {
   // All horizontally scaled replicas should return the same id.
   // daml-on-kv-ledger: returns an identifier supplied on command line at launch time
   // canton: returns globally unique identifier of the participant
+  //
+  // Required permissions: ``base:read``
   rpc GetParticipantId(GetParticipantIdRequest) returns (GetParticipantIdResponse);
 
   // Get the party details of the given parties. Only known parties will be
   // returned in the list.
+  //
+  // Required permissions: ``parties:read`` or (``parties:self`` and CanReadAsParty(party) for the parties
+  // in the request)
   rpc GetParties(GetPartiesRequest) returns (GetPartiesResponse);
 
   // List the parties known by the participant.
   // The list returned contains parties whose ledger access is facilitated by
   // the participant and the ones maintained elsewhere.
+  //
+  // Required permissions: ``parties:read``
   rpc ListKnownParties(ListKnownPartiesRequest) returns (ListKnownPartiesResponse);
 
   // Allocates a new party on a ledger and adds it to the set managed by the participant.
@@ -68,6 +75,9 @@ service PartyManagementService {
   // is richer than the surface protocol, the arguments take implicit values
   // The party identifier suggestion must be a valid party name. Party names are required to be non-empty US-ASCII strings built from letters, digits, space,
   // colon, minus and underscore limited to 255 chars
+  //
+  // Required permissions: ``parties:write``, or ``parties:allocate`` if creating a party assigned
+  // to the calling user
   rpc AllocateParty(AllocatePartyRequest) returns (AllocatePartyResponse);
 
   // Alpha 3.3: Endpoint to allocate a new external party on a synchronizer
@@ -83,13 +93,20 @@ service PartyManagementService {
   // In the simple case of a non-multi hosted, non-decentralized party, the RPC will return once the party is
   // effectively allocated and ready to use, similarly to the AllocateParty behavior.
   // For more complex scenarios applications may need to query the party status explicitly (only through the admin API as of now).
+  //
+  // Required permissions: ``parties:write``, or ``parties:allocate`` if creating a party assigned
+  // to the calling user
   rpc AllocateExternalParty(AllocateExternalPartyRequest) returns (AllocateExternalPartyResponse);
 
   // Update selected modifiable participant-local attributes of a party details resource.
   // Can update the participant's local information for local parties.
+  //
+  // Required permissions: ``parties:write``
   rpc UpdatePartyDetails(UpdatePartyDetailsRequest) returns (UpdatePartyDetailsResponse);
 
   // Update the assignment of a party from one IDP to another.
+  //
+  // Required permissions: ``parties:write`` and ``idps:write``
   rpc UpdatePartyIdentityProviderId(UpdatePartyIdentityProviderIdRequest) returns (UpdatePartyIdentityProviderIdResponse);
 
   // Alpha 3.3: Convenience endpoint to generate topology transactions for external signing
@@ -102,6 +119,8 @@ service PartyManagementService {
   // Note that this request will create a normal namespace using the same key for the
   // identity as for signing. More elaborate schemes such as multi-signature
   // or decentralized parties require you to construct the topology transactions yourself.
+  //
+  // Required permissions: ``parties:read`` or ``parties:allocate``
   rpc GenerateExternalPartyTopology(GenerateExternalPartyTopologyRequest) returns (GenerateExternalPartyTopologyResponse);
 }
 

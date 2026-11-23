@@ -8,6 +8,7 @@ import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedContractEntry
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.examples.java.iou
+import com.digitalasset.canton.http.json.tests.upgrades.v1.java.foo.Foo as FooV1
 import com.digitalasset.canton.participant.admin.data.RepairContract
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
@@ -176,4 +177,26 @@ trait RepairTestUtil {
         }
       }
     }
+
+  protected def createFooV1Contract(
+      participant: ParticipantReference,
+      owner: Party,
+      other: Party,
+      synchronizerId: Option[SynchronizerId] = None,
+  ): FooV1.ContractId = {
+    val createCmd =
+      new FooV1(
+        owner.toLf,
+        other.toLf,
+      ).create.commands.asScala.toSeq
+
+    val createTx = participant.ledger_api.javaapi.commands.submit(
+      Seq(owner),
+      createCmd,
+      userPackageSelectionPreference = Seq(LfPackageId.assertFromString(FooV1.PACKAGE_ID)),
+      synchronizerId = synchronizerId,
+    )
+    JavaDecodeUtil.decodeAllCreated(FooV1.COMPANION)(createTx).loneElement.id
+  }
+
 }

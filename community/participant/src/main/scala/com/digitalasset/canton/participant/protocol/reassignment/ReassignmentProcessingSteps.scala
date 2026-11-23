@@ -74,7 +74,6 @@ import com.digitalasset.canton.participant.protocol.{
   ProtocolProcessor,
   TransactionProcessor,
 }
-import com.digitalasset.canton.participant.store.ReassignmentStore.ReassignmentStoreError
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend.TrafficRegistration
 import com.digitalasset.canton.platform.apiserver.services.command.{
@@ -1169,14 +1168,6 @@ object ReassignmentProcessingSteps {
       )
       NoStakeholders(contracts)
     }
-  }
-
-  final case class ReassignmentStoreFailed(
-      reassignmentId: ReassignmentId,
-      error: ReassignmentStoreError,
-  ) extends ReassignmentProcessorError {
-    override def message: String =
-      s"Cannot reassign `$reassignmentId`: internal reassignment store error"
   }
 
   final case class EncryptionError(

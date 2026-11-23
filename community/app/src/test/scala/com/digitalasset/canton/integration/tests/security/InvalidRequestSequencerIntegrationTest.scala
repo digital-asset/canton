@@ -28,7 +28,7 @@ import io.grpc.{ConnectivityState, ManagedChannel, StatusRuntimeException}
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
-trait InvalidRequestSequencerIntegrationTest
+sealed trait InvalidRequestSequencerIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with SecurityTestSuite {
@@ -60,6 +60,10 @@ trait InvalidRequestSequencerIntegrationTest
       SequencerTestHelper
         .requestToken(
           daChannel,
+          com.digitalasset.canton.networking.Endpoint(
+            sequencer1.config.publicApi.address,
+            sequencer1.config.publicApi.port,
+          ),
           daId,
           participant1.id,
           SynchronizerCrypto(participant1.crypto, staticSynchronizerParameters1),
@@ -136,7 +140,11 @@ trait InvalidRequestSequencerIntegrationTest
     setMaxRequestSizeAndRestart(maxRequestSizeDefault)
 
     val request = SequencerTestHelper.mkSubmissionRequest(participant1.id)
-    val signature = SequencerTestHelper.signSubmissionRequest(request, participant1).futureValueUS
+    val signature = SequencerTestHelper
+      .signSubmissionRequest(request, participant1, daId)
+      .futureValueUS
+      .value
+      .signature
 
     SequencerTestHelper
       .sendSubmissionRequest(sequencerServiceStub, request, signature)
@@ -214,7 +222,11 @@ trait InvalidRequestSequencerIntegrationTest
         .mkSubmissionRequest(participant1.id)
         .focus(_.batch.envelopes)
         .replace(List(bigEnvelope))
-    val signature = SequencerTestHelper.signSubmissionRequest(request, participant1).futureValueUS
+    val signature = SequencerTestHelper
+      .signSubmissionRequest(request, participant1, daId)
+      .futureValueUS
+      .value
+      .signature
 
     SequencerTestHelper
       .sendSubmissionRequest(sequencerServiceStub, request, signature)
@@ -266,6 +278,10 @@ trait InvalidRequestSequencerDefaultLimitsIntegrationTest
       SequencerTestHelper
         .requestToken(
           daChannel,
+          com.digitalasset.canton.networking.Endpoint(
+            sequencer1.config.publicApi.address,
+            sequencer1.config.publicApi.port,
+          ),
           daId,
           participant1.id,
           SynchronizerCrypto(participant1.crypto, staticSynchronizerParameters1),
@@ -349,13 +365,13 @@ trait InvalidRequestSequencerDefaultLimitsIntegrationTest
   }
 }
 
-class InvalidRequestSequencerBftOrderingIntegrationTestPostgres
+final class InvalidRequestSequencerBftOrderingIntegrationTestPostgres
     extends InvalidRequestSequencerIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }
 
-class InvalidRequestSequencerDefaultLimitsIntegrationTestPostgres
+final class InvalidRequestSequencerDefaultLimitsIntegrationTestPostgres
     extends InvalidRequestSequencerDefaultLimitsIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

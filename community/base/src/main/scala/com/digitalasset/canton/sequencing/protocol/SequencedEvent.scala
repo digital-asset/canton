@@ -96,7 +96,7 @@ object SequencedEvent
   override def name: String = "SequencedEvent"
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.SequencedEvent)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(v32.SequencedEvent)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV32),
       _.toProtoV32,
     )
@@ -368,7 +368,7 @@ object CompressedSequencedEvent
 
   // Keep in sync with SequencedEvent.versioningTable.
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.SequencedEvent)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(v32.SequencedEvent)(
       supportedProtoVersionMemoizedPVV(_)(SequencedEvent.fromProtoV32Compressed),
       SequencedEvent.serializeV32,
     )

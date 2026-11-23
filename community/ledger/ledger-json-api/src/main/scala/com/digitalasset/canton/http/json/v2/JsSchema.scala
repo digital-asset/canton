@@ -188,6 +188,7 @@ object JsSchema {
       deriveRelaxedCodec
 
     implicit val filtersRW: Codec[transaction_filter.Filters] = deriveRelaxedCodec
+    implicit val contractIdFilterRW: Codec[transaction_filter.ContractIdFilter] = deriveRelaxedCodec
     implicit val eventFormatRW: Codec[transaction_filter.EventFormat] = deriveRelaxedCodec
 
     implicit val transactionShapeEncoder: Encoder[TransactionShape] =
@@ -218,12 +219,21 @@ object JsSchema {
     implicit val participantPermissionDecoder: Decoder[state_service.ParticipantPermission] =
       stringDecoderForEnum()
 
+    implicit val hostingStateEncoder: Encoder[state_service.HostingState] =
+      stringEncoderForEnum()
+
+    implicit val hostingStateDecoder: Decoder[state_service.HostingState] =
+      stringDecoderForEnum()
+
     implicit val jsPrefetchContractKeyRW: Codec[js.PrefetchContractKey] = deriveConfiguredCodec
 
     implicit val unrecognizedShape: Schema[transaction_filter.TransactionShape.Unrecognized] =
       Schema.derived
 
     implicit val participantPermissionSchema: Schema[state_service.ParticipantPermission] =
+      stringSchemaForEnum()
+
+    implicit val hostingStateSchema: Schema[state_service.HostingState] =
       stringSchemaForEnum()
 
     implicit val transactionShapeSchema: Schema[transaction_filter.TransactionShape] =

@@ -20,15 +20,34 @@ class ProtoDocumentationConformanceTest extends AnyWordSpecLike with Matchers wi
       val conflictingFields = checkedFields.filter(f => f.isOptional && f.isRequired)
       val unspecifiedFields = checkedFields.filter(f => !f.isOptional && !f.isRequired)
       conflictingFields shouldBe empty withClue
-        s"The following fields have conflicting Required and Optional markers:\n" +
+        s"Found ${conflictingFields.size} field(s) with conflicting Required and Optional markers:\n" +
         conflictingFields
           .map(f => s"- ${f.fileName} / ${f.messageName} / ${f.fieldName}: ${f.comment.trim}")
           .mkString("\n")
       unspecifiedFields shouldBe empty withClue
-        s"The following fields in proto files have no Required or Optional marker:\n" +
+        s"Found ${unspecifiedFields.size} field(s) in proto files with no Required or Optional marker:\n" +
         unspecifiedFields
           .map(f => s"- ${f.fileName} / ${f.messageName} / ${f.fieldName}")
           .mkString("\n")
+    }
+  }
+
+  "new rpc comments" should {
+    "contain a 'Required permissions: ' line" in {
+      def hasRequiredPermissions(rpc: ReportedRpc): Boolean =
+        rpc.comment
+          .split("\n")
+          .exists(line => ProtoInfo.requiredPermissionsPattern.findFirstIn(line).isDefined)
+
+      val allRpcs = ProtoCommentsChecker.reportRpcs().filter(_.exposed)
+      val missingRpcs = allRpcs.filterNot(hasRequiredPermissions)
+      if (!missingRpcs.isEmpty)
+        fail(
+          s"Found ${missingRpcs.size} rpc method(s) with no 'Required permissions: ' line:\n" +
+            missingRpcs
+              .map(r => s"- ${r.fileName} / ${r.serviceName} / ${r.methodName}")
+              .mkString("\n")
+        )
     }
   }
 }
@@ -42,6 +61,19 @@ final case class ReportedField(
     isSkipped: Boolean, // oneof variant field; Required/Optional doesn't apply
     comment: String,
 )
+
+final case class ReportedRpc(
+    fileName: String,
+    serviceName: String,
+    methodName: String,
+    comment: String,
+) {
+  def exposed = !List(
+    "CommandInspectionService",
+    "ParticipantPruningService",
+    "PartyManagementAlphaService",
+  ).contains(serviceName)
+}
 
 object ProtoCommentsChecker {
 
@@ -79,6 +111,20 @@ object ProtoCommentsChecker {
             messageInfo.isFieldRequired(fieldName),
             skippedFieldKeys.contains(messageName -> fieldName),
             comment,
+          )
+        }
+      }
+    }
+
+  def reportRpcs(): Seq[ReportedRpc] =
+    protoInfo.protoComments.fileComments.toSeq.flatMap { case (fileName, fileComments) =>
+      fileComments.services.toSeq.flatMap { case (serviceName, methods) =>
+        methods.map { method =>
+          ReportedRpc(
+            fileName,
+            serviceName,
+            method.name,
+            method.comments.getOrElse(""),
           )
         }
       }

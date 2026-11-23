@@ -1085,7 +1085,7 @@ private[dao] object JdbcLedgerDaoTransactionsSpec {
       eventProjectionProperties: EventProjectionProperties,
   ) = {
     val eventFormat = InternalEventFormat(
-      templatePartiesFilter = filter,
+      eventFilter = filter,
       eventProjectionProperties = eventProjectionProperties,
     )
     val txFormat = Some(
@@ -1104,7 +1104,7 @@ private[dao] object JdbcLedgerDaoTransactionsSpec {
   ): InternalTransactionFormat =
     InternalTransactionFormat(
       internalEventFormat = InternalEventFormat(
-        templatePartiesFilter = TemplatePartiesFilter(
+        eventFilter = TemplatePartiesFilter(
           relation = Map.empty,
           templateWildcardParties = Some(requestingParties),
         ),

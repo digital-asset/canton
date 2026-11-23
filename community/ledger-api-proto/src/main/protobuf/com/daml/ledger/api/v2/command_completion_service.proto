@@ -29,10 +29,14 @@ option java_package = "com.daml.ledger.api.v2";
 service CommandCompletionService {
   // Deprecated: please use ``GetCompletions`` instead.
   // Subscribe to command completion events.
+  //
+  // Required permissions: ``ledger:read`` and ability to read as the mentioned parties
   rpc CompletionStream(CompletionStreamRequest) returns (stream CompletionStreamResponse);
 
   // Subscribe to command completion events.
   // This streaming endpoint provides more flexibility in filtering than the predecessor ``CompletionStream``.
+  //
+  // Required permissions: ``ledger:read`` and ability to read as the mentioned parties
   rpc GetCompletions(GetCompletionsRequest) returns (stream CompletionStreamResponse);
 
   // Look up a completion by its transaction hash.
@@ -43,6 +47,8 @@ service CommandCompletionService {
   // - the completion is not visible to the user,
   // - the completion was populated before upgrading to Canton version 3.5,
   // - respective completions are all pruned.
+  //
+  // Required permissions: ``ledger:read`` and ability to read as the mentioned parties
   rpc GetCompletionByHash(GetCompletionByHashRequest) returns (GetCompletionByHashResponse);
 }
 

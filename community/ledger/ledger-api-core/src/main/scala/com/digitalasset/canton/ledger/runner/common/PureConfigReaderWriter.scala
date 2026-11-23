@@ -13,6 +13,7 @@ import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConf
 import com.digitalasset.canton.platform.config.{
   ActiveContractsServiceStreamsConfig,
   CommandServiceConfig,
+  HostedPartiesStreamsConfig,
   IdentityProviderManagementConfig,
   IndexServiceConfig,
   PackageServiceConfig,
@@ -162,6 +163,9 @@ class PureConfigReaderWriter(secure: Boolean = true) {
 
   implicit val transactionFlatStreamsConfigConvert: ConfigConvert[UpdatesStreamsConfig] =
     deriveConvert[UpdatesStreamsConfig]
+
+  implicit val hostedPartiesStreamsConfigConvert: ConfigConvert[HostedPartiesStreamsConfig] =
+    deriveConvert[HostedPartiesStreamsConfig]
 
   implicit val indexServiceConfigConvert: ConfigConvert[IndexServiceConfig] =
     deriveConvert[IndexServiceConfig]

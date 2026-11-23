@@ -26,6 +26,8 @@ service StateService {
   // the snapshot may fail with "FAILED_PRECONDITION/PARTICIPANT_PRUNED_DATA_ACCESSED".
   // Note that it is ok to request acs snapshots for party migration with offsets other than ledger end, because party
   // migration is not concerned with incomplete (un)assignments.
+  //
+  // Required permissions: ``ledger:read`` and CanReadAs for the required parties.
   rpc GetActiveContracts(GetActiveContractsRequest) returns (stream GetActiveContractsResponse);
 
   // Returns a page of the snapshot of the active contracts and incomplete (un)assignments at a ledger offset.
@@ -33,16 +35,25 @@ service StateService {
   // the client SHOULD begin retrieving updates from the update service,
   // starting at the ``GetActiveContractsPageResponse``.``active_at_offset`` specified in this request.
   // Clients SHOULD NOT assume that the set of active contracts they receive reflects the state at the ledger end.
+  //
+  // Required permissions: ``ledger:read`` and CanReadAs for the required parties.
   rpc GetActiveContractsPage(GetActiveContractsPageRequest) returns (GetActiveContractsPageResponse);
 
   // Get the list of connected synchronizers at the time of the query.
+  //
+  // Required permissions: ``base:read`` if called without party arguments.
+  // ``parties:read`` or (``parties:self`` and (CanReadAs or CanExecuteAs for the required parties)) if called with party arguments.
   rpc GetConnectedSynchronizers(GetConnectedSynchronizersRequest) returns (GetConnectedSynchronizersResponse);
 
   // Get the current ledger end.
   // Subscriptions started with the returned offset will serve events after this RPC was called.
+  //
+  // Required permissions: ``base:read``
   rpc GetLedgerEnd(GetLedgerEndRequest) returns (GetLedgerEndResponse);
 
   // Get the latest successfully pruned ledger offsets
+  //
+  // Required permissions: ``base:read``
   rpc GetLatestPrunedOffsets(GetLatestPrunedOffsetsRequest) returns (GetLatestPrunedOffsetsResponse);
 
   // Translate syncrhonizer record time to an offset
@@ -52,7 +63,29 @@ service StateService {
   // If the requested record time is after the latest record time observed for this synchronizer, the request fails with
   // RECORD_TIME_NOT_OBSERVED_YET error code. This may be transitional condition until participant node catches up with most recent synchronizer updates.
   // In such case the caller may retry this request.
+  //
+  // Required permissions: ``base:read``
   rpc ConvertRecordTimeToOffset(ConvertRecordTimeToOffsetRequest) returns (ConvertRecordTimeToOffsetResponse);
+
+  // Returns a stream of the snapshot of the hosted parties at a ledger offset, which are  satisfying the
+  // request's query parameters.
+  // Once the stream of GetHostedParties completes,
+  // the client SHOULD begin streaming topology updates from the update service,
+  // starting at the ``GetHostedPartiesResponse``.``hosted_at_offset``.
+  // Clients SHOULD NOT assume that the set of hosted parties they receive reflects the state at the ledger end.
+  //
+  // Required permissions: ``ledger:read``
+  rpc GetHostedParties(GetHostedPartiesRequest) returns (stream GetHostedPartiesResponse);
+
+  // Returns a page of the snapshot of the hosted parties at a ledger offset, which are satisfying the request's
+  // query parameters.
+  // Once all pages are fetched by repeated calls to ``GetHostedPartiesPage``,
+  // the client SHOULD begin retrieving topology updates from the update service,
+  // starting at the ``GetHostedPartiesPageResponse``.``hosted_at_offset``.
+  // Clients SHOULD NOT assume that the set of hosted parties they receive reflects the state at the ledger end.
+  //
+  // Required permissions: ``ledger:read``
+  rpc GetHostedPartiesPage(GetHostedPartiesPageRequest) returns (GetHostedPartiesPageResponse);
 }
 
 message GetActiveContractsRequest {
@@ -145,6 +178,7 @@ message GetActiveContractsPageRequest {
   // Optional
   bool include_incomplete_reassignments = 5;
 }
+
 message GetActiveContractsResponse {
   // The workflow ID used in command submission which corresponds to the contract_entry. Only set if
   // the ``workflow_id`` for the command was set.
@@ -376,4 +410,181 @@ message ConvertRecordTimeToOffsetResponse {
   //
   // Required
   int64 offset = 1;
+}
+
+message GetHostedPartiesRequest {
+  // The inclusive offset at which the snapshot of the hosted parties will be computed.
+  // Must be no greater than the current ledger end offset.
+  // Must be greater than or equal to the last pruning offset.
+  // Optional, if defined, it must be a valid absolute offset (positive integer) or ledger begin offset (zero).
+  // If zero, the empty set will be returned.
+  // If not defined and no ``stream_continuation_token`` is set, the current ledger end will be used and it will be populated in the responses.
+  // If not defined and a ``stream_continuation_token`` is set, the ``hosted_at_offset`` used by the request from which
+  // the ``stream_continuation_token`` originates will be used.
+  //
+  // Optional
+  optional int64 hosted_at_offset = 1;
+
+  // If not set, the result is restricted to the parties the caller can read as (all parties if the
+  // caller can read as any party), hosted on any synchronizer on the local participant.
+  //
+  // Optional
+  HostedPartiesFilter filter = 2;
+
+  // Opaque representation of a continuation token defining a position in the hosted parties snapshot.
+  // The prefix of the hosted parties snapshot will be omitted up to and including the element from which
+  // the continuation token was read.
+  // To reuse the continuation token from a `GetHostedPartiesResponse`:
+  //
+  // - subsequent request must be executed on the same participant with the same version of canton,
+  // - subsequent request must have the same ``hosted_at_offset`` and ``filter``,
+  // - and the participant must not have been pruned after the ``hosted_at_offset``.
+  //
+  // If not specified, the whole hosted parties snapshot will be returned.
+  //
+  // Optional: can be empty
+  optional bytes stream_continuation_token = 3;
+}
+
+message GetHostedPartiesPageRequest {
+  // The inclusive offset at which the snapshot of the hosted parties will be computed.
+  // Must be no greater than the current ledger end offset.
+  // Must be greater than or equal to the last pruning offset.
+  // Optional, if defined, it must be a valid absolute offset (positive integer) or ledger begin offset (zero).
+  // If zero, the empty set will be returned.
+  // If not defined and no ``page_token`` is set, the current ledger end will be used and it will be populated in the response.
+  // If not defined and a ``page_token`` is set, the ``hosted_at_offset`` used by the request from which
+  // the ``page_token`` originates will be used.
+  //
+  // Optional
+  optional int64 hosted_at_offset = 1;
+
+  // If not set, the result is restricted to the parties the caller can read as (all parties if the
+  // caller can read as any party), hosted on any synchronizer on the local participant.
+  //
+  // Optional
+  HostedPartiesFilter filter = 2;
+
+  // To get the next page of the hosted parties snapshot, the ``page_token`` should be set to the
+  // ``next_page_token`` of the last ``GetHostedPartiesPageResponse``.
+  // The page token only works if subsequent requests:
+  //
+  // - are executed on the same participant,
+  // - use the same ``hosted_at_offset`` and ``filter``
+  // - and the participant's store was not pruned to after the ``hosted_at_offset``.
+  //
+  // If not specified, the first page of the hosted parties snapshot will be returned.
+  //
+  // Optional: can be empty
+  optional bytes page_token = 3;
+
+  // The result page will contain at most max_page_size hosted parties of the respective hosted parties snapshot.
+  // The server might reject max_page_size breaching the server-specified limit.
+  // Optional, if not defined, the default will be determined by the server.
+  //
+  // Optional
+  optional int32 max_page_size = 4;
+}
+
+message HostedPartiesFilter {
+  // The responses will be related to these parties only. If some parties cannot be found or no hosting information
+  // is available, they will be omitted from the result.
+  // If left empty: responses will be related to all parties.
+  //
+  // Optional: can be empty
+  repeated string party_filter = 1;
+
+  // By default the responses will be related to the local participant only.
+  // If set: the responses will be related to all participants.
+  // Please note: the party hosting information is only exhaustive for the local participant,
+  // for non-local participants the topology information might be partial.
+  //
+  // Optional
+  bool all_participants = 2;
+
+  // The responses will be related to these synchronizers only. If some synchronizers cannot be found
+  // or no hosting information is available, they will be omitted from the result.
+  // If left empty: responses will be related to all synchronizers.
+  //
+  // Optional: can be empty
+  repeated string synchronizer_id_filter = 3;
+}
+
+message GetHostedPartiesResponse {
+  // Required
+  HostedParty hosted_party = 1;
+
+  // The ``hosted_at_offset`` which was specified in the request or calculated by the service.
+  //
+  // Required
+  int64 hosted_at_offset = 2;
+
+  // Opaque representation of a continuation token which can be used in the request to bypass the already processed part
+  // of the hosted parties snapshot.
+  //
+  // Required: must be non-empty
+  bytes stream_continuation_token = 3;
+}
+
+message GetHostedPartiesPageResponse {
+  // Optional: can be empty
+  repeated HostedParty hosted_parties = 1;
+
+  // The ``hosted_at_offset`` which was specified in the request or calculated by the service.
+  //
+  // Required
+  int64 hosted_at_offset = 2;
+
+  // If not present this is the last page. If present, this token must be used to get the next page.
+  //
+  // Optional: can be empty
+  optional bytes next_page_token = 3;
+}
+
+message HostedParty {
+  // Required
+  string party = 1;
+
+  // Includes one entry per participant and synchronizer where the party is hosted at the offset
+  // of ``hosted_at_offset`` in the request.
+  //
+  // Required: must be non-empty
+  repeated HostingParticipant hosting_participants = 2;
+}
+
+message HostingParticipant {
+  // Required
+  string participant_id = 1;
+
+  // A valid synchronizer id.
+  // Identifies the synchronizer where the party is hosted.
+  //
+  // Required
+  string synchronizer_id = 2;
+
+  // The time at which the respective topology transaction became effective.
+  //
+  // Required
+  google.protobuf.Timestamp record_time = 3;
+
+  // The offset at which the respective topology transaction became effective.
+  //
+  // Required
+  int64 offset = 4;
+
+  // Required
+  ParticipantPermission participant_permission = 5;
+
+  // Required
+  HostingState hosting_state = 6;
+}
+
+enum HostingState {
+  HOSTING_STATE_UNSPECIFIED = 0;
+
+  // The party is being onboarded on the participant, the party cannot be used for command submissions yet.
+  HOSTING_STATE_ONBOARDING = 1;
+
+  // The participant hosts the party.
+  HOSTING_STATE_ACTIVE = 2;
 }

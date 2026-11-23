@@ -71,6 +71,7 @@ jobs:
         shard: [0, 1]
     timeout-minutes: 60
     env:
+      CANTON_ENABLE_EXPENSIVE_CHECKS: "1"
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
       # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
       SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}

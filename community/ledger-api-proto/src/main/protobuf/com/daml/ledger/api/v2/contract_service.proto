@@ -19,6 +19,8 @@ service ContractService {
   // or repair service.
   // If there is no contract exist with the contract ID, or there is no intersection with the querying_parties,
   // an CONTRACT_PAYLOAD_NOT_FOUND error will be raised.
+  //
+  // Required permissions: ``ledger:read`` and ``readAs`` for the relevant parties
   rpc GetContract(GetContractRequest) returns (GetContractResponse);
 }
 

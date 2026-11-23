@@ -409,6 +409,9 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[v2.admin.user_management_service.CreateUserResponse, openapi.CreateUserResponse](
           openapi.CreateUserResponse.fromJson
         ),
+        Mapping[v2.transaction_filter.ContractIdFilter, openapi.ContractIdFilter](
+          openapi.ContractIdFilter.fromJson
+        ),
         Mapping[v2.transaction_filter.CumulativeFilter, openapi.CumulativeFilter](
           openapi.CumulativeFilter.fromJson
         ),
@@ -1158,6 +1161,48 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           openapi.ConvertRecordTimeToOffsetResponse,
         ](
           openapi.ConvertRecordTimeToOffsetResponse.fromJson
+        ),
+        Mapping[
+          v2.state_service.HostedPartiesFilter,
+          openapi.HostedPartiesFilter,
+        ](
+          openapi.HostedPartiesFilter.fromJson
+        ),
+        Mapping[
+          v2.state_service.HostingParticipant,
+          openapi.HostingParticipant,
+        ](
+          openapi.HostingParticipant.fromJson
+        ),
+        Mapping[
+          v2.state_service.HostedParty,
+          openapi.HostedParty,
+        ](
+          openapi.HostedParty.fromJson
+        ),
+        Mapping[
+          v2.state_service.GetHostedPartiesRequest,
+          openapi.GetHostedPartiesRequest,
+        ](
+          openapi.GetHostedPartiesRequest.fromJson
+        ),
+        Mapping[
+          v2.state_service.GetHostedPartiesResponse,
+          openapi.GetHostedPartiesResponse,
+        ](
+          openapi.GetHostedPartiesResponse.fromJson
+        ),
+        Mapping[
+          v2.state_service.GetHostedPartiesPageRequest,
+          openapi.GetHostedPartiesPageRequest,
+        ](
+          openapi.GetHostedPartiesPageRequest.fromJson
+        ),
+        Mapping[
+          v2.state_service.GetHostedPartiesPageResponse,
+          openapi.GetHostedPartiesPageResponse,
+        ](
+          openapi.GetHostedPartiesPageResponse.fromJson
         ),
       )
     }

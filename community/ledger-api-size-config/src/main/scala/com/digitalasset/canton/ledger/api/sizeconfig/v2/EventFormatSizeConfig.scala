@@ -15,9 +15,13 @@ import pureconfig.{ConfigReader, ConfigWriter}
   *
   * @param filtersByPartySizeLimit
   *   max number of entries in map field `filters_by_party`
+  *
+  * @param filtersByContractIdSizeLimit
+  *   max number of elements in repeated field `filters_by_contract_id`
   */
 final case class EventFormatSizeConfig(
-    filtersByPartySizeLimit: PositiveInt
+    filtersByPartySizeLimit: PositiveInt,
+    filtersByContractIdSizeLimit: PositiveInt,
 )
 
 object EventFormatSizeConfig {

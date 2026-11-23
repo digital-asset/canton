@@ -951,7 +951,11 @@ class DeclarativeParticipantApi(
         val output = new File(fetchDarDirectory, matched.matched)
         logger.info(s"Downloading ${dar.location} to $output")
         BinaryFileUtil
-          .downloadFile(dar.location, output.toString, dar.requestHeaders)
+          .downloadFile(
+            dar.location,
+            output.toString,
+            dar.requestHeaders.all,
+          )
           .leftMap { err =>
             logger.warn(s"Failed to download ${dar.location}: $err")
           }

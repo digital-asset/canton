@@ -49,6 +49,21 @@ class AuthInterceptor(
         case Success(claimSet) => Success(claimSet)
       }
 
+  /** Like [[extractClaims]], but fails if no token was presented or none of the authentication
+    * services could verify it.
+    */
+  def extractAuthenticatedClaims(
+      authToken: Option[String],
+      serviceName: String,
+  )(implicit loggingContextWithTrace: LoggingContextWithTrace): Future[ClaimSet] =
+    extractClaims(authToken, serviceName).flatMap {
+      case ClaimSet.Unauthenticated =>
+        Future.failed(
+          AuthorizationChecksErrors.Unauthenticated.MissingJwtToken().asGrpcError
+        )
+      case claimSet => Future.successful(claimSet)
+    }
+
   private val deny: Future[(Vector[String], ClaimSet)] =
     Future.successful(Vector.empty[String] -> (ClaimSet.Unauthenticated: ClaimSet))
 

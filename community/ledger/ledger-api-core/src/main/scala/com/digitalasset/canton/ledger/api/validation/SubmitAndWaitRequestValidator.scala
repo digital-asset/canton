@@ -8,6 +8,7 @@ import com.daml.ledger.api.v2.command_service.{
   SubmitAndWaitForTransactionRequest,
   SubmitAndWaitRequest,
 }
+import com.digitalasset.canton.ledger.api.validation.FormatValidator.RejectContractIdFilters
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import io.grpc.StatusRuntimeException
@@ -49,7 +50,7 @@ class SubmitAndWaitRequestValidator(
     for {
       commands <- requirePresence(req.commands, "commands")
       _ <- requirePresence(req.transactionFormat, "transaction_format").flatMap(
-        FormatValidator.validate
+        FormatValidator.validate(_, RejectContractIdFilters)
       )
       _ <- commandsValidator.validateCommands(
         commands,
@@ -67,7 +68,8 @@ class SubmitAndWaitRequestValidator(
     for {
       commands <- requirePresence(req.reassignmentCommands, "reassignment_commands")
       _ <- req.eventFormat match {
-        case Some(eventFormat) => FormatValidator.validate(eventFormat).map(_ => ())
+        case Some(eventFormat) =>
+          FormatValidator.validate(eventFormat, RejectContractIdFilters).map(_ => ())
         case None => Right(())
       }
       _ <- commandsValidator.validateReassignmentCommands(

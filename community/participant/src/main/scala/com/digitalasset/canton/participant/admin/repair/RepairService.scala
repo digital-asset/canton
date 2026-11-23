@@ -13,15 +13,9 @@ import com.digitalasset.canton.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
-import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries}
-import com.digitalasset.canton.ledger.participant.state.Update.RepairReassignmentAccepted
-import com.digitalasset.canton.ledger.participant.state.{
-  Reassignment,
-  ReassignmentInfo,
-  RepairUpdate,
-  TransactionMeta,
-  Update,
-}
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.participant.state.Update.RepairParticipantEventUpdate
+import com.digitalasset.canton.ledger.participant.state.{ParticipantEvent, RepairUpdate}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -42,7 +36,11 @@ import com.digitalasset.canton.participant.sync.{
 }
 import com.digitalasset.canton.participant.synchronizer.SynchronizerAliasManager
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.{LfChoiceName, *}
+import com.digitalasset.canton.platform.store.backend.PersistentParticipantEventUpdateCategory.{
+  Purge,
+  PurgeTxStyle,
+}
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
@@ -51,8 +49,6 @@ import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PekkoUtil.FutureQueue
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
-import com.digitalasset.daml.lf.CantonOnly
-import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
@@ -286,10 +282,11 @@ final class RepairService(
           _ <-
             if (contractsToArchive.nonEmpty)
               EitherTUtil.rightUS[String, Unit](
-                publishArchivedEvent(
+                publishRemoveEvent(
                   contractsToArchive,
                   repair,
                   archiveTimeOfRepair.repairCounter,
+                  eventMode,
                   repairIndexer,
                 )
               )
@@ -298,10 +295,11 @@ final class RepairService(
           _ <-
             if (contractsToUnassign.nonEmpty)
               EitherTUtil.rightUS[String, Unit](
-                publishUnassignedEvent(
+                publishRemoveEvent(
                   contractsToUnassign,
                   repair,
                   unassignTimeOfRepair.repairCounter,
+                  eventMode,
                   repairIndexer,
                 )
               )
@@ -367,6 +365,7 @@ final class RepairService(
             syncCrypto,
             repairIndexer,
             contractStore.value,
+            contractValidator,
             loggerFactory,
           )
 
@@ -375,7 +374,7 @@ final class RepairService(
           )
           // Note the following purposely fails if any contract fails which results in not all contracts being processed.
           _ <- changeAssignation
-            .changeAssignation(changeAssignationData, skipInactive)
+            .changeAssignation(changeAssignationData, skipInactive, packageMetadataView.getSnapshot)
             .map(_ => Seq[Unit]())
 
         } yield ()).mapK(FutureUnlessShutdown.failOnShutdownToAbortExceptionK("changeAssignation"))
@@ -473,6 +472,7 @@ final class RepairService(
           syncCrypto,
           repairIndexer,
           contractStore.value,
+          contractValidator,
           loggerFactory,
         )
 
@@ -495,19 +495,17 @@ final class RepairService(
           syncCrypto,
           repairIndexer,
           contractStore.value,
+          contractValidator,
           loggerFactory,
         )
-        contractIdsData = ChangeAssignation.Data[Seq[(LfContractId, Option[ReassignmentCounter])]](
-          reassignmentData.contractsBatch.contractIds.map(_ -> None).toSeq,
+        changeData = ChangeAssignation.Data(
+          reassignmentData.contractsBatch,
           ReassignmentTag.Source(
             targetRepairRequest.unwrap.timesOfRepair.drop(contractsCount.value)
           ),
           ReassignmentTag.Target(sourceRepairRequest.unwrap.timesOfRepair),
         )
-        _ <- changeAssignationBack.changeAssignation(
-          contractIdsData,
-          skipInactive = false,
-        )
+        _ <- changeAssignationBack.reverseAssignation(changeData)
       } yield ()).mapK(FutureUnlessShutdown.failOnShutdownToAbortExceptionK("rollbackUnassignment"))
     }
 
@@ -639,116 +637,43 @@ final class RepairService(
     }
   }
 
-  private def toArchive(c: GenContractInstance): LfNodeExercises = LfNodeExercises(
-    targetCoid = c.contractId,
-    templateId = c.templateId,
-    packageName = c.inst.packageName,
-    interfaceId = None,
-    choiceId = LfChoiceName.assertFromString("Archive"),
-    consuming = true,
-    actingParties = c.metadata.signatories,
-    chosenValue = LfValue.ValueRecord(None, ImmArray.empty),
-    stakeholders = c.metadata.stakeholders,
-    signatories = c.metadata.signatories,
-    choiceObservers = Set.empty[LfPartyId], // default archive choice has no choice observers
-    choiceAuthorizers = None, // default (signatories + actingParties)
-    children = ImmArray.empty[LfNodeId],
-    exerciseResult = Some(LfValue.ValueUnit),
-    keyOpt = c.metadata.maybeKeyWithMaintainers,
-    byKey = false,
-    externalCallResults = ImmArray.empty,
-    version = c.inst.version,
-  )
-
-  private def publishArchivedEvent(
+  private def publishRemoveEvent(
       contracts: Seq[(GenContractInstance, ReassignmentCounter)],
       repair: RepairRequest,
       repairCounter: RepairCounter,
+      eventMode: RepairLedgerApiEventMode,
       repairIndexer: FutureQueue[RepairUpdate],
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    val nodeIds = LazyList.from(0).map(LfNodeId.apply)
-    val txNodes = nodeIds.zip(contracts.map { case (c, _) => toArchive(c) }).toMap
-    val update = Update.RepairTransactionAccepted(
-      transactionMeta = TransactionMeta(
-        ledgerEffectiveTime = repair.timestamp.toLf,
-        workflowId = None,
-        preparationTime = repair.timestamp.toLf,
-        submissionSeed = Update.noOpSeed,
-        timeBoundaries = LedgerTimeBoundaries.unconstrained,
-        optUsedPackages = None,
-        optNodeSeeds = None,
-        optByKeyNodes = None,
-      ),
-      transactionInfo = Update.TransactionAccepted.TransactionInfo(
-        LfCommittedTransaction(
-          CantonOnly.lfVersionedTransaction(
-            nodes = txNodes,
-            roots = ImmArray.from(nodeIds.take(txNodes.size)),
-          )
-        )
-      ),
-      updateId = randomUpdateId(syncCrypto),
-      synchronizerId = repair.synchronizer.psid.logical,
-      repairCounter = repairCounter,
-      recordTime = repair.timestamp,
-      // no need to pass the contract infos since no create nodes are involved
-      contractInfos = Map.empty,
-      traceContext = traceContext,
-    )
-    // not waiting for Update.persisted, since CommitRepair anyway will be waited for at the end
-    repairIndexer.offer(update).map(_ => ())
-  }
-
-  private def publishUnassignedEvent(
-      contracts: Seq[(GenContractInstance, ReassignmentCounter)],
-      repair: RepairRequest,
-      repairCounter: RepairCounter,
-      repairIndexer: FutureQueue[RepairUpdate],
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-
-    // Unassignments set the same source and target synchronizerIds since they are artificial
-    // unassigns without an actual target synchronizer (this is used for purging a contract)
-    val reassignmentId = ReassignmentId(
-      ReassignmentTag.Source(repair.synchronizer.psid.logical),
-      ReassignmentTag.Target(repair.synchronizer.psid.logical),
-      unassignmentTs = repair.timestamp,
-      contractIdCounters = contracts.map { case (c, reassignmentCounter) =>
-        (c.contractId, reassignmentCounter)
-      },
-    )
-
-    val unassigns = contracts.zipWithIndex
-      .map { case ((c, reassignmentCounter), nodeId) =>
-        Reassignment.Unassign(
-          contractId = c.contractId,
-          templateId = c.templateId,
-          packageName = c.inst.packageName,
-          stakeholders = c.metadata.stakeholders,
-          assignmentExclusivity = None,
-          reassignmentCounter = reassignmentCounter.unwrap,
-          nodeId = nodeId,
-          keyOpt = c.metadata.maybeKeyWithMaintainers,
-        )
-      }
-
-    NonEmpty
-      .from(unassigns)
-      .map { unassignsNE =>
-        RepairReassignmentAccepted(
-          workflowId = None,
+    val removals = contracts.zipWithIndex.map { case ((c, reassignmentCounter), nodeId) =>
+      ParticipantEvent.Removed(
+        contractId = c.contractId,
+        templateId = c.templateId,
+        packageName = c.inst.packageName,
+        stakeholders = c.metadata.stakeholders,
+        nodeId = nodeId,
+        reassignmentCounter = reassignmentCounter.unwrap,
+        keyOpt = c.metadata.maybeKeyWithMaintainers,
+        signatories = Some(c.metadata.signatories),
+      )
+    }
+    val category =
+      if (
+        contracts.exists { case (_, reassignmentCounter: ReassignmentCounter) =>
+          eventMode.useReassignmentEvent(reassignmentCounter)
+        }
+      ) Purge
+      else PurgeTxStyle
+    Option
+      .when(removals.nonEmpty) {
+        RepairParticipantEventUpdate(
           updateId = randomUpdateId(syncCrypto),
-          reassignmentInfo = ReassignmentInfo(
-            sourceSynchronizer = ReassignmentTag.Source(repair.synchronizer.psid.logical),
-            targetSynchronizer = ReassignmentTag.Target(repair.synchronizer.psid.logical),
-            submitter = None,
-            reassignmentId = reassignmentId,
-            isReassigningParticipant = false,
-          ),
-          reassignment = Reassignment.Batch(unassignsNE),
-          repairCounter = repairCounter,
-          recordTime = repair.timestamp,
+          workflowId = None,
           synchronizerId = repair.synchronizer.psid.logical,
+          recordTime = repair.timestamp,
+          events = removals,
+          category = category,
           traceContext = traceContext,
+          repairCounter = repairCounter,
         )
       }
       .fold(Future.unit)(repairIndexer.offer(_).map(_ => ()))
