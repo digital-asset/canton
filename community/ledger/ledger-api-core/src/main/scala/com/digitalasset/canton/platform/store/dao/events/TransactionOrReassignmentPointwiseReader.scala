@@ -59,9 +59,9 @@ final class TransactionOrReassignmentPointwiseReader(
       )(
         eventSequentialIds = eventSeqIdRange,
         requestingPartiesForTx = internalUpdateFormat.includeTransactions
-          .flatMap(_.internalEventFormat.templatePartiesFilter.allFilterParties),
+          .flatMap(_.internalEventFormat.eventFilter.allFilterParties),
         requestingPartiesForReassignment = internalUpdateFormat.includeReassignments
-          .flatMap(_.templatePartiesFilter.allFilterParties),
+          .flatMap(_.eventFilter.allFilterParties),
       )
     )
     deactivateEvents <- dbDispatcher.executeSql(
@@ -72,9 +72,9 @@ final class TransactionOrReassignmentPointwiseReader(
       )(
         eventSequentialIds = eventSeqIdRange,
         requestingPartiesForTx = internalUpdateFormat.includeTransactions
-          .flatMap(_.internalEventFormat.templatePartiesFilter.allFilterParties),
+          .flatMap(_.internalEventFormat.eventFilter.allFilterParties),
         requestingPartiesForReassignment = internalUpdateFormat.includeReassignments
-          .flatMap(_.templatePartiesFilter.allFilterParties),
+          .flatMap(_.eventFilter.allFilterParties),
       )
     )
   } yield {
@@ -95,9 +95,9 @@ final class TransactionOrReassignmentPointwiseReader(
       )(
         eventSequentialIds = eventSeqIdRange,
         requestingPartiesForTx = internalUpdateFormat.includeTransactions
-          .flatMap(_.internalEventFormat.templatePartiesFilter.allFilterParties),
+          .flatMap(_.internalEventFormat.eventFilter.allFilterParties),
         requestingPartiesForReassignment = internalUpdateFormat.includeReassignments
-          .flatMap(_.templatePartiesFilter.allFilterParties),
+          .flatMap(_.eventFilter.allFilterParties),
       )
     )
     deactivateEvents <- dbDispatcher.executeSql(
@@ -108,9 +108,9 @@ final class TransactionOrReassignmentPointwiseReader(
       )(
         eventSequentialIds = eventSeqIdRange,
         requestingPartiesForTx = internalUpdateFormat.includeTransactions
-          .flatMap(_.internalEventFormat.templatePartiesFilter.allFilterParties),
+          .flatMap(_.internalEventFormat.eventFilter.allFilterParties),
         requestingPartiesForReassignment = internalUpdateFormat.includeReassignments
-          .flatMap(_.templatePartiesFilter.allFilterParties),
+          .flatMap(_.eventFilter.allFilterParties),
       )
     )
     variousWitnessedEvents <- dbDispatcher.executeSql(
@@ -121,9 +121,9 @@ final class TransactionOrReassignmentPointwiseReader(
       )(
         eventSequentialIds = eventSeqIdRange,
         requestingPartiesForTx = internalUpdateFormat.includeTransactions
-          .flatMap(_.internalEventFormat.templatePartiesFilter.allFilterParties),
+          .flatMap(_.internalEventFormat.eventFilter.allFilterParties),
         requestingPartiesForReassignment = internalUpdateFormat.includeReassignments
-          .flatMap(_.templatePartiesFilter.allFilterParties),
+          .flatMap(_.eventFilter.allFilterParties),
       )
     )
   } yield {

@@ -83,7 +83,7 @@ trait PackageOps extends NamedLogging {
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit]
 
   def revokeVettingForPackages(
-      packages: List[LfPackageId],
+      packages: Seq[LfPackageId],
       darDescriptor: DarDescription,
       psid: PhysicalSynchronizerId,
       forceFlags: ForceFlags,
@@ -233,7 +233,7 @@ class PackageOpsImpl(
     }.void
 
   override def revokeVettingForPackages(
-      packages: List[LfPackageId],
+      packages: Seq[LfPackageId],
       darDescriptor: DarDescription,
       psid: PhysicalSynchronizerId,
       forceFlags: ForceFlags,

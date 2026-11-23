@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.apiserver.services.admin
 
 import com.daml.ledger.api.v2.admin as proto_admin
-import com.digitalasset.canton.auth.AuthorizationChecksErrors
+import com.digitalasset.canton.auth.{AuthorizationChecksErrors, ClaimApiArea}
 import com.digitalasset.canton.ledger.error.groups.UserManagementServiceErrors
 import com.digitalasset.canton.logging.{ErrorLoggingContext, LoggingContextWithTrace}
 import com.digitalasset.canton.platform.apiserver.services.admin.AuthenticatedUserContextResolver.AuthenticatedUserContext
@@ -106,12 +106,13 @@ object Utils {
       case Some(rights) =>
         for {
           authenticatedUserContext <- authenticatedUserContextF
+          restrictedPartyAllocation = authenticatedUserContext.claims.claims.collect {
+            case ClaimApiArea(ClaimApiArea.Parties(ClaimApiArea.Parties.Write)) =>
+          }.isEmpty
           resultingRightsCount = rights.collect { case r: UserRightForParty => r.party }.size
             + outstandingCalls
           _ <-
-            if (
-              authenticatedUserContext.isRegularUser && resultingRightsCount > maxSelfAllocatedParties
-            )
+            if (restrictedPartyAllocation && resultingRightsCount > maxSelfAllocatedParties)
               Future.failed(
                 AuthorizationChecksErrors.PermissionDenied
                   .Reject(s"User quota of party allocations exhausted")

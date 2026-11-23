@@ -57,7 +57,7 @@ sealed trait JsonApiConformanceBase
   ) = {
     val config = Config.default.copy(
       verbose = true,
-      timeoutScaleFactor = 3.0,
+      timeoutScaleFactor = 4.0,
       reportOnFailuresOnly = false,
       jsonApiMode = useJson,
       participantsEndpoints = testParticipants,

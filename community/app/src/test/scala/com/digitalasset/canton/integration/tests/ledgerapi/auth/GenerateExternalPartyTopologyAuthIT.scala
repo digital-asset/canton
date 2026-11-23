@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.daml.ledger.api.v2.crypto as lapicrypto
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.google.protobuf.ByteString
@@ -13,7 +14,9 @@ import java.security.KeyPairGenerator
 import java.util.UUID
 import scala.concurrent.Future
 
-final class GenerateExternalPartyTopologyAuthIT extends PublicServiceCallAuthTests {
+final class GenerateExternalPartyTopologyAuthIT
+    extends PublicServiceCallAuthTests
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
   private val keyGen = KeyPairGenerator.getInstance("Ed25519")
@@ -21,6 +24,12 @@ final class GenerateExternalPartyTopologyAuthIT extends PublicServiceCallAuthTes
   private val pb = keyPair.getPublic
 
   override def serviceCallName: String = "PartyManagementService#GenerateExternalPartyTopology"
+
+  override def apiAreaScopeBaseToken = standardToken(randomPartyReadUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.partiesAllocate.area) -> true,
+    List(ClaimApiArea.ledgerRead.area) -> false,
+  )
 
   override def serviceCall(
       context: ServiceCallContext

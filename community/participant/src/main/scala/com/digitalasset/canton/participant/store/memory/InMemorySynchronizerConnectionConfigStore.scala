@@ -21,6 +21,7 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   Error,
   InconsistentLogicalSynchronizerIds,
   InconsistentSequencerIds,
+  LogicalSynchronizerIdAlreadyAdded,
   LsuOngoing,
   LsuSource,
   LsuTarget,
@@ -105,6 +106,7 @@ class InMemorySynchronizerConnectionConfigStore(
           for {
             _ <- checkAliasConsistent(psid, alias)
             _ <- checkLogicalIdConsistent(psid, alias)
+            _ <- checkLogicalIdNotUsedByOtherAlias(psid, alias)
           } yield ()
 
         case UnknownPhysicalSynchronizerId => Either.unit
@@ -225,6 +227,19 @@ class InMemorySynchronizerConnectionConfigStore(
       .toLeft(())
       .leftWiden[Error]
   }
+
+  // Ensure the logical synchronizer id of psid is not already registered with another alias
+  private def checkLogicalIdNotUsedByOtherAlias(
+      psid: PhysicalSynchronizerId,
+      alias: SynchronizerAlias,
+  ): Either[Error, Unit] =
+    configuredSynchronizerMap.keySet
+      .collectFirst {
+        case (existingAlias, KnownPhysicalSynchronizerId(existingPsid))
+            if existingAlias != alias && existingPsid.logical == psid.logical =>
+          LogicalSynchronizerIdAlreadyAdded(psid, alias, existingAlias)
+      }
+      .toLeft(())
 
   // Ensure this psid is not already registered with another alias
   private def checkAliasConsistent(
@@ -463,6 +478,7 @@ class InMemorySynchronizerConnectionConfigStore(
         for {
           _ <- checkAliasConsistent(psid, alias)
           _ <- checkLogicalIdConsistent(psid, alias)
+          _ <- checkLogicalIdNotUsedByOtherAlias(psid, alias)
 
           // Check that there exist one entry for this alias without psid
           config <- get(alias, UnknownPhysicalSynchronizerId)

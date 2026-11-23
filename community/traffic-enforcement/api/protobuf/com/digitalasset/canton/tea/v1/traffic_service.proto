@@ -10,13 +10,14 @@ import "google/protobuf/timestamp.proto";
 // Service used for book-keeping and managing of traffic accounts for Ledger API users.
 service TrafficService {
   // Get account state for a given account ID.
-  // Permissioned to users with CanDebitTrafficFrom for the account ID, CanDebitTrafficFromAnyAccount,
-  // ActAsAnyParty, ExecuteAsAnyParty, ActAs or ExecuteAs rights for the party with the same ID,
-  // or Ledger API admin users.
+  //
+  // Required permissions: ``traffic:read``, or (``traffic:self`` and (CanDebitTrafficFrom for the account ID, CanDebitTrafficFromAnyAccount,
+  // ActAsAnyParty, ExecuteAsAnyParty, or ActAs or ExecuteAs rights for the party with the same ID)).
   rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
 
   // Update account state for a given account ID.
-  // Permissioned only to Ledger API admin users.
+  //
+  // Required permissions: ``traffic:write``.
   rpc UpdateAccount(UpdateAccountRequest) returns (UpdateAccountResponse);
 
   // Prune events from the event log, submission correlations, and uncharged completions that are older than a given timestamp.
@@ -27,19 +28,22 @@ service TrafficService {
   // (7 days by default), otherwise the request is rejected with TRAFFIC_UNSAFE_TO_PRUNE.
   // WARNING: Affects de-duplication. If an event is pruned, de-duplication UpdateAccount requests on it will NOT be possible.
   // WARNING: If a submission's correlation is pruned before its completion arrives, the submission is NOT debited.
+  //
+  // Required permissions: ``traffic:write``.
   rpc Prune(PruneRequest) returns (PruneResponse);
 
   // List accounts and their details.
   // Accounts that were never credited or debited are not listed.
   //
-  // Permissioned to users holding CanActAsAnyParty, CanExecuteAsAnyParty or CanDebitTrafficFromAnyAccount rights,
-  // or Ledger API admin users.
+  // Required permissions: ``traffic:read`` or CanActAsAnyParty, CanExecuteAsAnyParty or CanDebitTrafficFromAnyAccount rights.
   rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
 
   // Deprecated since Canton 3.7, disabled by default since Canton 3.8 and removed in Canton 3.9.
   // Use Prune instead.
   // Served by Prune, and returns only the number of pruned events.
   // Permissioned only to Ledger API admin users.
+  //
+  // Required permissions: ``traffic:write``.
   rpc PruneEvents(PruneEventsRequest) returns (PruneEventsResponse) {
     option deprecated = true;
   }

@@ -8,13 +8,13 @@ import cats.data.NonEmptyList
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.api.client.data.{CantonStatus, NodeStatus}
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeInt,
   NonNegativeLong,
   Port,
   PositiveInt,
 }
-import com.digitalasset.canton.config.{NonNegativeDuration, Password}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.NoTracing
@@ -72,9 +72,6 @@ object CantonHealthAdministrationEncoders {
     (ref: PhysicalSynchronizerId) => ref.toString
 
   implicit val encodePort: Encoder[Port] = Encoder.encodeInt.contramap[Port](_.unwrap)
-
-  // We do not want to serialize the password to JSON, e.g., as part of a config dump.
-  implicit val encoder: Encoder[Password] = Encoder.encodeString.contramap(_ => "****")
 
   implicit val nonNegativeIntEncoder: Encoder[NonNegativeInt] =
     Encoder.encodeInt.contramap(_.unwrap)

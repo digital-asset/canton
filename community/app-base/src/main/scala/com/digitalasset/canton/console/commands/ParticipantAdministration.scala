@@ -29,6 +29,7 @@ import com.digitalasset.canton.admin.api.client.data.PackageDescription.PackageC
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.PruningServiceGrpc
 import com.digitalasset.canton.admin.participant.v30.PruningServiceGrpc.PruningServiceStub
+import com.digitalasset.canton.admin.participant.v30.UnvetDarRequest.UnvetScope
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
   ConsoleCommandTimeout,
@@ -1989,20 +1990,40 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         }
 
       @Help.Summary(
-        "Revoke vetting for all packages contained in the DAR archive identified by the provided main package-id"
+        "Revoke vetting for packages contained in the DAR archive identified by the " +
+          "provided main package-id"
       )
       @Help.Description(
-        """This command succeeds if the vetting command used to vet the DAR's packages
-          |was symmetric and resulted in a single vetting topology transaction for all the packages
-          |in the DAR.
+        """Revokes vetting for packages contained in a DAR archive.
+          |By default, this command will only revoke vetting for the main package
+          |of the DAR.
           |
-          |This command is potentially dangerous and misuse can lead the participant to fail in
-          |processing transactions.
+          |Parameters:
+          |- mainPackageId: The main package ID of the DAR archive for which vetting
+          |  should be revoked.
+          |- synchronizerId: Optional synchronizer ID on which the vetting revocation
+          |  is effected. If not provided, the command will attempt to use the
+          |  connected synchronizer. If the participant is connected to multiple
+          |  synchronizers, this parameter must be provided otherwise the command
+          |  will fail.
+          |- unvetScope: Specifies which packages of the DAR to unvet.
+          |  If not specified, defaults to UNVET_SCOPE_MAIN_PACKAGE_ONLY.
+          |
+          |  NOTE: Unvetting all package dependencies of a DAR
+          |  (using UNVET_SCOPE_ALL_DAR_PACKAGES) is not safe as a DAR's dependencies
+          |  might be used by other DARs. Use with caution.
           """
       )
-      def disable(mainPackageId: String, synchronizerId: Option[SynchronizerId] = None): Unit =
+      def disable(
+          mainPackageId: String,
+          synchronizerId: Option[SynchronizerId] = None,
+          unvetScope: UnvetScope = UnvetScope.UNVET_SCOPE_MAIN_PACKAGE_ONLY,
+      ): Unit =
         consoleEnvironment.run {
-          adminCommand(ParticipantAdminCommands.Package.UnvetDar(mainPackageId, synchronizerId))
+          adminCommand(
+            ParticipantAdminCommands.Package
+              .UnvetDar(mainPackageId, synchronizerId, unvetScope)
+          )
         }
     }
   }

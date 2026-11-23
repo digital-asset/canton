@@ -15,7 +15,7 @@ import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
 import com.digitalasset.canton.synchronizer.block.{BlockEvents, LedgerBlockEvent}
 import com.digitalasset.canton.synchronizer.metrics.{SequencerMetrics, ThroughputCapMetrics}
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.{
-  IndividualThroughputCapConfig,
+  ThroughputCapByMessageTypeConfig,
   ThroughputCapConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerThroughputCap.{
@@ -71,57 +71,56 @@ class BlockSequencerThroughputCap(
 
   private val lock = new Mutex()
   private val closed = new AtomicBoolean(false)
-  private val perMessageTypeCaps = new AtomicReference(
-    Map[SubmissionRequestType, IndividualBlockSequencerThroughputCap](
-      SubmissionRequestType.ConfirmationRequest -> makeIndividualCap(
-        config.messages.confirmationRequest,
-        SubmissionRequestType.ConfirmationRequest,
-      ),
-      SubmissionRequestType.TopologyTransaction -> makeIndividualCap(
-        config.messages.topology,
-        SubmissionRequestType.TopologyTransaction,
-      ),
-      SubmissionRequestType.ConfirmationResponse -> makeIndividualCap(
-        config.messages.confirmationResponse,
-        SubmissionRequestType.ConfirmationResponse,
-      ),
-    )
+
+  private final class Caps(val byName: Map[String, IndividualBlockSequencerThroughputCap]) {
+    val byRequestType: Map[SubmissionRequestType, Seq[IndividualBlockSequencerThroughputCap]] =
+      byName.values.toSeq.groupBy(_.config.requestType)
+  }
+
+  private val caps = new AtomicReference(
+    new Caps(config.messages.map { case (name, setting) =>
+      name -> makeIndividualCap(name, setting)
+    })
   )
 
   private def makeIndividualCap(
-      individualConfig: IndividualThroughputCapConfig,
-      requestType: SubmissionRequestType,
+      name: String,
+      individualConfig: ThroughputCapByMessageTypeConfig,
   ) =
     new IndividualBlockSequencerThroughputCap(
-      config.observationPeriodSeconds,
       config.strict,
-      config.delayedActivation,
       config.thresholds,
       config.updateEveryMs,
       individualConfig,
-      requestType,
+      name,
       clock,
       metrics,
       timeouts,
       loggerFactory,
     )
 
-  def getCap(requestType: SubmissionRequestType): Option[IndividualThroughputCapConfig] =
-    perMessageTypeCaps.get().get(requestType).map(_.config)
+  def getCap(name: String): Option[ThroughputCapByMessageTypeConfig] =
+    caps.get().byName.get(name).map(_.config)
+
+  def getCaps: Map[String, ThroughputCapByMessageTypeConfig] =
+    caps.get().byName.map { case (name, cap) => name -> cap.config }
 
   /** Hot-replace existing cap */
   def replaceCap(
-      requestType: SubmissionRequestType,
-      individualConfig: Option[IndividualThroughputCapConfig],
-  )(implicit traceContext: TraceContext): Unit = {
-    logger.info(s"Adjusting cap for $requestType to $individualConfig ")
-    perMessageTypeCaps
-      .getAndUpdate(current =>
-        individualConfig
-          .map(newConfig => current.updated(requestType, makeIndividualCap(newConfig, requestType)))
-          .getOrElse(current)
-      )
-      .get(requestType)
+      name: String,
+      individualConfig: Option[ThroughputCapByMessageTypeConfig],
+  )(implicit traceContext: TraceContext): Unit = lock.exclusive {
+    logger.info(s"Adjusting cap '$name' to $individualConfig")
+    val existing = individualConfig match {
+      case Some(newConfig) =>
+        caps.getAndUpdate(current =>
+          new Caps(current.byName.updated(name, makeIndividualCap(name, newConfig)))
+        )
+      case None =>
+        caps.getAndUpdate(current => new Caps(current.byName.removed(name)))
+    }
+    existing.byName
+      .get(name)
       .foreach(_.close())
   }
 
@@ -135,11 +134,13 @@ class BlockSequencerThroughputCap(
   ): Either[String, Unit] =
     if (!enabled.get()) Right(())
     else
-      perMessageTypeCaps
+      caps
         .get()
-        .get(requestType)
-        .map(_.shouldAllowTransaction(member, requestLevel))
-        .getOrElse(Right(()))
+        .byRequestType
+        .getOrElse(requestType, Seq.empty)
+        .foldLeft[Either[String, Unit]](Right(())) { (allowed, cap) =>
+          allowed.flatMap(_ => cap.shouldAllowTransaction(member, requestLevel))
+        }
 
   def addBlockUpdate(
       update: BlockEvents
@@ -172,9 +173,10 @@ class BlockSequencerThroughputCap(
   ): Unit = if (enabled.get())(lock.exclusive {
     cancellable.foreach(_.cancel().discard)
     submissions.foreach { submission =>
-      perMessageTypeCaps
+      caps
         .get()
-        .get(submission.requestType)
+        .byRequestType
+        .getOrElse(submission.requestType, Seq.empty)
         .foreach(
           _.addEvent(
             timestamp = submission.sequencingTime,
@@ -189,7 +191,7 @@ class BlockSequencerThroughputCap(
 
   private def advanceWindow(): Unit = if (!closed.get()) {
     lock.exclusive {
-      perMessageTypeCaps.get().values.foreach(_.advanceWindow())
+      caps.get().byName.values.foreach(_.advanceWindow())
       scheduleClockTick()
     }
   }
@@ -212,7 +214,7 @@ class BlockSequencerThroughputCap(
   override def close(): Unit = lock.exclusive {
     if (!closed.getAndSet(true)) {
       cancellable.foreach(_.cancel())
-      perMessageTypeCaps.getAndSet(Map.empty).foreach(_._2.close())
+      caps.getAndSet(new Caps(Map.empty)).byName.values.foreach(_.close())
     }
   }
 }
@@ -254,13 +256,11 @@ object BlockSequencerThroughputCap {
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   class IndividualBlockSequencerThroughputCap(
-      observationPeriodSeconds: Int,
       strict: Boolean,
-      delayedActivation: Boolean,
       thresholdsConfig: NonEmpty[Seq[PositiveDouble]],
       updateEveryMs: NonNegativeInt,
-      val config: IndividualThroughputCapConfig,
-      requestType: SubmissionRequestType,
+      val config: ThroughputCapByMessageTypeConfig,
+      name: String,
       clock: Clock,
       parentMetrics: SequencerMetrics,
       override protected val timeouts: ProcessingTimeout,
@@ -268,7 +268,8 @@ object BlockSequencerThroughputCap {
   ) extends NamedLogging
       with FlagCloseable {
 
-    private var initialized: Boolean = !delayedActivation
+    private val observationPeriodSeconds = config.observationPeriodSeconds.value
+    private val requestType = config.requestType
 
     private val thresholds = thresholdsConfig.sorted.reverse.zipWithIndex
     private val maximumGlobalTransactionsPerObservationPeriod =
@@ -297,7 +298,7 @@ object BlockSequencerThroughputCap {
 
     private val metrics =
       new ThroughputCapMetrics(
-        requestType.name,
+        name,
         parentMetrics.prefix,
         parentMetrics.openTelemetryMetricsFactory,
       )
@@ -310,12 +311,10 @@ object BlockSequencerThroughputCap {
           Right(())
         case _ =>
           val key = ThroughputCapKey(member)
-          if (!initialized) Right(())
-          else
-            for {
-              _ <- aboveMaxRate(key, requestLevel)
-              _ <- aboveThrottledRate(key)
-            } yield ()
+          for {
+            _ <- aboveMaxRate(key, requestLevel)
+            _ <- aboveThrottledRate(key)
+          } yield ()
       }
 
     private def aboveMaxRate(key: ThroughputCapKey, requestLevel: Int): Either[String, Unit] = {
@@ -424,7 +423,6 @@ object BlockSequencerThroughputCap {
         totalWindowBytes += bytes
       }
       localTimeOfLatestEvent = clock.uniqueTime()
-
       memberUsage
         .updateWith(key) {
           case Some(value) => Some(ThroughputCapValue(value.bytes + bytes, value.count + 1))
@@ -455,11 +453,6 @@ object BlockSequencerThroughputCap {
                     .minusSeconds(observationPeriodSeconds.toLong)
                 ) < 0
               }
-
-              // Once the window advances and events are removed, the cap logic has been running
-              // for at least config.observationPeriodSeconds, and caps can be enforced
-              if (!initialized && removed.nonEmpty)
-                initialized = true
 
               // Update bookkeeping for events that no longer fall within the observation window
               removed.foreach { entry =>

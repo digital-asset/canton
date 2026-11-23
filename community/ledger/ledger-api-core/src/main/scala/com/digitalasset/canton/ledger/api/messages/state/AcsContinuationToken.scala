@@ -12,6 +12,7 @@ import com.daml.platform.v1.acs_continuation.{
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
+import com.digitalasset.canton.ledger.api.util.PageTokenUtils.Checksum
 import com.digitalasset.canton.ledger.api.util.{PageTokenUtils, UpdateFormatHashUtils}
 import com.digitalasset.canton.ledger.api.validation.{FieldValidator, ValidationErrors}
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -22,12 +23,12 @@ import scala.util.chaining.scalaUtilChainingOps
 
 final case class AcsRangeInfo(
     continuationPointer: Option[AcsContinuationPointer],
-    requestChecksum: AcsContinuationToken.Checksum,
+    requestChecksum: Checksum,
     limit: Option[Long],
 )
 
 object AcsRangeInfo {
-  def empty: AcsRangeInfo = AcsRangeInfo(None, AcsContinuationToken.emptyChecksum, None)
+  def empty: AcsRangeInfo = AcsRangeInfo(None, PageTokenUtils.emptyChecksum, None)
 
   def assertFromContinuationTokenBytes(continuationTokenBytes: Option[ByteString]): AcsRangeInfo =
     empty.copy(
@@ -67,10 +68,6 @@ final case class AcsContinuationPointerIncompleteReassignments(
 
 object AcsContinuationToken {
   private val TokenVersion = 2
-
-  final case class Checksum(bytes: ByteString)
-
-  def emptyChecksum: Checksum = Checksum(ByteString.copyFrom(Array.fill(4)(0.toByte)))
 
   def calcChecksum(
       request: GetActiveContractsRequest,

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.services.SubmitDummyPreparedSubmission
@@ -16,6 +17,7 @@ final class ExecuteSubmissionAuthIT
     with SubmitDummyPreparedSubmission
     with ExecuteAsAuthTests
     with ActAsAnyPartyAuthTests
+    with ApiAreaScopeServiceCallAuthTests
     with DebitTrafficFromAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
@@ -25,6 +27,13 @@ final class ExecuteSubmissionAuthIT
 
   override def serviceCallName: String = "InteractiveSubmissionService#ExecuteSubmission"
   override def executeAsShouldSucceed: Boolean = true
+
+  override def apiAreaScopeBaseToken = standardToken(mainActorActUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerExecute.area) -> true,
+    List(ClaimApiArea.ledgerAct.area) -> true,
+    List(ClaimApiArea.ledgerRead.area) -> false,
+  )
 
   override def serviceCall(context: ServiceCallContext)(implicit
       env: TestConsoleEnvironment

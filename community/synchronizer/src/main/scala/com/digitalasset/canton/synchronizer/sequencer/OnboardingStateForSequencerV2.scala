@@ -68,7 +68,7 @@ object OnboardingStateForSequencerV2
   )(protocolVersionRepresentativeFor(protocolVersion))
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec.applyE(ProtocolVersion.v36)(
+    ProtoVersion(30) -> VersionedProtoCodec.applyE(ProtocolVersion.minimum)(
       v30.OnboardingStateForSequencerV2
     )(supportedProtoVersion(_)(fromProtoV30), _.toProtoV30),
     ProtoVersion(31) -> VersionedProtoCodec.applyE(ProtocolVersion.v37)(

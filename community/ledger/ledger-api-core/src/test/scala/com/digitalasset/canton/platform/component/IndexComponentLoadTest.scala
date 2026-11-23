@@ -18,6 +18,7 @@ import com.digitalasset.canton.ledger.api.messages.state.{
   AcsRangeInfo,
 }
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
+import com.digitalasset.canton.ledger.api.util.PageTokenUtils
 import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.ledger.api.{
   CumulativeFilter,
@@ -395,7 +396,7 @@ trait IndexComponentLoadTestBase
         activeAt = ledgerEndOffset,
         rangeInfo = AcsRangeInfo(
           continuationPointer,
-          AcsContinuationToken.emptyChecksum,
+          PageTokenUtils.emptyChecksum,
           Some(pageSize.toLong),
         ),
         configOverrides = None,
@@ -406,7 +407,7 @@ trait IndexComponentLoadTestBase
         page.lastOption match {
           case Some(last) if !last.streamContinuationToken.isEmpty =>
             AcsContinuationToken.decodeAndValidate(
-              expectedChecksum = AcsContinuationToken.emptyChecksum,
+              expectedChecksum = PageTokenUtils.emptyChecksum,
               token = last.streamContinuationToken,
               fieldName = "stream_continuation_token",
               limit =
@@ -833,6 +834,7 @@ trait IndexComponentLoadTestBase
           filtersByParty = Map(),
           filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter(true)),
           verbose = true,
+          filtersByContractId = Seq.empty,
         ),
         transactionShape = transactionShape,
       )
@@ -842,6 +844,7 @@ trait IndexComponentLoadTestBase
         filtersByParty = Map(),
         filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter(true)),
         verbose = true,
+        filtersByContractId = Seq.empty,
       )
     ),
     includeTopologyEvents = Some(

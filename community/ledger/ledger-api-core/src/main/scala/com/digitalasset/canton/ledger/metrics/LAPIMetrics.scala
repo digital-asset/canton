@@ -65,6 +65,16 @@ class LAPIMetrics private[metrics] (
       )
     )
 
+    val hostedParties: Counter = metricsFactory.counter(
+      MetricInfo(
+        prefix :+ "hosted_parties_sent",
+        summary = "The number of hosted parties sent by the ledger api.",
+        description =
+          "The total number of hosted parties sent over the ledger api streams to all clients.",
+        qualification = MetricQualification.Traffic,
+      )
+    )
+
   }
 
   val streams: StreamsMetrics = new StreamsMetrics

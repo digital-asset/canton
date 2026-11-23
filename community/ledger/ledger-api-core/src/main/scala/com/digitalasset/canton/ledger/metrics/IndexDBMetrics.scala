@@ -89,6 +89,24 @@ trait UpdateStreamsDbMetrics {
     val fetchEventDeactivateIdsStakeholderFilteredIds: DatabaseMetrics = createDbMetrics(
       "fetch_event_deactivate_ids_stakeholder_filtered_ids"
     )
+    val fetchEventActivateIdsContractId: DatabaseMetrics = createDbMetrics(
+      "fetch_event_activate_ids_contract_id"
+    )
+    val fetchEventActivateIdsContractIdFilteredRange: DatabaseMetrics = createDbMetrics(
+      "fetch_event_activate_ids_contract_id_filtered_range"
+    )
+    val fetchEventActivateIdsContractIdFilteredIds: DatabaseMetrics = createDbMetrics(
+      "fetch_event_activate_ids_contract_id_filtered_ids"
+    )
+    val fetchEventDeactivateIdsContractId: DatabaseMetrics = createDbMetrics(
+      "fetch_event_deactivate_ids_contract_id"
+    )
+    val fetchEventDeactivateIdsContractIdFilteredRange: DatabaseMetrics = createDbMetrics(
+      "fetch_event_deactivate_ids_contract_id_filtered_range"
+    )
+    val fetchEventDeactivateIdsContractIdFilteredIds: DatabaseMetrics = createDbMetrics(
+      "fetch_event_deactivate_ids_contract_id_filtered_ids"
+    )
     val fetchEventActivatePayloads: DatabaseMetrics = createDbMetrics(
       "fetch_event_activate_payloads"
     )
@@ -540,6 +558,11 @@ class MainIndexDBMetrics(
   val getEventSeqIdRange: DatabaseMetrics = createDbMetrics("get_event_sequential_id_range")
   val getAcsEventSeqIdRange: DatabaseMetrics =
     createDbMetrics("get_acs_event_sequential_id_range")
+  val getHostedPartiesEventSeqId: DatabaseMetrics =
+    createDbMetrics("get_hosted_parties_event_sequential_id")
+  val getHostedPartyIdRanges: DatabaseMetrics = createDbMetrics("get_hosted_party_id_ranges")
+  val getHostedPartyIds: DatabaseMetrics = createDbMetrics("get_hosted_party_ids")
+  val getHostedPartyBatch: DatabaseMetrics = createDbMetrics("get_hosted_party_batch")
   val loadStringInterningEntries: DatabaseMetrics = createDbMetrics(
     "load_string_interning_entries"
   )

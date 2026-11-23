@@ -12,6 +12,7 @@ import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamResponse,
 }
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import io.grpc.stub.StreamObserver
@@ -19,13 +20,20 @@ import io.grpc.stub.StreamObserver
 import scala.concurrent.Future
 
 final class CompletionStreamAuthIT
-    extends ExpiringStreamServiceCallAuthTests[CompletionStreamResponse] {
+    extends ExpiringStreamServiceCallAuthTests[CompletionStreamResponse]
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "CommandCompletionService#CompletionStream"
 
   override val testCanReadAsMainActor: Boolean = false
+
+  override def apiAreaScopeBaseToken = standardToken(mainActorReadUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerRead.area) -> true,
+    List(ClaimApiArea.partiesAllocate.area) -> false,
+  )
 
   override protected def stream(
       context: ServiceCallContext,

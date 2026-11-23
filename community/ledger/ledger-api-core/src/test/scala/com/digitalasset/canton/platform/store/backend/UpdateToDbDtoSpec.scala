@@ -198,7 +198,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         "Repair transaction is implicitly an ACS delta",
       )
       val updateName =
-        if (isRepairTransaction) classOf[state.Update.RepairTransactionAccepted].getSimpleName
+        if (isRepairTransaction) classOf[state.Update.RepairParticipantEventUpdate].getSimpleName
         else classOf[state.Update.SequencedTransactionAccepted].getSimpleName
       s"handle $updateName (single create node, isAcsDelta = $isAcsDelta)" in {
         val completionInfo = someCompletionInfo
@@ -230,14 +230,21 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         val transaction = builder.buildCommitted()
         val update =
           if (isRepairTransaction)
-            state.Update.RepairTransactionAccepted(
-              transactionMeta = transactionMeta,
-              transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
+            state.Update.RepairParticipantEventUpdate(
               updateId = updateId,
+              workflowId = transactionMeta.workflowId,
               synchronizerId = someSynchronizerId1,
               recordTime = someRecordTime,
+              events = Seq(
+                ParticipantEvent.Added(
+                  nodeId = createNodeId.index,
+                  contractInstance = someContractInfos(contract).persistedContractInstance,
+                  representativePackageId = someContractInfos(contract).representativePackageId,
+                  reassignmentCounter = 0L,
+                )
+              ),
+              category = PersistentParticipantEventUpdateCategory.AcsImportTxStyle,
               repairCounter = RepairCounter(1337),
-              contractInfos = Map(contract.contractId -> someContractInfos(contract)),
               traceContext = TraceContext.empty,
             )
           else
@@ -270,20 +277,25 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             Option.when(!isRepairTransaction)(externalTransactionHash.unwrap.toByteArray),
           traffic_cost =
             Option.when(!isRepairTransaction)(someCompletionInfo.paidTrafficCost.value),
-          event_type = PersistentEventType.Create.asInt,
+          event_type =
+            if (isRepairTransaction) PersistentEventType.Add.asInt
+            else PersistentEventType.Create.asInt,
           event_sequential_id = 0,
           node_id = createNodeId.index,
-          additional_witnesses = Some(
+          additional_witnesses = Option.when(!isRepairTransaction)(
             if (isAcsDelta) Set.empty
             else Set("signatory1", "signatory2", "signatory3", "observer")
           ),
           source_synchronizer_id = None,
-          reassignment_counter = None,
+          reassignment_counter = if (isRepairTransaction) Some(0) else None,
           reassignment_id = None,
           representative_package_id =
             if (isRepairTransaction) someRepresentativePackageId
             else createNode.templateId.packageId,
-          participant_event_category = None,
+          participant_event_category =
+            if (isRepairTransaction)
+              Some(PersistentParticipantEventUpdateCategory.AcsImportTxStyle.asInt)
+            else None,
           notPersistedContractId = createNode.coid,
           internal_contract_id = 42L,
           create_key_hash = createNode.gkeyOpt.map(_.hash.toHexString),

@@ -15,7 +15,7 @@ object SharedDependencies {
   private val grpc_version = "1.85.0"
   private val pekko_actor_version = "1.2.1"
   private val pekko_http_version = "1.1.0"
-  private val bouncycastle_version = "1.86"
+  private val bouncycastle_version = "1.87"
   private val jline_version = "3.30.17"
   // Mirrors the scalapb the sbt-protoc plugin generates with (project/plugins.sbt), asserted
   // below so the json cannot pin a version the build never resolves.

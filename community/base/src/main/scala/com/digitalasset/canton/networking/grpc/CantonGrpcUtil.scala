@@ -24,6 +24,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasRunOnClosing, UnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
+import com.digitalasset.canton.networking.grpc.ratelimiting.LimitResult.FullMethodName
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -431,6 +432,21 @@ object CantonGrpcUtil {
       ) extends CantonError.Impl(
             cause =
               s"Reached the limit of concurrent requests for $methodName. Please try again later"
+          ) {
+        override def retryable = Some(ErrorCategoryRetry(5.seconds))
+        // not logged automatically in order to throttle logging
+        override def logOnCreation: Boolean = false
+      }
+
+      final case class TooManyRequests(
+          methodName: FullMethodName,
+          remoteAddr: String,
+          limiter: String,
+      )(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends CantonError.Impl(
+            cause =
+              s"Exceeded the rate limit for $methodName (limiter: $limiter). Please try again later"
           ) {
         override def retryable = Some(ErrorCategoryRetry(5.seconds))
         // not logged automatically in order to throttle logging

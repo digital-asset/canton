@@ -10,17 +10,12 @@ import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
   AuthInterceptorSuppressionRule,
   AuthServiceJWTSuppressionRule,
 }
-import org.scalatest.Assertion
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
-trait SyncServiceCallAuthTests extends ServiceCallWithMainActorAuthTests {
-
-  /** Allows to override what is regarded as a successful response, e.g. lookup queries for commands
-    * can return a NOT_FOUND, which is fine because the result is not PERMISSION_DENIED
-    */
-  def successfulBehavior(f: Future[Any])(implicit ec: ExecutionContext): Assertion =
-    expectSuccess(f)
+trait SyncServiceCallAuthTests
+    extends ServiceCallWithMainActorAuthTests
+    with SuccessfulServiceCallAuthTests {
 
   def denyCallsWithParticipantAdmin: Boolean = true
 
@@ -66,7 +61,7 @@ trait SyncServiceCallAuthTests extends ServiceCallWithMainActorAuthTests {
       expectPermissionDenied(
         serviceCallWithMainActorUser(
           "u2",
-          proto.Right.Kind.CanReadAs(proto.Right.CanReadAs(getMainActorId)),
+          Vector(proto.Right.Kind.CanReadAs(proto.Right.CanReadAs(getMainActorId))),
         )
       )
     }
@@ -90,7 +85,7 @@ trait SyncServiceCallAuthTests extends ServiceCallWithMainActorAuthTests {
       ) in { implicit env =>
       import env.*
       loggerFactory.suppress(AuthInterceptorSuppressionRule) {
-        expectPermissionDenied(serviceCall(canReadAsUnknownUserStandardJWT))
+        expectUnauthenticated(serviceCall(canReadAsUnknownUserStandardJWT))
       }
     }
     "deny calls with explicitly non-expired read-only token" taggedAs securityAsset

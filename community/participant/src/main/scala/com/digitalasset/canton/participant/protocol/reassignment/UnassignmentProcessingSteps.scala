@@ -761,7 +761,13 @@ private[reassignment] class UnassignmentProcessingSteps(
             notInitiator = pendingSubmissionDataO.isEmpty
             _ <-
               if (notInitiator && storedInReassignmentStore)
-                triggerAssignmentWhenExclusivityTimeoutExceeded(pendingRequestData)
+                EitherT.right[ReassignmentProcessorError](
+                  triggerAutomaticAssignment(pendingRequestData).valueOr(error =>
+                    logger.info(
+                      s"Automatic assignment of ${unassignmentValidationResult.reassignmentId} is not triggered: ${error.message}"
+                    )
+                  )
+                )
               else EitherT.pure[FutureUnlessShutdown, ReassignmentProcessorError](())
 
             reassignmentAccepted =
@@ -802,7 +808,7 @@ private[reassignment] class UnassignmentProcessingSteps(
       )
     )
 
-  private[this] def triggerAssignmentWhenExclusivityTimeoutExceeded(
+  private[this] def triggerAutomaticAssignment(
       pendingRequestData: RequestType#PendingRequestData
   )(implicit
       traceContext: TraceContext

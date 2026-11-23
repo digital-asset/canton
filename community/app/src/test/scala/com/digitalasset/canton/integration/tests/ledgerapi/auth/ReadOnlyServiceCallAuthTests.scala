@@ -9,20 +9,14 @@ import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
   AuthInterceptorSuppressionRule,
   AuthServiceJWTSuppressionRule,
 }
-import org.scalatest.Assertion
 
 import java.time.Duration
-import scala.concurrent.{ExecutionContext, Future}
 
-trait ReadOnlyServiceCallAuthTests extends ServiceCallWithMainActorAuthTests {
+trait ReadOnlyServiceCallAuthTests
+    extends ServiceCallWithMainActorAuthTests
+    with SuccessfulServiceCallAuthTests {
 
   def denyAdmin: Boolean = true;
-
-  /** Allows to override what is regarded as a successful response, e.g. lookup queries for commands
-    * can return a NOT_FOUND, which is fine because the result is not PERMISSION_DENIED
-    */
-  def successfulBehavior(f: Future[Any])(implicit ec: ExecutionContext): Assertion =
-    expectSuccess(f)
 
   /** Flag to switch of a particular kind of test for technical reasons. See the use sites for
     * details.
@@ -131,7 +125,7 @@ trait ReadOnlyServiceCallAuthTests extends ServiceCallWithMainActorAuthTests {
       ) in { implicit env =>
       import env.*
       loggerFactory.suppress(AuthInterceptorSuppressionRule) {
-        expectPermissionDenied(
+        expectUnauthenticated(
           serviceCall(canReadAsUnknownUserStandardJWT.copy())
         )
       }
@@ -181,5 +175,6 @@ trait ReadOnlyServiceCallAuthTests extends ServiceCallWithMainActorAuthTests {
         )
       )
     }
+
   }
 }

@@ -1,0 +1,142 @@
+name: Toxiproxy Test Slow
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+      protocol_version:
+        description: Protocol version to test against
+        required: true
+        type: string
+      job_name:
+        description: Name reported to the flaky-test pipeline. Empty falls back to this workflow's own job id.
+        default: ""
+        type: string
+    secrets:
+      DATADOG_API_KEY:
+        required: false
+      SLACK_BOT_QA_NOTIFICATIONS:
+        required: false
+      GCLOUD_SHEETS_SA_KEY:
+        required: false
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  resolve_timings:
+    name: Resolve Timings Artifact Run
+    # One repo-wide artifact lookup for the whole matrix instead of one per shard,
+    # so the shared GITHUB_TOKEN rate-limit budget is not drained at run start.
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run-id: ${{ steps.resolve.outputs.run-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/actions/utils/resolve_previous_artifact_run
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve previous timings artifact run
+        id: resolve
+        # Best-effort. If the lookup is rate limited the shards just fall back to
+        # unbalanced splitting rather than failing the run.
+        continue-on-error: true
+        uses: ./.github/actions/utils/resolve_previous_artifact_run
+        with:
+          artifact-name: toxiproxy_test_slow-timings-latest
+
+  toxiproxy_test_slow:
+    name: Toxiproxy Test Slow
+    needs: resolve_timings
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 120
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
+      SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
+      SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS: ${{ vars.SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS }}
+      # Sheet key the alert's rota mention needs (select_rota.py), same job-level reason.
+      GCLOUD_SHEETS_SA_KEY: ${{ secrets.GCLOUD_SHEETS_SA_KEY }}
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+      CANTON_CI_JOB_NAME: ${{ inputs.job_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Set Canton Protocol Version
+        uses: ./.github/actions/test/set_canton_protocol_version
+        with:
+          protocol_version: ${{ inputs.protocol_version }}
+
+      - name: Start Postgres container
+        id: start_postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: 0
+
+      - name: Start Toxiproxy container
+        id: start_toxiproxy
+        uses: ./.github/actions/utils/toxiproxy/start_toxiproxy_container
+        with:
+          shard-index: 0
+          network-mode: host
+
+      - name: Prepare test inputs and timings
+        uses: ./.github/actions/test/prepare_test_inputs_with_timings
+        with:
+          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-path: ${{ github.job }}/.timings
+          github-token: ${{ github.token }}
+          previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
+          previous-timings-resolved: "true"
+
+      - name: Run Toxiproxy Slow Tests
+        id: run_toxiproxy_tests
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: >-
+            dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest"
+          reset_classes_if_requested: 'false'
+          fail_on_error_in_output: 'false'
+          num_test_buckets: '1'
+          shard_index: '0'
+          num_parallel_tasks: '1'
+          execution_context_size: '8'
+          setup_gcp_kms: 'false'
+          succeed_on_error: 'false'
+          timeout: '90m'
+          include_patterns: |
+            ^com\.digitalasset\.canton\.integration\.tests\.toxiproxy(?!\.fast(?:\.|$))(?:\.|$)
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.start_postgres.outputs.container-name }}
+
+      - name: Stop Toxiproxy container
+        if: always()
+        uses: ./.github/actions/utils/toxiproxy/stop_toxiproxy_container
+        with:
+          container-name: ${{ steps.start_toxiproxy.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: toxiproxy_test_slow
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: toxiproxy_test_slow
+      runner: ${{ inputs.runner }}
+      protocol_version: ${{ inputs.protocol_version }}
+      shard_job_result: ${{ needs.toxiproxy_test_slow.result }}

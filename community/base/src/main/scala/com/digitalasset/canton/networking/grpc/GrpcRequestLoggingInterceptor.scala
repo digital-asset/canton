@@ -11,6 +11,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.google.common.annotations.VisibleForTesting
+import com.google.common.net.InetAddresses
 import io.grpc.*
 import io.grpc.ForwardingServerCall.SimpleForwardingServerCall
 import io.grpc.ForwardingServerCallListener.SimpleForwardingServerCallListener
@@ -328,6 +329,49 @@ object GrpcAddressHelper {
         val remoteAddr = call.getAttributes.get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR)
         if (remoteAddr != null) remoteAddr.toString else "unknown"
       }
+
+  /** The IP of the TCP connection the call came in on, as a plain IP (no port, no leading `/`, no
+    * brackets) that can be parsed as an
+    * [[com.digitalasset.canton.networking.grpc.ratelimiting.IpCidr]], or `None` if the call did not
+    * come over TCP, for example an in-process call.
+    *
+    * Unlike [[extractClientIP]] this ignores all headers on purpose, so that the result is an IP
+    * the client cannot make up.
+    */
+  def extractSocketIpLiteral[ReqT, RespT](call: ServerCall[ReqT, RespT]): Option[String] =
+    call.getAttributes.get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR) match {
+      case inet: InetSocketAddress => Option(inet.getAddress).map(_.getHostAddress)
+      case _ => None
+    }
+
+  /** Reads a client IP from the headers, using the first of `headerKeys` that is present and holds
+    * a valid IP. Of a comma separated value, such as `X-Forwarded-For` carries, the leftmost entry
+    * is used.
+    *
+    * Leftmost is the correct entry under the trust assumption this is built on: the operator runs a
+    * proxy in front of the node and configures it in overwrite mode, so that the proxy replaces the
+    * header with the single IP it saw the client connect from. The header then holds one entry
+    * which should be the correct client IP. If a list of IP addresses is received, the leftmost of
+    * them is taken to be the correct client IP. This is assumed to be ensured by the operators of
+    * the proxies through an appropriate configuration.
+    */
+  def extractHeaderIpLiteral(
+      headers: Metadata,
+      headerKeys: Seq[Metadata.Key[String]],
+  ): Option[String] =
+    headerKeys.view
+      .flatMap(key => Option(headers.get(key)))
+      .flatMap(_.split(",").headOption.map(_.trim))
+      .find(isIpLiteral)
+
+  // An IPv6 scope id, the part after a %, names a local network interface and must not become a
+  // rate limit key, a client could otherwise name a different interface per request and get a key
+  // of its own. It is rejected here rather than by InetAddresses.forString, which accepts a scope
+  // id when an interface of that name exists on the host and hence decides validity by what the
+  // host looks like. Parsing with isInetAddress also keeps a malformed header off the exception
+  // path, which costs far more than the check itself.
+  private def isIpLiteral(value: String): Boolean =
+    !value.contains('%') && InetAddresses.isInetAddress(value)
 
   def extractTransportFromHeaders[ReqT, RespT](
       call: ServerCall[ReqT, RespT],

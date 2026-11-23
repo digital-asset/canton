@@ -31,6 +31,7 @@ import com.digitalasset.canton.admin.participant.v30.PingServiceGrpc.PingService
 import com.digitalasset.canton.admin.participant.v30.PruningServiceGrpc.PruningServiceStub
 import com.digitalasset.canton.admin.participant.v30.ResourceManagementServiceGrpc.ResourceManagementServiceStub
 import com.digitalasset.canton.admin.participant.v30.SynchronizerConnectivityServiceGrpc.SynchronizerConnectivityServiceStub
+import com.digitalasset.canton.admin.participant.v30.UnvetDarRequest.UnvetScope
 import com.digitalasset.canton.admin.participant.v30.{
   PerformManualLsuRequest,
   RepairCommitmentsUsingAcsRequest,
@@ -478,11 +479,18 @@ object ParticipantAdminCommands {
 
     // TODO(#14432): Add `synchronize` flag which makes the call block until the unvetting operation
     //               is observed by the participant on all connected synchronizers.
-    final case class UnvetDar(mainPackageId: String, synchronizerId: Option[SynchronizerId])
-        extends PackageCommand[v30.UnvetDarRequest, v30.UnvetDarResponse, Unit] {
+    final case class UnvetDar(
+        mainPackageId: String,
+        synchronizerId: Option[SynchronizerId],
+        unvetScope: UnvetScope,
+    ) extends PackageCommand[v30.UnvetDarRequest, v30.UnvetDarResponse, Unit] {
 
       override protected def createRequest(): Either[String, v30.UnvetDarRequest] = Right(
-        v30.UnvetDarRequest(mainPackageId, synchronizerId.map(_.toProtoPrimitive))
+        v30.UnvetDarRequest(
+          mainPackageId,
+          synchronizerId.map(_.toProtoPrimitive),
+          unvetScope,
+        )
       )
 
       override protected def submitRequest(

@@ -36,7 +36,7 @@ object EnvelopeContent
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(32) -> VersionedProtoCodec(
-      ProtocolVersion.v36
+      ProtocolVersion.minimum
     )(v32.EnvelopeContent)(
       supportedProtoVersionPVV(_)(fromProtoV32),
       _.toProtoV32,
@@ -89,7 +89,7 @@ object EnvelopeContent
         case Content.TopologyTransactionsBroadcast(messageP) =>
           TopologyTransactionsBroadcast.fromProtoV30(
             pvv,
-            TopologyTransactionDeserializationContext(synchronizerLimits.topologyLimits),
+            TopologyTransactionDeserializationContext(synchronizerLimits.topologyLimitsView),
             messageP,
           )
         case Content.AcsCommitmentProtocolMessage(messageP) =>

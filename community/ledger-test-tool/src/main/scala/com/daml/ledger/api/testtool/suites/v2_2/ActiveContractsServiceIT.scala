@@ -858,6 +858,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
                     filtersByParty = filtersByParty,
                     filtersForAnyParty = filtersForAnyParty,
                     verbose = true,
+                    filtersByContractId = Seq.empty,
                   )
                 ),
                 activeAtOffset = end,
@@ -928,6 +929,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
           filtersByParty = Map(party.getValue -> Filters(Nil)),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         )
       )
     for {
@@ -973,6 +975,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
           filtersByParty = Map(party.getValue -> Filters(Nil)),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         )
       )
     for {
@@ -1010,6 +1013,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
           filtersByParty = Map(party.getValue -> Filters(Nil)),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         )
       )
     for {
@@ -1049,6 +1053,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
           filtersByParty = Map(party.getValue -> Filters(Nil)),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         )
       )
     for {
@@ -1080,6 +1085,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
           filtersByParty = Map(party.getValue -> Filters(Nil)),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         )
       )
     for {
@@ -1200,7 +1206,9 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
         .mustFailWith(
           "event format without filters",
           RequestValidationErrors.InvalidArgument,
-          Some("filtersByParty and filtersForAnyParty cannot be empty simultaneously"),
+          Some(
+            "filtersByParty, filtersForAnyParty and filtersByContractId cannot be empty simultaneously"
+          ),
         )
     } yield ()
   })
@@ -1428,7 +1436,9 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
         .mustFailWith(
           "event format without filters",
           RequestValidationErrors.InvalidArgument,
-          Some("filtersByParty and filtersForAnyParty cannot be empty simultaneously"),
+          Some(
+            "filtersByParty, filtersForAnyParty and filtersByContractId cannot be empty simultaneously"
+          ),
         )
     } yield ()
   })

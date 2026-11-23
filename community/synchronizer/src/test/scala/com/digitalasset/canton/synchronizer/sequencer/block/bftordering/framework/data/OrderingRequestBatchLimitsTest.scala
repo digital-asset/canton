@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.{BftOrdererLimits, BftOrdererLimitsView}
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
@@ -17,7 +17,9 @@ import org.scalatest.wordspec.AnyWordSpec
 class OrderingRequestBatchLimitsTest extends AnyWordSpec with BftSequencerBaseTest {
 
   private val bound = 3
-  private val limits = BftOrdererLimits.default.copy(maxOrderingRequests = PositiveInt.three)
+  private val limits = BftOrdererLimitsView.default.copy(
+    limits = BftOrdererLimits.default.copy(maxOrderingRequests = PositiveInt.three)
+  )
 
   private val enforcing = ProtocolVersionValidation.PV(ProtocolVersion.dev)
 

@@ -365,6 +365,7 @@ sealed trait TrafficCostOnLAPITest
               ),
               filtersForAnyParty = None,
               verbose = false,
+              filtersByContractId = Seq.empty,
             )
           ),
         )

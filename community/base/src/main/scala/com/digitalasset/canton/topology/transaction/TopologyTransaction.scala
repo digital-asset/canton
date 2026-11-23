@@ -14,7 +14,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.{TopologyLimits, v30, v31}
+import com.digitalasset.canton.protocol.{TopologyLimitsView, v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.TopologyManagerError
@@ -229,9 +229,9 @@ final case class TopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
 
 /** @param topologyLimits
   *   bounds the collections inside a mapping: the synchronizer's limits, or
-  *   [[com.digitalasset.canton.protocol.TopologyLimits.default]] where no synchronizer is known
+  *   [[com.digitalasset.canton.protocol.TopologyLimitsView.default]] where no synchronizer is known
   */
-final case class TopologyTransactionDeserializationContext(topologyLimits: TopologyLimits)
+final case class TopologyTransactionDeserializationContext(topologyLimits: TopologyLimitsView)
 
 object TopologyTransaction
     extends VersioningCompanionContextMemoizationE[

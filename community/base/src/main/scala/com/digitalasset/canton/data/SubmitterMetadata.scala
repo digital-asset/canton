@@ -100,7 +100,7 @@ object SubmitterMetadata
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.SubmitterMetadata)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(v32.SubmitterMetadata)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV32),
       _.toProtoV32,
     )

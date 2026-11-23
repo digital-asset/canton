@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.services.SubmitAndWaitDummyCommand
@@ -14,11 +15,18 @@ final class SubmitAndWaitForTransactionAuthIT
     with SubmitAndWaitDummyCommand
     with ExecuteAsAuthTests
     with ActAsAnyPartyAuthTests
+    with ApiAreaScopeServiceCallAuthTests
     with DebitTrafficFromAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "CommandService#SubmitAndWaitForTransaction"
+
+  override def apiAreaScopeBaseToken = standardToken(mainActorActUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerAct.area) -> true,
+    List(ClaimApiArea.ledgerRead.area) -> false,
+  )
 
   override def serviceCall(
       context: ServiceCallContext

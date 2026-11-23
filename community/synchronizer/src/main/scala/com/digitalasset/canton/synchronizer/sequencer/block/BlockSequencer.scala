@@ -1181,7 +1181,11 @@ class BlockSequencer(
     } yield ()
 
   @nowarn("cat=deprecation")
-  override def trafficStatus(requestedMembers: Seq[Member], selector: TimestampSelector)(implicit
+  override def trafficStatus(
+      requestedMembers: Seq[Member],
+      selector: TimestampSelector,
+      includeOnboardingMembers: Boolean,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficControlError, SequencerTrafficStatus] =
     for {
@@ -1190,18 +1194,19 @@ class BlockSequencer(
         TrafficControlErrors.LsuTrafficNotInitialized.Error(),
       )
       topologySnapshot <- EitherT.right(cryptoApi.currentSnapshotApproximation)
-      members <- EitherT.right(
-        if (requestedMembers.isEmpty) {
-          // If requestedMembers is not set get the traffic states of all known members
-          topologySnapshot.ipsSnapshot.knownMembers()
-        } else {
-          topologySnapshot.ipsSnapshot
-            .knownMembers()
-            .map { registered =>
-              requestedMembers.toSet.intersect(registered)
-            }
-        }
+      requested = requestedMembers.toSet
+      known <- EitherT.right(topologySnapshot.ipsSnapshot.knownMembers())
+      // Members that traffic was purchased for ahead of their registration are not known in
+      // topology yet. They are only looked up on request, and not when all requested members are
+      // known, so that polling the state of known members does not query the database.
+      onboarding <- EitherT.right(
+        if (includeOnboardingMembers && !(requested.nonEmpty && requested.subsetOf(known)))
+          dbSequencerStore.onboardingMembersAt(topologySnapshot.ipsSnapshot.timestamp)
+        else FutureUnlessShutdown.pure(Set.empty[Member])
       )
+      eligible = known ++ onboarding
+      // If requestedMembers is not set get the traffic states of all eligible members
+      members = if (requested.isEmpty) eligible else requested.intersect(eligible)
       trafficState <- EitherT.right(trafficStatesForMembers(members, selector))
     } yield SequencerTrafficStatus(trafficState)
 
@@ -1615,14 +1620,18 @@ class BlockSequencer(
   }
 
   override def getThroughputCap(
-      requestType: SubmissionRequestType
-  ): Option[BlockSequencerConfig.IndividualThroughputCapConfig] =
-    throughputCap.getCap(requestType)
+      name: String
+  ): Option[BlockSequencerConfig.ThroughputCapByMessageTypeConfig] =
+    throughputCap.getCap(name)
+
+  override def listThroughputCaps
+      : Map[String, BlockSequencerConfig.ThroughputCapByMessageTypeConfig] =
+    throughputCap.getCaps
 
   override def setThroughputCap(
-      requestType: SubmissionRequestType,
-      config: Option[BlockSequencerConfig.IndividualThroughputCapConfig],
-  )(implicit traceContext: TraceContext): Unit = throughputCap.replaceCap(requestType, config)
+      name: String,
+      config: Option[BlockSequencerConfig.ThroughputCapByMessageTypeConfig],
+  )(implicit traceContext: TraceContext): Unit = throughputCap.replaceCap(name, config)
 
   override def performLsuSequencingTest(mediatorGroupRecipient: MediatorGroupRecipient)(implicit
       traceContext: TraceContext

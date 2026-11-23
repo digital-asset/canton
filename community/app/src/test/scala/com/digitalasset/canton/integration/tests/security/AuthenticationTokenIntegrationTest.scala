@@ -25,9 +25,15 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.networking.Endpoint
+import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
+import com.digitalasset.canton.sequencer.api.v30.SequencerAuthentication.ChallengeRequest
+import com.digitalasset.canton.sequencer.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationServiceStub
 import com.digitalasset.canton.sequencer.api.v30.SequencerServiceGrpc.SequencerServiceStub
-import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
+import com.digitalasset.canton.sequencing.authentication.{AuthenticationToken, MemberAuthentication}
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestRefused
+import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.P2PEndpointConfig
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, TopologyChangeOp}
 import com.digitalasset.canton.topology.{
   MediatorId,
@@ -36,6 +42,7 @@ import com.digitalasset.canton.topology.{
   PhysicalSynchronizerId,
   SequencerId,
 }
+import com.digitalasset.canton.version.ReleaseVersion
 import io.grpc.*
 import io.grpc.Status.Code
 import monocle.macros.syntax.lens.*
@@ -54,6 +61,9 @@ trait AuthenticationTokenIntegrationTest
     SecurityTest(property = Authenticity, asset = "synchronizer public api client")
 
   private var daChannel: ManagedChannel = _
+  private var p2pChannel: ManagedChannel = _
+  private var publicEndpoint: Endpoint = _
+  private var p2pEndpoint: Endpoint = _
   private var sequencerServiceStub: SequencerServiceStub = _
   private val confirmationRequestsMaxRate = NonNegativeInt.tryCreate(10000)
 
@@ -83,14 +93,70 @@ trait AuthenticationTokenIntegrationTest
           executionContext,
         )
         sequencerServiceStub = new SequencerServiceStub(daChannel)
+        publicEndpoint =
+          Endpoint(sequencer1.config.publicApi.address, sequencer1.config.publicApi.port)
+        if (MemberAuthentication.requiresVerifier(sequencer1.id, testedProtocolVersion)) {
+          val serverConfig = sequencer1.config.sequencer match {
+            case SequencerConfig.BftSequencer(_, bftConfig) =>
+              bftConfig.initialNetwork.value.serverEndpoint
+            case other =>
+              fail(
+                s"Verifier-bound authentication requires a CantonBFT P2P listener, " +
+                  s"but got $other sequencer config"
+              )
+          }
+          p2pEndpoint = Endpoint(serverConfig.externalAddress, serverConfig.externalPort)
+          p2pChannel = ClientChannelBuilder
+            .createChannelBuilderToTrustedServer(
+              P2PEndpointConfig(
+                serverConfig.externalAddress,
+                serverConfig.externalPort,
+                serverConfig.externalTlsConfig,
+              )
+            )(executionContext)
+            .build()
+        }
       }
 
   override def afterAll(): Unit = {
     SequencerTestHelper.closeChannel(daChannel, logger, getClass.getSimpleName)
+    SequencerTestHelper.closeChannel(p2pChannel, logger, s"${getClass.getSimpleName}-p2p")
     super.afterAll()
   }
 
   "sequencers" should {
+    "reject public-listener authentication as a sequencer at PV38 or later" onlyRunWhen (testedProtocolVersion.v > 37) in {
+      implicit env =>
+        import env.*
+        val result = SequencerTestHelper
+          .requestToken(
+            daChannel,
+            publicEndpoint,
+            daId,
+            sequencer2.id,
+            SynchronizerCrypto(sequencer2.crypto, staticSynchronizerParameters1),
+            testedProtocolVersion,
+            loggerFactory,
+          )
+          .value
+          .futureValueUS
+        // Only sequencer identities require v31, which is not bound on the public listener.
+        // Participants and mediators continue authenticating there through v30 at every PV.
+        result.left.value.getCode shouldBe Code.UNIMPLEMENTED
+
+        val legacyError = new SequencerAuthenticationServiceStub(daChannel)
+          .challenge(
+            ChallengeRequest(
+              sequencer2.id.toProtoPrimitive,
+              Seq(testedProtocolVersion.v),
+              ReleaseVersion.current.toProtoPrimitive,
+            )
+          )
+          .failed
+          .futureValue
+        Status.fromThrowable(legacyError).getCode shouldBe Code.FAILED_PRECONDITION
+    }
+
     "be able to authenticate and talk to each other" in { implicit env =>
       import env.*
 
@@ -690,16 +756,21 @@ trait AuthenticationTokenIntegrationTest
       synchronizerId: PhysicalSynchronizerId,
       memberId: Member,
       crypto: SynchronizerCrypto,
-  )(implicit ec: ExecutionContext): EitherT[FutureUnlessShutdown, Status, AuthenticationToken] =
+  )(implicit ec: ExecutionContext): EitherT[FutureUnlessShutdown, Status, AuthenticationToken] = {
+    // Only sequencer identities at PV38+ require the P2P listener.
+    //  Participants and mediators always use the public channel and endpoint.
+    val useP2P = MemberAuthentication.requiresVerifier(memberId, testedProtocolVersion)
     SequencerTestHelper
       .requestToken(
-        daChannel,
+        if (useP2P) p2pChannel else daChannel,
+        if (useP2P) p2pEndpoint else publicEndpoint,
         synchronizerId,
         memberId,
         crypto,
         testedProtocolVersion,
         loggerFactory,
       )
+  }
 
   private def sendSubmissionUsingToken(
       synchronizerId: PhysicalSynchronizerId,

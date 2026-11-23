@@ -43,7 +43,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.grpc.{ByteStringStreamObserver, OutputFileStreamObserver}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.TopologyLimits
+import com.digitalasset.canton.protocol.TopologyLimitsView
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, BaseWriteRequest, TopologyStoreId}
 import com.digitalasset.canton.topology.admin.v30.{
@@ -197,7 +197,7 @@ class TopologyAdministrationGroup(
           SignedTopologyTransaction
             .fromByteString(
               ProtocolVersionValidation.AlwaysValidation,
-              TopologyTransactionDeserializationContext(TopologyLimits.default),
+              TopologyTransactionDeserializationContext(TopologyLimitsView.default),
               bytes,
             )
             .leftMap(_.message)
@@ -534,7 +534,7 @@ class TopologyAdministrationGroup(
         ),
         password: Option[String] = None,
     ): Unit = {
-      val context = TopologyTransactionDeserializationContext(TopologyLimits.default)
+      val context = TopologyTransactionDeserializationContext(TopologyLimitsView.default)
       val transactionE = password match {
         case Some(password) =>
           for {
@@ -612,7 +612,7 @@ class TopologyAdministrationGroup(
       val transactions = files.map { file =>
         SignedTopologyTransaction
           .readFromTrustedFile(
-            TopologyTransactionDeserializationContext(TopologyLimits.default),
+            TopologyTransactionDeserializationContext(TopologyLimitsView.default),
             file,
           )
           .valueOr { err =>
@@ -642,7 +642,7 @@ class TopologyAdministrationGroup(
     ): Unit = {
       val transactions = SignedTopologyTransactions
         .readFromTrustedFile(
-          TopologyTransactionDeserializationContext(TopologyLimits.default),
+          TopologyTransactionDeserializationContext(TopologyLimitsView.default),
           file,
         )
         .valueOr { err =>
@@ -4590,6 +4590,12 @@ class TopologyAdministrationGroup(
       ): SignedTopologyTransaction[TopologyChangeOp, LsuSequencerConnectionSuccessor] = {
         val nodeStatus = instance.health.status
 
+        val validatedCustomTrustCertificates = customTrustCertificates
+          .traverse(ValidatedPemCertificate.create)
+          .valueOr(err =>
+            consoleEnvironment.raiseError(s"Unable to build sequencer connection: $err")
+          )
+
         consoleEnvironment.run {
           adminCommand(
             TopologyAdminCommands.Write.Propose(
@@ -4605,7 +4611,7 @@ class TopologyAdministrationGroup(
                     GrpcConnection(
                       validatedEndpoints,
                       useTls,
-                      customTrustCertificates,
+                      validatedCustomTrustCertificates,
                     ),
                   )
                 },

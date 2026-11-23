@@ -789,6 +789,7 @@ class SystematicTopologyAwareUpgradingIntegrationTest
                     filtersByParty = Map(bob.toProtoPrimitive -> Filters(Nil)),
                     filtersForAnyParty = None,
                     verbose = false,
+                    filtersByContractId = Seq.empty,
                   )
                 ),
                 transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
@@ -817,6 +818,7 @@ class SystematicTopologyAwareUpgradingIntegrationTest
                       filtersByParty = Map(charlie.toProtoPrimitive -> Filters(Nil)),
                       filtersForAnyParty = None,
                       verbose = false,
+                      filtersByContractId = Seq.empty,
                     )
                   ),
                   transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

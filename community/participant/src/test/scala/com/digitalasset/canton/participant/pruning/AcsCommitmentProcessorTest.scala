@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.pruning
 import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeLong,
@@ -907,6 +908,8 @@ sealed trait AcsCommitmentProcessorBaseTest
   }
 }
 
+// TODO(#37720): remove this test when removing the old AcsCommitmentProcessor together with PV37
+@UnstableTest
 class AcsCommitmentProcessorTest
     extends AsyncWordSpec
     with AcsCommitmentProcessorBaseTest

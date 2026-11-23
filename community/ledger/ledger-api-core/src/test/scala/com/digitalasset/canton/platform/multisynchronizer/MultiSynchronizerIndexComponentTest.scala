@@ -7,10 +7,10 @@ import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.messages.state.{AcsContinuationToken, AcsRangeInfo}
+import com.digitalasset.canton.ledger.api.util.PageTokenUtils
 import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.ledger.api.{CumulativeFilter, EventFormat}
 import com.digitalasset.canton.ledger.participant.state.{
-  IndexingWatermark,
   Reassignment,
   ReassignmentInfo,
   TestAcsChangeFactory,
@@ -80,37 +80,37 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
 
     // Verify that the AcsChanges have been propagated to the sequential post-processor.
     sequentiallyPostProcessedUpdates.count {
-      case _: Update.OnPRReassignmentAccepted => true
+      case _: Update.SequencedReassignmentAccepted => true
       case _ => false
     } shouldBe 1
     sequentiallyPostProcessedUpdates.count {
-      case _: Update.RepairReassignmentAccepted => true
+      case _: Update.RepairParticipantEventUpdate => true
       case _ => false
     } shouldBe 1
   }
 
   def setupEvents(party: Party) = {
     val (createC1, contracts1) = mkTransaction(createContract(party))
-    val (createC2, contracts2) = mkTransaction(createContract(party))
     val incompleteUnassignC1 =
       mkReassignmentWithUnassign(party, "incompleteUnassignC1", contracts1.map(_.contractId))
     val (_, contracts3) = mkTransaction(createContract(party))
+    val (createC2, contracts2) = mkTransaction(createContract(party))
     val incompleteAssignC3 =
       mkReassignmentAccepted(party, "incompleteAssignC3", true, contracts3)
     val (createC4, contracts4) = mkTransaction(createContract(party))
-    val (createC5, contracts5) = mkTransaction(createContract(party))
     val incompleteUnassignC4 =
       mkReassignmentWithUnassign(party, "incompleteUnassignC4", contracts4.map(_.contractId))
+    val (createC5, contracts5) = mkTransaction(createContract(party))
     val (_, contracts6) = mkTransaction(createContract(party))
     val incompleteAssignC6 =
       mkReassignmentAccepted(party, "incompleteAssignC3", true, contracts6)
     // last round with multiple events for each offset
     val (createC7, contracts7) =
       mkTransaction(createContract(party), createContract(party), createContract(party))
-    val (createC8, contracts8) =
-      mkTransaction(createContract(party), createContract(party), createContract(party))
     val incompleteUnassignC7 =
       mkReassignmentWithUnassign(party, "incompleteUnassignC7", contracts7.map(_.contractId))
+    val (createC8, contracts8) =
+      mkTransaction(createContract(party), createContract(party), createContract(party))
     val (_, contracts9) =
       mkTransaction(createContract(party), createContract(party), createContract(party))
     val incompleteAssignC9 =
@@ -140,6 +140,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
     val allContracts = getAcsF(eventFormat, None).futureValue
@@ -162,6 +163,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
     val allContracts = getAcsF(eventFormat, None).futureValue
@@ -192,6 +194,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
     val allEntries = getAcsF(eventFormat, None).futureValue
@@ -256,6 +259,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
         filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       continuationToken = None,
       limit = None,
@@ -304,6 +308,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       filtersByParty = Map(party4 -> CumulativeFilter.templateWildcardFilter()),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
     val allContracts = getAcsF(eventFormat, None).futureValue
@@ -316,14 +321,14 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
   it should "return full pages even if unassignments without CreateEvent found" in suppressLogWarnings {
     val party = Ref.Party.assertFromString("party7")
     val (_c, missingCreateContracts) = mkTransaction(createContract(party))
+    val (createC1, contracts1) = mkTransaction(createContract(party))
     val missingCreateUnassign = mkReassignmentWithUnassign(
       party,
       "missingCreateUnassign",
       missingCreateContracts.map(_.contractId),
     )
-    val (createC1, contracts1) = mkTransaction(createContract(party))
     val (createC2, contracts2) = mkTransaction(createContract(party))
-    val incompleteUnassignC2 = // ez itten lecsokkenti az ACSt. Miert? Nem incomplete?
+    val incompleteUnassignC2 =
       mkReassignmentWithUnassign(party, "incompleteUnassignC2", contracts2.map(_.contractId))
     setupLedgerWithIncompleteOffsets(
       createC1 -> contracts1,
@@ -335,6 +340,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
     val allContracts = getAcsF(eventFormat, None).futureValue
@@ -349,6 +355,9 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
     val ledgerEnd = ledgerEndOpt.map(_.increment).getOrElse(Offset.firstOffset)
     val incompleteOffsetAcc = updates.map(_._1).foldLeft(ledgerEnd -> Seq[Offset]()) {
       case ((currentOffset, acc), _u: Update.ReassignmentAccepted) =>
+        currentOffset.increment -> (acc :+ currentOffset)
+      case ((currentOffset, acc), u: Update.ParticipantEventUpdate)
+          if u.category.renderAsReassignment =>
         currentOffset.increment -> (acc :+ currentOffset)
       case ((currentOffset, acc), _) => (currentOffset.increment, acc)
     }
@@ -387,7 +396,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
   ) =
     continuationToken.traverse(token =>
       AcsContinuationToken.decodeAndValidate(
-        expectedChecksum = AcsContinuationToken.emptyChecksum,
+        expectedChecksum = PageTokenUtils.emptyChecksum,
         token = token,
         fieldName = "stream_continuation_token",
         limit =
@@ -404,7 +413,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
             activeAt = ledgerEnd.map(_.lastOffset),
             rangeInfo = AcsRangeInfo(
               continuationPointer = continuationPointer,
-              requestChecksum = AcsContinuationToken.emptyChecksum,
+              requestChecksum = PageTokenUtils.emptyChecksum,
               limit = limit.map(_.toLong),
             ),
             configOverrides = None,
@@ -419,11 +428,11 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
   private def mkReassignmentWithUnassign(
       party: Ref.Party,
       updateIdS: String,
-      contracIds: Seq[Value.ContractId],
+      contractIds: Seq[Value.ContractId],
   ) = {
     val updateId = TestUpdateId(updateIdS)
     val rt = recordTime()
-    Update.OnPRReassignmentAccepted(
+    Update.SequencedReassignmentAccepted(
       workflowId = None,
       updateId = updateId,
       reassignmentInfo = ReassignmentInfo(
@@ -435,7 +444,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       ),
       reassignment = Reassignment.Batch(
         Reassignment.Unassign(
-          contractId = contracIds.head,
+          contractId = contractIds.head,
           templateId = templateId,
           packageName = Ref.PackageName.fromInt(5),
           stakeholders = Set(party),
@@ -444,7 +453,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
           nodeId = 0,
           keyOpt = None,
         ),
-        contracIds.tail.map(contractId =>
+        contractIds.tail.map(contractId =>
           Reassignment.Unassign(
             contractId = contractId,
             templateId = templateId,
@@ -457,11 +466,11 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
           )
         )*
       ),
-      watermark = IndexingWatermark.fromTimestamp(rt),
       recordTime = rt,
-      synchronizerId = synchronizer2,
+      synchronizerId = synchronizer1,
       acsChangeFactory = TestAcsChangeFactory(),
       traceContext = implicitly,
+      optCompletionInfo = None,
     )
   }
 

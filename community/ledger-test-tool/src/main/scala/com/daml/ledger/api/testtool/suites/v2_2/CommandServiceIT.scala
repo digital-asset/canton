@@ -1041,6 +1041,7 @@ object CommandServiceIT {
       ),
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
     UpdateFormat(

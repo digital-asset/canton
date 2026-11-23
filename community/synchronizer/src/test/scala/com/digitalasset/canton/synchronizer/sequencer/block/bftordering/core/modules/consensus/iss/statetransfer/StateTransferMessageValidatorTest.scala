@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer
 
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -134,7 +134,7 @@ final class StateTransferMessageValidatorTest
       )(
         IssConsensusModule.parseStateTransferMessage(
           ProtocolVersionValidation.AlwaysValidation,
-          BftOrdererLimits.default,
+          BftOrdererLimitsView.default,
           myId,
           _,
         )
@@ -162,7 +162,7 @@ final class StateTransferMessageValidatorTest
       )(
         IssConsensusModule.parseStateTransferMessage31(
           ProtocolVersionValidation.AlwaysValidation,
-          BftOrdererLimits.default,
+          BftOrdererLimitsView.default,
           myId,
           _,
         )
@@ -389,7 +389,7 @@ final class StateTransferMessageValidatorTest
     )(
       IssConsensusModule.parseStateTransferMessage31(
         testedProtocolVersionValidation,
-        BftOrdererLimits.default,
+        BftOrdererLimitsView.default,
         otherId,
         _,
       )
@@ -403,7 +403,7 @@ final class StateTransferMessageValidatorTest
     )(
       IssConsensusModule.parseStateTransferMessage(
         testedProtocolVersionValidation,
-        BftOrdererLimits.default,
+        BftOrdererLimitsView.default,
         otherId,
         _,
       )

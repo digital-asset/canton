@@ -314,7 +314,7 @@ object DbSequencerStateManagerStore {
 
     override val versioningTable: VersioningTable = VersioningTable(
       ProtoVersion(30) -> VersionedProtoCodec.storage(
-        ReleaseProtocolVersion(ProtocolVersion.v36),
+        ReleaseProtocolVersion(ProtocolVersion.minimum),
         v30.AggregatedSignaturesOfSender,
       )(
         supportedProtoVersionPVV(_)(fromProtoV30),

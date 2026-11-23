@@ -126,7 +126,7 @@ object AcsChangesReader {
 
   private val wildcardInternalUpdateFormat: InternalUpdateFormat = {
     val wildcardEventFormat = InternalEventFormat(
-      templatePartiesFilter = TemplatePartiesFilter(
+      eventFilter = TemplatePartiesFilter(
         relation = Map.empty,
         // None means all parties known to the participant, i.e. a party-wildcard.
         templateWildcardParties = None,

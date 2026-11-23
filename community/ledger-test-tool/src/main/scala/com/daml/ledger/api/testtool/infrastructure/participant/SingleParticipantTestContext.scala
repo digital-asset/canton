@@ -792,12 +792,14 @@ final class SingleParticipantTestContext private[participant] (
           filtersByParty = Map.empty,
           filtersForAnyParty = Some(fs),
           verbose = verbose,
+          filtersByContractId = Seq.empty,
         )
       case Some(parties) =>
         EventFormat(
           filtersByParty = parties.map(party => party.getValue -> fs).toMap,
           filtersForAnyParty = None,
           verbose = verbose,
+          filtersByContractId = Seq.empty,
         )
     }
   }
@@ -1509,6 +1511,7 @@ final class SingleParticipantTestContext private[participant] (
               filtersByParty = actAs.map(_.getValue -> Filters(Nil)).toMap,
               filtersForAnyParty = None,
               verbose = true,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = toProto(transactionShape),
@@ -1941,6 +1944,17 @@ final class SingleParticipantTestContext private[participant] (
           .withSynchronizerId(synchronizerId.toProtoPrimitive)
       )
       .map(o => Offset.tryFromLong(o.offset))
+
+  override def getHostedParties(
+      request: GetHostedPartiesRequest
+  ): Future[Vector[GetHostedPartiesResponse]] = new StreamConsumer[GetHostedPartiesResponse](
+    services.state.getHostedParties(request, _)
+  ).all()
+
+  override def getHostedPartiesPage(
+      request: GetHostedPartiesPageRequest
+  ): Future[GetHostedPartiesPageResponse] =
+    services.state.getHostedPartiesPage(request)
 }
 
 object SingleParticipantTestContext {

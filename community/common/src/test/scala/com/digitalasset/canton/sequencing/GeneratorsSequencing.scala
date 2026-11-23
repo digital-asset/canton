@@ -15,9 +15,9 @@ import org.scalacheck.{Arbitrary, Gen}
 
 final class GeneratorsSequencing(generatorsTopology: GeneratorsTopology) {
   import com.digitalasset.canton.config.GeneratorsConfig.*
-  import com.digitalasset.canton.Generators.*
   import com.digitalasset.canton.time.GeneratorsTime.*
   import generatorsTopology.*
+  import com.digitalasset.canton.crypto.GeneratorsCrypto.*
 
   implicit val sequencerAliasArb: Arbitrary[SequencerAlias] = Arbitrary(
     string255Arb.arbitrary.map(str =>

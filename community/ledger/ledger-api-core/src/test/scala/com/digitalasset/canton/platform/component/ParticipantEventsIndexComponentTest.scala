@@ -35,7 +35,12 @@ abstract class ParticipantEventsIndexComponentTest(cacheSize: Int = 0)
       )
 
   def validated(protoFormat: ProtoUpdateFormat): UpdateFormat =
-    FormatValidator.validate(protoFormat)(NoLogging, LedgerApiSizeLimitsConfig()).value
+    FormatValidator
+      .validate(protoFormat, FormatValidator.RejectContractIdFilters)(
+        NoLogging,
+        LedgerApiSizeLimitsConfig(),
+      )
+      .value
 
   private val nextRecordTime = new SingleStepIncreasingRecordTime
 
@@ -59,6 +64,7 @@ abstract class ParticipantEventsIndexComponentTest(cacheSize: Int = 0)
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
 
     val transactionFormat = ProtoTransactionFormat(

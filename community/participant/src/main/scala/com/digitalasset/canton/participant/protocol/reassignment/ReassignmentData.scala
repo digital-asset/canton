@@ -40,6 +40,7 @@ object ReassignmentData {
           IncompleteReassignmentData(
             reassignmentId,
             unassignmentData.map(_.reassigningParticipants),
+            unassignmentData.map(_.stakeholders.signatories),
             _,
             queryOffset,
           )
@@ -69,10 +70,18 @@ object ReassignmentData {
   * event was emitted before or at `queryOffset` and that assigned event was not yet emitted or at
   * an offset greater than `queryOffset`. The same holds symmetrically for a
   * [[IncompleteReassignmentData.AssignmentEventGlobalOffset]].
+  *
+  * @param reassigningParticipants
+  *   The reassigning participants of the unassignment. `None` if the assignment started before the
+  *   unassignment.
+  * @param signatories
+  *   The signatories of the reassigned contracts. `None` if the assignment started before the
+  *   unassignment.
   */
 final case class IncompleteReassignmentData(
     reassignmentId: ReassignmentId,
     reassigningParticipants: Option[Set[ParticipantId]],
+    signatories: Option[Set[LfPartyId]],
     reassignmentEventGlobalOffset: ReassignmentEventGlobalOffset,
     queryOffset: Offset,
 ) {
@@ -100,6 +109,7 @@ object IncompleteReassignmentData {
       IncompleteReassignmentData(
         reassignmentId,
         unassignmentData.map(_.reassigningParticipants),
+        unassignmentData.map(_.stakeholders.signatories),
         reassignmentEventGlobalOffset,
         queryOffset,
       )

@@ -71,7 +71,7 @@ object LsuSequencingTestMessage extends VersioningCompanion[LsuSequencingTestMes
     )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(
       v30.LsuSequencingTestMessage
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),
@@ -146,7 +146,7 @@ object LsuSequencingTestMessageContent
   override def name: String = "LsuSequencingTestMessageContent"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(
       v30.LsuSequencingTestMessageContent
     )(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),

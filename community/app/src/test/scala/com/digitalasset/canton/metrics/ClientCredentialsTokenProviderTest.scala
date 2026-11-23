@@ -5,6 +5,7 @@ package com.digitalasset.canton.metrics
 
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext}
 import org.apache.pekko.http.scaladsl.Http

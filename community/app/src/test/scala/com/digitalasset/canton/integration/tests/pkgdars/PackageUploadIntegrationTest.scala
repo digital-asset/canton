@@ -517,6 +517,7 @@ trait PackageUploadIntegrationTest
       // just test whether we correctly can find the references for a given package
       participant1.packages.get_references(prim.packageId).map(_.name).toSet shouldBe Set(
         AdminWorkflowServices.PingDarResourceName,
+        AdminWorkflowServices.AcsReplicationDarResourceName,
         "CantonTests",
         "CantonExamples",
       )

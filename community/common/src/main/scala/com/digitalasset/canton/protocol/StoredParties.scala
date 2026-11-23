@@ -34,7 +34,7 @@ object StoredParties
     with HasVersionedMessageCompanionDbHelpers[StoredParties] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v36,
+      ProtocolVersion.minimum,
       supportedProtoVersion(v30.StoredParties)(fromProtoV30),
       _.toProtoV30,
     )

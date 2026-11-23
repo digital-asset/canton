@@ -61,7 +61,7 @@ private[dao] sealed class EventsReader(
           .executeSql(dbMetrics.getEventsByContractId)(
             eventStorageBackend.eventReaderQueries.fetchContractIdEvents(
               internalContractId,
-              requestingParties = internalEventFormat.templatePartiesFilter.allFilterParties,
+              requestingParties = internalEventFormat.eventFilter.allFilterParties,
               endEventSequentialId = ledgerEndCache().map(_.lastEventSeqId).getOrElse(0L),
             )
           )
@@ -86,7 +86,7 @@ private[dao] sealed class EventsReader(
       // enough to filter the create, they have the same template and witnesses with the archive
       _ <- OptionT.when(
         UpdateReader
-          .eventFilter(Some(internalEventFormat.templatePartiesFilter))
+          .eventFilter(Some(internalEventFormat.eventFilter))
           .apply(fatCreatedEvent)
       )(())(FutureInstances.parallelApplicativeFuture)
       deserializedCreateEvent <- OptionT.liftF(

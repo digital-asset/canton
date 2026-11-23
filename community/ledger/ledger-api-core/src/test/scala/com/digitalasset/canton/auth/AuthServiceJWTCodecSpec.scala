@@ -28,6 +28,9 @@ class AuthServiceJWTCodecSpec
     with TryValues
     with ScalaCheckDrivenPropertyChecks {
 
+  val extraScopes = s"dummy-scope1 ${AuthServiceJWTCodec.scopeLedgerApiFull} dummy-scope2"
+  val extraScopesJsArray = extraScopes.split(" ").toSeq.asJson.noSpaces
+
   /** Serializes a [[AuthServiceJWTPayload]] to JSON, then parses it back to a AuthServiceJWTPayload
     */
   private def serializeAndParse(value: AuthServiceJWTPayload)(implicit
@@ -184,9 +187,6 @@ class AuthServiceJWTCodecSpec
       parse(serialized) shouldBe Success(expected)
     }
 
-    val extraScopes = s"dummy-scope1 ${AuthServiceJWTCodec.scopeLedgerApiFull} dummy-scope2"
-    val extraScopesJsArray = extraScopes.split(" ").toSeq.asJson.noSpaces
-
     "support standard JWT claims with extra scopes" in {
       val serialized =
         s"""{
@@ -213,10 +213,6 @@ class AuthServiceJWTCodecSpec
       parse(serialized) shouldBe Success(expected.copy(scope = Some(extraScopes)))
     }
 
-    val extraCompositeScopes =
-      s"dummy-scope1 ${AuthServiceJWTCodec.scopeLedgerApiFull} dummy-scope2"
-    val extraCompositeScopesJsArray = extraCompositeScopes.split(" ").toSeq.asJson.noSpaces
-
     "support standard JWT claims with extra composite scopes" in {
       val serialized =
         s"""{
@@ -224,10 +220,10 @@ class AuthServiceJWTCodecSpec
            |  "aud": "someParticipantId",
            |  "sub": "someUserId",
            |  "exp": 100,
-           |  "scope": "$extraCompositeScopes"
+           |  "scope": "$extraScopes"
            |}
         """.stripMargin
-      parse(serialized) shouldBe Success(expected.copy(scope = Some(extraCompositeScopes)))
+      parse(serialized) shouldBe Success(expected.copy(scope = Some(extraScopes)))
     }
 
     "support standard JWT claims with extra composite scopes in scp" in {
@@ -237,10 +233,10 @@ class AuthServiceJWTCodecSpec
            |  "aud": "someParticipantId",
            |  "sub": "someUserId",
            |  "exp": 100,
-           |  "scp": $extraCompositeScopesJsArray
+           |  "scp": $extraScopesJsArray
            |}
         """.stripMargin
-      parse(serialized) shouldBe Success(expected.copy(scope = Some(extraCompositeScopes)))
+      parse(serialized) shouldBe Success(expected.copy(scope = Some(extraScopes)))
     }
   }
 
@@ -313,10 +309,10 @@ class AuthServiceJWTCodecSpec
             |  "aud": "someParticipantId",
             |  "sub": "someUserId",
             |  "exp": 100,
-            |  "scope": "dummy-scope1 ${AuthServiceJWTCodec.scopeLedgerApiFull} dummy-scope2"
+            |  "scope": "$extraScopes"
             |}
           """.stripMargin
-        parse(serialized) shouldBe Success(expected.copy(issuer = None))
+        parse(serialized) shouldBe Success(expected.copy(issuer = None, scope = Some(extraScopes)))
       }
 
       "support standard JWT claims with extra scopes in scp" in {
@@ -325,10 +321,10 @@ class AuthServiceJWTCodecSpec
              |  "aud": "someParticipantId",
              |  "sub": "someUserId",
              |  "exp": 100,
-             |  "scp": ["dummy-scope1", "${AuthServiceJWTCodec.scopeLedgerApiFull}", "dummy-scope2"]
+             |  "scp": $extraScopesJsArray
              |}
           """.stripMargin
-        parse(serialized) shouldBe Success(expected.copy(issuer = None))
+        parse(serialized) shouldBe Success(expected.copy(issuer = None, scope = Some(extraScopes)))
       }
 
       "support standard JWT claims with extra composite scopes" in {
@@ -340,7 +336,13 @@ class AuthServiceJWTCodecSpec
             |  "scope": "resource_server/dummy-scope1 ${AuthServiceJWTCodec.scopeLedgerApiFull} resource_server/dummy-scope2"
             |}
           """.stripMargin
-        parse(serialized) shouldBe Success(expected.copy(issuer = None))
+        parse(serialized) shouldBe Success(
+          expected.copy(
+            issuer = None,
+            scope =
+              Some("resource_server/dummy-scope1 daml_ledger_api resource_server/dummy-scope2"),
+          )
+        )
       }
 
       "support standard JWT claims with extra composite scopes in scp" in {
@@ -352,7 +354,13 @@ class AuthServiceJWTCodecSpec
              |  "scp": ["resource_server/dummy-scope1", "${AuthServiceJWTCodec.scopeLedgerApiFull}", "resource_server/dummy-scope2"]
              |}
           """.stripMargin
-        parse(serialized) shouldBe Success(expected.copy(issuer = None))
+        parse(serialized) shouldBe Success(
+          expected.copy(
+            issuer = None,
+            scope =
+              Some("resource_server/dummy-scope1 daml_ledger_api resource_server/dummy-scope2"),
+          )
+        )
       }
 
       "support standard JWT claims with iss claim as string" in {
@@ -468,7 +476,7 @@ class AuthServiceJWTCodecSpec
             exp = Some(Instant.ofEpochSecond(100)),
             format = StandardJWTTokenFormat.Scope,
             audiences = List.empty,
-            scope = Some(AuthServiceJWTCodec.scopeLedgerApiFull),
+            scope = Some("dummy-scope1 daml_ledger_api dummy-scope2"),
           )
         )
       }

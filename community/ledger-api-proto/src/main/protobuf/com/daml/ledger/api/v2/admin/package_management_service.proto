@@ -20,6 +20,8 @@ option java_package = "com.daml.ledger.api.v2.admin";
 // in the methods of this API.
 service PackageManagementService {
   // Returns the details of all Daml-LF packages known to the backing participant.
+  //
+  // Required permissions: ``ledger:read``
   rpc ListKnownPackages(ListKnownPackagesRequest) returns (ListKnownPackagesResponse);
 
   // Upload a DAR file to the participant.
@@ -27,6 +29,8 @@ service PackageManagementService {
   // If vetting is enabled in the request, the DAR is checked for upgrade compatibility
   // with the set of the already vetted packages on the target vetting synchronizer
   // See UploadDarFileRequest for details regarding vetting and the target vetting synchronizer.
+  //
+  // Required permissions: ``packages:write``
   rpc UploadDarFile(UploadDarFileRequest) returns (UploadDarFileResponse);
 
   // Validates the DAR and checks the upgrade compatibility of the DAR's packages
@@ -35,9 +39,13 @@ service PackageManagementService {
   //
   // The operation has no effect on the state of the participant or the Canton ledger:
   // the DAR payload and its packages are not persisted neither are the packages vetted.
+  //
+  // Required permissions: ``ledger:read``
   rpc ValidateDarFile(ValidateDarFileRequest) returns (ValidateDarFileResponse);
 
   // Update the vetted packages of this participant
+  //
+  // Required permissions: ``vetting:write``
   rpc UpdateVettedPackages(UpdateVettedPackagesRequest) returns (UpdateVettedPackagesResponse);
 }
 

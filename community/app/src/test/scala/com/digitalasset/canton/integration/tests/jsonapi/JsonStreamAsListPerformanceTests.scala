@@ -74,6 +74,7 @@ class JsonStreamAsListPerformanceTests
                         )
                       ),
                       verbose = false,
+                      filtersByContractId = Seq.empty,
                     )
                   ),
                   streamContinuationToken = None,

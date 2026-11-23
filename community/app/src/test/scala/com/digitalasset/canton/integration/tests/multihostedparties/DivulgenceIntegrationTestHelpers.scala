@@ -117,6 +117,7 @@ object DivulgenceIntegrationTestHelpers {
             filtersByParty = parties.map(party => party.toLf -> Filters(Nil)).toMap,
             filtersForAnyParty = if (parties.isEmpty) Some(Filters(Nil)) else None,
             verbose = false,
+            filtersByContractId = Seq.empty,
           )
         )
       } else None
@@ -130,6 +131,7 @@ object DivulgenceIntegrationTestHelpers {
                   filtersByParty = parties.map(party => party.toLf -> Filters(Nil)).toMap,
                   filtersForAnyParty = if (parties.isEmpty) Some(Filters(Nil)) else None,
                   verbose = false,
+                  filtersByContractId = Seq.empty,
                 )
               ),
               transactionShape = transactionShape,

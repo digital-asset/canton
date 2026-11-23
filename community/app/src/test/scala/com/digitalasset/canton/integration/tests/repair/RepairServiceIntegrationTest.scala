@@ -23,6 +23,7 @@ import com.digitalasset.canton.console.{CommandFailure, FeatureFlag}
 import com.digitalasset.canton.crypto.TestSalt
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.http.json.tests.upgrades.v1.java.foo.Foo as FooV1
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -75,7 +76,7 @@ trait RepairServiceIntegrationTest
 
   protected def cantonTestsPath: String
 
-  override lazy val environmentDefinition: EnvironmentDefinition =
+  override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
@@ -110,8 +111,13 @@ trait RepairServiceIntegrationTest
 
       participant1.synchronizers.connect_local(sequencer1, alias = daName)
       participant1.synchronizers.connect_local(sequencer2, alias = acmeName)
-      participant1.dars.upload(cantonTestsPath, synchronizerId = daId)
-      participant1.dars.upload(cantonTestsPath, synchronizerId = acmeId)
+
+      Seq(daId, acmeId).foreach { synchronizerId =>
+        Seq(cantonTestsPath, FooV1Path, FooV2Path).foreach { packageId =>
+          participant1.dars.upload(packageId, synchronizerId = synchronizerId)
+        }
+      }
+
       eventually()(assert(participant1.synchronizers.is_connected(daId)))
 
       participant2.synchronizers.connect_local(sequencer2, alias = acmeName)
@@ -620,6 +626,34 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
         }
       }
 
+      "use the creating package as the representative package if available" in { implicit env =>
+        withParticipantsInitialized { (alice, bob) =>
+          import env.*
+
+          val cidActive = withSynchronizerConnected(daName) {
+            createFooV1Contract(participant1, alice, bob).toLf
+          }
+
+          participant1.ledger_api.state.acs
+            .find_generic(alice, _.contractId == cidActive.coid)
+            .event
+            .representativePackageId shouldBe FooV1.PACKAGE_ID
+
+          participant1.repair.change_assignation(
+            Seq(cidActive),
+            daName,
+            acmeName,
+            skipInactive = false,
+          )
+
+          participant1.ledger_api.state.acs
+            .find_generic(alice, _.contractId == cidActive.coid)
+            .event
+            .representativePackageId shouldBe FooV1.PACKAGE_ID
+
+        }
+      }
+
       "move back and forth a contract" in { implicit env =>
         withParticipantsInitialized { (alice, bob) =>
           import env.*
@@ -894,6 +928,7 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
         Map(alice.toProtoPrimitive -> Filters(Nil), bob.toProtoPrimitive -> Filters(Nil)),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
     val updateWithPurge = participant1.ledger_api.updates
       .updates(
@@ -1227,6 +1262,7 @@ sealed trait RepairServiceMixedRepresentationTests extends RepairServiceIntegrat
         Map(alice.toProtoPrimitive -> Filters(Nil), bob.toProtoPrimitive -> Filters(Nil)),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
 
     participant1.ledger_api.updates.updates(
@@ -1416,17 +1452,54 @@ sealed trait RepairServiceBftSequencerPostgresTest {
   )
 }
 
+trait CacheDisabled extends RepairServiceIntegrationTest {
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition
+      .addConfigTransform(ConfigTransforms.disableCache)
+}
+
+trait ImfoBufferEnabled extends RepairServiceIntegrationTest {
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition
+      .addConfigTransforms(ConfigTransforms.updateAllParticipantConfigs { case (_, config) =>
+        config
+          .focus(_.ledgerApi.indexService.maxTransactionsInMemoryFanOutBufferSize)
+          .replace(1000)
+      })
+}
+
 class RepairServiceIntegrationTestPostgresStableLf
     extends RepairServiceIntegrationTestStableLf
+    with CacheDisabled
     with RepairServiceBftSequencerPostgresTest
     with RepairServiceMixedRepresentationTests
 
 class RepairServiceIntegrationTestPostgresStableLf_MultiSync
     extends RepairServiceIntegrationTestStableLf
+    with CacheDisabled
     with RepairServiceBftSequencerPostgresTest
     with WithMultiSynchronizerSupport
     with RepairServiceMultiSynchronizerTests
 
 class RepairServiceIntegrationTestPostgresLF23
     extends RepairServiceIntegrationTestLF23
+    with CacheDisabled
+    with RepairServiceBftSequencerPostgresTest
+
+class RepairServiceIntegrationTestImfoEnabledStableLf
+    extends RepairServiceIntegrationTestStableLf
+    with ImfoBufferEnabled
+    with RepairServiceBftSequencerPostgresTest
+    with RepairServiceMixedRepresentationTests
+
+class RepairServiceIntegrationTestImfoEnabledStableLf_MultiSync
+    extends RepairServiceIntegrationTestStableLf
+    with ImfoBufferEnabled
+    with RepairServiceBftSequencerPostgresTest
+    with WithMultiSynchronizerSupport
+    with RepairServiceMultiSynchronizerTests
+
+class RepairServiceIntegrationTestImfoEnabledLF23
+    extends RepairServiceIntegrationTestLF23
+    with ImfoBufferEnabled
     with RepairServiceBftSequencerPostgresTest

@@ -18,7 +18,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   PrepareSubmissionResponse,
   PreparedTransaction,
 }
-import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
+import com.digitalasset.canton.auth.{Authorizer, ClaimApiArea, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.{RequiredClaims, TrafficAccountAuthorization}
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
@@ -69,7 +69,9 @@ final class InteractiveSubmissionServiceAuthorization(
   override def getPreferredPackages(
       request: GetPreferredPackagesRequest
   ): Future[GetPreferredPackagesResponse] =
-    authorizer.rpc(service.getPreferredPackages)(RequiredClaim.Public())(request)
+    authorizer.rpc(service.getPreferredPackages)(
+      RequiredClaim.ApiArea(ClaimApiArea.ledgerRead.area)
+    )(request)
 
   override def bindService(): ServerServiceDefinition =
     InteractiveSubmissionServiceGrpc.bindService(this, executionContext)
@@ -119,11 +121,12 @@ object InteractiveSubmissionServiceAuthorization {
       request: PrepareSubmissionRequest
   ): List[RequiredClaim[PrepareSubmissionRequest]] = {
     val effectiveSubmitters = CommandsValidator.effectiveSubmitters(request)
-    RequiredClaims.executionClaims(
-      executeAs = Set.empty, // At preparation time the executeAs parties are only reading
-      readAs = effectiveSubmitters.readAs ++ effectiveSubmitters.actAs,
-      userIdL = userIdForPrepareSubmissionL,
-    )
+    RequiredClaim.ApiArea[PrepareSubmissionRequest](ClaimApiArea.ledgerRead.area) ::
+      RequiredClaims.executionClaims(
+        executeAs = Set.empty, // At preparation time the executeAs parties are only reading
+        readAs = effectiveSubmitters.readAs ++ effectiveSubmitters.actAs,
+        userIdL = userIdForPrepareSubmissionL,
+      )
   }
 
   def getExecuteSubmissionClaims[Req](
@@ -131,11 +134,12 @@ object InteractiveSubmissionServiceAuthorization {
       preparedTransactionL: Lens[Req, Option[PreparedTransaction]],
       userIdL: Lens[Req, String],
   ): List[RequiredClaim[Req]] =
-    RequiredClaims.executionClaims(
-      executeAs = executeAs(request, preparedTransactionL),
-      readAs = Set.empty[String],
-      userIdL = userIdL,
-    )
+    RequiredClaim.ApiArea[Req](ClaimApiArea.ledgerExecute.area) ::
+      RequiredClaims.executionClaims(
+        executeAs = executeAs(request, preparedTransactionL),
+        readAs = Set.empty[String],
+        userIdL = userIdL,
+      )
 
   def getExecuteSubmissionAndWaitForTransactionClaims(
       request: ExecuteSubmissionAndWaitForTransactionRequest

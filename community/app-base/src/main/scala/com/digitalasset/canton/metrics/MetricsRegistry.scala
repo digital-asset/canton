@@ -10,8 +10,8 @@ import com.daml.metrics.api.opentelemetry.{
 }
 import com.daml.metrics.api.{MetricQualification, MetricsContext, MetricsInfoFilter}
 import com.daml.metrics.{HistogramDefinition, MetricsFilterConfig}
-import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
+import com.digitalasset.canton.config.{Confidential, NonNegativeFiniteDuration}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.MetricsConfig.JvmMetrics
@@ -134,7 +134,7 @@ object OtlpAuth {
   final case class OauthClientCredentials(
       tokenUrl: String,
       clientId: String,
-      clientSecret: String,
+      clientSecret: Confidential[String],
       scope: Option[String] = None,
   ) extends OtlpAuth
 }
