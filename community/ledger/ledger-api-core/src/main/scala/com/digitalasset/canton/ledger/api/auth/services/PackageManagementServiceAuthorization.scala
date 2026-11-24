@@ -5,7 +5,8 @@ package com.digitalasset.canton.ledger.api.auth.services
 
 import com.daml.ledger.api.v2.admin.package_management_service.*
 import com.daml.ledger.api.v2.admin.package_management_service.PackageManagementServiceGrpc.PackageManagementService
-import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
+import com.digitalasset.canton.auth.RequiredClaim.ApiArea
+import com.digitalasset.canton.auth.{Authorizer, ClaimApiArea}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import io.grpc.ServerServiceDefinition
@@ -23,13 +24,19 @@ final class PackageManagementServiceAuthorization(
   override def listKnownPackages(
       request: ListKnownPackagesRequest
   ): Future[ListKnownPackagesResponse] =
-    authorizer.rpc(service.listKnownPackages)(RequiredClaim.Admin())(request)
+    authorizer.rpc(service.listKnownPackages)(
+      ApiArea(ClaimApiArea.ledgerRead.area)
+    )(request)
 
   override def uploadDarFile(request: UploadDarFileRequest): Future[UploadDarFileResponse] =
-    authorizer.rpc(service.uploadDarFile)(RequiredClaim.Admin())(request)
+    authorizer.rpc(service.uploadDarFile)(
+      ApiArea(ClaimApiArea.packagesWrite.area)
+    )(request)
 
   override def validateDarFile(request: ValidateDarFileRequest): Future[ValidateDarFileResponse] =
-    authorizer.rpc(service.validateDarFile)(RequiredClaim.Admin())(request)
+    authorizer.rpc(service.validateDarFile)(
+      ApiArea(ClaimApiArea.ledgerRead.area)
+    )(request)
 
   override def bindService(): ServerServiceDefinition =
     PackageManagementServiceGrpc.bindService(this, executionContext)
@@ -39,5 +46,9 @@ final class PackageManagementServiceAuthorization(
   override def updateVettedPackages(
       request: UpdateVettedPackagesRequest
   ): Future[UpdateVettedPackagesResponse] =
-    authorizer.rpc(service.updateVettedPackages)(RequiredClaim.Admin())(request)
+    authorizer.rpc(service.updateVettedPackages)(
+      ApiArea(ClaimApiArea.vettingWrite.area)
+    )(
+      request
+    )
 }

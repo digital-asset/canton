@@ -58,6 +58,7 @@ import com.digitalasset.canton.util.{
   GrpcStreamingUtils,
   OptionUtil,
 }
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{
   LfPartyId,
   ProtoDeserializationError,
@@ -98,18 +99,22 @@ final class GrpcParticipantRepairService(
   override def purgeContracts(request: PurgeContractsRequest): Future[PurgeContractsResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
-    val res: Either[RepairServiceError, Unit] = for {
+    val res: EitherT[FutureUnlessShutdown, RepairServiceError, Unit] = for {
       cids <- request.contractIds
         .traverse(LfContractId.fromString)
         .leftMap(RepairServiceError.InvalidArgument.Error(_))
+        .toEitherT[FutureUnlessShutdown]
+
       synchronizerAlias <- SynchronizerAlias
         .fromProtoPrimitive(request.synchronizerAlias)
         .leftMap(_.toString)
         .leftMap(RepairServiceError.InvalidArgument.Error(_))
+        .toEitherT[FutureUnlessShutdown]
 
       cidsNE <- NonEmpty
         .from(cids)
         .toRight(RepairServiceError.InvalidArgument.Error("Missing contract ids to purge"))
+        .toEitherT[FutureUnlessShutdown]
 
       _ <- sync.repairService
         .purgeContracts(
@@ -118,13 +123,12 @@ final class GrpcParticipantRepairService(
           request.ignoreAlreadyPurged,
           request.forceRepairWhenTopologyTransactionAtLedgerEnd,
         )
-        .leftMap(RepairServiceError.ContractPurgeError.Error(synchronizerAlias, _))
+        .leftMap[RepairServiceError](
+          RepairServiceError.ContractPurgeError.Error(synchronizerAlias, _)
+        )
     } yield ()
 
-    res.fold(
-      err => Future.failed(err.toGrpcError),
-      _ => Future.successful(PurgeContractsResponse()),
-    )
+    mapErrNewEUS(res.leftMap(_.toCantonRpcError)).map(_ => PurgeContractsResponse())
   }
 
   override def exportAcs(
@@ -548,8 +552,11 @@ final class GrpcParticipantRepairService(
     val res = for {
       reassignmentId <- EitherT.fromEither[FutureUnlessShutdown](
         protocol.ReassignmentId
-          .fromProtoPrimitive(request.reassignmentId)
-          .leftMap(err => ValueConversionError("reassignment_id", err.message).message)
+          .fromProtoPrimitive(
+            request.reassignmentId,
+            ProtocolVersionValidation.AlwaysValidation,
+          )
+          .leftMap(_.message)
       )
       sourceSynchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
         SynchronizerId

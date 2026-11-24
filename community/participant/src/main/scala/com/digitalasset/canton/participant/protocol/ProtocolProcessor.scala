@@ -248,9 +248,8 @@ abstract class ProtocolProcessor[
         explicitMediatorGroupIndex
           .map { index =>
             allActiveMediatorGroups
-              .lift(index.value)
-              .map(_.index)
-              .map(MediatorGroupRecipient(_))
+              .find(_.index == index)
+              .map(group => MediatorGroupRecipient(group.index))
               .toRight(NoMediatorError(recentSnapshot.timestamp))
           }
           .getOrElse {

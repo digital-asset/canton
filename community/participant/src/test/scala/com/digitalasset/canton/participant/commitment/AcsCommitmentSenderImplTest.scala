@@ -214,10 +214,12 @@ trait AcsCommitmentSenderImplTest
       assertCounterMetricValue(metrics.sendAttemptCount, 1)
     }
 
-    Seq(
-      "inactive participants" -> false,
-      "participants with revoked permission but retained trust certificates on a restricted synchronizer" -> true,
-    ).foreach { case (description, revokePermissions) =>
+    val tests = Seq("inactive participants" -> false) ++ Option
+      .when(testedProtocolVersion < ProtocolVersion.v38)(
+        "participants with revoked permission but retained trust certificates on a restricted synchronizer" -> true
+      )
+      .toList
+    tests.foreach { case (description, revokePermissions) =>
       s"skip the updates for $description and include them in unsent digests" in {
         // Revocation with retained trust certificates produces expected warnings. Capture them
         //  to avoid leaking into concurrent log assertions; participant iteration order is unspecified.

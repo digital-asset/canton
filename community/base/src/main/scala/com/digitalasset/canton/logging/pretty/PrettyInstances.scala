@@ -5,6 +5,7 @@ package com.digitalasset.canton.logging.pretty
 
 import cats.Show.Shown
 import com.digitalasset.base.error.utils.DecodedCantonError
+import com.digitalasset.canton.config.Confidential
 import com.digitalasset.canton.config.RequireTypes.{Port, RefinedNumeric}
 import com.digitalasset.canton.data.{DeduplicationPeriod, LedgerTimeBoundaries}
 import com.digitalasset.canton.protocol.*
@@ -45,6 +46,10 @@ trait PrettyInstances {
       // Cast is required to make IDEA happy.
       inst.prettyInternal.treeOf(inst.asInstanceOf[inst.type])
     }
+
+  // Never print the value inside a [[Confidential]], independently of `toString`
+  implicit def prettyConfidential[A]: Pretty[Confidential[A]] =
+    prettyOfString[Confidential[A]](_ => Confidential.Mask)
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   implicit def prettyPrettyPrintingFromCompanion[T <: PrettyPrintingFromCompanion]: Pretty[T] =

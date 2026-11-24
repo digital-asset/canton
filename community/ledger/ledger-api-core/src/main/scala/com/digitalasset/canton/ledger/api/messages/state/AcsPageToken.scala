@@ -22,7 +22,10 @@ import io.grpc.StatusRuntimeException
 import scala.util.chaining.scalaUtilChainingOps
 
 object AcsPageToken {
-  private val TokenVersion = 2
+  /*
+   * Version 3: the request checksum includes filtersByContractId field of update format
+   */
+  private val TokenVersion = 3
 
   @SuppressWarnings(Array("com.digitalasset.canton.ProtobufToByteString"))
   def encode(
@@ -93,7 +96,7 @@ object AcsPageToken {
       .map(_ => ValidationErrors.invalidAcsPageToken("Invalid token contents."))
     pointerToTheFirstElem <- AcsContinuationToken
       .decodeAndValidate(
-        expectedChecksum = AcsContinuationToken.emptyChecksum,
+        expectedChecksum = PageTokenUtils.emptyChecksum,
         token = proto.continuationToken,
         fieldName = "page_token",
         limit =

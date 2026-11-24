@@ -343,6 +343,8 @@ abstract class LsuRollForwardIntegrationTest
       import env.*
 
       IouSyntax.createIou(participant1)(bank, alice, 3.0)
+      // The roll forward has to transfer this purchase, which is made on the broken synchronizer
+      purchaseTrafficForUnregisteredMember(sequencer3)
       wally = participant2.parties.enable("Wally")
 
       lastTopologyActivityS2 = participant2.topology.party_to_participant_mappings
@@ -799,6 +801,7 @@ abstract class LsuRollForwardIntegrationTest
       )
 
       waitForTargetTimeOnSequencer(sequencer5, environment.clock.now, logger)
+      purchaseTrafficForUnregisteredMember(sequencer5)
 
       participants.all.forall(_.synchronizers.is_connected(fixture2.newPsid)) shouldBe true
 

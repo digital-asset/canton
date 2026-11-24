@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Signature
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.SegmentStateTest.*
@@ -26,9 +26,10 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class AcksAndCanonicalCommitsLimitsTest extends AnyWordSpec with BftSequencerBaseTest {
 
-  // maxAcks = maxCanonicalCommits = maxSequencersInSynchronizer
+  // maxAcks = maxCanonicalCommits = maxSequencersPerSynchronizer
   private val bound = 2
-  private val limits = BftOrdererLimits.default.copy(maxSequencersInSynchronizer = PositiveInt.two)
+  private val limits =
+    BftOrdererLimitsView.default.copy(maxSequencersPerSynchronizer = PositiveInt.two)
 
   private val enforcing = ProtocolVersionValidation.PV(ProtocolVersion.dev)
 

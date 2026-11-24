@@ -5,7 +5,6 @@ package com.digitalasset.canton.config
 
 import better.files.*
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.AuthServiceConfig.UnsafeJwtHmac256
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.ConfigErrors.{
   CannotParseFilesError,
@@ -22,13 +21,15 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
-import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.config.ExtensionServiceAuthConfig
 import com.digitalasset.canton.platform.config.{
   TopUpConfig,
   TrafficAccountingConfig,
   TrafficEnforcementServerConfig,
 }
+import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.ThroughputCapConfig
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import com.digitalasset.canton.version.{
@@ -40,6 +41,7 @@ import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
+import pureconfig.ConfigSource
 
 import java.io.File as JFile
 import java.nio.file.Path
@@ -155,6 +157,119 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
           )),
         )
       result.left.value shouldBe a[CannotParseFilesError.Error]
+    }
+  }
+
+  "sequencer throughput cap configuration" should {
+    def loadCaps(config: String) = {
+      val readers = new CantonConfig.ConfigReaders()(
+        ErrorLoggingContext.fromTracedLogger(logger)
+      )
+      import readers.throughputCapConfigReader
+      ConfigSource.string(config).load[ThroughputCapConfig]
+    }
+
+    def loadLegacyCaps(config: String): ThroughputCapConfig =
+      loggerFactory.assertLogs(
+        loadCaps(config).value,
+        _.warningMessage should include("throughput-cap configuration is deprecated"),
+      )
+
+    "project legacy limits and inherit the parent observation period" in {
+      val config = loadLegacyCaps("""
+        enabled = true
+        observation-period-seconds = 17
+        clock-tick-interval = 250ms
+        strict = false
+        delayed-activation = true
+        thresholds = [0.8, 0.6]
+        update-every-ms = 250
+        messages {
+          confirmation-request {
+            global-tps-cap = 30
+            global-kbps-cap = 3000
+            per-client-tps-cap = 3
+            per-client-kbps-cap = 300
+          }
+          topology.per-client-tps-cap = 0.5
+          confirmation-response.global-tps-cap = 90
+        }
+      """)
+      config.enabled shouldBe true
+      config.strict shouldBe false
+      config.clockTickInterval shouldBe NonNegativeFiniteDuration.ofMillis(250)
+      config.updateEveryMs.value shouldBe 250
+      config.thresholds.map(_.value) shouldBe Seq(0.8, 0.6)
+      val request = config.messages("confirmation-request")
+      request.requestType shouldBe SubmissionRequestType.ConfirmationRequest
+      request.globalTpsCap.value shouldBe 30
+      request.globalKbpsCap.value shouldBe 3000
+      request.perClientTpsCap.value shouldBe 3
+      request.perClientKbpsCap.value shouldBe 300
+      config.messages("topology").requestType shouldBe SubmissionRequestType.TopologyTransaction
+      config.messages("topology").perClientTpsCap.value shouldBe 0.5
+      config
+        .messages("confirmation-response")
+        .requestType shouldBe SubmissionRequestType.ConfirmationResponse
+      config.messages("confirmation-response").globalTpsCap.value shouldBe 90
+      Seq("confirmation-request", "topology", "confirmation-response").foreach { name =>
+        config.messages(name).observationPeriodSeconds.value shouldBe 17
+      }
+      config.messages("commitments") shouldBe ThroughputCapConfig().messages("commitments")
+      config.messages("time-proofs") shouldBe ThroughputCapConfig().messages("time-proofs")
+    }
+
+    "preserve omitted legacy limits and the default parent observation period" in {
+      val config = loadLegacyCaps("messages.confirmation-request.per-client-tps-cap = 7")
+      config.messages shouldBe ThroughputCapConfig().messages.updated(
+        "confirmation-request",
+        ThroughputCapConfig()
+          .messages("confirmation-request")
+          .copy(
+            perClientTpsCap = RequireTypes.PositiveDouble.tryCreate(7)
+          ),
+      )
+    }
+
+    "project the parent observation period even when no messages are specified" in {
+      val config = loadLegacyCaps("observation-period-seconds = 23")
+      Seq("confirmation-request", "topology", "confirmation-response").foreach { name =>
+        config.messages(name).observationPeriodSeconds.value shouldBe 23
+      }
+    }
+
+    "accept the legacy delayed activation field without restoring the grace period" in {
+      loadLegacyCaps("delayed-activation = false") shouldBe ThroughputCapConfig()
+    }
+
+    "keep named settings and their independent periods unchanged without warning" in {
+      val config = loadCaps("""
+        messages {
+          short {
+            request-type = "confirmation request"
+            observation-period-seconds = 2
+          }
+          long {
+            request-type = "confirmation request"
+            observation-period-seconds = 19
+          }
+        }
+      """).value
+      config.messages.keySet shouldBe Set("short", "long")
+      config.messages("short").observationPeriodSeconds.value shouldBe 2
+      config.messages("long").observationPeriodSeconds.value shouldBe 19
+      loadCaps("").value shouldBe ThroughputCapConfig()
+      loadCaps("messages = {}").value.messages shouldBe empty
+    }
+
+    "reject invalid legacy values and unknown or misspelled settings" in {
+      Seq(
+        "observation-period-seconds = 0",
+        "observation-period-seconds = -1",
+        "messages.confirmation-request.per-client-tps-capp = 1",
+        "messages.custom.per-client-tps-cap = 1",
+        """messages.confirmation-request.request-type = "invalid"""",
+      ).foreach(config => loadCaps(config).isLeft shouldBe true)
     }
   }
 
@@ -334,7 +449,7 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
         |public-lapi-size-config.completion-stream-request.parties-size-limit = 10""".stripMargin
     ) { result =>
       val sizeLimits = result.value
-      inside(sizeLimits) { case LedgerApiSizeLimitsConfig(_, _, _, sharedSizeConfig, _, _, _) =>
+      inside(sizeLimits) { case LedgerApiSizeLimitsConfig(_, _, _, sharedSizeConfig, _, _) =>
         sharedSizeConfig.completionsRequestPartiesSizeLimit shouldBe PositiveInt.tryCreate(5)
       }
       sizeLimits.publicLapiSizeConfig.getCompletionsRequest.partiesSizeLimit shouldBe
@@ -686,48 +801,148 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
   }
 
   "dumping config" should {
-    def assertNoLeakage(configMapOverride: Map[String, String] = Map.empty) = {
-      val config =
-        CantonConfig.parseAndLoadOrExit(
-          files,
-          Some(DefaultPorts.create()),
-        )
 
+    /** Loads the base config plus `configOverride`, then asserts that none of the `canaries` show
+      * up either in the startup log rendering or the config dump.
+      */
+    def assertNoLeakage(canaries: Seq[String], configOverride: String = "") = {
       val configFromCliOnly = CantonConfig
         .parseAndMergeJustCLIConfigs(NonEmpty.from(files).value)
         .valueOrFail("config should be loaded")
-      val configFromMap = ConfigFactory.parseMap(configMapOverride.asJava)
-      val finalConfig = CantonConfig.mergeConfigs(configFromCliOnly, Seq(configFromMap))
-      val rawConfig = CantonConfig.renderForLoggingOnStartup(finalConfig)
-      val dump = config.dumpString
-      val participant1Config = config.participantsByString("participant")
-      val secret = participant1Config.ledgerApi.authServices.head match {
-        case UnsafeJwtHmac256(secret, _, _, _, _, _, _) => secret
-        case x =>
-          fail(s"Invalid participant config: $x from files $files")
+      val mergedConfig =
+        CantonConfig.mergeConfigs(configFromCliOnly, Seq(ConfigFactory.parseString(configOverride)))
+      val cantonConfig = CantonConfig
+        .loadAndValidate(
+          mergedConfig.withFallback(ConfigFactory.load()),
+          Some(DefaultPorts.create()),
+        )
+        .valueOrFail("config should be valid")
+
+      // Sanity check that the canaries were actually picked up
+      val unredacted = mergedConfig.resolve().root().render()
+      clue("canaries should be in the unredacted config") {
+        canaries.filterNot(unredacted.contains) shouldBe empty
       }
-      val storageConfig = participant1Config.storage.config
-      // test db password
-      storageConfig.getString("properties.password") shouldBe "supersafe"
 
-      // test jwt secret
-      dump should not include storageConfig.getString("properties.password")
-      dump should not include secret.unwrap
-
-      rawConfig should not include storageConfig.getString("properties.password")
-      rawConfig should not include secret.unwrap
+      val renderings = Seq(
+        "startup log rendering" -> cantonConfig.dumpStringWithoutDefaults(mergedConfig),
+        "config dump" -> cantonConfig.dumpString,
+      )
+      val leaks = for {
+        (name, rendered) <- renderings
+        canary <- canaries if rendered.contains(canary)
+      } yield s"$name contains $canary"
+      if (leaks.nonEmpty) fail(leaks.mkString("\n"))
     }
 
     "not leak confidential information" in {
-      assertNoLeakage()
+      // Secrets from the base config files
+      val dbPassword = "supersafe"
+      val jwtSecret = "not-safe-for-production"
+      assertNoLeakage(Seq(dbPassword, jwtSecret))
       clue("with password override") {
         assertNoLeakage(
+          Seq(dbPassword, jwtSecret),
           // Test with specifically overridden password as well (typically provided via -C on the CLI)
-          Map(
-            "canton.participants.participant.storage.config.properties.password" -> "supersafe"
-          )
+          s"""canton.participants.participant.storage.config.properties.password = "$dbPassword"""",
         )
       }
+    }
+
+    "not leak fixed admin tokens, OTLP client secrets or tracing headers" in {
+      val fixedAdminToken = "fixed-admin-token-leak-canary"
+      val clientSecret = "otlp-client-secret-leak-canary"
+      val tracingHeader = "Bearer tracing-header-leak-canary"
+
+      assertNoLeakage(
+        Seq(fixedAdminToken, clientSecret, tracingHeader),
+        s"""
+           |canton.participants.participant {
+           |  ledger-api.admin-token-config.fixed-admin-token = "$fixedAdminToken"
+           |  admin-api.admin-token-config.fixed-admin-token = "$fixedAdminToken"
+           |}
+           |canton.monitoring.metrics.reporters = [{
+           |  type = otlp
+           |  auth {
+           |    type = oauth-client-credentials
+           |    token-url = "https://auth.example.com/token"
+           |    client-id = "canton"
+           |    client-secret = "$clientSecret"
+           |  }
+           |}]
+           |canton.monitoring.tracing.tracer.exporter {
+           |  type = otlp
+           |  additional-headers { "Authorization" = "$tracingHeader" }
+           |}
+           |""".stripMargin,
+      )
+    }
+
+    "not leak remote node tokens, JDBC URL passwords or DAR download headers" in {
+      val remoteToken = "remote-participant-token-leak-canary"
+      val jdbcUrlPassword = "jdbc-url-password-leak-canary"
+      val darHeader = "Bearer dar-header-leak-canary"
+
+      assertNoLeakage(
+        Seq(remoteToken, jdbcUrlPassword, darHeader),
+        s"""
+           |canton.remote-participants.remote {
+           |  admin-api.port = 10012
+           |  ledger-api.port = 10011
+           |  token = "$remoteToken"
+           |}
+           |canton.participants.participant {
+           |  storage.config.properties.url =
+           |    "jdbc:postgresql://localhost:5432/canton?user=canton&password=$jdbcUrlPassword"
+           |  alpha-dynamic.dars = [{
+           |    location = "https://example.com/my.dar"
+           |    request-headers { "Authorization" = "$darHeader" }
+           |  }]
+           |}
+           |""".stripMargin,
+      )
+    }
+
+    "not leak database passwords with in-memory storage" in {
+      val dbPassword = "memory-storage-password-leak-canary"
+
+      assertNoLeakage(
+        Seq(dbPassword),
+        s"""
+           |canton.participants.participant.storage {
+           |  type = memory
+           |  config.properties.password = "$dbPassword"
+           |}
+           |""".stripMargin,
+      )
+    }
+
+    "not include all of the default values on startup" in {
+      val configFromCliOnly = CantonConfig
+        .parseAndMergeJustCLIConfigs(NonEmpty.from(files).value)
+        .valueOrFail("config should be merged")
+      val mergedConfig =
+        CantonConfig.mergeConfigs(
+          configFromCliOnly,
+          Seq(
+            ConfigFactory.parseString(
+              s"""
+           |canton.remote-participants.remote {
+           |  admin-api.port = 10012
+           |  ledger-api.port = 10011
+           |  token = "hunter2"
+           |}
+           |""".stripMargin
+            )
+          ),
+        )
+      val config = CantonConfig.parseAndLoadOrExit(files, Some(DefaultPorts.create()))
+      val defaultOnlyKey = "log-config-with-defaults"
+
+      config.dumpString should include(defaultOnlyKey)
+      val rendered = config.dumpStringWithoutDefaults(mergedConfig)
+      rendered should not include defaultOnlyKey
+      rendered should include("remote-participants")
     }
   }
 

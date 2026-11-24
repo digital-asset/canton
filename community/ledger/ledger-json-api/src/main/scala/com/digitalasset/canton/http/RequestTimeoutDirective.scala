@@ -46,7 +46,7 @@ object RequestTimeoutDirective {
       Try(Duration(value)).toOption.collect { case timeout: FiniteDuration => timeout }
   }
 
-  private def parse(rawHeaderValue: String): Option[FiniteDuration] =
+  private[http] def parse(rawHeaderValue: String): Option[FiniteDuration] =
     rawHeaderValue.trim match {
       case AsMillis(timeout) => Some(timeout)
       case AsDuration(timeout) => Some(timeout)

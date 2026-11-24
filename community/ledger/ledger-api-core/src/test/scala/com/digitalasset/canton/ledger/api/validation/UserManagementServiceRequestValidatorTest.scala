@@ -110,5 +110,27 @@ class UserManagementServiceRequestValidatorTest extends AnyWordSpec with SizeLim
         UpdateUserRequest(user = Some(user(0)), updateMask = Some(fieldMask(numberOfBytes)))
       )(errorLoggingContext, sizeLimitsConfigWithLimits)
     )
+
+    def updateWithResourceVersion(resourceVersion: String) =
+      UserManagementServiceRequestValidator.validateUpdateUserRequest(
+        UpdateUserRequest(
+          user = Some(
+            user(0).copy(metadata =
+              Some(ObjectMeta(resourceVersion = resourceVersion, annotations = Map.empty))
+            )
+          ),
+          updateMask = Some(FieldMask(Seq("metadata"))),
+        )
+      )(errorLoggingContext, sizeLimitsConfigWithLimits)
+
+    "accept a resource version of 36 characters" in {
+      updateWithResourceVersion("0" * 34 + "42") shouldBe a[scala.util.Right[?, ?]]
+    }
+
+    "reject a resource version longer than 36 characters" in {
+      val error = updateWithResourceVersion("0" * 35 + "42").left.value
+      error.getStatus.getCode shouldBe io.grpc.Status.Code.INVALID_ARGUMENT
+      error.getStatus.getDescription should include("maximum length of 36")
+    }
   }
 }

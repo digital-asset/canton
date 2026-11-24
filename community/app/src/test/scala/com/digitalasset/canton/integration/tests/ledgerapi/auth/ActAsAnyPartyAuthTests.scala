@@ -5,24 +5,13 @@ package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthServiceJWTSuppressionRule
-import org.scalatest.Assertion
-
-import scala.concurrent.{ExecutionContext, Future}
 
 /** Tests for the ``CanActAsAnyParty`` right. A user holding this right may act as any party, so it
   * must be authorized wherever an act-as (or, transitively, read-as / execute-as) claim for a
   * specific party is required.
-  *
-  * The notion of a successful (i.e. authorized) call is delegated to ``successfulBehavior``, which
-  * each concrete service provides (e.g. a successful submission, or a non-PERMISSION_DENIED
-  * rejection).
   */
-trait ActAsAnyPartyAuthTests { self: ServiceCallWithMainActorAuthTests =>
-
-  /** Provided by [[SyncServiceCallAuthTests]] / [[ReadOnlyServiceCallAuthTests]] of the concrete
-    * service under test.
-    */
-  def successfulBehavior(f: Future[Any])(implicit ec: ExecutionContext): Assertion
+trait ActAsAnyPartyAuthTests extends SuccessfulServiceCallAuthTests {
+  self: ServiceCallWithMainActorAuthTests =>
 
   serviceCallName should {
     "allow calls with can-act-as-any-party token without expiration" taggedAs securityAsset

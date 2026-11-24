@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.digitalasset.canton.HasExecutionContext
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{
   SigningKeysWithThreshold,
@@ -30,6 +31,7 @@ import scala.concurrent.Future
 
 final class AllocateExternalPartyAuthIT
     extends AdminOrIDPAdminServiceCallAuthTests
+    with ApiAreaScopeServiceCallAuthTests
     with HasExecutionContext {
 
   registerPlugin(new UseH2(loggerFactory))
@@ -43,6 +45,12 @@ final class AllocateExternalPartyAuthIT
     }
 
   override def serviceCallName: String = "PartyManagementService#AllocateExternalParty"
+
+  override def apiAreaScopeBaseToken = adminToken
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.partiesWrite.area) -> true,
+    List(ClaimApiArea.partiesRead.area) -> false,
+  )
 
   private val signingKey: SigningPublicKey = {
     val keyGen = KeyPairGenerator.getInstance("Ed25519")

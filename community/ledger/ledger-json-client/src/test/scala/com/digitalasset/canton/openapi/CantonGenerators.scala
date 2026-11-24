@@ -36,6 +36,10 @@ object CantonGenerators {
     enumArbitrary(
       lapi.state_service.ParticipantPermission.enumCompanion
     )
+  implicit val arbHostingState: Arbitrary[lapi.state_service.HostingState] =
+    enumArbitrary(
+      lapi.state_service.HostingState.enumCompanion
+    )
   implicit val arbPackageStatus: Arbitrary[lapi.package_service.PackageStatus] =
     enumArbitrary(
       lapi.package_service.PackageStatus.enumCompanion
@@ -89,6 +93,9 @@ object CantonGenerators {
 
   implicit val arbOptSigningPublicKey: Arbitrary[Option[lapi.crypto.SigningPublicKey]] =
     arbSomeOnly[lapi.crypto.SigningPublicKey]
+
+  implicit val arbOptHostedParty: Arbitrary[Option[lapi.state_service.HostedParty]] =
+    arbSomeOnly[lapi.state_service.HostedParty]
 
   // we do not provide unknownFields, as they are not used in the JSON API
   implicit val arbJsStatus: Arbitrary[com.google.rpc.status.Status] =

@@ -107,7 +107,10 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
   protected def withProjection[A](body: (ActorTestKit, Backend) => A): A = {
     val testKit = ActorTestKit(s"tea-projection-${UUID.randomUUID()}", pekkoTestConfig)
     try body(testKit, createBackend()(testKit.system))
-    finally testKit.shutdownTestKit()
+    finally {
+      testKit.shutdownTestKit()
+
+    }
   }
 
   protected def singleTopUp(
@@ -575,7 +578,10 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
               {
                 val ref = spawnProjection(testKit, backend, errorSource)
                 try {
-                  eventually()(thrown.get() shouldBe 2)
+                  eventually() {
+                    thrown.get() shouldBe 2
+                    balanceOf(backend, alice) shouldBe Some(AccountState.credits(alice, 1, t1))
+                  }
                 } finally stopProjection(testKit, ref)
               },
               _ shouldBe empty,

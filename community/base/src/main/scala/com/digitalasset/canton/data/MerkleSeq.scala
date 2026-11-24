@@ -201,7 +201,7 @@ object MerkleSeq
   )
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.MerkleSeq)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(v30.MerkleSeq)(
       supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
@@ -458,7 +458,7 @@ object MerkleSeq
     }
 
     override val versioningTable: VersioningTable = VersioningTable(
-      ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.MerkleSeqElement)(
+      ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(v30.MerkleSeqElement)(
         supportedProtoVersionPVV(_)(fromProtoV30),
         _.toProtoV30,
       )

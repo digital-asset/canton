@@ -248,7 +248,7 @@ trait TransactionAuthorizationCache[+PureCrypto <: CryptoPureApi] {
           )
         }
 
-      namespacesToLoad.foreach { namespace =>
+      (namespacesToLoad ++ remainingNamespacesToLoad).foreach { namespace =>
         namespaceCache
           .putIfAbsent(
             namespace,

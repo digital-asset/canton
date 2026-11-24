@@ -10,7 +10,6 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
-  DynamicSynchronizerParameters,
   DynamicSynchronizerParametersWithValidity,
   SequencingParametersWithValidity,
 }
@@ -29,6 +28,7 @@ import com.digitalasset.canton.topology.transaction.{
   MediatorSynchronizerState,
   OwnerToKeyMapping,
   ParticipantAttributes,
+  ParticipantPermission,
   ParticipantSynchronizerPermission,
   PartyToKeyMapping,
   PartyToParticipant,
@@ -56,6 +56,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.nonempty.NonEmpty
 
@@ -454,37 +455,43 @@ abstract class BaseTopologySnapshot(
       participantsIdsWithCertificates.toSeq.mapFilter { pid =>
         val supportedFeatures =
           participantsWithCertificates.get(pid).toList.flatMap(_.featureFlags)
-        if (
-          synchronizerParametersState.parameters.onboardingRestriction.isRestricted && !participantSynchronizerPermissions
-            .contains(pid)
-        ) {
-          // 3a. If the synchronizer is restricted, we must have found a ParticipantSynchronizerPermission for the participants, otherwise
-          // the participants shouldn't have been able to onboard to the synchronizer in the first place.
-          // In case we don't find a ParticipantSynchronizerPermission, we don't return the participant with default permissions, but we skip it.
-          logger.warn(
-            s"Unable to find ParticipantSynchronizerPermission for participant $pid on synchronizer ${synchronizerParametersState.synchronizerId} with onboarding restrictions ${synchronizerParametersState.parameters.onboardingRestriction} at $referenceTime"
-          )
-          None
-        } else {
-          val permissions = participantSynchronizerPermissions
-            .getOrElse(
-              pid,
-              ParticipantSynchronizerPermission
-                .default(synchronizerParametersState.synchronizerId, pid),
-            )
-            .setDefaultLimitIfNotSet(
-              DynamicSynchronizerParameters.defaultParticipantSynchronizerLimits
-            )
-          // 3b. Apply default permissions/trust of submission/ordinary if missing participant synchronizer permission and
-          // grab rate limits from dynamic synchronizer parameters if not specified
-          Some(
-            pid -> ParticipantAttributes(
-              permissions.permission,
-              permissions.loginAfter,
+
+        val attributesO = participantSynchronizerPermissions.get(pid) match {
+          case None =>
+            def attributesWithDefault = ParticipantAttributes(
+              ParticipantPermission.Submission,
+              None,
               supportedFeatures,
             )
-          )
+            if (synchronizerParametersState.parameters.onboardingRestriction.isRestricted) {
+              if (psid.protocolVersion >= ProtocolVersion.v38) {
+                // 3a. If the synchronizer became restricted after the participant had been onboarded,
+                // the participant need not have a ParticipantSynchronizerPermission. Therefore, we return the default permissions in that case.
+                Some(attributesWithDefault)
+              } else {
+                // 3a. If the synchronizer is restricted, we must have found a ParticipantSynchronizerPermission for the participants, otherwise
+                // the participants shouldn't have been able to onboard to the synchronizer in the first place.
+                // In case we don't find a ParticipantSynchronizerPermission, we don't return the participant with default permissions, but we skip it.
+                logger.warn(
+                  s"Unable to find ParticipantSynchronizerPermission for participant $pid on synchronizer ${synchronizerParametersState.synchronizerId} with onboarding restrictions ${synchronizerParametersState.parameters.onboardingRestriction} at $referenceTime"
+                )
+                None
+              }
+            } else {
+              // 3b. Apply default permissions/trust of submission/ordinary if missing participant synchronizer permission and
+              // grab rate limits from dynamic synchronizer parameters if not specified
+              Some(attributesWithDefault)
+            }
+          case Some(permission) =>
+            Some(
+              ParticipantAttributes(
+                permission.permission,
+                permission.loginAfter,
+                supportedFeatures,
+              )
+            )
         }
+        attributesO.map(pid -> _)
       }.toMap
     }
 

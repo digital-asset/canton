@@ -16,6 +16,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficPurchasedRequestAsyncSendFailed
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.ProtocolVersion
 
 import java.time.Duration
@@ -61,11 +62,46 @@ class TrafficParticipantOnboardingTest
     implicit env =>
       import env.*
 
+      val firstTopUpBalance = NonNegativeLong.tryCreate(50000)
       val topUpBalance = NonNegativeLong.tryCreate(100000)
       val member = participant1 // unregistered member
-      val serial = sendTopUp(member, topUpBalance)
+      val firstSerial = sendTopUp(member, firstTopUpBalance)
 
-      // Start and connect the new member to be able to query traffic balance
+      // The traffic state of a member that is still onboarding is returned on request
+      val firstState = eventually() {
+        val (_, state) = sequencer1.traffic_control
+          .traffic_state_of_members(Seq(member), includeOnboardingMembers = true)
+          .trafficStates
+          .loneElement
+        state.serial shouldBe Some(firstSerial)
+        state.extraTrafficPurchased shouldBe firstTopUpBalance
+        state
+      }
+      sequencer1.traffic_control
+        .traffic_state_of_all_members(includeOnboardingMembers = true)
+        .trafficStates
+        .keySet should contain(member.id: Member)
+
+      // ... and left out by default
+      sequencer1.traffic_control.traffic_state_of_members(Seq(member)).trafficStates shouldBe empty
+      sequencer1.traffic_control
+        .traffic_state_of_all_members()
+        .trafficStates
+        .keySet should not contain (member.id: Member)
+
+      // The queried state gives the serial to use for the next top up
+      val serial = sendTopUp(member, topUpBalance, Some(firstState.serial.value.increment.value))
+
+      eventually() {
+        val (_, state) = sequencer1.traffic_control
+          .traffic_state_of_members(Seq(member), includeOnboardingMembers = true)
+          .trafficStates
+          .loneElement
+        state.serial shouldBe Some(serial)
+        state.extraTrafficPurchased shouldBe topUpBalance
+      }
+
+      // Start and connect the new member
       member.start()
       member.health.wait_for_running()
       member.synchronizers.connect_local(sequencer1, daName)

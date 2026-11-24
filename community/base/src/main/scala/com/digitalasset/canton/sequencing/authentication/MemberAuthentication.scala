@@ -9,11 +9,13 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.AuthenticationError
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenManager
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import io.grpc.{Status, StatusRuntimeException}
 
@@ -22,13 +24,19 @@ import scala.util.control.NonFatal
 
 trait MemberAuthentication {
 
+  /** Construct the signing input shared by the client and verifier. With no verifier binding, keep
+    * the legacy hash unchanged. For PV38 sequencers, include the intended verifier so a signature
+    * obtained through a callback cannot be redeemed at another sequencer.
+    */
   def hashSynchronizerNonce(
       nonce: Nonce,
       synchronizerId: PhysicalSynchronizerId,
       pureCrypto: CryptoPureApi,
+      verifierO: Option[MemberAuthentication.Verifier] = None,
   ): Hash
 
-  /** Member concatenates the nonce with the synchronizer's id and signs it (step 3)
+  /** Member signs the nonce and synchronizer ID, additionally binding the verifier for sequencer
+    * authentication from protocol version 38 (step 3).
     */
   def signSynchronizerNonce(
       member: Member,
@@ -36,6 +44,7 @@ trait MemberAuthentication {
       synchronizerId: PhysicalSynchronizerId,
       possibleSigningKeys: NonEmpty[Seq[Fingerprint]],
       crypto: SynchronizerCrypto,
+      verifierO: Option[MemberAuthentication.Verifier] = None,
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
@@ -45,6 +54,19 @@ trait MemberAuthentication {
 object MemberAuthentication extends MemberAuthentication {
 
   import com.digitalasset.canton.util.ShowUtil.*
+
+  /** The intended recipient of an authentication proof. Signers use the identity disclosed by the
+    * challenge service and the endpoint they actually dialed. Verifiers reconstruct this binding
+    * from their own configured identity and external endpoint, never from requester-supplied
+    * values.
+    */
+  final case class Verifier(sequencerId: SequencerId, endpoint: Endpoint)
+
+  def requiresVerifier(member: Member, protocolVersion: ProtocolVersion): Boolean =
+    member match {
+      case _: SequencerId => protocolVersion.v > 37
+      case _: ParticipantId | _: MediatorId => false
+    }
 
   def apply(member: Member): Either[AuthenticationError, MemberAuthentication] = member match {
     // TODO(#24306) allow sequencer-sequencer authentication only for BFT sequencers on P2P endpoints
@@ -111,8 +133,19 @@ object MemberAuthentication extends MemberAuthentication {
       nonce: Nonce,
       synchronizerId: PhysicalSynchronizerId,
       pureCrypto: CryptoPureApi,
+      verifierO: Option[Verifier],
   ): Hash = {
     val builder = commonNonce(pureCrypto, nonce, synchronizerId)
+    verifierO.foreach { binding =>
+      builder
+        // Domain-separate this format from other authentication payloads
+        //  sharing the same hash purpose.
+        .addString("sequencer-authentication-api-v31")
+        // The actual verifier hash components to prevent a relay
+        //  from redirecting the signature to another sequencer.
+        .addString(binding.sequencerId.toProtoPrimitive)
+        .addString(binding.endpoint.toString)
+    }
     builder.finish()
   }
 
@@ -122,11 +155,12 @@ object MemberAuthentication extends MemberAuthentication {
       synchronizerId: PhysicalSynchronizerId,
       possibleSigningKeys: NonEmpty[Seq[Fingerprint]],
       crypto: SynchronizerCrypto,
+      verifierO: Option[Verifier],
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, AuthenticationError, Signature] = {
-    val hash = hashSynchronizerNonce(nonce, synchronizerId, crypto.pureCrypto)
+    val hash = hashSynchronizerNonce(nonce, synchronizerId, crypto.pureCrypto, verifierO)
 
     for {
       // see if we have any of the possible keys with the correct usage that could be used to sign

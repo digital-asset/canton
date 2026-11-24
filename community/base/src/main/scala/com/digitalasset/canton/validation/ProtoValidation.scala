@@ -229,6 +229,24 @@ object ProtoValidation {
       Either.cond(condition(value), (), mkError(value))
     }
 
+  /** Check a condition from a protocol version on, for a check that a later version introduced.
+    *
+    * @param pvv
+    *   `PV(pv)` checks the condition if `pv` is at least `since`, `NoValidation` skips it,
+    *   `AlwaysValidation` checks it
+    * @param since
+    *   the first protocol version that checks the condition
+    * @param condition
+    *   `false` means the message is rejected
+    * @param error
+    *   the error for a rejected message
+    */
+  def validateConditionSince(pvv: ProtocolVersionValidation, since: ProtocolVersion)(
+      condition: => Boolean,
+      error: => ProtoDeserializationError,
+  ): ParsingResult[Unit] =
+    validateCondition(pvv, ValidationParam(since -> ()))(_ => condition, _ => error)
+
   /** `validateLength`, then `parse` every element, for elements with no [[ProtoValidator]] of their
     * own, i.e. a repeated message or enum field.
     *

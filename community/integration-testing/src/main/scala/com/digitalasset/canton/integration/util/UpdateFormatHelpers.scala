@@ -38,12 +38,14 @@ object UpdateFormatHelpers {
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(filters),
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     else
       EventFormat(
         filtersByParty = partyIds.map(_.toLf -> filters).toMap,
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
   }
 

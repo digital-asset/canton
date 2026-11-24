@@ -449,26 +449,62 @@ final class GrpcSequencerChannelPoolTest
       verify(responseObserver2, times(1)).onCompleted()
     }
 
-    "release the slot when the member token has already expired at initialization" in withEnv(
+    "release the slot immediately when the member token is already expired" in withEnv(
       PositiveInt.one
     ) { env =>
       import env.*
 
-      val res = createUninitializedChannel(
+      val (responseObserver, requestObserver) = createUninitializedChannel(
         // Token already expired
         memberTokenExpiresAt = Some(clock.now.minusSeconds(1))
       ).value
 
-      checkMetrics(pending = 1)
-      channelPool.size shouldBe 0
-      channelPool.numOfAvailableSlots shouldBe 1
+      checkMetrics()
+      verify(responseObserver, times(1)).onCompleted()
+      assertNumOfScheduledTasks(0)
 
-      initializeChannel(channelId1, expectSuccess = false).tupled(res)
+      initializeChannel(channelId1, expectSuccess = false)(
+        responseObserver,
+        requestObserver,
+      )
 
       checkMetrics()
-      channelPool.size shouldBe 0
-      channelPool.numOfAvailableSlots shouldBe 2
+      verify(responseObserver, times(1)).onCompleted()
+      verify(responseObserver, never).onError(any[Throwable])
+      assertNumOfScheduledTasks(0)
+    }
 
+    "close a pending connection when its token expires before the metadata timeout" in withEnv(
+      maxPoolSize = PositiveInt.one,
+      maxMetadataWaitingTime = PositiveFiniteDuration(2.minutes),
+    ) { env =>
+      import env.*
+
+      val tokenExpiresAt = clock.now.add(10.seconds)
+      val (responseObserver, _) = createUninitializedChannel(
+        // Token expires after now before the metadata timeout
+        memberTokenExpiresAt = Some(tokenExpiresAt)
+      ).value
+
+      checkMetrics(pending = 1)
+      assertNumOfScheduledTasks(1)
+
+      clock.advanceTo(tokenExpiresAt.minusSeconds(1))
+
+      checkMetrics(pending = 1)
+      verify(responseObserver, never).onCompleted()
+
+      clock.advanceTo(tokenExpiresAt)
+
+      checkMetrics()
+      verify(responseObserver, times(1)).onCompleted()
+      verify(responseObserver, never).onError(any[Throwable])
+      assertNumOfScheduledTasks(0)
+
+      clock.advance(2.minutes.toJava)
+
+      checkMetrics()
+      verify(responseObserver, times(1)).onCompleted()
       assertNumOfScheduledTasks(0)
     }
 
@@ -483,6 +519,33 @@ final class GrpcSequencerChannelPoolTest
         createAndInitializeChannel(channelId1, member2, member1)
       val (channel2Observer, _) =
         createAndInitializeChannel(channelId2, member1, member3)
+      val (channel3Observer, _) =
+        createAndInitializeChannel(channelId3, member2, member3)
+
+      checkMetrics(pending = 1, waiting = 2, active = 1)
+
+      channelPool.closeChannels(Some(member1), waitForClosed = true)
+
+      eventually(2.seconds) {
+        verify(channel1Observer).onCompleted()
+        verify(channel1ObserverForJoiningMember).onCompleted()
+        verify(channel2Observer).onCompleted()
+        verify(channel3Observer, never).onCompleted()
+      }
+      checkMetrics(pending = 1, waiting = 1)
+    }
+
+    "release slots when a second member is revoked via closeChannels(member)" in withEnv() { env =>
+      import env.*
+
+      createUninitializedChannel().value
+      val (channel1Observer, _) =
+        createAndInitializeChannel(channelId1, member2, member1)
+      // Make 1st channel active, member1 is a secondMemeber
+      val (channel1ObserverForJoiningMember, _) =
+        createAndInitializeChannel(channelId1, member1, member2)
+      val (channel2Observer, _) =
+        createAndInitializeChannel(channelId2, member2, member1)
       val (channel3Observer, _) =
         createAndInitializeChannel(channelId3, member2, member3)
 

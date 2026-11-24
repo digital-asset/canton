@@ -352,14 +352,6 @@ final case class TransactionView private (
       }
     } yield this
   }
-
-  /** The parse depth of a TransactionView is the parse depth of its subviews Although the
-    * TransactionView itself does not increment the depth counter in when used in a subview it will
-    * be enclosed in a MerkleSeq.Singleton that does increment the counter.
-    */
-  def parseDepth: Int =
-    subviews.subviews.parseDepth(_.subviews.subviews)
-
 }
 
 object TransactionView
@@ -377,7 +369,7 @@ object TransactionView
     param("subviews", _.subviews),
   )
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.ViewNode)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(v30.ViewNode)(
       supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
@@ -488,7 +480,15 @@ object TransactionView
       )
       participantData <- MerkleTree.fromProtoOptionV30NoMerkleSeq(
         protoView.viewParticipantData,
-        ViewParticipantData.fromByteString(pvv, (hashOps, expectedProtocolVersion), _),
+        ViewParticipantData.fromByteString(
+          pvv,
+          ViewParticipantDataDeserializationContext(
+            hashOps,
+            expectedProtocolVersion,
+            transactionLimits,
+          ),
+          _,
+        ),
       )
 
       subViews <- TransactionSubviews.fromProtoV30(

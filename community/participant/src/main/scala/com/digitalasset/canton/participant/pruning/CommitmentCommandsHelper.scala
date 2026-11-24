@@ -32,6 +32,7 @@ import com.digitalasset.canton.version.{
   HasVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
 }
 import com.digitalasset.canton.{ProtoDeserializationError, ReassignmentCounter}
 import com.digitalasset.daml.lf.data.Bytes
@@ -74,10 +75,17 @@ object JsonCodecs {
       s => ReassignmentCounter(s.toLong),
     )
 
+  // Reads back the JSON the console writes from its own participant's inspection response.
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   implicit val reassignmentIdRW: ReadWriter[ReassignmentId] =
     readwriter[String].bimap[ReassignmentId](
       reassignmentId => reassignmentId.toProtoPrimitive,
-      ReassignmentId.tryCreate,
+      s =>
+        ReassignmentId
+          .fromProtoPrimitive(s, ProtocolVersionValidation.NoValidation)
+          .valueOr(err =>
+            throw new IllegalArgumentException(s"Invalid ReassignmentId: ${err.message}")
+          ),
     )
 }
 
@@ -110,7 +118,7 @@ object CommitmentContractMetadata
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v36,
+        ProtocolVersion.minimum,
         supportedProtoVersion(v30.CommitmentContractMeta)(fromProtoV30),
         _.toProtoV30,
       )
@@ -218,7 +226,7 @@ object CommitmentInspectContract
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v36,
+        ProtocolVersion.minimum,
         supportedProtoVersion(v30.CommitmentContract)(fromProtoV30),
         _.toProtoV30,
       )
@@ -530,7 +538,7 @@ object ContractStateOnSynchronizer
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v36,
+        ProtocolVersion.minimum,
         supportedProtoVersion(v30.ContractState.SynchronizerState)(fromProtoV30),
         _.toProtoV30,
       )
@@ -599,7 +607,7 @@ object ContractCreated
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v36,
+        ProtocolVersion.minimum,
         supportedProtoVersion(v30.ContractState.Created)(fromProtoV30),
         _.toProtoV30,
       )
@@ -646,7 +654,7 @@ object ContractAssigned
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v36,
+        ProtocolVersion.minimum,
         supportedProtoVersion(v30.ContractState.Assigned)(fromProtoV30),
         _.toProtoV30,
       )
@@ -659,7 +667,10 @@ object ContractAssigned
     val reassignmentIdE = assigned.reassignmentId match {
       case Some(reassignmentId) =>
         for {
-          reassignmentId <- ReassignmentId.fromProtoPrimitive(reassignmentId.id)
+          reassignmentId <- ReassignmentId.fromProtoPrimitive(
+            reassignmentId.id,
+            ProtocolVersionValidation.AlwaysValidation,
+          )
         } yield Some(reassignmentId)
       case None => Right(None: Option[ReassignmentId])
     }
@@ -709,7 +720,7 @@ object ContractUnassigned
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v36,
+        ProtocolVersion.minimum,
         supportedProtoVersion(v30.ContractState.Unassigned)(fromProtoV30),
         _.toProtoV30,
       )
@@ -727,7 +738,10 @@ object ContractUnassigned
       reassignmentIdE = unassigned.reassignmentId match {
         case Some(reassignmentId) =>
           for {
-            reassignmentId <- ReassignmentId.fromProtoPrimitive(reassignmentId.id)
+            reassignmentId <- ReassignmentId.fromProtoPrimitive(
+              reassignmentId.id,
+              ProtocolVersionValidation.AlwaysValidation,
+            )
           } yield Some(reassignmentId)
         case None => Right(None: Option[ReassignmentId])
       }
@@ -769,7 +783,7 @@ object ContractArchived
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v36,
+        ProtocolVersion.minimum,
         supportedProtoVersion(v30.ContractState.Archived)(fromProtoV30),
         _.toProtoV30,
       )
@@ -806,7 +820,7 @@ object ContractUnknown
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v36,
+        ProtocolVersion.minimum,
         supportedProtoVersion(v30.ContractState.Unknown)(fromProtoV30),
         _.toProtoV30,
       )

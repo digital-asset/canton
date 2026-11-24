@@ -317,8 +317,20 @@ nightly_integration_test_with_session_keys:
 nightly_cn_topology_snapshot_test_only:
   executor: canton-2xlarge-docker-with-postgres
   parallelism: 4 # One node per environment (cilr, dev, test, main)
+  parameters:
+    protocol_version:
+      type: string
+      default: ""
   steps:
-    - allow_automatic_protocol_version
+    - when:
+        condition: << parameters.protocol_version >>
+        steps:
+          - set_canton_protocol_version:
+              protocol_version: << parameters.protocol_version >>
+    - unless:
+        condition: << parameters.protocol_version >>
+        steps:
+          - allow_automatic_protocol_version
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.topology"

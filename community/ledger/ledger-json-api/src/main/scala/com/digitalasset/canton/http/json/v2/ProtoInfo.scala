@@ -146,6 +146,7 @@ object ProtoInfo {
   val optionalPattern = raw"^\s*\bOptional\b".r
   val requiredPattern = raw"^\s*\bRequired\b(?!\s+unless\b)".r
   val optionalWhenRequiredUnlessPattern = raw"^\s*\bRequired\b(?:\s+unless\b)".r
+  val requiredPermissionsPattern = raw"^\s*Required permissions:\s".r
   val CommentsOverridesApiDescriptionResourceLocation = "ledger-api/json-comments-overrides.yml"
   lazy val cachedProtoData = loadData()
   def camelToSnake(name: String): String =

@@ -121,7 +121,7 @@ object ListKeyOwnersResult {
           "encryption_keys",
           AdminApiResponseValidation.Trusted,
           AdminApiResponseValidation.NoLengthLimit,
-        )((entry, _) => EncryptionPublicKey.fromProtoV30(entry))
+        )((entry, _) => EncryptionPublicKey.fromProtoV30(AdminApiResponseValidation.Trusted, entry))
     } yield ListKeyOwnersResult(synchronizerId, owner, signingKeys, encryptionKeys)
 }
 

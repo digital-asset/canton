@@ -126,6 +126,7 @@ class ValueDecoderUpgradingIntegrationTest
                 filtersByParty = Map.empty,
                 filtersForAnyParty = Some(transaction_filter.Filters(cumulative = Seq())),
                 verbose = false,
+                filtersByContractId = Seq.empty,
               )
             ).asJson,
             "activeAtOffset" -> endOffset.asJson,

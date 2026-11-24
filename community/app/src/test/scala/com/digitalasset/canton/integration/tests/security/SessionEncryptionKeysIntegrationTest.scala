@@ -305,6 +305,7 @@ trait SessionKeyIntegrationTest
           )(
             deserialize,
             defaultMaxBytesToDecompress,
+            com.digitalasset.canton.protocol.TransactionProtocolLimits.default,
           )
           .isRight
       }

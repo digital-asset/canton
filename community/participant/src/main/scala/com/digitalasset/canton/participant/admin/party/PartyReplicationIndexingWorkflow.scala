@@ -10,9 +10,10 @@ import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
+import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
 import com.digitalasset.canton.ledger.participant.state.{
   IndexingWatermark,
-  Reassignment,
+  ParticipantEvent,
   ReassignmentInfo,
   SynchronizerUpdate,
   Update,
@@ -35,6 +36,7 @@ import com.digitalasset.canton.participant.store.{
   PartyReplicationIndexingStore,
   PersistedContractInstance,
 }
+import com.digitalasset.canton.platform.store.backend.PersistentParticipantEventUpdateCategory
 import com.digitalasset.canton.protocol.{ReassignmentId, UpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.processing.EffectiveTime
@@ -296,7 +298,7 @@ class PartyReplicationIndexingWorkflow(
       pureCrypto: CryptoPureApi,
   )(
       timestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): Update.OnPRReassignmentAccepted = {
+  )(implicit traceContext: TraceContext): Update.OnlinePartyReplicationParticipantEventUpdate = {
     // Add the watermark fields to the hash to arrive at unique per-OnPR updateIds.
     val updateId = UpdateId(
       activationChanges
@@ -358,44 +360,42 @@ class PartyReplicationIndexingWorkflow(
       )
     val acsChangeFactory = AcsChangeSupport.fromCommitSet(commitSet)
     Update
-      .OnPRReassignmentAccepted(
+      .OnlinePartyReplicationParticipantEventUpdate(
         workflowId = None,
         updateId = updateId,
-        reassignmentInfo = artificialReassignmentInfo,
-        reassignment = Reassignment.Batch(
-          activationChanges.zipWithIndex.map[Reassignment] {
-            // TODO(#37238): Figure out representative package
-            case (ContractActivation(contractReassignment, internalContractId), idx) =>
-              Reassignment.Assign(
-                reassignmentCounter = contractReassignment.counter.v,
-                nodeId = idx,
-                persistedContractInstance = PersistedContractInstance(
-                  internalContractId = internalContractId,
-                  inst = contractReassignment.contract.inst,
-                ),
-                representativePackageId = contractReassignment.targetValidationPackageId.unwrap,
-              )
-            case (
-                  ContractDeactivation(ContractReassignment(contract, _, _, reassignmentCounter)),
-                  idx,
-                ) =>
-              Reassignment.Unassign(
-                contractId = contract.contractId,
-                templateId = contract.templateId,
-                packageName = contract.inst.packageName,
-                stakeholders = contract.metadata.stakeholders,
-                assignmentExclusivity = None,
-                reassignmentCounter = reassignmentCounter.v,
-                nodeId = idx,
-                keyOpt = contract.contractKeyWithMaintainers,
-              )
-          }
-        ),
         recordTime = timestamp,
         watermark = watermark,
         synchronizerId = synchronizerId,
         acsChangeFactory = acsChangeFactory,
         traceContext = traceContext,
+        events = activationChanges.zipWithIndex.map[ParticipantEvent] {
+          case (ContractActivation(contractReassignment, internalContractId), idx) =>
+            ParticipantEvent.Added(
+              nodeId = idx,
+              contractInstance = PersistedContractInstance(
+                internalContractId = internalContractId,
+                inst = contractReassignment.contract.inst,
+              ),
+              reassignmentCounter = contractReassignment.counter.v,
+              // TODO(#37238): Figure out representative package
+              representativePackageId = SameAsContractPackageId,
+            )
+          case (
+                ContractDeactivation(ContractReassignment(contract, _, _, reassignmentCounter)),
+                idx,
+              ) =>
+            ParticipantEvent.Removed(
+              contractId = contract.contractId,
+              templateId = contract.templateId,
+              packageName = contract.inst.packageName,
+              stakeholders = contract.metadata.stakeholders,
+              nodeId = idx,
+              reassignmentCounter = reassignmentCounter.v,
+              keyOpt = contract.contractKeyWithMaintainers,
+              signatories = Some(contract.metadata.signatories),
+            )
+        },
+        category = PersistentParticipantEventUpdateCategory.OnlinePartyReplication,
       )
       .tap(update =>
         // TODO(#30121): Move indexer confirmation to indexer post-processing

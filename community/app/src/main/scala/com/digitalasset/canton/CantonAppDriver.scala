@@ -222,7 +222,7 @@ abstract class CantonAppDriver extends App with NamedLogging with NoTracing {
               (if (loadedConfig.monitoring.logging.logConfigWithDefaults)
                  loadedConfig.dumpString
                else
-                 CantonConfig.renderForLoggingOnStartup(finalConfig))
+                 loadedConfig.dumpStringWithoutDefaults(explicitConfig = finalConfig))
           )
         }
         loadedConfig

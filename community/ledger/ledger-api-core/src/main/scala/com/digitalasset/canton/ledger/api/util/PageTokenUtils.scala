@@ -8,6 +8,10 @@ import com.google.protobuf.ByteString
 
 object PageTokenUtils {
 
+  final case class Checksum(bytes: ByteString)
+
+  def emptyChecksum: Checksum = Checksum(ByteString.copyFrom(Array.fill(4)(0.toByte)))
+
   /** Compute a 4-byte participant ID checksum for use in page tokens. */
   def calcParticipantChecksum(purpose: HashPurpose, participantId: String): ByteString =
     toChecksum(

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering
 
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -53,7 +53,7 @@ final case class CommitCertificate(
 object ConsensusCertificate {
   def fromProto(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       consensusCertificate: ProtoConsensusCertificate,
   ): ParsingResult[ConsensusCertificate] =
     consensusCertificate.certificate match {
@@ -78,7 +78,7 @@ object PrepareCertificate {
   }
   def fromProto(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       prepareCertificate: v30.PrepareCertificate,
   ): ParsingResult[PrepareCertificate] =
     for {
@@ -128,7 +128,7 @@ object CommitCertificate {
 
   def fromProto(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       commitCertificate: v30.CommitCertificate,
   ): ParsingResult[CommitCertificate] =
     // We set the actual sender of nested messages to `None`

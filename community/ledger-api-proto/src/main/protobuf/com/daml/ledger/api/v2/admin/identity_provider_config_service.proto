@@ -38,19 +38,29 @@ option java_package = "com.daml.ledger.api.v2.admin";
 service IdentityProviderConfigService {
   // Create a new identity provider configuration.
   // The request will fail if the maximum allowed number of separate configurations is reached.
+  //
+  // Required permissions: ``idps:write``
   rpc CreateIdentityProviderConfig(CreateIdentityProviderConfigRequest) returns (CreateIdentityProviderConfigResponse);
 
   // Get the identity provider configuration data by id.
+  //
+  // Required permissions: ``idps:read``
   rpc GetIdentityProviderConfig(GetIdentityProviderConfigRequest) returns (GetIdentityProviderConfigResponse);
 
   // Update selected modifiable attribute of an identity provider config resource described
   // by the ``IdentityProviderConfig`` message.
+  //
+  // Required permissions: ``idps:write``
   rpc UpdateIdentityProviderConfig(UpdateIdentityProviderConfigRequest) returns (UpdateIdentityProviderConfigResponse);
 
   // List all existing identity provider configurations.
+  //
+  // Required permissions: ``idps:read``
   rpc ListIdentityProviderConfigs(ListIdentityProviderConfigsRequest) returns (ListIdentityProviderConfigsResponse);
 
   // Delete an existing identity provider configuration.
+  //
+  // Required permissions: ``idps:write``
   rpc DeleteIdentityProviderConfig(DeleteIdentityProviderConfigRequest) returns (DeleteIdentityProviderConfigResponse);
 }
 

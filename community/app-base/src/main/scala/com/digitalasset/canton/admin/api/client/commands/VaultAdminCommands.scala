@@ -248,7 +248,11 @@ object VaultAdminCommands {
     ): Either[String, EncryptionPublicKey] =
       response.publicKey
         .toRight("No public key returned")
-        .flatMap(k => EncryptionPublicKey.fromProtoV30(k).leftMap(_.toString))
+        .flatMap(k =>
+          EncryptionPublicKey
+            .fromProtoV30(AdminApiResponseValidation.Trusted, k)
+            .leftMap(_.toString)
+        )
 
     // may time some time if we need to wait for entropy
     override def timeoutType: TimeoutType = DefaultUnboundedTimeout
@@ -323,7 +327,11 @@ object VaultAdminCommands {
     ): Either[String, EncryptionPublicKey] =
       response.publicKey
         .toRight("No public key returned")
-        .flatMap(k => EncryptionPublicKey.fromProtoV30(k).leftMap(_.toString))
+        .flatMap(k =>
+          EncryptionPublicKey
+            .fromProtoV30(AdminApiResponseValidation.Trusted, k)
+            .leftMap(_.toString)
+        )
 
   }
 

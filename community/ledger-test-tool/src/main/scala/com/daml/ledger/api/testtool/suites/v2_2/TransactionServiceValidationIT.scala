@@ -33,7 +33,9 @@ class TransactionServiceValidationIT(testDars: TestDars) extends LedgerTestSuite
       assertGrpcError(
         failure,
         RequestValidationErrors.InvalidArgument,
-        Some("filtersByParty and filtersForAnyParty cannot be empty simultaneously"),
+        Some(
+          "filtersByParty, filtersForAnyParty and filtersByContractId cannot be empty simultaneously"
+        ),
       )
     }
   })

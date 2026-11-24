@@ -45,6 +45,7 @@ trait RangeBoundaryStreamComponentTest
             filtersByParty = Map(dsoParty.value -> CumulativeFilter.templateWildcardFilter(true)),
             filtersForAnyParty = None,
             verbose = false,
+            filtersByContractId = Seq.empty,
           ),
           transactionShape = LedgerEffects,
         )

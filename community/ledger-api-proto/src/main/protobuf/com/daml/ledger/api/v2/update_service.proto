@@ -34,20 +34,28 @@ service UpdateService {
   //
   // - ACS delta: a requesting party must be a stakeholder of an event for it to be included.
   // - ledger effects: a requesting party must be a witness of an event for it to be included.
+  //
+  // Required permissions: ledger:read
   rpc GetUpdates(GetUpdatesRequest) returns (stream GetUpdatesResponse);
 
   // Lookup an update by its offset.
   // If there is no update with this offset, or all the events are filtered, an UPDATE_NOT_FOUND error will be raised.
+  //
+  // Required permissions: ledger:read
   rpc GetUpdateByOffset(GetUpdateByOffsetRequest) returns (GetUpdateResponse);
 
   // Lookup an update by its ID.
   // If there is no update with this ID, or all the events are filtered, an UPDATE_NOT_FOUND error will be raised.
+  //
+  // Required permissions: ledger:read
   rpc GetUpdateById(GetUpdateByIdRequest) returns (GetUpdateResponse);
 
   // Look up an update by its transaction hash.
   // This is only available for updates received after upgrading to Canton version 3.6.
   // If there is no update with this transaction hash, or all the events are filtered,
   // or the update was populated before upgrading to Canton version 3.6, an UPDATE_NOT_FOUND error will be raised.
+  //
+  // Required permissions: ledger:read
   rpc GetUpdateByHash(GetUpdateByHashRequest) returns (GetUpdateResponse);
 
   // Read a page of ledger's filtered updates. It returns the event types in accordance with
@@ -56,6 +64,8 @@ service UpdateService {
   //
   // - ACS delta: an event is included only if the requesting party is a stakeholder.
   // - ledger effects: an event is included if the requesting party is a witness.
+  //
+  // Required permissions: ledger:read
   rpc GetUpdatesPage(GetUpdatesPageRequest) returns (GetUpdatesPageResponse);
 }
 

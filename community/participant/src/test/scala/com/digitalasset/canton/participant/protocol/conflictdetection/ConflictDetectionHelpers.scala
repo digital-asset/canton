@@ -107,7 +107,7 @@ private[protocol] trait ConflictDetectionHelpers {
           targetSynchronizerId = ReassignmentStoreTest.targetSynchronizerId,
         )
 
-        store.addUnassignmentData(unassignmentData).value.map(_ => unassignmentData.reassignmentId)
+        store.addUnassignmentData(unassignmentData).map(_ => unassignmentData.reassignmentId)
       }
       .map { reassignmentIds =>
         val cache = new ReassignmentCache(store, futureSupervisor, timeouts, loggerFactory)(

@@ -74,7 +74,7 @@ object TopologyTransactionsBroadcast
     }
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(
       v30.TopologyTransactionsBroadcast
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),

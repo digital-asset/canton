@@ -230,7 +230,14 @@ class VettingIT(testDars: TestDars) extends LedgerTestSuite with AppendedClues {
       namePrefixes: Seq[String],
   ): ListVettedPackagesRequest =
     ListVettedPackagesRequest(
-      Some(PackageMetadataFilter(ids, namePrefixes).toProtoLAPI),
+      Some(
+        PackageMetadataFilter(
+          ids,
+          namePrefixes.map(prefix =>
+            Option.when(prefix.nonEmpty)(Ref.PackageName.assertFromString(prefix))
+          ),
+        ).toProtoLAPI
+      ),
       Some(
         TopologyStateFilter(
           participantIds = Seq(participantIdOrFail),
@@ -481,6 +488,8 @@ class VettingIT(testDars: TestDars) extends LedgerTestSuite with AppendedClues {
       disjointPkgIdAndNameResponse <- participant.listVettedPackages(
         listPackagesRequest(Seq(vettingDepPkgId), Seq(vettingMainName))
       )
+      // the empty prefix matches every package name
+      emptyPrefixResponse <- participant.listVettedPackages(listNamesRequest(Seq("")))
 
       _ <- unvetAllDARMains(participant)
     } yield {
@@ -493,6 +502,7 @@ class VettingIT(testDars: TestDars) extends LedgerTestSuite with AppendedClues {
       assertResponseHasAllVersions(bothPkgIdAndNamesResponse)
       assertResponseHasAllVersions(commonPrefixResponse)
       assertResponseHasAllVersions(disjointPkgIdAndNameResponse)
+      assertResponseHasAllVersions(emptyPrefixResponse)
     }
   })
 

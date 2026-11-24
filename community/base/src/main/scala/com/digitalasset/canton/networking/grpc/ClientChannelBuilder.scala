@@ -8,13 +8,13 @@ import com.daml.tls.TlsServerConfig.logTlsProtocolsAndCipherSuites
 import com.daml.tls.TlsVersion.TlsVersion
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{ClientConfig, KeepAliveClientConfig}
+import com.digitalasset.canton.crypto.ValidatedPemCertificate
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.tracing.TracingConfig.Propagation
 import com.digitalasset.canton.tracing.{TraceContextGrpc, TracingConfig}
 import com.digitalasset.canton.util.ResourceUtil.withResource
-import com.google.protobuf.ByteString
 import io.grpc.ManagedChannelBuilder
 import io.grpc.netty.shaded.io.grpc.netty.{GrpcSslContexts, NettyChannelBuilder}
 import io.grpc.netty.shaded.io.netty.handler.ssl.{SslContext, SslContextBuilder}
@@ -98,7 +98,7 @@ class ClientChannelBuilder private (protected val loggerFactory: NamedLoggerFact
       endpoint: Endpoint,
       useTls: Boolean,
       executor: Executor,
-      trustCertificate: Option[ByteString],
+      trustCertificate: Option[ValidatedPemCertificate],
       params: ClientChannelParams,
       loadBalancingPolicy: Option[String] = Some("round_robin"),
       healthCheck: Boolean = true,
@@ -133,11 +133,13 @@ class ClientChannelBuilder private (protected val loggerFactory: NamedLoggerFact
 
       // add certificates if provided
       trustCertificate.foreach { certChain =>
-        val sslContext = withResource(certChain.newInput()) { inputStream =>
+        val sslContext = withResource(certChain.pem.newInput()) { inputStream =>
           GrpcSslContexts.forClient().trustManager(inputStream).build()
         }
+
         builder.sslContext(sslContext)
       }
+
     } else
       builder.usePlaintext().discard
 

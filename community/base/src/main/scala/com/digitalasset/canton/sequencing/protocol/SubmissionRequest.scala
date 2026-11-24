@@ -221,7 +221,7 @@ object SubmissionRequest
   val versioningTable: VersioningTable = VersioningTable(
     // TODO(#36148) When introducing a new proto version after v32, please drop the old aggregation rule
     ProtoVersion(32) -> VersionedProtoCodec.withDependency(
-      ProtocolVersion.v36
+      ProtocolVersion.minimum
     )(v32.SubmissionRequest)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV32),
       _.toProtoV32, // Serialization of SubmissionRequest

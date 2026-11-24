@@ -229,16 +229,9 @@ final class LsuPruningIntegrationTest extends LsuBase {
 
     // ACS commitments are exchanged and upgrade time is clean (no outstanding ACS commitments) or matched
     participant1.health.ping(participant2)
-    if (fixture.newPsid.protocolVersion < ProtocolVersion.v36) {
-      eventually() {
-        noOutstandingCommitments(participant1, upgradeTime) shouldBe upgradeTime
-        noOutstandingCommitments(participant2, upgradeTime) shouldBe upgradeTime
-      }
-    } else {
-      eventually() {
-        latestMatchedCommitmentBy(participant1, participant2.id) should be >= upgradeTime
-        latestMatchedCommitmentBy(participant2, participant1.id) should be >= upgradeTime
-      }
+    eventually() {
+      latestMatchedCommitmentBy(participant1, participant2.id) should be >= upgradeTime
+      latestMatchedCommitmentBy(participant2, participant1.id) should be >= upgradeTime
     }
 
     clue("archive Iou 2.0") {
@@ -296,22 +289,12 @@ final class LsuPruningIntegrationTest extends LsuBase {
           .lastRequestTimestampBeforeOrAt(safeTimestamp)
           .futureValueUS shouldBe defined
 
-        if (fixture.newPsid.protocolVersion < ProtocolVersion.v36) {
-          getLogicalState(participant2, fixture.lsid).acsCommitmentStore
-            .searchComputedBetween(fixture.upgradeTime, safeTimestamp)
-            .futureValueUS
-            // periods completely before safeTimestamp
-            .filter { case (period, _, _) =>
-              period.toInclusive.forgetRefinement < safeTimestamp
-            } should not be empty
-        } else {
-          getLogicalState(participant2, fixture.lsid).acsDigestStore
-            .latestCheckpointUpTo(
-              Offset.tryFromLong(safeOffset),
-              AcsDigestStore.allCheckpointsFilter,
-            )
-            .futureValueUS should not be empty
-        }
+        getLogicalState(participant2, fixture.lsid).acsDigestStore
+          .latestCheckpointUpTo(
+            Offset.tryFromLong(safeOffset),
+            AcsDigestStore.allCheckpointsFilter,
+          )
+          .futureValueUS should not be empty
       }
 
       participant2.pruning.prune(safeOffset)

@@ -16,6 +16,7 @@ import com.digitalasset.canton.crypto.{
   SynchronizerSnapshotSyncCryptoApi,
 }
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -435,90 +436,91 @@ private[mediator] class DefaultVerdictSender(
           NonEmpty.from(recipients.toSeq)
         }
     if (recipientsByViewTypeAndRootHash.nonEmpty) {
-      for {
-
-        snapshot <- crypto.awaitSnapshot(requestId.unwrap)
-        // we use a snapshot approximation to generate the signature, effectively "guessing" what the sequenced time is going to be
-        currentSnapshotApproximation <- crypto.currentSnapshotApproximation
-        // Reused for both the inner rejection message signing and the submission request signing
-        // below, so that both signatures are computed as of the same approximate time.
-        signingTimestamp = clock.now
-        envs <- MonadUtil.parTraverseWithLimit(parameters.parallelism)(
-          recipientsByViewTypeAndRootHash.toSeq
-        ) { case ((viewType, rootHash), flatRecipients) =>
-          val rejection = ConfirmationResultMessage.create(
-            crypto.psid,
-            viewType,
-            requestId,
-            rootHash,
-            rejectionReason,
-            protocolVersion,
-          )
-
-          val recipients = Recipients.recipientGroups(flatRecipients.map(r => NonEmpty(Set, r)))
-
-          SignedProtocolMessage
-            .trySignAndCreate(
-              rejection,
-              currentSnapshotApproximation,
-              Some(
-                SigningTimestampOverrides(
-                  approximateTimestamp = signingTimestamp,
-                  validityPeriodEnd = Some(decisionTime),
-                )
-              ),
-              protocolVersion,
-            )
-            .map(_ -> recipients)
-        }
-        batches = envs.map(Batch.of(protocolVersion, _))
-        mediatorGroupO = // we always use RHMs to figure out the mediator group, to address rejections from a correct mediator that participants that received the RHMs expect
-          rootHashMessages.headOption // one RHM is enough because sequencer checks that all RHMs specify the same mediator recipient
-            .map { rhm =>
-              rhm.recipients.allRecipients
-                .collectFirst { case mediatorGroupRecipient: MediatorGroupRecipient =>
-                  mediatorGroupRecipient
-                }
-                .getOrElse {
-                  ErrorUtil.invalidState(
-                    "Root hash messages without a mediator recipient are not expected here (should not have been delivered by the sequencer)"
+      val mediatorGroupO = // we always use RHMs to figure out the mediator group, to address rejections from a correct mediator that participants that received the RHMs expect
+        rootHashMessages.headOption // one RHM is enough because sequencer checks that all RHMs specify the same mediator recipient
+          .flatMap { rhm =>
+            rhm.recipients.allRecipients
+              .collectFirst { case mediatorGroupRecipient: MediatorGroupRecipient =>
+                mediatorGroupRecipient
+              }
+              .orElse {
+                MediatorError.MalformedMessage
+                  .Reject(
+                    s"Received a root hash message for request $requestId without a mediator group recipient. Not sending a rejection."
                   )
-                }
-            }
-        _ <- MonadUtil.parTraverseWithLimit_(parameters.parallelism)(batches) { batch =>
-          mediatorGroupO.traverse_ {
-            // if no mediator could be detected from RHMs, participants will also detect this and there's not need to send a reject
-            mediatorGroup =>
-              for {
-                aggregationRule <- groupAggregationRule(
-                  snapshot.ipsSnapshot,
-                  mediatorGroup,
-                  protocolVersion,
-                )
-                  .valueOr(reason =>
-                    ErrorUtil.invalidState(
-                      s"MediatorReject not sent. Failed to determine group aggregation rule for mediator $mediatorGroup due to: $reason"
-                    )
-                  )
-                sendVerdict <-
-                  shouldSendVerdict(requestId, mediatorGroup, snapshot.ipsSnapshot)
-              } yield {
-                FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-                  sendResultBatch(
-                    requestId,
-                    batch,
-                    Some(currentSnapshotApproximation),
-                    signingTimestamp,
-                    decisionTime,
-                    aggregationRule = aggregationRule,
-                    sendVerdict,
-                  ),
-                  s"Failed to send REJECT verdict for request=$requestId",
-                )
+                  .report()
+                None
               }
           }
-        }
-      } yield ()
+      mediatorGroupO.traverse_ {
+        // if no mediator could be detected from RHMs, participants will also detect this and there's not need to send a reject
+        mediatorGroup =>
+          for {
+            snapshot <- crypto.awaitSnapshot(requestId.unwrap)
+            _ <- groupAggregationRule(snapshot.ipsSnapshot, mediatorGroup, protocolVersion).foldF(
+              reason =>
+                FutureUnlessShutdown.pure(
+                  MediatorError.MalformedMessage
+                    .Reject(
+                      s"MediatorReject not sent. Failed to determine group aggregation rule for mediator $mediatorGroup due to: $reason"
+                    )
+                    .report()
+                ),
+              aggregationRule =>
+                for {
+                  // we use a snapshot approximation to generate the signature, effectively "guessing" what the sequenced time is going to be
+                  currentSnapshotApproximation <- crypto.currentSnapshotApproximation
+                  // Reused for both the inner rejection message signing and the submission request signing
+                  // below, so that both signatures are computed as of the same approximate time.
+                  signingTimestamp = clock.now
+                  envs <- MonadUtil.parTraverseWithLimit(parameters.parallelism)(
+                    recipientsByViewTypeAndRootHash.toSeq
+                  ) { case ((viewType, rootHash), flatRecipients) =>
+                    val rejection = ConfirmationResultMessage.create(
+                      crypto.psid,
+                      viewType,
+                      requestId,
+                      rootHash,
+                      rejectionReason,
+                      protocolVersion,
+                    )
+
+                    val recipients =
+                      Recipients.recipientGroups(flatRecipients.map(r => NonEmpty(Set, r)))
+
+                    SignedProtocolMessage
+                      .trySignAndCreate(
+                        rejection,
+                        currentSnapshotApproximation,
+                        Some(
+                          SigningTimestampOverrides(
+                            approximateTimestamp = signingTimestamp,
+                            validityPeriodEnd = Some(decisionTime),
+                          )
+                        ),
+                        protocolVersion,
+                      )
+                      .map(_ -> recipients)
+                  }
+                  batches = envs.map(Batch.of(protocolVersion, _))
+                  sendVerdict <- shouldSendVerdict(requestId, mediatorGroup, snapshot.ipsSnapshot)
+                } yield batches.foreach { batch =>
+                  FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+                    sendResultBatch(
+                      requestId,
+                      batch,
+                      Some(currentSnapshotApproximation),
+                      signingTimestamp,
+                      decisionTime,
+                      aggregationRule = aggregationRule,
+                      sendVerdict,
+                    ),
+                    s"Failed to send REJECT verdict for request=$requestId",
+                  )
+                },
+            )
+          } yield ()
+      }
     } else FutureUnlessShutdown.unit
   }
 }

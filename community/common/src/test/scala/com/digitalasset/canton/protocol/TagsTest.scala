@@ -3,11 +3,18 @@
 
 package com.digitalasset.canton.protocol
 
+import com.digitalasset.canton.BaseTest.testedProtocolVersionValidation
+import com.digitalasset.canton.ProtoDeserializationError.{
+  InvariantViolation,
+  StringConversionError,
+  ValueConversionError,
+}
 import com.digitalasset.canton.ReassignmentCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -53,7 +60,7 @@ class TagsTest extends AnyWordSpec with Matchers {
     "fromBytes of toBytes" should {
       "roundtrip" in {
         examples.map(mk).foreach { id =>
-          ReassignmentId.fromBytes(id.toBytes) shouldBe Right(id)
+          ReassignmentId.fromBytes(id.toBytes) shouldBe id
         }
       }
     }
@@ -61,35 +68,74 @@ class TagsTest extends AnyWordSpec with Matchers {
     "fromProtoPrimitive of toProtoPrimitive" should {
       "roundtrip" in {
         examples.map(mk).foreach { id =>
-          ReassignmentId.fromProtoPrimitive(id.toProtoPrimitive) shouldBe Right(id)
+          ReassignmentId.fromProtoPrimitive(
+            id.toProtoPrimitive,
+            testedProtocolVersionValidation,
+          ) shouldBe Right(id)
         }
       }
     }
 
-    "create" should {
+    "fromProtoPrimitive" should {
       "fail if empty" in {
-        ReassignmentId.create("") shouldBe Left(
-          "invalid ReassignmentId(): no ReassignmentId version"
+        ReassignmentId.fromProtoPrimitive("", testedProtocolVersionValidation) shouldBe Left(
+          ValueConversionError("reassignment_id", "no ReassignmentId version")
         )
       }
       "fail if invalid version prefix" in {
-        ReassignmentId.create("FFFF") shouldBe Left(
-          "invalid ReassignmentId(FFFF): cannot parse ReassignmentId bytes: invalid version: -1"
+        ReassignmentId.fromProtoPrimitive("FFFF", testedProtocolVersionValidation) shouldBe Left(
+          ValueConversionError("reassignment_id", "invalid version: -1")
         )
       }
       "fail if invalid hex format" in {
-        ReassignmentId.create("this ain't hex") shouldBe Left(
-          "invalid ReassignmentId(this ain't hex): invalid hex"
+        ReassignmentId.fromProtoPrimitive(
+          "this ain't hex",
+          testedProtocolVersionValidation,
+        ) shouldBe Left(
+          StringConversionError("invalid hex", Some("reassignment_id"))
         )
       }
       "succeed for valid values" in {
-        ReassignmentId.create("0001").toOption isDefined
+        ReassignmentId
+          .fromProtoPrimitive("0001", testedProtocolVersionValidation)
+          .toOption isDefined
+      }
+      "produce ids of 70 hex characters" in {
+        examples.map(mk).foreach(_.toProtoPrimitive should have length 70)
+      }
+      "accept a payload of the size of a SHA-256 multi-hash" in {
+        val id = "00" + "12" * 34
+        ReassignmentId
+          .fromProtoPrimitive(id, testedProtocolVersionValidation)
+          .map(_.toProtoPrimitive) shouldBe Right(id)
+      }
+      "fail if longer than 70 hex characters, before decoding the hex" in {
+        // valid version, but the rest is not valid hex: the length is checked first
+        val id = "00" + "z" * 69
+        ReassignmentId.fromProtoPrimitive(
+          id,
+          ProtocolVersionValidation.AlwaysValidation,
+        ) shouldBe Left(
+          InvariantViolation(
+            field = Some("reassignment_id"),
+            error = "repeated or map field has 71 elements, exceeding the maximum of 70",
+          )
+        )
+      }
+      "fail if the version is not valid hex" in {
+        ReassignmentId.fromProtoPrimitive("z", testedProtocolVersionValidation) shouldBe Left(
+          StringConversionError("invalid hex", Some("reassignment_id"))
+        )
       }
     }
 
     "toString" should {
       "be sensible" in {
-        ReassignmentId.create("0001").map(_.toString) shouldBe Right("ReassignmentId(0001)")
+        ReassignmentId
+          .fromProtoPrimitive("0001", testedProtocolVersionValidation)
+          .map(_.toString) shouldBe Right(
+          "ReassignmentId(0001)"
+        )
       }
     }
   }

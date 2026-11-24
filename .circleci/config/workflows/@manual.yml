@@ -768,6 +768,7 @@ manual_cn_topology_snapshot_test:
           - maven-mirror
           - da-images
     - nightly_cn_topology_snapshot_test_only:
+        protocol_version: << pipeline.parameters.protocol_version >>
         context:
           - datadog
           - azure-self-cache

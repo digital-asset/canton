@@ -14,8 +14,8 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.api.validation.ParticipantOffsetValidator
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
+import com.digitalasset.canton.ledger.api.validation.{FieldValidator, ParticipantOffsetValidator}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.SyncService
@@ -103,6 +103,7 @@ final class ApiParticipantPruningService private (
   ): Future[Offset] =
     (for {
       _ <- checkOffsetIsSpecified(request.pruneUpTo)
+      _ <- FieldValidator.validateSubmissionId(request.submissionId)
       pruneUpTo <- ParticipantOffsetValidator.validatePositive(request.pruneUpTo, "prune_up_to")
     } yield pruneUpTo)
       .fold(

@@ -33,7 +33,7 @@ class InMemoryIdentityProviderConfigStore(
   ): Future[Result[IdentityProviderConfig]] = withState {
     for {
       _ <- checkIssuerDoNotExists(
-        identityProviderConfig.issuer,
+        identityProviderConfig.issuer.unwrap,
         identityProviderConfig.identityProviderId,
       )
       _ <- checkIdDoNotExists(identityProviderConfig.identityProviderId)
@@ -71,7 +71,7 @@ class InMemoryIdentityProviderConfigStore(
     for {
       currentState <- checkIdExists(id)
       _ <- update.issuerUpdate
-        .map(checkIssuerDoNotExists(_, update.identityProviderId))
+        .map(issuer => checkIssuerDoNotExists(issuer.unwrap, update.identityProviderId))
         .getOrElse(Either.unit)
     } yield {
       val updatedValue = currentState
@@ -88,7 +88,7 @@ class InMemoryIdentityProviderConfigStore(
       loggingContext: LoggingContextWithTrace
   ): Future[Result[IdentityProviderConfig]] = withState {
     state
-      .collectFirst { case (_, config) if config.issuer == issuer => Right(config) }
+      .collectFirst { case (_, config) if config.issuer.unwrap == issuer => Right(config) }
       .getOrElse(Left(IdentityProviderConfigByIssuerNotFound(issuer)))
   }
 
@@ -103,7 +103,9 @@ class InMemoryIdentityProviderConfigStore(
       idToIgnore: IdentityProviderId.Id,
   ): Result[Unit] =
     Either.cond(
-      !state.values.exists(cfg => cfg.issuer == issuer && cfg.identityProviderId != idToIgnore),
+      !state.values.exists(cfg =>
+        cfg.issuer.unwrap == issuer && cfg.identityProviderId != idToIgnore
+      ),
       (),
       IdentityProviderConfigWithIssuerExists(issuer),
     )

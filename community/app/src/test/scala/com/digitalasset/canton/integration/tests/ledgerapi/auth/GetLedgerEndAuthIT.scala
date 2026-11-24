@@ -4,17 +4,26 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.state_service.GetLedgerEndRequest
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.util.GrpcServices.StateService
 
 import scala.concurrent.Future
 
-final class GetLedgerEndAuthIT extends PublicServiceCallAuthTests {
+final class GetLedgerEndAuthIT
+    extends PublicServiceCallAuthTests
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "StateService#GetLedgerEnd"
+
+  override def apiAreaScopeBaseToken = standardToken(randomPartyActUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerRead.area) -> true,
+    List(ClaimApiArea.partiesAllocate.area) -> false,
+  )
 
   private lazy val request = GetLedgerEndRequest(Seq())
 

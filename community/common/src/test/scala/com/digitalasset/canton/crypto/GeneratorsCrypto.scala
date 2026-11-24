@@ -4,11 +4,13 @@
 package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.config.CantonRequireTypes.String68
-import com.digitalasset.canton.config.{DefaultProcessingTimeouts, PositiveFiniteDuration}
+import com.digitalasset.canton.config.RequireTypes.ExistingFile
+import com.digitalasset.canton.config.{DefaultProcessingTimeouts, PemFile, PositiveFiniteDuration}
 import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.{BaseTest, Generators}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
@@ -194,4 +196,18 @@ object GeneratorsCrypto {
           .map(str => Fingerprint.tryFromString(String68.tryCreate(str)))
       } yield AsymmetricEncrypted.apply(ciphertext, encryptionAlgorithmSpec, fingerprint)
     )
+
+  private lazy val certChainFile = PemFile(
+    ExistingFile.tryCreate("community/app/src/test/resources/tls/public-api.crt")
+  )
+
+  private lazy val validatedPemString: ValidatedPemCertificate = ValidatedPemCertificate
+    .create(
+      BinaryFileUtil.readByteStringFromFile(certChainFile.pemFile.unwrap.getPath).value
+    )
+    .value
+
+  implicit val validatedPemFile: Arbitrary[Option[ValidatedPemCertificate]] = Arbitrary(
+    Gen.oneOf(None, Some(validatedPemString))
+  )
 }

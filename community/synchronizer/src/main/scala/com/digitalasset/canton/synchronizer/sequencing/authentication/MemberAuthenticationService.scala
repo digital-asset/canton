@@ -30,25 +30,30 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
 import java.time.Duration
 import scala.concurrent.ExecutionContext
 
-/** The authentication service issues tokens to members after they have successfully completed the
-  * following challenge response protocol and after they have accepted the service agreement of the
-  * synchronizer. The tokens are required for connecting to the sequencer.
+/** Issues bearer tokens to active members after verifying a challenge response against their
+  * topology-authorized authentication signing keys. Tokens authenticate connections to the
+  * sequencer, including sequencer-to-sequencer P2P connections.
   *
-  * In order for a member to subscribe to the sequencer, it must follow a few steps for it to
-  * authenticate. Assuming the synchronizer already has knowledge of the member's public keys, the
-  * following steps are to be taken:
-  *   1. member sends request to the synchronizer for authenticating
-  *   1. synchronizer returns a nonce (a challenge random number)
-  *   1. member takes the nonce, concatenates it with the identity of the synchronizer, signs it and
-  *      sends it back
-  *   1. synchronizer checks the signature against the key of the member. if it matches, create a
-  *      token and return it
-  *   1. member will use the token when subscribing to the sequencer
+  * Assuming the synchronizer already knows the member's public keys:
+  *   1. The member requests a challenge. 2. The service returns a nonce and the fingerprints of
+  *      acceptable signing keys. 3. The member signs a hash of the nonce and physical synchronizer
+  *      ID and returns the signature. For sequencer members from protocol version 38, the hash
+  *      additionally binds a versioned domain separator, the verifier's sequencer ID, and the
+  *      host/port of the endpoint dialed. 4. The service verifies the signature, consumes the
+  *      unexpired nonce, and issues an expiring token. For verifier-bound authentication,
+  *      verification uses the local sequencer's configured identity and external endpoint, not
+  *      values supplied by the requester. 5. The member presents the token on subsequent
+  *      authenticated calls.
+  *
+  * Sequencer authentication from protocol version 38 requires verifier binding and does not fall
+  * back to the legacy handshake. Participant and mediator authentication, and sequencer
+  * authentication below protocol version 38, retain the nonce-and-synchronizer-ID signature.
   *
   * @param invalidateMemberCallback
   *   Called when a member is explicitly deactivated on the synchronizer so all active subscriptions
@@ -125,13 +130,28 @@ class MemberAuthenticationService(
       }
     }
 
-  /** synchronizer checks that the signature given by the member matches and returns a token if it
-    * does (step 4)
+  /** Verify and consume the member's challenge before issuing a token (step 4).
+    *
+    * @param verifierO
+    *   The local sequencer's configured identity and external endpoint, supplied by the
+    *   verifier-bound RPC service, not by the remote member. Required for sequencers from PV38.
     */
-  def validateSignature(member: Member, signature: Signature, providedNonce: Nonce)(implicit
+  def validateSignature(
+      member: Member,
+      signature: Signature,
+      providedNonce: Nonce,
+      verifierO: Option[MemberAuthentication.Verifier] = None,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, AuthenticationError, AuthenticationTokenWithExpiry] =
     for {
+      // Also enforce binding here, independently of RPC routing, to reject legacy proofs at PV38.
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        !MemberAuthentication
+          .requiresVerifier(member, synchronizerId.protocolVersion) || verifierO.nonEmpty,
+        (),
+        InvalidSignature(member): AuthenticationError,
+      )
       _ <- EitherT.right(waitForInitialized)
       _ <- isActive(member)
 
@@ -154,8 +174,15 @@ class MemberAuthenticationService(
         )
       }
 
+      // Reconstruct the expected signing input locally. A relayed proof binds the other endpoint
+      //  or identity and therefore fails signature verification against this verifier's binding.
       authentication <- EitherT.fromEither[FutureUnlessShutdown](MemberAuthentication(member))
-      hash = authentication.hashSynchronizerNonce(nonce, synchronizerId, cryptoApi.pureCrypto)
+      hash = authentication.hashSynchronizerNonce(
+        nonce,
+        synchronizerId,
+        cryptoApi.pureCrypto,
+        verifierO,
+      )
       snapshot <- EitherT.liftF(cryptoApi.currentSnapshotApproximation)
 
       // Pre-generation verification
@@ -274,11 +301,11 @@ class MemberAuthenticationService(
     storedToken
   }
 
-  /** synchronizer checks if the token given by the participant is the one previously assigned to it
-    * for authentication. The participant also provides the synchronizer id for which they think
-    * they are connecting to. If this id does not match this synchronizer's id, it means the
-    * participant was previously connected to a different synchronizer on the same address and now
-    * should be informed that this address now hosts a different synchronizer.
+  /** synchronizer checks if the token given by the member is the one previously assigned to it for
+    * authentication. The member also provides the synchronizer id for which they think they are
+    * connecting to. If this id does not match this synchronizer's id, it means the member was
+    * previously connected to a different synchronizer on the same address and now should be
+    * informed that this address now hosts a different synchronizer.
     */
   def validateToken(
       intendedSynchronizerId: PhysicalSynchronizerId,
@@ -523,17 +550,19 @@ class MemberAuthenticationServiceImpl(
             FutureUnlessShutdown.unit
           }
 
-        // case 3: a ParticipantSynchronizerPermission topology mapping was removed (participant removed)
+        // case 3: a ParticipantSynchronizerPermission topology mapping was removed (participant removed) up to PV 37
         case TopologyTransaction(
               TopologyChangeOp.Remove,
               _serial,
               cert: ParticipantSynchronizerPermission,
             ) =>
-          val participant = cert.participantId
-          logger.info(
-            s"Received topology transaction for revoking $participant's access. Calling invalidateAndExpire."
-          )
-          invalidateAndExpire(isParticipantActive)(participant)
+          if (synchronizerId.protocolVersion <= ProtocolVersion.v37) {
+            val participant = cert.participantId
+            logger.info(
+              s"Received topology transaction for revoking $participant's access. Calling invalidateAndExpire."
+            )
+            invalidateAndExpire(isParticipantActive)(participant)
+          } else FutureUnlessShutdown.unit
 
         // case 4: a SequencerSynchronizerState removal topology transaction is received (a sequencer group removed)
         case TopologyTransaction(

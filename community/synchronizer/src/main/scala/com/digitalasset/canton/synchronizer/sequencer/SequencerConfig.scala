@@ -4,16 +4,20 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.syntax.option.*
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveDurationSeconds}
 import com.digitalasset.canton.sequencer.admin.v30 as adminProto
+import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig.{
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.ThroughputCapByMessageTypeConfig.{
   DefaultGlobalKbpsCap,
   DefaultGlobalTpsCap,
   DefaultPerClientKbpsCap,
+  DefaultPerClientKbpsCommitmentsCap,
   DefaultPerClientTpsCap,
+  DefaultPerClientTpsCommitmentCap,
 }
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.{
   CircuitBreakerConfig,
@@ -27,6 +31,7 @@ import com.digitalasset.canton.synchronizer.sequencer.DatabaseSequencerConfig.{
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.nonempty.NonEmpty
+import pureconfig.error.CannotConvert
 import pureconfig.generic.semiauto.{deriveReader, deriveWriter}
 import pureconfig.{ConfigReader, ConfigWriter}
 
@@ -128,41 +133,131 @@ object BlockSequencerConfig {
     *
     * @param strict
     *   how should the per member rate cap be computed
-    * @param delayedActivation
-    *   If true (default) then the limits will be enforced after an initial grace period equal to
-    *   the observationPeriodSeconds.
     * @param updateEveryMs
     *   how often should the new caps be computed (only used in non-strict mode)
     */
   final case class ThroughputCapConfig(
       enabled: Boolean = false,
-      observationPeriodSeconds: Int = 60,
       clockTickInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(100),
-      messages: ThroughputCapByMessageTypeConfig = ThroughputCapByMessageTypeConfig(),
+      messages: Map[String, ThroughputCapByMessageTypeConfig] = Map(
+        "confirmation-request" -> ThroughputCapByMessageTypeConfig(
+          requestType = SubmissionRequestType.ConfirmationRequest
+        ),
+        "topology" -> ThroughputCapByMessageTypeConfig(
+          requestType = SubmissionRequestType.TopologyTransaction,
+          globalTpsCap = PositiveDouble.tryCreate(2.0),
+          perClientTpsCap = PositiveDouble.tryCreate(1.0),
+        ),
+        "confirmation-response" -> ThroughputCapByMessageTypeConfig(
+          requestType = SubmissionRequestType.ConfirmationResponse,
+          globalTpsCap = DefaultGlobalTpsCap * PositiveDouble.tryCreate(20),
+          perClientTpsCap = DefaultGlobalTpsCap * PositiveDouble.tryCreate(1.3),
+        ),
+        "commitments" -> ThroughputCapByMessageTypeConfig(
+          requestType = SubmissionRequestType.Commitment,
+          globalTpsCap = PositiveDouble.tryCreate(100),
+          perClientTpsCap = DefaultPerClientTpsCommitmentCap,
+          perClientKbpsCap = DefaultPerClientKbpsCommitmentsCap,
+        ),
+        "time-proofs" -> ThroughputCapByMessageTypeConfig(
+          requestType = SubmissionRequestType.TimeProof,
+          perClientTpsCap = PositiveDouble.tryCreate(0.1),
+          observationPeriodSeconds = PositiveInt.tryCreate(60),
+        ),
+      ),
       strict: Boolean = true,
-      delayedActivation: Boolean = true,
       thresholds: NonEmpty[Seq[PositiveDouble]] = NonEmpty.mk(Seq, PositiveDouble.tryCreate(0.9)),
       updateEveryMs: NonNegativeInt = NonNegativeInt.tryCreate(100),
   )
 
-  final case class ThroughputCapByMessageTypeConfig(
-      confirmationRequest: IndividualThroughputCapConfig = IndividualThroughputCapConfig(),
-      topology: IndividualThroughputCapConfig = IndividualThroughputCapConfig(
+  /** Input compatibility for the fixed message-type caps used before named settings. */
+  final case class LegacyThroughputCapConfig(
+      enabled: Boolean = false,
+      observationPeriodSeconds: PositiveInt = PositiveInt.tryCreate(60),
+      clockTickInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(100),
+      messages: LegacyThroughputCapByMessageTypeConfig = LegacyThroughputCapByMessageTypeConfig(),
+      strict: Boolean = true,
+      delayedActivation: Boolean = true,
+      thresholds: NonEmpty[Seq[PositiveDouble]] = NonEmpty.mk(Seq, PositiveDouble.tryCreate(0.9)),
+      updateEveryMs: NonNegativeInt = NonNegativeInt.tryCreate(100),
+  ) {
+    def toThroughputCapConfig: ThroughputCapConfig = {
+      val defaults = ThroughputCapConfig()
+      val legacyMessages = Seq[
+        (String, SubmissionRequestType, LegacyIndividualThroughputCapConfig)
+      ](
+        (
+          "confirmation-request",
+          SubmissionRequestType.ConfirmationRequest,
+          messages.confirmationRequest,
+        ),
+        ("topology", SubmissionRequestType.TopologyTransaction, messages.topology),
+        (
+          "confirmation-response",
+          SubmissionRequestType.ConfirmationResponse,
+          messages.confirmationResponse,
+        ),
+      ).map { case (name, requestType, setting) =>
+        name -> setting.toThroughputCapByMessageTypeConfig(requestType, observationPeriodSeconds)
+      }.toMap
+      defaults.copy(
+        enabled = enabled,
+        clockTickInterval = clockTickInterval,
+        messages = defaults.messages ++ legacyMessages,
+        strict = strict,
+        thresholds = thresholds,
+        updateEveryMs = updateEveryMs,
+      )
+    }
+  }
+
+  final case class LegacyThroughputCapByMessageTypeConfig(
+      confirmationRequest: LegacyIndividualThroughputCapConfig =
+        LegacyIndividualThroughputCapConfig(),
+      topology: LegacyIndividualThroughputCapConfig = LegacyIndividualThroughputCapConfig(
         globalTpsCap = PositiveDouble.tryCreate(2.0),
         perClientTpsCap = PositiveDouble.tryCreate(1.0),
       ),
-      confirmationResponse: IndividualThroughputCapConfig = IndividualThroughputCapConfig(
-        globalTpsCap = DefaultGlobalTpsCap * PositiveDouble.tryCreate(20),
-        perClientTpsCap = DefaultGlobalTpsCap * PositiveDouble.tryCreate(1.3),
-      ),
+      confirmationResponse: LegacyIndividualThroughputCapConfig =
+        LegacyIndividualThroughputCapConfig(
+          globalTpsCap = DefaultGlobalTpsCap * PositiveDouble.tryCreate(20),
+          perClientTpsCap = DefaultGlobalTpsCap * PositiveDouble.tryCreate(1.3),
+        ),
   )
 
-  /** configure an individual cap */
-  final case class IndividualThroughputCapConfig(
+  final case class LegacyIndividualThroughputCapConfig(
       globalTpsCap: PositiveDouble = DefaultGlobalTpsCap,
       globalKbpsCap: PositiveDouble = DefaultGlobalKbpsCap,
       perClientTpsCap: PositiveDouble = DefaultPerClientTpsCap,
       perClientKbpsCap: PositiveDouble = DefaultPerClientKbpsCap,
+  ) {
+    def toThroughputCapByMessageTypeConfig(
+        requestType: SubmissionRequestType,
+        observationPeriodSeconds: PositiveInt,
+    ): ThroughputCapByMessageTypeConfig =
+      ThroughputCapByMessageTypeConfig(
+        requestType = requestType,
+        globalTpsCap = globalTpsCap,
+        globalKbpsCap = globalKbpsCap,
+        perClientTpsCap = perClientTpsCap,
+        perClientKbpsCap = perClientKbpsCap,
+        observationPeriodSeconds = observationPeriodSeconds,
+      )
+  }
+
+  /** Each entry in `messages` is named by its map key and has an independent observation window.
+    *
+    * @param observationPeriodSeconds
+    *   duration of the observation window for this message type. Uses ~ 100 bytes per event (stores
+    *   the member-id).
+    */
+  final case class ThroughputCapByMessageTypeConfig(
+      requestType: SubmissionRequestType,
+      globalTpsCap: PositiveDouble = DefaultGlobalTpsCap,
+      globalKbpsCap: PositiveDouble = DefaultGlobalKbpsCap,
+      perClientTpsCap: PositiveDouble = DefaultPerClientTpsCap,
+      perClientKbpsCap: PositiveDouble = DefaultPerClientKbpsCap,
+      observationPeriodSeconds: PositiveInt = PositiveInt.tryCreate(60),
   ) {
 
     def toAdminProto: adminProto.IndividualThroughputCapConfig =
@@ -171,33 +266,52 @@ object BlockSequencerConfig {
         globalKbpsCap = globalKbpsCap.value,
         perClientTpsCap = perClientTpsCap.value,
         perClientKbpsCap = perClientKbpsCap.value,
+        observationPeriodSeconds = observationPeriodSeconds.value,
+        requestType = requestType.name,
       )
 
   }
 
-  object IndividualThroughputCapConfig {
+  object ThroughputCapByMessageTypeConfig {
 
     private[sequencer] val DefaultGlobalTpsCap: PositiveDouble = PositiveDouble.tryCreate(10.0)
     private[sequencer] val DefaultGlobalKbpsCap: PositiveDouble = PositiveDouble.tryCreate(2000.0)
     private[sequencer] val DefaultPerClientTpsCap: PositiveDouble = PositiveDouble.tryCreate(4.0)
     private[sequencer] val DefaultPerClientKbpsCap: PositiveDouble =
       PositiveDouble.tryCreate(1000.0)
+    private[sequencer] val DefaultPerClientTpsCommitmentCap = PositiveDouble.tryCreate(1.0)
+    private[sequencer] val DefaultPerClientKbpsCommitmentsCap: PositiveDouble =
+      PositiveDouble.tryCreate(100.0)
 
     object ConfigImplicits {
-      final implicit val individualCapConfigReader: ConfigReader[IndividualThroughputCapConfig] =
-        deriveReader[IndividualThroughputCapConfig]
-      final implicit val individualCapConfigWriter: ConfigWriter[IndividualThroughputCapConfig] =
-        deriveWriter[IndividualThroughputCapConfig]
+      private implicit val requestTypeReader: ConfigReader[SubmissionRequestType] =
+        ConfigReader.fromString(str =>
+          SubmissionRequestType
+            .fromStringForCap(str)
+            .toRight(
+              CannotConvert(str, "SubmissionRequestType", "Unsupported throughput cap message type")
+            )
+        )
+      private implicit val requestTypeWriter: ConfigWriter[SubmissionRequestType] =
+        ConfigWriter.toString(_.name)
+      final implicit val throughputCapByMessageTypeConfigReader
+          : ConfigReader[ThroughputCapByMessageTypeConfig] =
+        deriveReader[ThroughputCapByMessageTypeConfig]
+      final implicit val throughputCapByMessageTypeConfigWriter
+          : ConfigWriter[ThroughputCapByMessageTypeConfig] =
+        deriveWriter[ThroughputCapByMessageTypeConfig]
     }
 
     def fromAdminProto(
         value: adminProto.IndividualThroughputCapConfig
-    ): ParsingResult[IndividualThroughputCapConfig] = {
+    ): ParsingResult[ThroughputCapByMessageTypeConfig] = {
       val adminProto.IndividualThroughputCapConfig(
         globalTpsCapP,
         globalKbpsCapP,
         perClientTpsCapP,
         perClientKbpsCapP,
+        observationPeriodSecondsP,
+        requestTypeP,
       ) = value
       for {
         globalTpsCap <- ProtoConverter.parsePositiveDouble("global_tps_cap", globalTpsCapP)
@@ -210,11 +324,25 @@ object BlockSequencerConfig {
           "per_client_kbps_cap",
           perClientKbpsCapP,
         )
-      } yield IndividualThroughputCapConfig(
+        observationPeriodSeconds <- ProtoConverter.parsePositiveInt(
+          "observation_period_seconds",
+          observationPeriodSecondsP,
+        )
+        requestType <- SubmissionRequestType
+          .fromStringForCap(requestTypeP)
+          .toRight(
+            ProtoDeserializationError.ValueConversionError(
+              "request_type",
+              s"Unknown submission type $requestTypeP",
+            )
+          )
+      } yield ThroughputCapByMessageTypeConfig(
         globalTpsCap = globalTpsCap,
         globalKbpsCap = globalKbpsCap,
         perClientTpsCap = perClientTpsCap,
         perClientKbpsCap = perClientKbpsCap,
+        observationPeriodSeconds = observationPeriodSeconds,
+        requestType = requestType,
       )
     }
 

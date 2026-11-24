@@ -9,7 +9,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -63,7 +63,7 @@ object ConsensusStatus {
   /** Deserialization context for BFT orderer consensus status structures */
   final case class ConsensusStatusDeserializationContext(
       from: BftNodeId,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
   )
 
   object EpochStatus
@@ -188,7 +188,7 @@ object ConsensusStatus {
 
     private[modules] def fromProto(
         pvv: ProtocolVersionValidation,
-        limits: BftOrdererLimits,
+        limits: BftOrdererLimitsView,
         proto: v30.SegmentStatus,
     ): ParsingResult[SegmentStatus] =
       proto.status match {
@@ -279,7 +279,7 @@ object ConsensusStatus {
 
     private[modules] def fromProto(
         pvv: ProtocolVersionValidation,
-        limits: BftOrdererLimits,
+        limits: BftOrdererLimitsView,
         proto: v30.BlockStatus,
     ): ParsingResult[BlockStatus] =
       proto.status match {

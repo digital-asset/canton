@@ -64,9 +64,24 @@ final class GeneratorsProtocol(
       maxQuorumSize =
         StaticSynchronizerParameters.defaultMaxQuorumSizeUntil
           .orValue(allLimits.transactionProtocolLimits.maxQuorumSize, protocolVersion)
+      maxViewsPerMessage =
+        StaticSynchronizerParameters.defaultMaxViewsPerMessageUntil
+          .orValue(allLimits.transactionProtocolLimits.maxViewsPerMessage, protocolVersion)
+      maxContractsPerView =
+        StaticSynchronizerParameters.defaultMaxContractsPerViewUntil
+          .orValue(allLimits.transactionProtocolLimits.maxContractsPerView, protocolVersion)
+      maxExternalCallResultsPerView =
+        StaticSynchronizerParameters.defaultMaxExternalCallResultsPerViewUntil
+          .orValue(
+            allLimits.transactionProtocolLimits.maxExternalCallResultsPerView,
+            protocolVersion,
+          )
       transactionProtocolLimits = allLimits.transactionProtocolLimits.copy(
         maxSignaturesPerEnvelope = maxSignaturesPerEnvelope,
         maxQuorumSize = maxQuorumSize,
+        maxViewsPerMessage = maxViewsPerMessage,
+        maxContractsPerView = maxContractsPerView,
+        maxExternalCallResultsPerView = maxExternalCallResultsPerView,
       )
       topologyLimitsV32 = StaticSynchronizerParameters.defaultTopologyLimitsUntil
         .orValue(allLimits.topologyLimits, protocolVersion)
@@ -74,9 +89,6 @@ final class GeneratorsProtocol(
         maxVettedPackagesPerParticipant =
           StaticSynchronizerParameters.defaultMaxVettedPackagesPerParticipantUntil
             .orValue(topologyLimitsV32.maxVettedPackagesPerParticipant, protocolVersion),
-        maxSequencersPerSynchronizer =
-          StaticSynchronizerParameters.defaultMaxSequencersPerSynchronizerUntil
-            .orValue(topologyLimitsV32.maxSequencersPerSynchronizer, protocolVersion),
         maxMediatorsPerGroup = StaticSynchronizerParameters.defaultMaxMediatorsPerGroupUntil
           .orValue(topologyLimitsV32.maxMediatorsPerGroup, protocolVersion),
         maxSignaturesPerTransaction =
@@ -96,17 +108,17 @@ final class GeneratorsProtocol(
       acsCommitmentLimits = StaticSynchronizerParameters.defaultAcsCommitmentLimitsUntil
         .orValue(allLimits.acsCommitmentLimits, protocolVersion)
       bftOrdererLimits = StaticSynchronizerParameters.defaultBftOrdererLimitsUntil
-        .orValue(
-          allLimits.bftOrdererLimits
-            .copy(maxSequencersInSynchronizer = SynchronizerLimits.MaxSequencersInSynchronizer),
-          protocolVersion,
-        )
+        .orValue(allLimits.bftOrdererLimits, protocolVersion)
+      maxSequencersPerSynchronizer =
+        StaticSynchronizerParameters.defaultMaxSequencersPerSynchronizerUntil
+          .orValue(allLimits.maxSequencersPerSynchronizer, protocolVersion)
 
       synchronizerLimits = allLimits.copy(
         transactionProtocolLimits = transactionProtocolLimits,
         topologyLimits = topologyLimits,
         acsCommitmentLimits = acsCommitmentLimits,
         bftOrdererLimits = bftOrdererLimits,
+        maxSequencersPerSynchronizer = maxSequencersPerSynchronizer,
       )
       parameters = StaticSynchronizerParameters
         .create(

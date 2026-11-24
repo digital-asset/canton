@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.api.auth.services
 
 import com.daml.ledger.api.v2.testing.time_service.*
 import com.daml.ledger.api.v2.testing.time_service.TimeServiceGrpc.TimeService
-import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
+import com.digitalasset.canton.auth.{Authorizer, ClaimApiArea, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.google.protobuf.empty.Empty
@@ -22,10 +22,14 @@ final class TimeServiceAuthorization(
     with GrpcApiService {
 
   override def getTime(request: GetTimeRequest): Future[GetTimeResponse] =
-    authorizer.rpc(service.getTime)(RequiredClaim.Public())(request)
+    authorizer.rpc(service.getTime)(
+      RequiredClaim.ApiArea(ClaimApiArea.ledgerRead.area)
+    )(request)
 
   override def setTime(request: SetTimeRequest): Future[Empty] =
-    authorizer.rpc(service.setTime)(RequiredClaim.Admin())(request)
+    authorizer.rpc(service.setTime)(
+      RequiredClaim.ApiArea(ClaimApiArea.timeWrite.area)
+    )(request)
 
   override def bindService(): ServerServiceDefinition =
     TimeServiceGrpc.bindService(this, executionContext)

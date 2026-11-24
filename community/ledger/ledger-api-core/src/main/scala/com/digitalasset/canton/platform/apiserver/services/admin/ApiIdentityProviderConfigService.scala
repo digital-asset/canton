@@ -57,8 +57,8 @@ class ApiIdentityProviderConfigService(
           "identity_provider_id",
         )
         jwksUrl <- requireJwksUrl(config.jwksUrl, "jwks_url")
-        issuer <- requireNonEmptyString(config.issuer, "issuer")
-        audience <- optionalString(config.audience)(Right(_))
+        issuer <- requireIssuer(config.issuer, "issuer")
+        audience <- optionalString(config.audience)(requireAudience(_, "audience"))
       } yield IdentityProviderConfig(
         identityProviderId,
         config.isDeactivated,
@@ -211,8 +211,8 @@ object ApiIdentityProviderConfigService {
     proto.IdentityProviderConfig(
       identityProviderId = identityProviderConfig.identityProviderId.toRequestString,
       isDeactivated = identityProviderConfig.isDeactivated,
-      jwksUrl = identityProviderConfig.jwksUrl.value,
-      issuer = identityProviderConfig.issuer,
-      audience = identityProviderConfig.audience.getOrElse(""),
+      jwksUrl = identityProviderConfig.jwksUrl.unwrap,
+      issuer = identityProviderConfig.issuer.unwrap,
+      audience = identityProviderConfig.audience.fold("")(_.unwrap),
     )
 }

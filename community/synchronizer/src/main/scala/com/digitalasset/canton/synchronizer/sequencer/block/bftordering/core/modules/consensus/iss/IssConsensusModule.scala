@@ -8,7 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
@@ -1054,7 +1054,7 @@ object IssConsensusModule {
 
   def parseNetworkMessage(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       protoSignedMessage: v30.SignedMessage,
       actualSender: BftNodeId,
   ): ParsingResult[SignedMessage[ConsensusSegment.ConsensusMessage.PbftNetworkMessage]] =
@@ -1076,7 +1076,7 @@ object IssConsensusModule {
 
   def parseConsensusNetworkMessage(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       claimedFrom: BftNodeId,
       actualSender: Option[BftNodeId],
       message: v30.ConsensusMessage,
@@ -1124,7 +1124,7 @@ object IssConsensusModule {
 
   def parseRetransmissionMessage(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       sentBy: BftNodeId,
       message: v30.RetransmissionMessage,
   ): ParsingResult[Consensus.RetransmissionsMessage] =
@@ -1150,7 +1150,7 @@ object IssConsensusModule {
 
   def parseStateTransferMessage(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       sentBy: BftNodeId,
       message: v30.StateTransferMessage,
   )(
@@ -1176,7 +1176,7 @@ object IssConsensusModule {
 
   def parseStateTransferMessage31(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       sentBy: BftNodeId,
       message: v31.StateTransferMessage,
   )(

@@ -10,7 +10,7 @@ import com.daml.ledger.api.v2.command_completion_service.{
   GetCompletionByHashResponse,
 }
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
-import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
+import com.daml.ledger.api.v2.state_service.{GetActiveContractsResponse, GetHostedPartiesResponse}
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse.Update
 import com.daml.ledger.api.v2.update_service.{
   GetUpdateResponse,
@@ -27,6 +27,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.messages.update.{GetUpdatesPageRequest, UpdatesPageToken}
+import com.digitalasset.canton.ledger.api.util.PageTokenUtils
 import com.digitalasset.canton.ledger.api.{
   CumulativeFilter,
   EventFormat,
@@ -258,6 +259,7 @@ private[index] class IndexServiceImpl(
         filtersForAnyParty =
           Option.when(stakeholders1.isEmpty)(CumulativeFilter.templateWildcardFilter()),
         verbose = false,
+        filtersByContractId = Seq.empty, // TODO (#36902) implement contract id filter for ACS
       )
     val synchronizerIdString = synchronizerId.toProtoPrimitive
 
@@ -569,6 +571,17 @@ private[index] class IndexServiceImpl(
   ): Future[Option[Offset]] =
     ledgerDao.updateReader
       .highestOffsetBeforeOrFirstAt(synchronizerId, recordTime)
+
+  override def hostedParties(
+      filter: IndexerHostedPartyFilter,
+      validAt: Offset,
+      fromExcl: Option[Ref.Party],
+      limit: Option[Int],
+      continuationChecksum: PageTokenUtils.Checksum,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[GetHostedPartiesResponse, NotUsed] =
+    ledgerDao.hostedParties(filter, validAt, fromExcl, limit, continuationChecksum)
 
   private def between[A](
       startExclusive: Option[Offset],
@@ -1144,7 +1157,7 @@ object IndexServiceImpl {
       )
       Some(
         InternalEventFormat(
-          templatePartiesFilter = TemplatePartiesFilter(
+          eventFilter = TemplatePartiesFilter(
             relation = templateFilter,
             templateWildcardParties = templateWildcardFilter,
           ),

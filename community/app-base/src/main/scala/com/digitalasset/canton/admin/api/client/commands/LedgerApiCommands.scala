@@ -2187,6 +2187,7 @@ object LedgerApiCommands {
                     )
                   ),
                   verbose = true,
+                  filtersByContractId = Seq.empty,
                 )
               )
             ),
@@ -2320,6 +2321,7 @@ object LedgerApiCommands {
                           .toMap,
                         filtersForAnyParty = None,
                         verbose = true,
+                        filtersByContractId = Seq.empty,
                       )
                     )
                   ),
@@ -2597,7 +2599,8 @@ object LedgerApiCommands {
         Right(
           GetActiveContractsRequest(
             activeAtOffset = activeAtOffset,
-            eventFormat = Some(EventFormat(parties.map((_, filter)).toMap, None, verbose)),
+            eventFormat =
+              Some(EventFormat(parties.map((_, filter)).toMap, None, verbose, Seq.empty)),
             streamContinuationToken = None,
             includeIncompleteReassignments = includeIncompleteReassignments,
           )
@@ -2812,6 +2815,7 @@ object LedgerApiCommands {
           filtersForAnyParty = Option.when(requestingParties.isEmpty)(filters),
           filtersByParty = requestingParties.map(_ -> filters).toMap,
           verbose = true,
+          filtersByContractId = Seq.empty,
         )
         Right(
           GetEventsByContractIdRequest(

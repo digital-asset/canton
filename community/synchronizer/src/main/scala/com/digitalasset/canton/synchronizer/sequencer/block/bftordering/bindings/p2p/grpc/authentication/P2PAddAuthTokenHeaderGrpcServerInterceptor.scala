@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.authentication
 
+import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SynchronizerCrypto
@@ -36,9 +37,9 @@ import io.grpc.{ServerInterceptor as GrpcServerInterceptor, *}
 
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
-import scala.concurrent.{ExecutionContext, ExecutionContextExecutor}
+import scala.concurrent.ExecutionContextExecutor
 import scala.jdk.CollectionConverters.SetHasAsScala
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
 private[bftordering] class P2PAddAuthTokenHeaderGrpcServerInterceptor(
     synchronizerId: PhysicalSynchronizerId,
@@ -54,7 +55,7 @@ private[bftordering] class P2PAddAuthTokenHeaderGrpcServerInterceptor(
     with FlagCloseableAsync {
 
   private val tokenProvider =
-    new AuthenticationTokenProvider(
+    AuthenticationTokenProvider(
       synchronizerId,
       member,
       crypto,
@@ -84,8 +85,8 @@ private[bftordering] class P2PAddAuthTokenHeaderGrpcServerInterceptor(
     // Its Contexts.interceptCall attaches the authenticated context around the synchronous call
     // into this interceptor, so this lookup does not depend on thread-local propagation across threads.
     IdentityContextHelper.getCurrentStoredMember match {
-      case Some(_: SequencerId) =>
-        interceptSequencerCall(call, requestHeaders, next)
+      case Some(peerSequencerId: SequencerId) =>
+        interceptSequencerCall(call, requestHeaders, next, peerSequencerId)
       case Some(peerMember) =>
         logger.info(s"Rejecting P2P call from non-sequencer member $peerMember")
         call.close(
@@ -109,6 +110,7 @@ private[bftordering] class P2PAddAuthTokenHeaderGrpcServerInterceptor(
       call: ServerCall[ReqT, RespT],
       requestHeaders: Metadata,
       next: ServerCallHandler[ReqT, RespT],
+      peerSequencerId: SequencerId,
   )(implicit traceContext: TraceContext): ServerCall.Listener[ReqT] =
     Option(
       requestHeaders.get(P2PAddEndpointHeaderGrpcClientInterceptor.ENDPOINT_METADATA_KEY)
@@ -121,6 +123,7 @@ private[bftordering] class P2PAddAuthTokenHeaderGrpcServerInterceptor(
         synchronizeWithClosingSync("P2PAddAuthTokenHeaderGrpcServerInterceptor.interceptCall") {
           val channel =
             createNettyClientChannelBuilder(clientChannelBuilder, p2pEndpoint.endpointConfig)
+              .valueOr(err => throw new IllegalArgumentException(s"Unable to create channel: $err"))
               .build()
 
           val authenticationServiceChannel =
@@ -155,6 +158,7 @@ private[bftordering] class P2PAddAuthTokenHeaderGrpcServerInterceptor(
                 call,
                 tokenProvider,
                 p2pEndpointId,
+                peerSequencerId,
                 authenticationServiceChannel,
                 liveChannels,
                 synchronizerId,
@@ -167,7 +171,11 @@ private[bftordering] class P2PAddAuthTokenHeaderGrpcServerInterceptor(
             )
           case UnlessShutdown.AbortedDueToShutdown =>
             logger.info(s"Not intercepting incoming P2P call as the interceptor is shutting down")
-            next.startCall(call, requestHeaders)
+            call.close(
+              Status.UNAVAILABLE.withDescription("P2P authentication is shutting down"),
+              new Metadata(),
+            )
+            new ServerCall.Listener[ReqT] {}
         }
 
       case _ =>
@@ -196,13 +204,14 @@ object P2PAddAuthTokenHeaderGrpcServerInterceptor {
       call: ServerCall[ReqT, RespT],
       tokenProvider: AuthenticationTokenProvider,
       p2pEndpointId: P2PEndpoint.Id,
+      peerSequencerId: SequencerId,
       authenticationServiceChannel: GrpcManagedChannel,
       liveChannels: scala.collection.mutable.Set[GrpcManagedChannel],
       synchronizerId: PhysicalSynchronizerId,
       member: Member,
       timeouts: ProcessingTimeout,
       override val loggerFactory: NamedLoggerFactory,
-  )(implicit traceContext: TraceContext, executionContext: ExecutionContext)
+  )(implicit traceContext: TraceContext)
       extends GrpcSimpleForwardingServerCall[ReqT, RespT](call)
       with NamedLogging {
 
@@ -219,68 +228,79 @@ object P2PAddAuthTokenHeaderGrpcServerInterceptor {
       }
 
     override def sendHeaders(responseHeaders: Metadata): Unit = {
-      Try {
+      val authenticationResult = Try {
         logger.info(
           s"Retrieving sequencer client authentication token to authenticate this P2P server to $p2pEndpointId"
         )
 
+        // Authenticate ourselves back to the original caller, not merely to any endpoint it
+        //  advertises. At PV38 the provider checks peerSequencer before signing and binds the
+        //  signature to the callback endpoint; only then may its token be returned to the caller.
         val tokenFetcher =
           new ChannelTokenFetcher(
             tokenProvider,
             Endpoint(p2pEndpointId.address, p2pEndpointId.port),
             authenticationServiceChannel,
+            expectedVerifierO = Some(peerSequencerId),
           )
         timeouts.network
           .awaitUS("tokenFetcher")( // Unfortunately, headers must be set synchronously
-            tokenFetcher.apply
-              .fold(
-                error =>
-                  logger.warn(
-                    s"Failed to fetch P2P server authentication token to $p2pEndpointId: $error"
-                  ),
-                { tokenWithExpiry =>
-                  logger.debug(
-                    s"Setting P2P server authentication token to $p2pEndpointId into response headers"
-                  )
-                  SequencerClientTokenAuthentication
-                    .authenticationMetadata(
-                      synchronizerId,
-                      member,
-                      tokenWithExpiry.token,
-                      into = responseHeaders,
-                    )
-                    .discard
-                },
-              )
-          ) match {
-          case UnlessShutdown.AbortedDueToShutdown =>
-            logger.info(
-              s"Aborted due to shutdown while trying to fetch P2P server authentication token to $p2pEndpointId"
-            )
-          case _ =>
-            logger.info(
-              s"Successfully retrieved token to authenticate P2P server to $p2pEndpointId " +
-                "and added authentication headers"
-            )
+            tokenFetcher.apply.value
+          )
+      }.flatMap {
+        case UnlessShutdown.Outcome(Right(token)) => Success(token)
+        case UnlessShutdown.Outcome(Left(error)) => Failure(error.asRuntimeException())
+        case UnlessShutdown.AbortedDueToShutdown =>
+          Failure(
+            Status.UNAVAILABLE
+              .withDescription("P2P authentication is shutting down")
+              .asRuntimeException()
+          )
+      }.map { tokenWithExpiry =>
+        SequencerClientTokenAuthentication
+          .authenticationMetadata(
+            synchronizerId,
+            member,
+            tokenWithExpiry.token,
+            into = responseHeaders,
+          )
+          .discard
+        logger.info(
+          s"Successfully retrieved token to authenticate P2P server to $p2pEndpointId " +
+            "and added authentication headers"
+        )
+      }
+
+      try {
+        authenticationResult match {
+          case Failure(exception) =>
+            val message = s"Failed to fetch P2P server authentication token to $p2pEndpointId"
+            if (Status.fromThrowable(exception).getCode == Status.Code.UNAVAILABLE)
+              logger.debug(message, exception)
+            else logger.warn(message, exception)
+            // The P2P connection manager sends its opener synchronously through sendHeaders before
+            //  associating the advertised endpoint with the authenticated caller.
+            //  Returning normally, even after closing the RPC, would let that setup continue.
+            //  Throwing makes the opener fail, so no receiver, sender, endpoint association,
+            //  or store update is installed.
+            //
+            //  In particular, authenticated malicious sequencer M can advertise honest sequencer2's
+            //  endpoint. The callback then rejects sequencer2's verifier identity because it
+            //  expected M. If that failure were swallowed, setup could still reassign sequencer2's
+            //  endpoint to M in connection state and overwrite its identity in an existing
+            //  P2PEndpointsStore row.
+            // Let the connection manager terminate the stream through the response observer.
+            throw exception
+          case Success(()) =>
+            logger.debug(s"Sending server response headers to $p2pEndpointId")
+            super.sendHeaders(responseHeaders)
         }
-      }.fold(
-        logger.warn(
-          s"Timed out while trying to fetch P2P server authentication token to $p2pEndpointId",
-          _,
-        ),
-        _ => (),
-      )
-
-      cleanupChannel()
-
-      logger.debug(s"Sending server response headers to $p2pEndpointId")
-      super.sendHeaders(responseHeaders)
+      } finally cleanupChannel()
     }
 
     override def close(status: Status, trailers: Metadata): Unit =
-      try {
-        super.close(status, trailers)
-      } finally {
+      try super.close(status, trailers)
+      finally {
         cleanupChannel() // Ensures channel is closed if sendHeaders was never called
       }
   }

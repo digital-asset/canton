@@ -20,6 +20,6 @@ final case class InternalTransactionFormat(
 )
 
 final case class InternalEventFormat(
-    templatePartiesFilter: TemplatePartiesFilter,
+    eventFilter: EventFilter,
     eventProjectionProperties: EventProjectionProperties,
 )

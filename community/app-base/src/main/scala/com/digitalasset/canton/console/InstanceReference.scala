@@ -739,7 +739,7 @@ class RemoteParticipantReference(environment: ConsoleEnvironment, override val n
     with RemoteInstanceReference {
 
   override protected[console] def adminApiToken: Option[String] =
-    config.adminApiToken.orElse(config.token)
+    config.adminApiToken.orElse(config.token).map(_.unwrap)
 
   @Help.Summary("Return remote participant config")
   def config: RemoteParticipantConfig =
@@ -752,10 +752,11 @@ class RemoteParticipantReference(environment: ConsoleEnvironment, override val n
       name,
       command,
       config.clientLedgerApi,
-      config.token,
+      ledgerApiToken,
     )
 
-  override protected[console] def ledgerApiToken: Option[String] = config.token
+  override protected[console] def ledgerApiToken: Option[String] =
+    config.token.map(_.unwrap)
 
   private lazy val testing_ = new ParticipantTestingGroup(this, consoleEnvironment, loggerFactory)
 
@@ -1489,6 +1490,9 @@ class LocalSequencerReference(
     GrpcSequencerConnection.fromInternal(
       config.publicApi.clientConfig
         .asSequencerConnection(sequencerAlias = SequencerAlias.tryCreate(name), sequencerId = None)
+        .valueOr(err =>
+          consoleEnvironment.raiseError(s"Unable to build sequencer connection: $err")
+        )
     )
 
   private[console] val nodes: SequencerNodes =
@@ -1521,10 +1525,14 @@ class RemoteSequencerReference(val environment: ConsoleEnvironment, val name: St
 
   override def sequencerConnection: GrpcSequencerConnection =
     GrpcSequencerConnection.fromInternal(
-      config.publicApi.asSequencerConnection(
-        sequencerAlias = SequencerAlias.tryCreate(name),
-        sequencerId = None,
-      )
+      config.publicApi
+        .asSequencerConnection(
+          sequencerAlias = SequencerAlias.tryCreate(name),
+          sequencerId = None,
+        )
+        .valueOr(err =>
+          consoleEnvironment.raiseError(s"Unable to build sequencer connection: $err")
+        )
     )
 
   protected lazy val publicApiClient: SequencerPublicApiClient = new SequencerPublicApiClient(

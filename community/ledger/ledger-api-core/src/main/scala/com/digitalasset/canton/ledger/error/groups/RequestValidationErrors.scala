@@ -678,6 +678,51 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
   }
 
   @Explanation(
+    """This error is emitted when a submitted hosted parties request contains a continuation token which cannot be verified.
+      |The token must be taken from a valid GetHostedPartiesResponse and used with the same hosted_at_offset and filter,
+      |with the same Canton participant running the same Canton version. These tokens are not intended to be stored
+      |and used much later under different circumstances."""
+  )
+  @Resolution("Inspect the reason given and correct your application.")
+  object InvalidHostedPartiesContinuationToken
+      extends ErrorCode(
+        id = "INVALID_HOSTED_PARTIES_CONTINUATION_TOKEN",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Reject()(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause =
+            "The submitted request contains an invalid continuation token. Tokens used in GetHostedParties requests " +
+              "must be taken from a valid GetHostedPartiesResponse and used with the same hosted_at_offset and " +
+              "filter, with the same Canton participant running the same Canton version."
+        )
+  }
+
+  @Explanation(
+    """This error is emitted when a submitted ledger API request contains a page token which cannot be verified.
+      |When a hosted parties page request is made with a page token, the token must be taken from a valid
+      |GetHostedPartiesPageResponse and used with the same hosted_at_offset and filter, with the same Canton
+      |participant running the same Canton version. These tokens are not intended to be stored and used much later
+      |under different circumstances."""
+  )
+  @Resolution("Inspect the reason given and correct your application.")
+  object InvalidHostedPartiesPageToken
+      extends ErrorCode(
+        id = "INVALID_HOSTED_PARTIES_PAGE_TOKEN",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Reject(message: String)(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause =
+            s"The submitted request contains an invalid page token. Tokens used in GetHostedPartiesPage requests " +
+              "must be taken from a valid GetHostedPartiesPageResponse and used with the same hosted_at_offset and " +
+              s"filter, with the same Canton participant running the same Canton version. $message"
+        )
+  }
+
+  @Explanation(
     "This error is emitted when a submitted ledger API command specifies an invalid deduplication period."
   )
   @Resolution(

@@ -64,6 +64,10 @@ import com.daml.ledger.api.v2.state_service.{
   GetActiveContractsPageResponse,
   GetActiveContractsRequest,
   GetActiveContractsResponse,
+  GetHostedPartiesPageRequest,
+  GetHostedPartiesPageResponse,
+  GetHostedPartiesRequest,
+  GetHostedPartiesResponse,
   GetLedgerEndResponse,
 }
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
@@ -1002,5 +1006,19 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
   ): Future[Offset] = withTimeout(
     "Convert record time to offset",
     delegate.convertRecordTimeToOffset(synchronizerId, recordTime),
+  )
+
+  override def getHostedParties(
+      request: GetHostedPartiesRequest
+  ): Future[Vector[GetHostedPartiesResponse]] = withTimeout(
+    "Get hosted parties",
+    delegate.getHostedParties(request),
+  )
+
+  override def getHostedPartiesPage(
+      request: GetHostedPartiesPageRequest
+  ): Future[GetHostedPartiesPageResponse] = withTimeout(
+    "Get hosted parties page",
+    delegate.getHostedPartiesPage(request),
   )
 }

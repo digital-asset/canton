@@ -27,10 +27,8 @@ import scala.concurrent.Future
 trait AuthService {
 
   /** Return empty [[com.digitalasset.canton.auth.ClaimSet.Unauthenticated]] to reject requests with
-    * a UNAUTHENTICATED error status. Return [[com.digitalasset.canton.auth.ClaimSet.Claims]] with
-    * only a single [[com.digitalasset.canton.auth.ClaimPublic]] claim to reject all non-public
-    * requests with a PERMISSION_DENIED status. Return a failed future to reject requests with an
-    * INTERNAL error status.
+    * a UNAUTHENTICATED error status. Return a failed future to reject requests with an INTERNAL
+    * error status.
     *
     * When a present token cannot be verified, do not log the reason eagerly: several
     * [[com.digitalasset.canton.auth.AuthService]]s may be tried in sequence and an earlier failure

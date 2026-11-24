@@ -102,7 +102,8 @@ final case class SequencerNodeParameterConfig(
 /** @param lsuSequencingBoundsOverride
   *   Override the LSU sequencing bounds computed from the topology store. Should be used ONLY in a
   *   disaster recovery scenario (roll forward) and the value MUST be identical across sequencer
-  *   nodes.
+  *   nodes. Together with ignorePsidCheck on LSU successor initialization, permits initializing
+  *   from a topology snapshot without an LSU announcement.
   * @param globalMaxSequencingTimeExclusive
   *   Allows to specify an upper bound on the sequencing times: any message with sequencing time
   *   strictly greater to this value will not be delivered. Important notes:

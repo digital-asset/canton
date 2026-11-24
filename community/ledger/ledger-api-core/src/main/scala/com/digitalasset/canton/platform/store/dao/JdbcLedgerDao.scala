@@ -3,15 +3,18 @@
 
 package com.digitalasset.canton.platform.store.dao
 
+import com.daml.ledger.api.v2.state_service.GetHostedPartiesResponse
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.health.{HealthStatus, ReportsHealth}
 import com.digitalasset.canton.ledger.api.ParticipantId
+import com.digitalasset.canton.ledger.api.util.PageTokenUtils
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.{
+  IndexerHostedPartyFilter,
   IndexerKnownPartiesPage,
   IndexerPartyDetails,
 }
@@ -22,6 +25,7 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.config.{
   ActiveContractsServiceStreamsConfig,
+  HostedPartiesStreamsConfig,
   UpdatesStreamsConfig,
 }
 import com.digitalasset.canton.platform.store.*
@@ -30,13 +34,15 @@ import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLoc
 import com.digitalasset.canton.platform.store.backend.{ParameterStorageBackend, ReadStorageBackend}
 import com.digitalasset.canton.platform.store.cache.{AchsStateCache, LedgerEndCache}
 import com.digitalasset.canton.platform.store.dao.events.*
+import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.store.utils.QueueBasedConcurrencyLimiter
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.Scheduler
-import org.apache.pekko.pattern
+import org.apache.pekko.stream.scaladsl.Source
+import org.apache.pekko.{NotUsed, pattern}
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.FiniteDuration
@@ -54,6 +60,9 @@ private[platform] class JdbcLedgerDao(
     completionsPageSize: Int,
     activeContractsServiceStreamsConfig: ActiveContractsServiceStreamsConfig,
     updatesStreamsConfig: UpdatesStreamsConfig,
+    hostedPartiesStreamsConfig: HostedPartiesStreamsConfig,
+    stringInterning: StringInterning,
+    participantId: Ref.ParticipantId,
     globalMaxEventIdQueries: Int,
     globalMaxEventPayloadQueries: Int,
     tracer: Tracer,
@@ -134,6 +143,23 @@ private[platform] class JdbcLedgerDao(
           }
         )
     }
+
+  override def hostedParties(
+      filter: IndexerHostedPartyFilter,
+      validAt: Offset,
+      fromExcl: Option[Party],
+      limit: Option[Int],
+      continuationChecksum: PageTokenUtils.Checksum,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[GetHostedPartiesResponse, NotUsed] =
+    hostedPartiesStreamReader.streamHostedParties(
+      filter = filter,
+      validAt = validAt,
+      fromExcl = fromExcl,
+      limit = limit,
+      continuationChecksum = continuationChecksum,
+    )
 
   private def ensurePruningIsNotInProgress[T](
       f: => Future[T]
@@ -328,6 +354,20 @@ private[platform] class JdbcLedgerDao(
     incompleteOffsets = incompleteOffsets,
     metrics = metrics,
     tracer = tracer,
+    loggerFactory = loggerFactory,
+  )(queryExecutionContext)
+
+  private val hostedPartiesStreamReader = new HostedPartiesStreamReader(
+    config = hostedPartiesStreamsConfig,
+    globalIdQueriesLimiter = globalIdQueriesLimiter,
+    globalPayloadQueriesLimiter = globalPayloadQueriesLimiter,
+    dbDispatcher = dbDispatcher,
+    queryValidRange = queryValidRange,
+    partyStorageBackend = readStorageBackend.partyStorageBackend,
+    eventStorageBackend = readStorageBackend.eventStorageBackend,
+    stringInterning = stringInterning,
+    participantId = participantId,
+    metrics = metrics,
     loggerFactory = loggerFactory,
   )(queryExecutionContext)
 

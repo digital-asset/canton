@@ -9,7 +9,13 @@ import com.daml.jwt.JwksUrl
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.*
-import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId}
+import com.digitalasset.canton.user.{
+  Audience,
+  IdentityProviderConfig,
+  IdentityProviderId,
+  Issuer,
+  JwksUrlLengthLimited,
+}
 
 import java.sql.Connection
 
@@ -29,9 +35,9 @@ object IdentityProviderStorageBackendImpl extends IdentityProviderStorageBackend
           IdentityProviderConfig(
             identityProviderId = IdentityProviderId.Id.assertFromString(identityProviderId),
             isDeactivated = isDeactivated,
-            jwksUrl = JwksUrl.assertFromString(jwksUrl),
-            issuer = issuer,
-            audience = audience,
+            jwksUrl = JwksUrlLengthLimited.tryFromJwksUrl(JwksUrl.assertFromString(jwksUrl)),
+            issuer = Issuer.tryCreate(issuer),
+            audience = audience.map(Audience.tryCreate),
           )
       }
   }
@@ -41,9 +47,9 @@ object IdentityProviderStorageBackendImpl extends IdentityProviderStorageBackend
   ): Unit = {
     val identityProviderId = identityProviderConfig.identityProviderId.value: String
     val isDeactivated = identityProviderConfig.isDeactivated
-    val jwksUrl = identityProviderConfig.jwksUrl.value
-    val issuer = identityProviderConfig.issuer
-    val audience = identityProviderConfig.audience
+    val jwksUrl = identityProviderConfig.jwksUrl.unwrap
+    val issuer = identityProviderConfig.issuer.unwrap
+    val audience = identityProviderConfig.audience.map(_.unwrap)
     discard(SQL"""
        INSERT INTO lapi_identity_provider_config (identity_provider_id, is_deactivated, jwks_url, issuer, audience)
        VALUES ($identityProviderId, $isDeactivated, $jwksUrl, $issuer, $audience)

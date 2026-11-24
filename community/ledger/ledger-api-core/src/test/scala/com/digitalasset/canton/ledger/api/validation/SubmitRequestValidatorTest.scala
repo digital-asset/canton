@@ -69,6 +69,7 @@ import com.digitalasset.canton.ledger.api.{
 }
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
+import com.digitalasset.canton.platform.config.CommandServiceConfig
 import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.version.HashingSchemeVersion
@@ -294,7 +295,8 @@ class SubmitRequestValidatorTest
             commands = Some(api.commands),
             transactionFormat = Some(
               TransactionFormat(
-                eventFormat = Some(EventFormat(Map.empty, Some(Filters(Nil)), verbose = false)),
+                eventFormat =
+                  Some(EventFormat(Map.empty, Some(Filters(Nil)), verbose = false, Seq.empty)),
                 transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
               )
             ),
@@ -312,7 +314,7 @@ class SubmitRequestValidatorTest
               commands = Some(api.commands),
               transactionFormat = Some(
                 TransactionFormat(
-                  eventFormat = Some(EventFormat(Map.empty, None, verbose = false)),
+                  eventFormat = Some(EventFormat(Map.empty, None, verbose = false, Seq.empty)),
                   transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
                 )
               ),
@@ -323,8 +325,8 @@ class SubmitRequestValidatorTest
           ),
           code = INVALID_ARGUMENT,
           description =
-            "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: filtersByParty and filtersForAnyParty " +
-              "cannot be empty simultaneously",
+            "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: filtersByParty, filtersForAnyParty " +
+              "and filtersByContractId cannot be empty simultaneously",
           metadata = Map.empty,
         )
       }
@@ -343,7 +345,12 @@ class SubmitRequestValidatorTest
                 TransactionFormat(
                   // a template wildcard for party and one for any party
                   eventFormat = Some(
-                    EventFormat(Map(party -> Filters(Nil)), Some(Filters(Nil)), verbose = false)
+                    EventFormat(
+                      Map(party -> Filters(Nil)),
+                      Some(Filters(Nil)),
+                      verbose = false,
+                      Seq.empty,
+                    )
                   ),
                   transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
                 )
@@ -378,13 +385,47 @@ class SubmitRequestValidatorTest
         )
       }
 
+      "reject a request with contract id filters in the transaction format" in {
+        mustRejectContractIdFilters(
+          testedSubmitAndWaitRequestValidator.validate(
+            req = SubmitAndWaitForTransactionRequest(
+              commands = Some(api.commands),
+              transactionFormat = Some(
+                TransactionFormat(
+                  eventFormat = Some(
+                    EventFormat(Map.empty, None, verbose = false, protoContractIdFilters)
+                  ),
+                  transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+                )
+              ),
+            ),
+            currentLedgerTime = internal.ledgerTime,
+            currentUtcTime = internal.submittedAt,
+            maxDeduplicationDuration = internal.maxDeduplicationDuration,
+          )
+        )
+      }
+
+      "reject a reassignment request with contract id filters in the event format" in {
+        mustRejectContractIdFilters(
+          testedSubmitAndWaitRequestValidator.validate(
+            SubmitAndWaitForReassignmentRequest(
+              // not validated: the event format is rejected first
+              reassignmentCommands = Some(ReassignmentCommands.defaultInstance),
+              eventFormat =
+                Some(EventFormat(Map.empty, None, verbose = false, protoContractIdFilters)),
+            )
+          )
+        )
+      }
+
       "reject a reassignment request with an event format without filters" in {
         mustFailWithoutFilters(
           testedSubmitAndWaitRequestValidator.validate(
             SubmitAndWaitForReassignmentRequest(
               // not validated: the event format is rejected first
               reassignmentCommands = Some(ReassignmentCommands.defaultInstance),
-              eventFormat = Some(EventFormat(Map.empty, None, verbose = false)),
+              eventFormat = Some(EventFormat(Map.empty, None, verbose = false, Seq.empty)),
             )
           )
         )
@@ -623,6 +664,35 @@ class SubmitRequestValidatorTest
           internal.submittedAt,
           internal.maxDeduplicationDuration,
         ) shouldEqual Right(withLedgerTime(internal.emptyCommands, minLedgerTimeAbs))
+      }
+
+      "respect the minLedgerTime upper bound" in {
+        val maxDelay = CommandServiceConfig.DefaultMinLedgerTimeMaxDelay
+        val delay = maxDelay.asJava.multipliedBy(2)
+        forAll(
+          Table(
+            ("field", "commands"),
+            "min_ledger_time_abs" -> api.commands.copy(minLedgerTimeAbs =
+              Some(TimestampConversion.fromInstant(internal.ledgerTime.plus(delay)))
+            ),
+            "min_ledger_time_rel" -> api.commands
+              .copy(minLedgerTimeRel = Some(DurationConversion.toProto(delay))),
+          )
+        ) { (field, commands) =>
+          requestMustFailWith(
+            testedCommandValidator.validateCommands(
+              commands = commands,
+              currentLedgerTime = internal.ledgerTime,
+              currentUtcTime = internal.submittedAt,
+              maxDeduplicationDuration = internal.maxDeduplicationDuration,
+            ),
+            code = INVALID_ARGUMENT,
+            description =
+              s"INVALID_FIELD(8,0): The submitted command has a field with invalid value: Invalid field $field: " +
+                s"must not be more than ${maxDelay.underlying} ahead of the current ledger time",
+            metadata = Map.empty,
+          )
+        }
       }
 
       "transform valid deduplication into correct internal structure" in {
@@ -1304,7 +1374,8 @@ class SubmitRequestValidatorTest
           signature =
             SignatureSizeConfig(signatureSizeLimit = PositiveInt.tryCreate(maxSignatureBytes)),
           eventFormat = EventFormatSizeConfig(
-            filtersByPartySizeLimit = PositiveInt.tryCreate(maxFiltersByParty)
+            filtersByPartySizeLimit = PositiveInt.tryCreate(maxFiltersByParty),
+            filtersByContractIdSizeLimit = PositiveInt.MaxValue,
           ),
         ),
         interactiveLapiSizeConfig = sizeLimitsConfig.interactiveLapiSizeConfig.copy(
@@ -1422,6 +1493,7 @@ class SubmitRequestValidatorTest
                     filtersByParty = parties(maxFiltersByParty + 1).map(_ -> Filters(Nil)).toMap,
                     filtersForAnyParty = None,
                     verbose = false,
+                    filtersByContractId = Seq.empty,
                   )
                 ),
                 transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
@@ -1437,6 +1509,30 @@ class SubmitRequestValidatorTest
             actual = maxFiltersByParty + 1,
             limit = maxFiltersByParty,
           ),
+        )
+      }
+
+      "reject contract id filters in the transaction format when validating an execute-and-wait request" in {
+        mustRejectContractIdFilters(
+          submitRequestValidatorWithLimits.validateExecuteAndWait(
+            executeRequest,
+            Some(
+              TransactionFormat(
+                eventFormat = Some(
+                  EventFormat(
+                    filtersByParty = Map.empty,
+                    filtersForAnyParty = None,
+                    verbose = false,
+                    filtersByContractId = protoContractIdFilters,
+                  )
+                ),
+                transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+              )
+            ),
+            internal.ledgerTime,
+            SubmissionIdGenerator.Random,
+            internal.maxDeduplicationDuration,
+          )(errorLoggingContext)
         )
       }
 

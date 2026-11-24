@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.apiserver
 
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
-import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
+import com.daml.ledger.api.v2.state_service.{GetActiveContractsResponse, GetHostedPartiesResponse}
 import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesPageResponse}
 import com.daml.metrics.Timed
 import com.digitalasset.canton.config.CantonRequireTypes.String185
@@ -13,6 +13,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
+import com.digitalasset.canton.ledger.api.util.PageTokenUtils
 import com.digitalasset.canton.ledger.api.{EventFormat, UpdateFormat}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.ledger.participant.state.index.*
@@ -99,6 +100,19 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
   ): Future[Option[Offset]] = Timed.future(
     metrics.services.index.highestOffsetBeforeOrFirstAt,
     delegate.highestOffsetBeforeOrFirstAt(synchronizerId = synchronizerId, recordTime = recordTime),
+  )
+
+  override def hostedParties(
+      filter: IndexerHostedPartyFilter,
+      validAt: Offset,
+      fromExcl: Option[Ref.Party],
+      limit: Option[Int],
+      continuationChecksum: PageTokenUtils.Checksum,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[GetHostedPartiesResponse, NotUsed] = Timed.source(
+    metrics.services.index.hostedParties,
+    delegate.hostedParties(filter, validAt, fromExcl, limit, continuationChecksum),
   )
 
   override def getActiveContracts(

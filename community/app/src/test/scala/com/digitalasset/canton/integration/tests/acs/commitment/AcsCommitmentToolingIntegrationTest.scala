@@ -602,6 +602,7 @@ trait AcsCommitmentToolingIntegrationTest
 
         logger.info("Send a commitment, which will cover the five intervals.")
         participant1.testing.fetch_synchronizer_times()
+        participant1.health.ping(participant2, synchronizerId = Some(daId))
 
         val (_, _, cmtOverFiveIntervals) = eventually() {
           val p1Computed = participant1.commitments

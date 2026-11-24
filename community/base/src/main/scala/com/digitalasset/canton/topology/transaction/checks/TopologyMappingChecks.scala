@@ -21,10 +21,13 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.cache.TopologyStateLookup
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.*
-import com.digitalasset.canton.topology.store.TopologyTransactionRejection.RequiredMapping as RequiredMappingRejection
 import com.digitalasset.canton.topology.store.TopologyTransactionRejection.RequiredMapping.{
   LsuSequencerSuccessorInvalidSuccessorPsid,
   NoLsuAnnounced,
+}
+import com.digitalasset.canton.topology.store.TopologyTransactionRejection.{
+  RequiredMapping,
+  RequiredMapping as RequiredMappingRejection,
 }
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
@@ -242,6 +245,15 @@ class RequiredTopologyMappingChecks(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] = {
+    inStore.foreach { stored =>
+      if (stored.mapping.code != toValidate.mapping.code) {
+        val msg =
+          s"Validating topology transaction's code ${toValidate.mapping.code} differs from in-store transaction's code ${stored.mapping.code}"
+        if (protocolVersion > ProtocolVersion.v37) ErrorUtil.invalidArgument(msg)
+        else logger.error(msg)
+      }
+    }
+
     // Allow removal of root certificates even without prior existing positive transaction
     // This makes it possible to block a namespace from being used in an authorizing position in any topology mapping.
     lazy val isRootCertificateRemoval =
@@ -284,133 +296,131 @@ class RequiredTopologyMappingChecks(
         .toLeft(())
     )
 
-    lazy val checkOpt = (toValidate.mapping.code, inStore.map(_.mapping.code)) match {
-      case (Code.SynchronizerTrustCertificate, None | Some(Code.SynchronizerTrustCertificate)) =>
-        val checkReplace = toValidate
-          .select[TopologyChangeOp.Replace, SynchronizerTrustCertificate]
-          .map(
-            checkSynchronizerTrustCertificateReplace(
-              effective,
-              _,
-              inStore.flatMap(_.selectMapping[SynchronizerTrustCertificate]),
+    def checkOpt = if (
+      protocolVersion <= ProtocolVersion.v37 &&
+      inStore.exists(_.mapping.code != toValidate.mapping.code)
+    ) None
+    else
+      toValidate.mapping.code match {
+        case Code.SynchronizerTrustCertificate =>
+          toValidate
+            .select[TopologyChangeOp.Replace, SynchronizerTrustCertificate]
+            .map(
+              checkSynchronizerTrustCertificateReplace(
+                effective,
+                _,
+                inStore.flatMap(_.selectMapping[SynchronizerTrustCertificate]),
+              )
             )
-          )
 
-        checkReplace
-
-      case (Code.PartyToParticipant, None | Some(Code.PartyToParticipant)) =>
-        toValidate
-          .select[TopologyChangeOp.Replace, PartyToParticipant]
-          .map(
-            checkPartyToParticipant(
-              effective,
-              _,
-              inStore.flatMap(_.select[TopologyChangeOp.Replace, PartyToParticipant]),
+        case Code.PartyToParticipant =>
+          toValidate
+            .select[TopologyChangeOp.Replace, PartyToParticipant]
+            .map(
+              checkPartyToParticipant(
+                effective,
+                _,
+                inStore.flatMap(_.select[TopologyChangeOp.Replace, PartyToParticipant]),
+              )
             )
-          )
 
-      case (Code.OwnerToKeyMapping, None | Some(Code.OwnerToKeyMapping)) =>
-        val checkReplace = toValidate
-          .select[TopologyChangeOp.Replace, OwnerToKeyMapping]
-          .map(
-            checkOwnerToKeyMappingReplace(_, inStore.flatMap(_.selectMapping[OwnerToKeyMapping]))
-          )
-
-        val checkRemove = toValidate
-          .select[TopologyChangeOp.Remove, OwnerToKeyMapping]
-          .map(
-            checkOwnerToKeyMappingRemove(effective, _)
-          )
-
-        checkReplace.orElse(checkRemove)
-
-      case (Code.MediatorSynchronizerState, None | Some(Code.MediatorSynchronizerState)) =>
-        toValidate
-          .select[TopologyChangeOp.Replace, MediatorSynchronizerState]
-          .map(
-            checkMediatorSynchronizerStateReplace(
-              effective,
-              _,
-              inStore.flatMap(_.select[TopologyChangeOp.Replace, MediatorSynchronizerState]),
-              relaxChecksForBackwardsCompatibility,
+        case Code.OwnerToKeyMapping =>
+          val checkReplace = toValidate
+            .select[TopologyChangeOp.Replace, OwnerToKeyMapping]
+            .map(
+              checkOwnerToKeyMappingReplace(
+                _,
+                inStore.flatMap(_.selectMapping[OwnerToKeyMapping]),
+              )
             )
-          )
 
-      case (Code.SequencerSynchronizerState, None | Some(Code.SequencerSynchronizerState)) =>
-        toValidate
-          .select[TopologyChangeOp.Replace, SequencerSynchronizerState]
-          .map(
-            checkSequencerSynchronizerStateReplace(
-              effective,
-              _,
-              inStore.flatMap(_.select[TopologyChangeOp.Replace, SequencerSynchronizerState]),
-              relaxChecksForBackwardsCompatibility,
+          val checkRemove = toValidate
+            .select[TopologyChangeOp.Remove, OwnerToKeyMapping]
+            .map(
+              checkOwnerToKeyMappingRemove(effective, _)
             )
-          )
 
-      case (
-            Code.DecentralizedNamespaceDefinition,
-            None | Some(Code.DecentralizedNamespaceDefinition),
-          ) =>
-        toValidate
-          .select[TopologyChangeOp.Replace, DecentralizedNamespaceDefinition]
-          .map(
-            checkDecentralizedNamespaceDefinitionReplace(
-              effective,
-              _,
-              inStore.flatMap(_.select[TopologyChangeOp, DecentralizedNamespaceDefinition]),
+          checkReplace.orElse(checkRemove)
+
+        case Code.MediatorSynchronizerState =>
+          toValidate
+            .select[TopologyChangeOp.Replace, MediatorSynchronizerState]
+            .map(
+              checkMediatorSynchronizerStateReplace(
+                effective,
+                _,
+                inStore.flatMap(_.select[TopologyChangeOp.Replace, MediatorSynchronizerState]),
+                relaxChecksForBackwardsCompatibility,
+              )
             )
-          )
 
-      case (
-            Code.NamespaceDelegation,
-            None | Some(Code.NamespaceDelegation),
-          ) =>
-        toValidate
-          .select[TopologyChangeOp.Replace, NamespaceDelegation]
-          .map(
-            checkNamespaceDelegationReplace(
-              effective,
-              _,
-              inStore.flatMap(_.select[TopologyChangeOp.Remove, NamespaceDelegation]),
-              relaxChecksForBackwardsCompatibility,
+        case Code.SequencerSynchronizerState =>
+          toValidate
+            .select[TopologyChangeOp.Replace, SequencerSynchronizerState]
+            .map(
+              checkSequencerSynchronizerStateReplace(
+                effective,
+                _,
+                inStore.flatMap(_.select[TopologyChangeOp.Replace, SequencerSynchronizerState]),
+                relaxChecksForBackwardsCompatibility,
+              )
             )
-          )
 
-      case (Code.SynchronizerParametersState, None | Some(Code.SynchronizerParametersState)) =>
-        toValidate
-          .select[TopologyChangeOp.Remove, SynchronizerParametersState]
-          .map(_ =>
-            EitherT.leftT[FutureUnlessShutdown, Unit](
-              RequiredMappingRejection
-                .CannotRemoveMapping(Code.SynchronizerParametersState): TopologyTransactionRejection
+        case Code.DecentralizedNamespaceDefinition =>
+          toValidate
+            .select[TopologyChangeOp.Replace, DecentralizedNamespaceDefinition]
+            .map(
+              checkDecentralizedNamespaceDefinitionReplace(
+                effective,
+                _,
+                inStore.flatMap(_.select[TopologyChangeOp, DecentralizedNamespaceDefinition]),
+              )
             )
-          )
 
-      case (
-            Code.LsuAnnouncement,
-            None | Some(Code.LsuAnnouncement),
-          ) =>
-        toValidate
-          .select[TopologyChangeOp.Replace, LsuAnnouncement]
-          .map(
-            checkLsuAnnouncement(
-              effective,
-              _,
-              inStore.flatMap(_.selectMapping[LsuAnnouncement]),
+        case Code.NamespaceDelegation =>
+          toValidate
+            .select[TopologyChangeOp.Replace, NamespaceDelegation]
+            .map(
+              checkNamespaceDelegationReplace(
+                effective,
+                _,
+                inStore.flatMap(_.select[TopologyChangeOp.Remove, NamespaceDelegation]),
+                relaxChecksForBackwardsCompatibility,
+              )
             )
-          )
 
-      case (
-            Code.LsuSequencerConnectionSuccessor,
-            None | Some(Code.LsuSequencerConnectionSuccessor),
-          ) =>
-        toValidate
-          .select[TopologyChangeOp.Replace, LsuSequencerConnectionSuccessor]
-          .map(checkLsuSequencerSuccessor(effective, _))
+        case Code.SynchronizerParametersState =>
+          toValidate
+            .select[TopologyChangeOp.Remove, SynchronizerParametersState]
+            .map(_ =>
+              EitherT.leftT[FutureUnlessShutdown, Unit](
+                RequiredMappingRejection.CannotRemoveMapping(
+                  Code.SynchronizerParametersState
+                ): TopologyTransactionRejection
+              )
+            )
 
-      case _otherwise => None
-    }
+        case Code.LsuAnnouncement =>
+          toValidate
+            .select[TopologyChangeOp.Replace, LsuAnnouncement]
+            .map(
+              checkLsuAnnouncement(
+                effective,
+                _,
+                inStore.flatMap(_.selectMapping[LsuAnnouncement]),
+              )
+            )
+
+        case Code.LsuSequencerConnectionSuccessor =>
+          toValidate
+            .select[TopologyChangeOp.Replace, LsuSequencerConnectionSuccessor]
+            .map(checkLsuSequencerSuccessor(effective, _))
+
+        case Code.OwnerToKeyMapping | Code.PartyToKeyMapping |
+            Code.ParticipantSynchronizerPermission | Code.PartyHostingLimits |
+            Code.SequencingParametersState | Code.VettedPackages =>
+          None
+      }
 
     val checkKeyCount = (toValidate.operation, toValidate.mapping) match {
       case (TopologyChangeOp.Replace, keyMapping: KeyMapping) => checkKeyMappingKeyCount(keyMapping)
@@ -504,17 +514,21 @@ class RequiredTopologyMappingChecks(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] = {
-    // Checks if the participant is allowed to submit its synchronizer trust certificate
+    // Checks if the participant is allowed to submit or update its synchronizer trust certificate
     val participantId = toValidate.mapping.participantId
+
+    val hasAlreadyBeenOnboarded = inStore.nonEmpty && protocolVersion > ProtocolVersion.v37
 
     def loadOnboardingRestriction()
         : EitherT[FutureUnlessShutdown, TopologyTransactionRejection, OnboardingRestriction] =
       loadSynchronizerParameters(effective, toValidate.mapping.synchronizerId)
         .map(_.onboardingRestriction)
 
-    def checkSynchronizerIsNotLocked(restriction: OnboardingRestriction) =
+    def checkSynchronizerIsNotLockedForOnboarding(
+        restriction: OnboardingRestriction
+    ): EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] =
       EitherTUtil.condUnitET[FutureUnlessShutdown](
-        restriction.isOpen, {
+        restriction.isOpen || hasAlreadyBeenOnboarded, {
           logger.info(
             s"Synchronizer is locked at $effective. Rejecting onboarding of new participant ${toValidate.mapping}"
           )
@@ -532,8 +546,8 @@ class RequiredTopologyMappingChecks(
       // using the flags to check for restrictions instead of == UnrestrictedOpen to be more
       // future proof in case we will add additional restrictions in the future and would miss a case,
       // because there is no exhaustiveness check without full pattern matching
-      if (restrictions.isUnrestricted && restrictions.isOpen) {
-        // No further checks to be done. any participant can join the synchronizer
+      if (restrictions.isUnrestricted && restrictions.isOpen || hasAlreadyBeenOnboarded) {
+        // No further checks to be done. any participant can join the synchronizer or update their synchronizer trust certificate
         EitherTUtil.unitUS
       } else if (restrictions.isRestricted && restrictions.isOpen) {
         // Only participants with explicit permission may join the synchronizer
@@ -575,12 +589,12 @@ class RequiredTopologyMappingChecks(
         }
       } else {
         EitherT.leftT(
-          RequiredMappingRejection
-            .OnboardingRestrictionInPlace(participantId, restrictions, None)
+          RequiredMappingRejection.OnboardingRestrictionInPlace(participantId, restrictions, None)
         )
       }
 
-    def checkPartyIdDoesntExist() = for {
+    def checkPartyIdDoesntExist()
+        : EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] = for {
       ptps <- loadFromStoreByUid(
         effective,
         Set(Code.PartyToParticipant),
@@ -603,14 +617,16 @@ class RequiredTopologyMappingChecks(
       }
     } yield ()
 
-    def checkParticipantDoesNotRejoin() = EitherTUtil.condUnitET[FutureUnlessShutdown](
-      inStore.forall(_.operation != TopologyChangeOp.Remove),
-      RequiredMappingRejection.ParticipantCannotRejoinSynchronizer(
-        toValidate.mapping.participantId
-      ),
-    )
+    def checkParticipantDoesNotRejoin()
+        : EitherT[FutureUnlessShutdown, RequiredMapping.ParticipantCannotRejoinSynchronizer, Unit] =
+      EitherTUtil.condUnitET[FutureUnlessShutdown](
+        inStore.forall(_.operation != TopologyChangeOp.Remove),
+        RequiredMappingRejection.ParticipantCannotRejoinSynchronizer(
+          toValidate.mapping.participantId
+        ),
+      )
 
-    def participantHasKeys() =
+    def participantHasKeys(): EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] =
       checkNewSynchronizerMembersHaveKeys(
         effective,
         newMembers = Set(participantId),
@@ -621,7 +637,7 @@ class RequiredTopologyMappingChecks(
       _ <- checkParticipantDoesNotRejoin()
       _ <- checkPartyIdDoesntExist()
       restriction <- loadOnboardingRestriction()
-      _ <- checkSynchronizerIsNotLocked(restriction)
+      _ <- checkSynchronizerIsNotLockedForOnboarding(restriction)
       _ <- checkParticipantIsNotRestricted(restriction)
       _ <- participantHasKeys()
     } yield ()

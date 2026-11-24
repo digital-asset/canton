@@ -117,7 +117,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       "find previously stored reassignments" in {
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
+          _ <- store.addUnassignmentData(unassignmentData)
           lookup10 <- valueOrFail(store.lookup(unassignmentData.reassignmentId))(
             "lookup failed to find the stored reassignment"
           )
@@ -127,7 +127,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       "not invent reassignments" in {
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
+          _ <- store.addUnassignmentData(unassignmentData)
           lookup10 <- store.lookup(reassignment11).value
         } yield assert(
           lookup10 == Left(UnknownReassignmentId(reassignment11)),
@@ -165,10 +165,10 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         )
 
         for {
-          _ <- valueOrFail(store.addUnassignmentData(reassignment1))("first add failed")
-          _ <- valueOrFail(store.addUnassignmentData(reassignment2))("second add failed")
-          _ <- valueOrFail(store.addUnassignmentData(reassignment3))("third add failed")
-          _ <- valueOrFail(store.addUnassignmentData(reassignment4))("fourth add failed")
+          _ <- store.addUnassignmentData(reassignment1)
+          _ <- store.addUnassignmentData(reassignment2)
+          _ <- store.addUnassignmentData(reassignment3)
+          _ <- store.addUnassignmentData(reassignment4)
         } yield (List(reassignment1, reassignment2, reassignment3, reassignment4))
       }
 
@@ -257,8 +257,8 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
-          _ <- store.addAssignmentDataIfAbsent(assignmentData).value
-          _ <- store.addAssignmentDataIfAbsent(assignmentData).value
+          _ <- store.addAssignmentDataIfAbsent(assignmentData)
+          _ <- store.addAssignmentDataIfAbsent(assignmentData)
         } yield succeed
       }
 
@@ -276,10 +276,8 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val updatedAssignmentData = assignmentData.focus(_.contracts).replace(updatedBatch)
 
         for {
-          _ <- store.addAssignmentDataIfAbsent(assignmentData).value
-          _ <- valueOrFail(
-            store.addAssignmentDataIfAbsent(updatedAssignmentData)
-          )("addAssignmentDataIfAbsent")
+          _ <- store.addAssignmentDataIfAbsent(assignmentData)
+          _ <- store.addAssignmentDataIfAbsent(updatedAssignmentData)
           entry <- store.findReassignmentEntry(data.reassignmentId).value
         } yield entry.map(_.stakeholders) shouldBe Right(data.contractsBatch.stakeholders.all)
       }
@@ -287,17 +285,17 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       "AddAssignmentData doesn't update the entry once the reassignment data is inserted" in {
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
-          _ <- store.addUnassignmentData(data).value
+          _ <- store.addUnassignmentData(data)
           entry11 <- store.findReassignmentEntry(data.reassignmentId).value
-          _ <- store.addAssignmentDataIfAbsent(assignmentData).value
+          _ <- store.addAssignmentDataIfAbsent(assignmentData)
           entry12 <- store.findReassignmentEntry(data.reassignmentId).value
 
-          _ <- store.addAssignmentDataIfAbsent(assignmentData).value
+          _ <- store.addAssignmentDataIfAbsent(assignmentData)
           entry22 <- store.findReassignmentEntry(data.reassignmentId).value
 
           _ <- store.completeReassignment(data.reassignmentId, ts).value
           entry31 <- store.findReassignmentEntry(data.reassignmentId).value
-          _ <- store.addAssignmentDataIfAbsent(assignmentData).value
+          _ <- store.addAssignmentDataIfAbsent(assignmentData)
           entry32 <- store.findReassignmentEntry(data.reassignmentId).value
         } yield {
           entry11 shouldBe entry12
@@ -308,7 +306,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       "addUnassignment is called after addAssignmentData with conflicting data" in {
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
-          _ <- store.addAssignmentDataIfAbsent(assignmentData).value
+          _ <- store.addAssignmentDataIfAbsent(assignmentData)
           modifiedUnassignmentData = ReassignmentStoreTest.mkUnassignmentDataForSynchronizer(
             sourceMediator = mediator1,
             data.submitterMetadata.submitter,
@@ -316,7 +314,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
             targetSynchronizer,
             contract,
           )
-          _ <- store.addUnassignmentData(modifiedUnassignmentData).value
+          _ <- store.addUnassignmentData(modifiedUnassignmentData)
           entry <- store.findReassignmentEntry(data.reassignmentId).value
         } yield entry shouldBe Right(
           ReassignmentEntry(modifiedUnassignmentData, None, None, None)
@@ -333,9 +331,9 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
           dataWithTs.contractsBatch,
         )
         for {
-          _ <- store.addAssignmentDataIfAbsent(assignmentDataWithTs).value
+          _ <- store.addAssignmentDataIfAbsent(assignmentDataWithTs)
           entryBefore <- store.findReassignmentEntry(dataWithTs.reassignmentId).value
-          _ <- store.addUnassignmentData(dataWithTs).value
+          _ <- store.addUnassignmentData(dataWithTs)
           entryAfter <- store.findReassignmentEntry(dataWithTs.reassignmentId).value
         } yield {
           // addAssignmentDataIfAbsent stores a placeholder Epoch timestamp
@@ -348,13 +346,13 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       "complete the assignment before the unassignment" in {
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         (for {
-          _ <- store.addAssignmentDataIfAbsent(assignmentData).value
+          _ <- store.addAssignmentDataIfAbsent(assignmentData)
           entry1 <- store.findReassignmentEntry(data.reassignmentId).value
           lookup1 <- store.lookup(data.reassignmentId).value
           _ <- store.completeReassignment(data.reassignmentId, ts).value
           lookup2 <- store.lookup(data.reassignmentId).value
 
-          _ <- store.addUnassignmentData(data).value
+          _ <- store.addUnassignmentData(data)
           lookup3 <- store.lookup(data.reassignmentId).value
 
         } yield {
@@ -426,9 +424,9 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         }
 
         for {
-          _ <- valueOrFail(MonadUtil.sequentialTraverse_(data) { case (_, reassignmentData) =>
+          _ <- MonadUtil.sequentialTraverse_(data) { case (_, reassignmentData) =>
             store.addUnassignmentData(reassignmentData)
-          })("add reassignments")
+          }
 
           offsets = data.map { case (offset, reassignmentData) =>
             reassignmentData.reassignmentId -> offset
@@ -465,7 +463,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
+          _ <- store.addUnassignmentData(unassignmentData)
 
           _ <- store
             .addReassignmentsOffsets(Map(reassignmentId -> unassignmentOffset))
@@ -520,7 +518,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
+          _ <- store.addUnassignmentData(unassignmentData)
 
           _ <- store
             .addReassignmentsOffsets(Map(reassignmentId -> unassignmentOffset))
@@ -555,7 +553,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
+          _ <- store.addUnassignmentData(unassignmentData)
 
           _ <- store
             .addReassignmentsOffsets(Map(reassignmentId -> assignmentOffset))
@@ -590,7 +588,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
+          _ <- store.addUnassignmentData(unassignmentData)
 
           _ <- store
             .addReassignmentsOffsets(Map(reassignmentId -> unassignmentOffset))
@@ -662,7 +660,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
+          _ <- store.addUnassignmentData(unassignmentData)
 
           conflictingAdd <- loggerFactory.assertLogs(
             store
@@ -693,7 +691,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
+          _ <- store.addUnassignmentData(unassignmentData)
 
           _ <- store
             .addReassignmentsOffsets(Map(reassignmentId -> assignmentOffset))
@@ -755,8 +753,8 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val assignmentOffset = 20L
 
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add 1 failed")
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData2))("add 2 failed")
+          _ <- store.addUnassignmentData(unassignmentData)
+          _ <- store.addUnassignmentData(unassignmentData2)
           lookupNoOffset <- store.findIncomplete(Long.MaxValue, None, limit)
 
           _ <- store
@@ -854,7 +852,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         )
 
         for {
-          _ <- valueOrFail(store.addAssignmentDataIfAbsent(assignmentData))("add failed")
+          _ <- store.addAssignmentDataIfAbsent(assignmentData)
           lookupNoOffset <- store.findIncomplete(Long.MaxValue, None, limit)
           _ <- store.completeReassignment(assignmentData.reassignmentId, ts).value
           _ <-
@@ -870,7 +868,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
           lookupAtAssignment <- store.findIncomplete(assignmentOffset, None, limit)
 
-          _ <- store.addUnassignmentData(unassignmentData).value
+          _ <- store.addUnassignmentData(unassignmentData)
 
           _ <-
             store
@@ -944,13 +942,13 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
           )
         }
 
-        val addReassignmentsET = reassignmentsData.parTraverse(store.addUnassignmentData)
+        val addReassignmentsF = reassignmentsData.parTraverse(store.addUnassignmentData)
 
         def lift(stakeholder: LfPartyId, others: LfPartyId*): Option[NonEmpty[Set[LfPartyId]]] =
           Option(NonEmpty(Set, stakeholder, others*))
 
         for {
-          _ <- valueOrFail(addReassignmentsET)("add failed")
+          _ <- addReassignmentsF
           _ <- store
             .addReassignmentsOffsets(
               reassignmentsData
@@ -988,7 +986,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val offset = 42L
 
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
+          _ <- store.addUnassignmentData(unassignmentData)
           _ <- store
             .addReassignmentsOffsets(
               Map(unassignmentData.reassignmentId -> UnassignmentGlobalOffset(offset))
@@ -1072,7 +1070,6 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         for {
           _ <- store
             .addUnassignmentData(unassignmentData)
-            .valueOrFail("Unable to store unassignment data")
 
           _ <- store
             .addReassignmentsOffsets(
@@ -1195,7 +1192,6 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         for {
           _ <- store
             .addUnassignmentData(unassignmentData1)
-            .valueOrFail("Unable to store unassignment data")
 
           _ <- store
             .addReassignmentsOffsets(
@@ -1205,7 +1201,6 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
           _ <- store
             .addUnassignmentData(unassignmentData2)
-            .valueOrFail("Unable to store unassignment data")
 
           _ <- store
             .addReassignmentsOffsets(
@@ -1300,7 +1295,6 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         for {
           _ <- store
             .addUnassignmentData(unassignmentData)
-            .valueOrFail("Unable to store unassignment data")
 
           _ <- store
             .addReassignmentsOffsets(Map(reassignmentId -> AssignmentGlobalOffset(assignedOffset)))
@@ -1363,7 +1357,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val unassignmentOffset = 10L
         val assignmentOffset = 20L
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
+          _ <- store.addUnassignmentData(unassignmentData)
 
           _ <- store
             .addReassignmentsOffsets(
@@ -1399,7 +1393,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val assignmentOffset = 20L
 
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
+          _ <- store.addUnassignmentData(unassignmentData)
 
           _ <- store
             .addReassignmentsOffsets(
@@ -1440,8 +1434,8 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
         for {
           lookupEmpty <- store.findEarliestIncomplete()
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData3))("add failed")
+          _ <- store.addUnassignmentData(unassignmentData)
+          _ <- store.addUnassignmentData(unassignmentData3)
 
           lookupAllInFlight <- store.findEarliestIncomplete()
 
@@ -1504,9 +1498,9 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val assignmentOffset3 = 35L
 
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData2))("add failed")
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData3))("add failed")
+          _ <- store.addUnassignmentData(unassignmentData)
+          _ <- store.addUnassignmentData(unassignmentData2)
+          _ <- store.addUnassignmentData(unassignmentData3)
 
           _ <- store
             .addReassignmentsOffsets(
@@ -1562,12 +1556,8 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       "be idempotent" in {
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))(
-            "first add failed"
-          )
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))(
-            "second add failed"
-          )
+          _ <- store.addUnassignmentData(unassignmentData)
+          _ <- store.addUnassignmentData(unassignmentData)
         } yield succeed
       }
 
@@ -1577,10 +1567,8 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val updatedUnassignmentData =
           unassignmentData2.focus(_.unassignmentTs).modify(_.immediateSuccessor)
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))(
-            "first add failed"
-          )
-          _ <- store.addUnassignmentData(updatedUnassignmentData).value
+          _ <- store.addUnassignmentData(unassignmentData)
+          _ <- store.addUnassignmentData(updatedUnassignmentData)
           entry <- store
             .findReassignmentEntry(unassignmentData.reassignmentId)
             .valueOrFail("lookup")
@@ -1599,15 +1587,9 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
         for {
 
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData10))(
-            "first add failed"
-          )
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData11))(
-            "second add failed"
-          )
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData12))(
-            "third add failed"
-          )
+          _ <- store.addUnassignmentData(unassignmentData10)
+          _ <- store.addUnassignmentData(unassignmentData11)
+          _ <- store.addUnassignmentData(unassignmentData12)
           lookup10 <- valueOrFail(store.lookup(unassignmentData10.reassignmentId))(
             "first reassignment not found"
           )
@@ -1640,7 +1622,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       "mark the reassignment as completed" in {
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
+          _ <- store.addUnassignmentData(unassignmentData)
           _ <- valueOrFail(store.completeReassignment(unassignmentData.reassignmentId, ts))(
             "completion failed"
           )
@@ -1651,7 +1633,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       "be idempotent" in {
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
+          _ <- store.addUnassignmentData(unassignmentData)
           _ <- valueOrFail(store.completeReassignment(unassignmentData.reassignmentId, ts))(
             "first completion failed"
           )
@@ -1665,7 +1647,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId = unassignmentData.reassignmentId
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
+          _ <- store.addUnassignmentData(unassignmentData)
           _ <- valueOrFail(store.completeReassignment(reassignmentId, ts))(
             "first completion failed"
           )
@@ -1685,7 +1667,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val ts2 = CantonTimestamp.ofEpochSecond(4)
         val reassignmentId = unassignmentData.reassignmentId
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
+          _ <- store.addUnassignmentData(unassignmentData)
           _ <- valueOrFail(store.completeReassignment(reassignmentId, ts2))(
             "later completion failed"
           )
@@ -1703,7 +1685,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId = unassignmentData.reassignmentId
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
+          _ <- store.addUnassignmentData(unassignmentData)
           _ <- store.deleteReassignment(reassignmentId)
           lookup <- store.lookup(reassignmentId).value
         } yield lookup shouldBe Left(UnknownReassignmentId(reassignmentId))
@@ -1721,7 +1703,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId = unassignmentData.reassignmentId
         for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
+          _ <- store.addUnassignmentData(unassignmentData)
           _ <- store.deleteReassignment(reassignmentId)
           _ <- store.deleteReassignment(reassignmentId)
         } yield succeed
@@ -1735,7 +1717,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         new FailingOfflineTopologyLookup(),
       )
       for {
-        _ <- valueOrFail(storeTarget.addUnassignmentData(unassignmentData))("add failed")
+        _ <- storeTarget.addUnassignmentData(unassignmentData)
         found <- store1.lookup(unassignmentData.reassignmentId).value
       } yield found shouldBe Left(UnknownReassignmentId(unassignmentData.reassignmentId))
     }
@@ -1767,11 +1749,9 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         )
 
         for {
-          _ <- valueOrFail(store.addUnassignmentData(aliceReassignment))(
-            "add alice failed"
-          )
-          _ <- valueOrFail(store.addUnassignmentData(bobReassignment))("add bob failed")
-          _ <- valueOrFail(store.addUnassignmentData(eveReassignment))("add eve failed")
+          _ <- store.addUnassignmentData(aliceReassignment)
+          _ <- store.addUnassignmentData(bobReassignment)
+          _ <- store.addUnassignmentData(eveReassignment)
           _ <- valueOrFail(store.completeReassignment(aliceReassignment.reassignmentId, ts))(
             "completion alice failed"
           )

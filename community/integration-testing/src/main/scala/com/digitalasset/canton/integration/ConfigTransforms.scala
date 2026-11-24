@@ -45,6 +45,7 @@ import com.digitalasset.canton.{BaseTest, UniquePortGenerator, config}
 import com.typesafe.config.ConfigValueFactory
 import monocle.macros.syntax.lens.*
 import monocle.macros.{GenLens, GenPrism}
+import org.slf4j.LoggerFactory
 
 import scala.concurrent.duration.*
 import scala.util.Random
@@ -99,6 +100,37 @@ object ConfigTransforms {
     BaseTest.testedProtocolVersion
   )
 
+  private lazy val nightlyExpensiveTest = {
+    val tmp = sys.env.get("CANTON_ENABLE_EXPENSIVE_CHECKS").map(_.toLowerCase).contains("true")
+    if (tmp) {
+      LoggerFactory
+        .getLogger(getClass)
+        .info(
+          "CANTON_ENABLE_EXPENSIVE_CHECKS is set. Enabling more expensive checks."
+        )
+    }
+    tmp
+  }
+
+  def toggleTopologyStateConsistencyChecks(enable: Boolean): ConfigTransform =
+    ConfigTransforms
+      .updateAllParticipantConfigs_(
+        _.focus(_.topology.enableTopologyStateCacheConsistencyChecks)
+          .replace(enable)
+      )
+      .compose(
+        ConfigTransforms.updateAllMediatorConfigs_(
+          _.focus(_.topology.enableTopologyStateCacheConsistencyChecks)
+            .replace(enable)
+        )
+      )
+      .compose(
+        ConfigTransforms.updateAllSequencerConfigs_(
+          _.focus(_.topology.enableTopologyStateCacheConsistencyChecks)
+            .replace(enable)
+        )
+      )
+
   /** Config transforms to apply to heavy-weight tests using an [[EnvironmentDefinition]]. For
     * example, these transforms should be applied to toxiproxy tests.
     */
@@ -115,6 +147,7 @@ object ConfigTransforms {
           .focus(_.parameters.engine.enableAdditionalConsistencyChecks)
           .replace(true)
       ),
+      toggleTopologyStateConsistencyChecks(nightlyExpensiveTest),
       _.focus(_.parameters.enableAdditionalConsistencyChecks)
         .replace(true)
         .focus(_.monitoring.logging.logSlowFutures)
@@ -719,7 +752,9 @@ object ConfigTransforms {
   /** For performance tests...
     */
   def disableAdditionalConsistencyChecks: ConfigTransform =
-    _.focus(_.parameters.enableAdditionalConsistencyChecks).replace(false)
+    toggleTopologyStateConsistencyChecks(false).compose(
+      _.focus(_.parameters.enableAdditionalConsistencyChecks).replace(false)
+    )
 
   def setParticipantMaxConnections(maxConnections: PositiveInt): ConfigTransform =
     modifyAllStorageConfigs { (nodeType, _, config) =>

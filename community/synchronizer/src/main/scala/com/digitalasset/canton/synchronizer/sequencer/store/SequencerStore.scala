@@ -665,6 +665,15 @@ trait SequencerStore
       traceContext: TraceContext
   ): FutureUnlessShutdown[Set[Member]]
 
+  /** Members that were registered as onboarding (see [[registerOnboardingMember]]) and are not
+    * registered at `asOf`: those still onboarding, and those whose registration only takes effect
+    * at or after `asOf`. Members that registered without onboarding first and disabled members are
+    * not included. Uncached, like [[allRegisteredMembers]].
+    */
+  def onboardingMembersAt(asOf: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[Member]]
+
   /** Save a series of payloads to the store. Is up to the caller to determine a reasonable batch
     * size and no batching is done within the store.
     * @param payloads

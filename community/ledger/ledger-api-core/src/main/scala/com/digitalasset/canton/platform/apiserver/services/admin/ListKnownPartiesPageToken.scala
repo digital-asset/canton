@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 
 import cats.syntax.either.*
 import com.daml.platform.v1.page_tokens.ListPartiesPageTokenPayload
+import com.digitalasset.canton.config.CantonRequireTypes.String500
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.ledger.api.util.PageTokenUtils
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
@@ -62,14 +63,17 @@ object ListKnownPartiesPageToken {
     *   None if the token is empty (first page), otherwise the decoded payload. Fails if the token
     *   is not a base64-encoded protobuf payload.
     */
-  def decode(pageToken: String)(implicit
+  def decode(pageTokenUnvalidated: String)(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Option[ListPartiesPageTokenPayload]] =
-    if (pageToken.isEmpty) Right(None)
+    if (pageTokenUnvalidated.isEmpty) Right(None)
     else
       for {
+        pageToken <- String500
+          .create(pageTokenUnvalidated)
+          .leftMap(_ => invalidPageToken(s"longer than ${String500.maxLength} characters"))
         decodedBytes <- Try(
-          Base64.getUrlDecoder.decode(pageToken.getBytes(StandardCharsets.UTF_8))
+          Base64.getUrlDecoder.decode(pageToken.unwrap.getBytes(StandardCharsets.UTF_8))
         ).toEither
           .leftMap(_ => invalidPageToken("failed base64 decoding"))
         payload <- Try(ListPartiesPageTokenPayload.parseFrom(decodedBytes)).toEither

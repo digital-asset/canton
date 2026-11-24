@@ -288,9 +288,12 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
       |- predecessorState: Retrieved using sequencer.topology.transactions.sequencer_lsu_state
       |- synchronizerParameters: Synchronizer parameters of the node
       |- ignorePsidCheck:
-      |    If true, it will not be checked that that current physical synchronizer id matches
-      |    the successor in the topology state. Should be used *only* in disaster
-      |    recovery scenarios (roll forward).
+      |    If true, skips the optional consistency check that the current physical synchronizer
+      |    id matches the successor in the topology state. Should be used *only* in disaster
+      |    recovery scenarios (roll forward). Unless an explicit lsu-sequencing-bounds-override
+      |    is configured, the snapshot must contain an effective, fully authorized LSU
+      |    announcement naming the current physical synchronizer id and yield its
+      |    sequencing bounds.
       |""")
   def initialize_from_lsu_predecessor(
       inputFile: String,
