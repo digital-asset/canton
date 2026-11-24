@@ -4,6 +4,7 @@
 package com.digitalasset.canton.crypto
 
 import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.MultiHashSignature.LeafSalt
 import com.digitalasset.canton.logging.pretty.{
@@ -20,6 +21,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionValidation,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 /** A signature over the root of a [[MerkleHashTree]] of salted leaves, together with the salt and
@@ -127,9 +129,9 @@ object MultiHashSignature
         s"A leaf salt has $Length bytes, got ${bytes.size}",
       )
 
-    /** Creates the leaf salt. Throws if [[create]] fails. */
-    def tryCreate(bytes: ByteString): LeafSalt =
-      create(bytes).valueOr(err => throw new IllegalArgumentException(err))
+    /** Generates a fresh random leaf salt */
+    def generate(random: RandomOps): LeafSalt =
+      new LeafSalt(random.generateRandomByteString(Length))
   }
 
   /** The leaf of a signed item in the tree: a hash of the leaf's salt and the raw SHA-256 digest of
@@ -153,6 +155,44 @@ object MultiHashSignature
       leafSalt: LeafSalt,
   ): MultiHashSignature =
     new MultiHashSignature(signature, inclusionPath, leafSalt)
+
+  /** The tree over the salted leaves of items that are signed together with one signature. Sign
+    * [[root]] once, and pass the signature to [[signatures]] to obtain the multi-hash signature of
+    * each item.
+    */
+  final class SigningTree private (
+      val root: Hash,
+      // The salt and the inclusion path of each item's leaf, in the order of the items
+      saltsAndPaths: NonEmpty[Seq[(LeafSalt, InclusionPath)]],
+  ) {
+
+    /** The multi-hash signatures of the items, in the order of the hashes passed to
+      * [[SigningTree.create]]. Each of them consists of the given signature over [[root]], the salt
+      * of the item's leaf and the inclusion path of that leaf.
+      */
+    def signatures(rootSignature: Signature): NonEmpty[Seq[MultiHashSignature]] =
+      saltsAndPaths.map { case (salt, path) => new MultiHashSignature(rootSignature, path, salt) }
+  }
+
+  object SigningTree {
+
+    /** Creates the tree over the given hashes, with a fresh random salt for each leaf. Duplicate
+      * hashes occupy separate leaves with separate salts. Fails if there are more than
+      * [[MerkleHashTree.MaxSize]] hashes.
+      */
+    def create(hashes: NonEmpty[Seq[Hash]], random: RandomOps): Either[String, SigningTree] = {
+      val (salts, leaves) = hashes.map { hash =>
+        val salt = LeafSalt.generate(random)
+        (salt, saltedLeaf(salt, hash))
+      }.unzip
+      for {
+        tree <- MerkleHashTree.create(leaves)
+        saltsAndPaths <- salts.zipWithIndex.toNEF.traverse { case (salt, index) =>
+          tree.pathFor(index).map(salt -> _).toRight(s"No inclusion path for leaf $index")
+        }
+      } yield new SigningTree(tree.root, saltsAndPaths)
+    }
+  }
 
   /** Parses a multi-hash signature. The expected protocol version is passed on to the parsing of
     * the signature. The bound on the number of siblings of the inclusion path applies for every

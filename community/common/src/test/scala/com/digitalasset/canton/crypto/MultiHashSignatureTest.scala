@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.MultiHashSignature.LeafSalt
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
@@ -21,7 +22,7 @@ class MultiHashSignatureTest extends AnyWordSpec with BaseTest {
 
   // Five signed items with their salts, and the tree over their salted leaves
   private val items = (0 until 5).map(TestHash.digest)
-  private val salts = (0 until 5).map(i => LeafSalt.tryCreate(TestHash.digest(i).unwrap))
+  private val salts = (0 until 5).map(i => LeafSalt.create(TestHash.digest(i).unwrap).value)
   private val leaves: Seq[Hash] =
     items.zip(salts).map { case (item, salt) => MultiHashSignature.saltedLeaf(salt, item) }
   private val tree = MerkleHashTree.tryCreate(NonEmpty.from(leaves).value)
@@ -172,6 +173,36 @@ class MultiHashSignatureTest extends AnyWordSpec with BaseTest {
 
     "print the inclusion path and the leaf salt" in {
       withPath.toString should (include("inclusionPath") and include("leafSalt"))
+    }
+  }
+
+  "SigningTree" should {
+    val random = new SymbolicPureCrypto
+
+    def signAll(hashes: NonEmpty[Seq[Hash]]): (Hash, NonEmpty[Seq[MultiHashSignature]]) = {
+      val signingTree = MultiHashSignature.SigningTree.create(hashes, random).value
+      (signingTree.root, signingTree.signatures(signature))
+    }
+
+    "produce one signature per hash, in order, that leads from the hash to the root" in {
+      forAll(Table("number of hashes", 1, 2, 3, 4, 5, 8, 13)) { n =>
+        val hashes = NonEmpty.from((0 until n).map(TestHash.digest)).value
+        val (root, signatures) = signAll(hashes)
+
+        signatures.forgetNE should have size n.toLong
+        hashes.zip(signatures).foreach { case (hash, multiHashSignature) =>
+          withClue(s"at inclusion path ${multiHashSignature.inclusionPath}") {
+            multiHashSignature.signature shouldBe signature
+            multiHashSignature.rootHash(hash) shouldBe root
+          }
+        }
+      }
+    }
+
+    "salt every leaf with a different salt" in {
+      val (_, signatures) = signAll(NonEmpty.from(items).value)
+
+      signatures.forgetNE.map(_.leafSalt).toSet should have size items.size.toLong
     }
   }
 }

@@ -1,0 +1,25 @@
+name: Setup GCP credentials for cn-topology-snapshots
+description: >
+  Setup GCP credentials for cn-topology-snapshots tests.
+  This wrapper delegates to the generic GCP auth action with the topology-specific WIF settings.
+
+inputs:
+  service_account_key:
+    description: Service-account JSON key for key-based authentication when WIF is unavailable.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve DA Images WIF configuration
+      id: da_images_wif
+      uses: ./.github/actions/utils/resolve_da_images_wif
+
+    - name: Setup GCP credentials for cn-topology-snapshots
+      uses: ./.github/actions/utils/setup_gcp
+      with:
+        service_account_key: ${{ inputs.service_account_key }}
+        workload_identity_provider: ${{ steps.da_images_wif.outputs.workload_identity_provider }}
+        service_account: ${{ steps.da_images_wif.outputs.service_account }}
+        token_format: access_token

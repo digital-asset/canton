@@ -1,0 +1,77 @@
+name: Test Ping Windows
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: false
+        type: string
+        default: windows-latest
+
+permissions:
+  contents: read
+
+jobs:
+  test_ping_windows:
+    name: Test Ping Windows
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/actions/test/set_automatic_protocol_version
+
+      - name: Download packaged community release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: package-community-release.zip
+          path: ${{ runner.temp }}/package-community-artifacts
+
+      - name: Extract community release
+        shell: pwsh
+        run: |
+          $artifactDir = Join-Path $env:RUNNER_TEMP 'package-community-artifacts'
+          $extractDir = Join-Path $env:GITHUB_WORKSPACE 'workspace'
+          $archives = @(Get-ChildItem -LiteralPath $artifactDir -Filter 'canton-open-source-*.zip' -File |
+            Where-Object { $_.Name -notlike '*-api.zip' })
+          if ($archives.Count -ne 1) {
+            throw "Expected one community release ZIP (excluding API ZIPs) in $artifactDir, found $($archives.Count)"
+          }
+
+          $archive = $archives[0]
+          Write-Host "Extracting $($archive.Name) into $extractDir"
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $extractDir -Force
+          # The ZIP's top-level directory matches its filename without .zip.
+          $releaseDir = Join-Path $extractDir $archive.BaseName
+          "CANTON_RELEASE_DIR=$releaseDir" >> $env:GITHUB_ENV
+
+      - name: Allow automatic protocol version selection
+        uses: ./.github/actions/test/set_automatic_protocol_version
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Run ping on Windows release
+        shell: pwsh
+        run: |
+          $cantonBat = Join-Path $env:CANTON_RELEASE_DIR 'bin/canton.bat'
+          if (-not (Test-Path -LiteralPath $cantonBat -PathType Leaf)) {
+            throw "Could not find canton.bat in the extracted community release: $cantonBat"
+          }
+
+          $topologyConf = Join-Path $env:CANTON_RELEASE_DIR 'examples/01-simple-topology/simple-topology.conf'
+          $pingScript = Join-Path $env:CANTON_RELEASE_DIR 'examples/01-simple-topology/simple-ping.canton'
+
+          & $cantonBat run -v -c $topologyConf $pingScript
+
+      - name: Upload log artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-ping-windows-log
+          path: log
+          if-no-files-found: warn

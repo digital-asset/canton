@@ -22,6 +22,13 @@ import com.digitalasset.canton.sequencer.api.v30.SequencerAuthentication.{
   LogoutResponse,
 }
 import com.digitalasset.canton.sequencer.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
+import com.digitalasset.canton.sequencer.api.v31.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService as VerifierBoundAuthenticationService
+import com.digitalasset.canton.sequencer.api.v31.{
+  SequencerAuthenticateRequest,
+  SequencerAuthenticateResponse,
+  SequencerChallengeRequest,
+  SequencerChallengeResponse,
+}
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   AuthenticationError,
   LogoutTokenDoesNotExist,
@@ -60,10 +67,58 @@ class GrpcSequencerAuthenticationService(
 
   private val pvv = ProtocolVersionValidation(protocolVersion)
 
-  /** This will complete the participant authentication process using the challenge information and
-    * returning a token to be used for further authentication.
+  /** Bind this service to the local sequencer identity and configured external P2P endpoint. The
+    * challenge discloses our identity to the signer; redemption reconstructs the signed hash using
+    * this same binding. Neither value may come from the authentication request, otherwise a relay
+    * could choose the verifier against which its captured signature is checked.
     */
-  override def authenticate(request: AuthenticateRequest): Future[AuthenticateResponse] = {
+  def forVerifier(
+      verifier: MemberAuthentication.Verifier
+  ): VerifierBoundAuthenticationService =
+    // The service is not bound if PV <= 37, but it rejects requests even if bound in that case.
+    new VerifierBoundAuthenticationService {
+      private def whenSupported[A](operation: => Future[A]): Future[A] =
+        if (MemberAuthentication.requiresVerifier(verifier.sequencerId, protocolVersion)) operation
+        else
+          Future.failed(
+            Status.UNIMPLEMENTED
+              .withDescription("Verifier-bound authentication requires protocol version 38")
+              .asRuntimeException()
+          )
+
+      override def sequencerAuthenticate(
+          request: SequencerAuthenticateRequest
+      ): Future[SequencerAuthenticateResponse] =
+        whenSupported(
+          authenticateInternal(
+            AuthenticateRequest(request.member, request.signature, request.nonce),
+            Some(verifier),
+          ).map(response => SequencerAuthenticateResponse(response.token, response.expiresAt))
+        )
+
+      override def sequencerChallenge(
+          request: SequencerChallengeRequest
+      ): Future[SequencerChallengeResponse] =
+        whenSupported(
+          challengeInternal(
+            ChallengeRequest(request.member, request.memberProtocolVersions, request.clientVersion),
+            verifierBound = true,
+          ).map { challenge =>
+            SequencerChallengeResponse(Some(challenge), verifier.sequencerId.toProtoPrimitive)
+          }
+        )
+    }
+
+  /** Redeem a member challenge response. Participants and mediators retain this RPC at every
+    * protocol version; sequencers may use it only below PV38.
+    */
+  override def authenticate(request: AuthenticateRequest): Future[AuthenticateResponse] =
+    authenticateInternal(request, None)
+
+  private def authenticateInternal(
+      request: AuthenticateRequest,
+      verifierO: Option[MemberAuthentication.Verifier],
+  ): Future[AuthenticateResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     (for {
       memberStr <- eitherT(
@@ -72,6 +127,7 @@ class GrpcSequencerAuthenticationService(
           .leftMap(err => (Status.INVALID_ARGUMENT.withDescription(err.toString), true))
       )
       member <- eitherT(deserializeMember(memberStr))
+      _ <- eitherT(checkAuthenticationMechanism(member, verifierO.nonEmpty))
       signature <- eitherT(
         ProtoConverter
           .parseRequired(Signature.fromProtoV30(pvv, _), "signature", request.signature)
@@ -83,7 +139,7 @@ class GrpcSequencerAuthenticationService(
           .leftMap(err => (Status.INVALID_ARGUMENT.withDescription(err.toString), true))
       )
       tokenAndExpiry <- authenticationService
-        .validateSignature(member, signature, providedNonce)
+        .validateSignature(member, signature, providedNonce, verifierO)
         .leftMap(handleAuthError)
     } yield {
       val AuthenticationTokenWithExpiry(token, expiry) = tokenAndExpiry
@@ -115,13 +171,34 @@ class GrpcSequencerAuthenticationService(
     }.asGrpcResponse
   }
 
-  /** This will return a random number (nonce) plus the fingerprint of the key the participant needs
-    * to use to complete the authentication process with this synchronizer. A handshake check is
-    * also done here to make sure that no participant can start authenticating without doing this
-    * check. While the pure handshake can be called without any prior setup, this endpoint will only
-    * work after topology state for the participant has been pushed to this synchronizer.
+  /** Issue a member challenge after protocol compatibility and topology checks. Requesting a nonce
+    * does not prove ownership of the claimed member identity; only redeeming its signature does.
+    * PV38 sequencers must use the verifier-bound challenge RPC instead.
     */
-  override def challenge(request: ChallengeRequest): Future[ChallengeResponse] = {
+  override def challenge(request: ChallengeRequest): Future[ChallengeResponse] =
+    challengeInternal(request, verifierBound = false)
+
+  // Enforce the choice at both challenge issuance and redemption, so PV38 sequencers cannot
+  //  bypass verifier binding by calling the still-available participant/mediator RPCs.
+  private def checkAuthenticationMechanism(
+      member: Member,
+      verifierBound: Boolean,
+  ): Either[(Status, Boolean), Unit] =
+    Either.cond(
+      verifierBound == MemberAuthentication.requiresVerifier(member, protocolVersion),
+      (),
+      (
+        Status.FAILED_PRECONDITION.withDescription(
+          "Incorrect authentication mechanism for member and protocol version"
+        ),
+        false,
+      ),
+    )
+
+  private def challengeInternal(
+      request: ChallengeRequest,
+      verifierBound: Boolean,
+  ): Future[ChallengeResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     (for {
       _ <- eitherT(handshakeValidation(request))
@@ -131,6 +208,7 @@ class GrpcSequencerAuthenticationService(
           .leftMap(err => (Status.INVALID_ARGUMENT.withDescription(err.toString), true))
       )
       member <- eitherT(deserializeMember(memberStr))
+      _ <- eitherT(checkAuthenticationMechanism(member, verifierBound))
       result <- authenticationService
         .generateChallenge(member)
         .leftMap(handleAuthError)

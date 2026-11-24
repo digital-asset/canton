@@ -78,6 +78,7 @@ message Value {
 
     TextMap text_map = 16;
 
+    // EVM-compatible unsigned 256-bit integer, encoded as a decimal string.
     bytes uint256 = 17;
 
     // user-defined datas

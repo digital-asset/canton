@@ -49,4 +49,7 @@ WARN  i\.g\.n\.s\.i\.n\.c\.ChannelInitializer - Failed to initialize a channel. 
 WARN  c\.d\.c\.s\.s\.DynamicGrpcServer:MediatorReplayBenchmark/.*\(PublicServer\): shutdown did not complete gracefully in allotted .* seconds\.
 WARN  c\.d\.c\.s\.c\.PeriodicAcknowledgements:MediatorReplayBenchmark/.* - Failed to acknowledge clean timestamp \(usually because sequencer is down\):
 
+# Ignore expected warning when CI enables cached decoding of validated archives
+WARN  c\.d\.d\.l\.a\.Decode\$ - Caching of decoded validated archives is enabled\.
+
 # Make sure to have a trailing newline

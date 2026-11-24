@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.jsonapi
 
 import com.daml.jwt.Jwt
 import com.daml.ledger.api.v2.admin.user_management_service.{CreateUserRequest, User}
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{AuthServiceConfig, CantonConfig}
 import com.digitalasset.canton.discard.Implicits.DiscardOps

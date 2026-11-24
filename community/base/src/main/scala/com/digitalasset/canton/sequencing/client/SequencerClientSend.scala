@@ -172,6 +172,14 @@ object SequencerClientSend {
       */
     def trafficCost: Option[Long]
 
+    /** Whether multiple copies of the request may have reached sequencers through amplification.
+      * Copies refused synchronously don't count.
+      *
+      * Check after the send result arrived. True doesn't mean multiple copies reached sequencers,
+      * but false means no other copy can still be delivered.
+      */
+    def mayHaveSentMultipleCopies: Boolean
+
     /** Sends the prepared request, just like `SequencerClientSend.sendAsync`.
       *
       * Only call this once. Preparation fixes the message ID, so calling it again while the first

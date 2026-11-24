@@ -63,14 +63,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Restore compile and sbt caches
-        if: ${{ inputs.script_argument != 'finish_release_process' }}
-        uses: ./.github/actions/build/restore_compile_sbt_caches
-
       - name: Authorize git
         uses: ./.github/actions/git/authorize_git
         with:
           github_token: ${{ env.REPO_GITHUB_TOKEN }}
+
+      - name: Restore compile and sbt caches
+        if: ${{ inputs.script_argument != 'finish_release_process' }}
+        uses: ./.github/actions/build/restore_compile_sbt_caches
 
       - name: Invoke propose.sh script for release step
         timeout-minutes: 90

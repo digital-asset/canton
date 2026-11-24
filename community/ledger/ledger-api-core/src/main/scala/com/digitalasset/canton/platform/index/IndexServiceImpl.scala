@@ -1157,7 +1157,7 @@ object IndexServiceImpl {
       )
       Some(
         InternalEventFormat(
-          templatePartiesFilter = TemplatePartiesFilter(
+          eventFilter = TemplatePartiesFilter(
             relation = templateFilter,
             templateWildcardParties = templateWildcardFilter,
           ),

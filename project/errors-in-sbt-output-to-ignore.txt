@@ -129,4 +129,7 @@ sbt-license-report: unable to find the value for property joda\.artifactId
 # Transient protoc failure due to race condition on the protocbridge script
 ^\[info\] Full protoc args:.*
 
+# Ignore expected warning when CI enables cached decoding of validated archives
+WARN com\.digitalasset\.daml\.lf\.archive\.Decode\$ -- Caching of decoded validated archives is enabled\.
+
 # Make sure to have a trailing newline

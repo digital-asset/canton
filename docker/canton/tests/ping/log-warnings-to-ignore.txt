@@ -7,3 +7,5 @@
 # sequencer; each failed attempt logs these. The test still fails if the connection never succeeds.
 Connection has failed validation since .*NOT_SERVING
 SYNC_SERVICE_BAD_CONNECTIVITY.*Connection pool failed to initialize within
+# Phase 1 calls ListKnownPackages without a token on purpose. Either field order.
+The command is missing a \(valid\) JWT token.*ListKnownPackages|ListKnownPackages.*The command is missing a \(valid\) JWT token

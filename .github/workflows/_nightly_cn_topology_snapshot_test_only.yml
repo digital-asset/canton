@@ -1,5 +1,4 @@
-name: Sequential Test
-
+name: Nightly CN Topology Snapshot Test Only
 on:
   workflow_call:
     inputs:
@@ -7,30 +6,15 @@ on:
         description: GitHub Actions runner label
         required: true
         type: string
-      protocol_version:
-        required: true
-        type: string
     secrets:
       DATADOG_API_KEY:
         required: true
-      SLACK_BOT_QA_NOTIFICATIONS:
-        required: false
-      GCLOUD_SHEETS_SA_KEY:
-        required: false
       GCLOUD_SERVICE_KEY:
         required: true
-      AWS_ACCESS_KEY_ID:
-        required: true
-      AWS_SECRET_ACCESS_KEY:
-        required: true
-      AWS_SESSION_TOKEN:
-        required: false
-      AWS_REGION:
-        required: false
 
 permissions:
-  actions: write
   contents: read
+  actions: write
   id-token: write
   issues: write
 
@@ -59,48 +43,35 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/utils/resolve_previous_artifact_run
         with:
-          artifact-name: sequential_test-timings-latest
+          artifact-name: nightly_cn_topology_snapshot_test_only-timings-latest
 
-  sequential_test:
-    name: Sequential Test (Shard ${{ matrix.shard }})
+  nightly_cn_topology_snapshot_test_only:
+    name: Nightly CN Topology Snapshot Test Only (shard ${{ matrix.shard }})
     needs: resolve_timings
     runs-on: ${{ inputs.runner }}
     strategy:
       fail-fast: false
-      max-parallel: 16
+      max-parallel: 4
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-    # Safety net, not the primary limit, mirroring the ordinary test job. A hung sbt run is caught
-    # first and gracefully by the 40m GNU-timeout cap in run_ordinary_tests, which this job shares.
-    # Sequential shards finish in about 15 minutes, so this job-level cap only matters for hangs
-    # outside sbt, and 60 stops a wedged shard from running for three hours.
-    timeout-minutes: 60
+        shard: [0, 1, 2, 3]
+    timeout-minutes: 270
     env:
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
-      # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
-      SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
-      SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS: ${{ vars.SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS }}
-      # Sheet key the alert's rota mention needs (select_rota.py), same job-level reason.
-      GCLOUD_SHEETS_SA_KEY: ${{ secrets.GCLOUD_SHEETS_SA_KEY }}
       GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
-      AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
-      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
-      AWS_RETRY_MODE: adaptive
-      AWS_MAX_ATTEMPTS: "10"
-      EXECUTOR_JVM_HEAP_SIZE: 14000M
+      EXECUTOR_JVM_HEAP_SIZE: 20000M
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with: {fetch-depth: 0}
 
       - name: Start Postgres container
-        id: postgres
+        id: start_postgres
         uses: ./.github/actions/utils/postgres/start_postgres_container_standard
         with:
           shard-index: ${{ matrix.shard }}
+
+      - name: Set Automatic Protocol Version
+        uses: ./.github/actions/test/set_automatic_protocol_version
 
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings
@@ -111,31 +82,40 @@ jobs:
           previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
           previous-timings-resolved: "true"
 
-      - name: Run tests (Shard ${{ matrix.shard }})
-        uses: ./.github/actions/test/run_ordinary_tests
+      - name: Setup GCP credentials for Topology Snapshot Tests
+        uses: ./.github/actions/test/setup_gcp_topology
         with:
-          exclude_unstable_tests: true
-          num_parallel_tasks: "4"
+          service_account_key: ${{ env.GCLOUD_SERVICE_KEY }}
+
+      - name: Run Nightly CN Topology Snapshot Tests
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: >-
+            dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+          fail_on_error_in_output: 'false'
+          num_test_buckets: '4'
           shard_index: ${{ matrix.shard }}
-          num_test_buckets: "16"
-          execution_context_size: "1"
+          num_parallel_tasks: '1'
+          include_patterns: ^com\.digitalasset\.canton\.integration\.tests\.nightly\.topology
+          setup_gcp_kms: 'false'
           test_file: test-full-class-names.log
           timings_file: ${{ github.job }}/.timings/timings.json
-          protocol_version: ${{ inputs.protocol_version }}
+          timeout: '240m'
+          max_single_test_minutes: '240'
+          rerun_max_single_test_minutes: '240'
 
       - name: Stop Postgres container
         if: always()
         uses: ./.github/actions/utils/postgres/stop_postgres_container
         with:
-          container-name: ${{ steps.postgres.outputs.container-name }}
+          container-name: ${{ steps.start_postgres.outputs.container-name }}
 
   aggregate_shard_outputs:
     name: Aggregate Shard Outputs
-    needs: sequential_test
+    needs: nightly_cn_topology_snapshot_test_only
     if: always()
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
-      caller_job: sequential_test
-      shard_job_result: ${{ needs.sequential_test.result }}
-      runner: ${{ inputs.runner }}
-      protocol_version: ${{ inputs.protocol_version }}
+      caller_job: nightly_cn_topology_snapshot_test_only
+      protocol_version: ''
+      shard_job_result: ${{ needs.nightly_cn_topology_snapshot_test_only.result }}

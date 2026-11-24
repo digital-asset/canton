@@ -35,6 +35,7 @@ import com.digitalasset.canton.platform.config.CommandServiceConfig
 import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.daml.lf.command.*
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.value.Value as Lf
@@ -216,7 +217,10 @@ final class CommandsValidator(
               sourceSynchronizerId <- requireSynchronizerId(assignCommand.value.source, "source")
               targetSynchronizerId <- requireSynchronizerId(assignCommand.value.target, "target")
               reassignmentId <- ReassignmentId
-                .fromProtoPrimitive(assignCommand.value.reassignmentId)
+                .fromProtoPrimitive(
+                  assignCommand.value.reassignmentId,
+                  ProtocolVersionValidation.AlwaysValidation,
+                )
                 .left
                 .map(_ =>
                   ValidationErrors.invalidField("reassignment_id", "Invalid reassignment ID")

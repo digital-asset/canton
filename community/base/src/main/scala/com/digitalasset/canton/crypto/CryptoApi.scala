@@ -42,7 +42,11 @@ import com.digitalasset.canton.health.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CryptoMetrics
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
@@ -178,10 +182,15 @@ trait CryptoPureApi
     with PasswordBasedEncryptionOps
     with JwksOps
 
-sealed trait CryptoPureApiError extends Product with Serializable with PrettyPrinting
+sealed trait CryptoPureApiError extends Product with Serializable with PrettyPrintingFromCompanion
 object CryptoPureApiError {
   final case class KeyParseAndValidateError(error: String) extends CryptoPureApiError {
-    override protected def pretty: Pretty[KeyParseAndValidateError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[KeyParseAndValidateError] =
+      KeyParseAndValidateError
+  }
+
+  object KeyParseAndValidateError extends PrettyPrintingCompanion[KeyParseAndValidateError] {
+    override protected val pretty: Pretty[KeyParseAndValidateError] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -195,12 +204,18 @@ trait CryptoPrivateStoreApi
     with EncryptionPrivateStoreOps
     with SigningPrivateStoreOps
 
-sealed trait SyncCryptoError extends Product with Serializable with PrettyPrinting
+sealed trait SyncCryptoError extends Product with Serializable with PrettyPrintingFromCompanion
 object SyncCryptoError {
 
   final case class SyncCryptoSessionKeyGenerationError(error: SigningKeyGenerationError)
       extends SyncCryptoError {
-    override protected def pretty: Pretty[SyncCryptoSessionKeyGenerationError] = prettyOfParam(
+    override def prettyCompanion: PrettyPrintingCompanion[SyncCryptoSessionKeyGenerationError] =
+      SyncCryptoSessionKeyGenerationError
+  }
+
+  object SyncCryptoSessionKeyGenerationError
+      extends PrettyPrintingCompanion[SyncCryptoSessionKeyGenerationError] {
+    override protected val pretty: Pretty[SyncCryptoSessionKeyGenerationError] = prettyOfParam(
       _.error
     )
   }
@@ -212,7 +227,11 @@ object SyncCryptoError {
       timestamp: CantonTimestamp,
       candidates: Seq[Fingerprint],
   ) extends SyncCryptoError {
-    override protected def pretty: Pretty[KeyNotAvailable] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[KeyNotAvailable] = KeyNotAvailable
+  }
+
+  object KeyNotAvailable extends PrettyPrintingCompanion[KeyNotAvailable] {
+    override protected val pretty: Pretty[KeyNotAvailable] = prettyOfClass(
       param("owner", _.owner),
       param("key purpose", _.keyPurpose),
       param("timestamp", _.timestamp),
@@ -221,27 +240,51 @@ object SyncCryptoError {
   }
 
   final case class SyncCryptoSigningError(error: SigningError) extends SyncCryptoError {
-    override protected def pretty: Pretty[SyncCryptoSigningError] = prettyOfParam(_.error)
+    override def prettyCompanion: PrettyPrintingCompanion[SyncCryptoSigningError] =
+      SyncCryptoSigningError
+  }
+
+  object SyncCryptoSigningError extends PrettyPrintingCompanion[SyncCryptoSigningError] {
+    override protected val pretty: Pretty[SyncCryptoSigningError] = prettyOfParam(_.error)
   }
 
   final case class SyncCryptoDecryptionError(error: DecryptionError) extends SyncCryptoError {
-    override protected def pretty: Pretty[SyncCryptoDecryptionError] = prettyOfParam(_.error)
+    override def prettyCompanion: PrettyPrintingCompanion[SyncCryptoDecryptionError] =
+      SyncCryptoDecryptionError
+  }
+
+  object SyncCryptoDecryptionError extends PrettyPrintingCompanion[SyncCryptoDecryptionError] {
+    override protected val pretty: Pretty[SyncCryptoDecryptionError] = prettyOfParam(_.error)
   }
 
   final case class SyncCryptoEncryptionError(error: EncryptionError) extends SyncCryptoError {
-    override protected def pretty: Pretty[SyncCryptoEncryptionError] = prettyOfParam(_.error)
+    override def prettyCompanion: PrettyPrintingCompanion[SyncCryptoEncryptionError] =
+      SyncCryptoEncryptionError
+  }
+
+  object SyncCryptoEncryptionError extends PrettyPrintingCompanion[SyncCryptoEncryptionError] {
+    override protected val pretty: Pretty[SyncCryptoEncryptionError] = prettyOfParam(_.error)
   }
 
   final case class StoreError(error: CryptoPrivateStoreError) extends SyncCryptoError {
-    override protected def pretty: Pretty[StoreError] =
-      prettyOfClass(unnamedParam(_.error))
+    override def prettyCompanion: PrettyPrintingCompanion[StoreError] = StoreError
+  }
+
+  object StoreError extends PrettyPrintingCompanion[StoreError] {
+    override protected val pretty: Pretty[StoreError] = prettyOfClass(unnamedParam(_.error))
   }
 
   /** Thrown when a sign message request does not support session signing keys, e.g., for a
     * non-protocol message.
     */
   final case class UnsupportedDelegationSignatureError(message: String) extends SyncCryptoError {
-    override protected def pretty: Pretty[UnsupportedDelegationSignatureError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[UnsupportedDelegationSignatureError] =
+      UnsupportedDelegationSignatureError
+  }
+
+  object UnsupportedDelegationSignatureError
+      extends PrettyPrintingCompanion[UnsupportedDelegationSignatureError] {
+    override protected val pretty: Pretty[UnsupportedDelegationSignatureError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
@@ -251,15 +294,29 @@ object SyncCryptoError {
     */
   final case class SyncCryptoDelegationSignatureCreationError(error: String)
       extends SyncCryptoError {
-    override protected def pretty: Pretty[SyncCryptoDelegationSignatureCreationError] =
+    override def prettyCompanion
+        : PrettyPrintingCompanion[SyncCryptoDelegationSignatureCreationError] =
+      SyncCryptoDelegationSignatureCreationError
+  }
+
+  object SyncCryptoDelegationSignatureCreationError
+      extends PrettyPrintingCompanion[SyncCryptoDelegationSignatureCreationError] {
+    override protected val pretty: Pretty[SyncCryptoDelegationSignatureCreationError] =
       prettyOfClass(
         unnamedParam(_.error.unquoted)
       )
   }
 
   final case class SyncCryptoDelegationHashingError(error: String) extends SyncCryptoError {
-    override protected def pretty: Pretty[SyncCryptoDelegationHashingError] =
-      prettyOfClass(unnamedParam(_.error.unquoted))
+    override def prettyCompanion: PrettyPrintingCompanion[SyncCryptoDelegationHashingError] =
+      SyncCryptoDelegationHashingError
+  }
+
+  object SyncCryptoDelegationHashingError
+      extends PrettyPrintingCompanion[SyncCryptoDelegationHashingError] {
+    override protected val pretty: Pretty[SyncCryptoDelegationHashingError] = prettyOfClass(
+      unnamedParam(_.error.unquoted)
+    )
   }
 }
 
@@ -291,6 +348,40 @@ trait SyncCryptoApi {
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, Signature]
+
+  /** Signs the given hashes with one signature over the root of a
+    * [[com.digitalasset.canton.crypto.MultiHashSignature$.SigningTree]], and returns the multi-hash
+    * signature of each hash, in the order of the hashes. The root is signed with [[sign]], so the
+    * signing key is selected in the same way, including session signing keys.
+    *
+    * @param hashes
+    *   the hashes to sign. Duplicate hashes get separate signatures.
+    * @param usage
+    *   restricts signing to private keys that have at least one matching usage
+    * @param signingTimestampOverrides
+    *   Optional overrides for selecting an approximate signing timestamp and validity end, used to
+    *   select the correct session signing key whenever session signing keys are enabled. As one key
+    *   signs all hashes, the validity end must cover the verification of every hash, e.g., the
+    *   latest maximum sequencing time or decision time among the messages that carry them.
+    */
+  def signHashes(
+      hashes: NonEmpty[Seq[Hash]],
+      usage: NonEmpty[Set[SigningKeyUsage]],
+      signingTimestampOverrides: Option[SigningTimestampOverrides],
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, SyncCryptoError, NonEmpty[Seq[MultiHashSignature]]] =
+    for {
+      signingTree <- EitherT.fromEither[FutureUnlessShutdown](
+        MultiHashSignature.SigningTree
+          .create(hashes, pureCrypto)
+          .leftMap[SyncCryptoError](err =>
+            SyncCryptoError.SyncCryptoSigningError(SigningError.InvalidHashSequence(err))
+          )
+      )
+      rootSignature <- sign(signingTree.root, usage, signingTimestampOverrides)
+    } yield signingTree.signatures(rootSignature)
 
   /** Verify signature of a given owner. Convenience method to lookup a key of a given owner,
     * synchronizer and timestamp and verify the result.
@@ -598,7 +689,7 @@ object Crypto {
                         batchingConfig,
                         loggerFactory,
                       )
-                      .leftMap(err => show"Failed to create crypto private store: $err")
+                      .leftMap(err => show"Failed to create crypto private store: ${err.toString}")
                     jceCrypto <- createCryptoWithJceProvider(
                       cryptoSchemes,
                       cryptoPublicStore,
@@ -611,7 +702,7 @@ object Crypto {
               for {
                 cryptoPrivateStore <- CryptoPrivateStore
                   .create(storage, releaseProtocolVersion, timeouts, batchingConfig, loggerFactory)
-                  .leftMap(err => show"Failed to create crypto private store: $err")
+                  .leftMap(err => show"Failed to create crypto private store: ${err.toString}")
                 jceCrypto <- createCryptoWithJceProvider(
                   cryptoSchemes,
                   cryptoPublicStore,

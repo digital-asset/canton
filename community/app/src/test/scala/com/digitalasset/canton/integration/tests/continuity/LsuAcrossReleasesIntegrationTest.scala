@@ -553,8 +553,7 @@ private object LsuAcrossReleasesIntegrationTest {
     */
   private val sequencerBlockKeysUnknownToReleases = Seq(
     "circuit-breaker.messages.lsu-sequencing-test",
-    "throughput-cap.delayed-activation",
-    "throughput-cap.messages.confirmation-response",
+    "throughput-cap.messages",
   )
 
   private def toRemovals(paths: Seq[String]): Set[(String, Option[(String, Any)])] =

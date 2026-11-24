@@ -32,7 +32,6 @@ class HashSpec extends AnyWordSpec with Inside with Matchers with TableDrivenPro
 
   private val packageId0 = Ref.PackageId.assertFromString("package")
   private val packageName0 = Ref.PackageName.assertFromString("package-name-0")
-
   def mkUpgradeFriendlyHash(
       templateId: Ref.Identifier,
       value: Value,

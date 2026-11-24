@@ -1,0 +1,67 @@
+name: Post top flaky tests
+
+# Post the most persistent open flaky-test issues to the flaky tests Slack channel. The scheduled
+# run posts for real (passes --post). A manual dispatch defaults to a dry run that only prints the
+# message, tick the "post" box to send it from a manual run too.
+on:
+  schedule:
+    # 06:00 UTC on workdays, after close_stale_flake_issues has run at 05:00.
+    - cron: '0 6 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      post:
+        description: 'Actually post to Slack (unchecked = dry run, logs only)'
+        type: boolean
+        default: false
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  post-top-flakes:
+    name: Rank open flaky issues and post the top ones
+    needs: pick_runner
+    runs-on: ${{ needs.pick_runner.outputs.runner }}
+    # Internal-only: reads the private flaky issues and posts to DA Slack. Skip on the OSS mirror.
+    # TODO(#34681): re-enable on the public repo after the OSS org switch.
+    if: github.repository == 'DACH-NY/canton'
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
+      SLACK_CHANNEL_ID_TEAM_CANTON_FLAKY_TESTS: ${{ vars.SLACK_CHANNEL_ID_TEAM_CANTON_FLAKY_TESTS }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Post top flaky tests
+        uses: ./.github/actions/nix/nix_run
+        with:
+          # Scheduled runs always post. A manual dispatch honors the "post" checkbox.
+          command: python3 scripts/ci/post_top_flakes.py ${{ (github.event_name == 'schedule' || inputs.post == true) && '--post' || '' }}
+
+  # A failed or cancelled scheduled run pings the CI rota in #team-canton-internal, so it is not
+  # left red in the Actions tab with nobody looking. A manual run has someone watching it.
+  notify:
+    name: Notify on Failure
+    needs: [pick_runner, post-top-flakes]
+    if: >-
+      always() &&
+      github.event_name == 'schedule' &&
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    uses: ./.github/workflows/_notify.yml
+    secrets: inherit
+    with:
+      needs_json: ${{ toJSON(needs) }}

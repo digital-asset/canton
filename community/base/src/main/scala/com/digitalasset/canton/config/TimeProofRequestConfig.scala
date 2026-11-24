@@ -6,7 +6,11 @@ package com.digitalasset.canton.config
 import cats.syntax.option.*
 import com.digitalasset.canton.admin.time.v30
 import com.digitalasset.canton.config
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
 /** Various config values for the time proof request sender
@@ -29,14 +33,20 @@ final case class TimeProofRequestConfig(
     maxSequencingDelay: NonNegativeFiniteDuration =
       TimeProofRequestConfig.defaultMaxSequencingDelay,
     requestTimeout: NonNegativeFiniteDuration = TimeProofRequestConfig.defaultRequestTimeout,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   private[config] def toProtoV30: v30.TimeProofRequestConfig = v30.TimeProofRequestConfig(
     initialRetryDelay = initialRetryDelay.toProtoPrimitive.some,
     maxRetryDelay = maxRetryDelay.toProtoPrimitive.some,
     maxSequencingDelay = maxSequencingDelay.toProtoPrimitive.some,
     requestTimeout = requestTimeout.toProtoPrimitive.some,
   )
-  override protected def pretty: Pretty[TimeProofRequestConfig] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[TimeProofRequestConfig] =
+    TimeProofRequestConfig
+
+}
+
+object TimeProofRequestConfig extends PrettyPrintingCompanion[TimeProofRequestConfig] {
+  override protected val pretty: Pretty[TimeProofRequestConfig] = prettyOfClass(
     paramIfNotDefault(
       "initialRetryDelay",
       _.initialRetryDelay,
@@ -58,10 +68,6 @@ final case class TimeProofRequestConfig(
       TimeProofRequestConfig.defaultRequestTimeout,
     ),
   )
-
-}
-
-object TimeProofRequestConfig {
 
   private val defaultRequestTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofMinutes(2)

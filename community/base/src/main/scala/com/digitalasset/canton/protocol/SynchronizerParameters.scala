@@ -317,6 +317,18 @@ object StaticSynchronizerParameters
     BftOrdererLimits.default,
   )
 
+  // Only v33 (and later) of the proto carries max_sequencers_per_synchronizer
+  private[protocol] val defaultMaxSequencersPerSynchronizerUntil = DefaultValueUntilExclusive[
+    StaticSynchronizerParameters,
+    StaticSynchronizerParameters.type,
+    PositiveInt,
+  ](
+    _.synchronizerLimits.maxSequencersPerSynchronizer,
+    "synchronizerLimits.maxSequencersPerSynchronizer",
+    rpvForNextValidationBoundPV,
+    SynchronizerLimits.DefaultMaxSequencersPerSynchronizer,
+  )
+
   // Only v33 (and later) of the proto carries max_vetted_packages_per_participant
   private[protocol] val defaultMaxVettedPackagesPerParticipantUntil = DefaultValueUntilExclusive[
     StaticSynchronizerParameters,
@@ -327,18 +339,6 @@ object StaticSynchronizerParameters
     "synchronizerLimits.topologyLimits.maxVettedPackagesPerParticipant",
     rpvForNextValidationBoundPV,
     TopologyLimits.default.maxVettedPackagesPerParticipant,
-  )
-
-  // Only v33 (and later) of the proto carries max_sequencers_per_synchronizer
-  private[protocol] val defaultMaxSequencersPerSynchronizerUntil = DefaultValueUntilExclusive[
-    StaticSynchronizerParameters,
-    StaticSynchronizerParameters.type,
-    PositiveInt,
-  ](
-    _.synchronizerLimits.topologyLimits.maxSequencersPerSynchronizer,
-    "synchronizerLimits.topologyLimits.maxSequencersPerSynchronizer",
-    rpvForNextValidationBoundPV,
-    TopologyLimits.default.maxSequencersPerSynchronizer,
   )
 
   // Only v33 (and later) of the proto carries max_mediators_per_group
@@ -422,8 +422,8 @@ object StaticSynchronizerParameters
     defaultMaxSignaturesPerEnvelopeLimitUntil,
     defaultMaxQuorumSizeUntil,
     defaultBftOrdererLimitsUntil,
-    defaultMaxVettedPackagesPerParticipantUntil,
     defaultMaxSequencersPerSynchronizerUntil,
+    defaultMaxVettedPackagesPerParticipantUntil,
     defaultMaxMediatorsPerGroupUntil,
     defaultMaxSignaturesPerTransactionUntil,
     defaultMaxTransactionHashesPerMultiSignatureUntil,

@@ -44,7 +44,7 @@ object ConnectToSequencerChannelResponse
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.sequencerChannel)(
       v30.ConnectToSequencerChannelResponse
     )(
-      supportedProtoVersion(_)(fromProtoV30),
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     ),
   )
@@ -77,7 +77,8 @@ object ConnectToSequencerChannelResponse
   }
   object Response {
     def fromProtoV30(
-        response: v30_ChannelResponse
+        pvv: ProtocolVersionValidation,
+        response: v30_ChannelResponse,
     ): ParsingResult[Response] =
       response match {
         case v30_ChannelResponse.Empty =>
@@ -85,7 +86,7 @@ object ConnectToSequencerChannelResponse
         case v30_ChannelResponse.Connected(connectedP) =>
           SequencerChannelConnectedToAllEndpoints.fromProtoV30(connectedP).map(_ => Connected)
         case v30_ChannelResponse.SessionKey(keyP) =>
-          SequencerChannelSessionKey.fromProtoV30(keyP).map(SessionKey.apply)
+          SequencerChannelSessionKey.fromProtoV30(pvv, keyP).map(SessionKey.apply)
         case v30_ChannelResponse.SessionKeyAcknowledgement(keyAckP) =>
           SequencerChannelSessionKeyAck.fromProtoV30(keyAckP).map(_ => SessionKeyAck)
         case v30_ChannelResponse.Payload(payloadP) =>
@@ -110,11 +111,12 @@ object ConnectToSequencerChannelResponse
     )
 
   def fromProtoV30(
-      requestP: v30.ConnectToSequencerChannelResponse
+      pvv: ProtocolVersionValidation,
+      requestP: v30.ConnectToSequencerChannelResponse,
   ): ParsingResult[ConnectToSequencerChannelResponse] = {
     val v30.ConnectToSequencerChannelResponse(responseP, traceContextP) = requestP
     for {
-      response <- Response.fromProtoV30(responseP)
+      response <- Response.fromProtoV30(pvv, responseP)
       traceContext <- SerializableTraceContext.fromProtoV30Opt(traceContextP).map(_.unwrap)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield ConnectToSequencerChannelResponse(response, traceContext)(rpv)

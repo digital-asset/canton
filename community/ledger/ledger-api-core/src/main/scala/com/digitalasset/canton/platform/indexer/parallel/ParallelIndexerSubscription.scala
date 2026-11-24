@@ -10,7 +10,15 @@ import com.daml.metrics.api.MetricsContext.withMetricLabels
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.ledger.participant.state.Update.{CommitRepair, ContractInfo}
+import com.digitalasset.canton.ledger.participant.state.Update.{
+  CommitRepair,
+  ContractInfo,
+  ParticipantEventUpdate,
+  ReassignmentAccepted,
+  ReceivedAcsCommitment,
+  TopologyTransactionEffective,
+  TransactionAccepted,
+}
 import com.digitalasset.canton.ledger.participant.state.{
   ParticipantEvent,
   Reassignment,
@@ -56,7 +64,7 @@ import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.nonempty.NonEmpty
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
-import org.apache.pekko.stream.{KillSwitches, Materializer, OverflowStrategy}
+import org.apache.pekko.stream.{KillSwitch, Materializer, OverflowStrategy}
 import org.apache.pekko.{Done, NotUsed}
 
 import java.sql.Connection
@@ -147,7 +155,7 @@ private[platform] final case class ParallelIndexerSubscription[Batch](
         contractStore
           .lookupBatchedInternalIdsNonReadThrough(contractIds)(tc)
 
-    val ((sourceQueue, uniqueKillSwitch), completionFuture) = Source
+    val (sourceQueue, completionFuture) = Source
       .queue[(Long, Update)](
         bufferSize = maxInputBufferSize,
         overflowStrategy = OverflowStrategy.backpressure,
@@ -342,11 +350,16 @@ private[platform] final case class ParallelIndexerSubscription[Batch](
           case _ => Flow.apply.map(_ => ())
         }
       )
-      .viaMat(KillSwitches.single)(Keep.both)
       .toMat(Sink.ignore)(Keep.both)
       .run()(materializer)
     (
-      Handle(completionFuture.map(_ => ())(materializer.executionContext), uniqueKillSwitch),
+      Handle(
+        completed = completionFuture.map(_ => ())(materializer.executionContext),
+        killSwitch = new KillSwitch {
+          override def shutdown(): Unit = sourceQueue.complete()
+          override def abort(ex: Throwable): Unit = sourceQueue.fail(ex)
+        },
+      ),
       sourceDone =>
         new PekkoSourceQueueToFutureQueue(
           sourceQueue = sourceQueue,
@@ -649,10 +662,6 @@ object ParallelIndexerSubscription {
         u.copy(
           contractInfos = fixContractInfos(overrides)(u.contractInfos)
         )
-      case u: Update.RepairTransactionAccepted =>
-        u.copy(
-          contractInfos = fixContractInfos(overrides)(u.contractInfos)
-        )
       case u: Update.SequencedReassignmentAccepted =>
         u.copy(
           reassignment = fixReassignments(overrides)(u.reassignment)
@@ -661,11 +670,6 @@ object ParallelIndexerSubscription {
         u.copy(
           reassignment = fixReassignments(overrides)(u.reassignment)
         )
-      case u: Update.OnPRReassignmentAccepted =>
-        u.copy(
-          reassignment = fixReassignments(overrides)(u.reassignment)
-        )
-
       case u: Update.CommandRejected => u
       case u: Update.CommitRepair => u
       case u: Update.EmptyAcsPublicationRequired => u
@@ -735,15 +739,28 @@ object ParallelIndexerSubscription {
     metrics.indexer.inputMapping.batchSize.update(input.size)(MetricsContext.Empty)
 
     val batch = input.iterator.flatMap { case (offset, update) =>
+      val sequencedLogMessage = update match {
+        case sequenced: SynchronizerUpdate =>
+          s"recordTime=${sequenced.recordTime} synchronizerId=${sequenced.synchronizerId.toLengthLimitedString}"
+        case _ => ""
+      }
+      val updateIdOpt = update match {
+        case u: TransactionAccepted => Some(u.updateId)
+        case u: ReassignmentAccepted => Some(u.updateId)
+        case u: ParticipantEventUpdate => Some(u.updateId)
+        case u: TopologyTransactionEffective => Some(u.updateId)
+        case u: ReceivedAcsCommitment => Some(u.updateId)
+        case _ => None
+      }
+      val updateIdString = updateIdOpt.map(updateId => s"updateId=${updateId.toHexString}")
+      val logMessage =
+        s"Phase 7: Storing at offset=${offset.unwrap} ${update.getClass.getSimpleName} $sequencedLogMessage $updateIdString"
       update match {
-        case _: Update.TransactionAccepted | _: Update.ReassignmentAccepted =>
-          logger.info(
-            s"Phase 7: Storing at offset=${offset.unwrap} $update"
-          )(update.traceContext)
+        case _: Update.TransactionAccepted | _: Update.ReassignmentAccepted |
+            _: Update.ParticipantEventUpdate =>
+          logger.info(logMessage)(update.traceContext)
         case _ =>
-          logger.debug(
-            s"Storing at offset=${offset.unwrap} $update"
-          )(update.traceContext)
+          logger.debug(logMessage)(update.traceContext)
       }
       toDbDto(offset)(update)
     }.toVector

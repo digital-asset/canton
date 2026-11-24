@@ -5,6 +5,10 @@ package com.digitalasset.canton.platform
 
 import com.digitalasset.daml.lf.data.Ref.NameTypeConRef
 
+sealed trait EventFilter extends ((NameTypeConRef, Set[String], ContractId) => Boolean) {
+  def allFilterParties: Option[Set[Party]]
+}
+
 /** This class represents the filters used in transactions and contracts fetching based on the
   * templates or interfaces they implement and the parties included.
   *
@@ -19,19 +23,13 @@ import com.digitalasset.daml.lf.data.Ref.NameTypeConRef
 final case class TemplatePartiesFilter(
     relation: Map[NameTypeConRef, Option[Set[Party]]],
     templateWildcardParties: Option[Set[Party]],
-) extends ((NameTypeConRef, Set[String]) => Boolean) {
-  def apply(templateId: NameTypeConRef, parties: Set[String]) = {
-    val matchesByWildcard: Boolean =
-      templateWildcardParties match {
-        case Some(include) => parties.exists(p => include.map(_.toString)(p))
-        case None => parties.nonEmpty // the witnesses should not be empty
-      }
+) extends EventFilter {
+  def apply(templateId: NameTypeConRef, parties: Set[String], contractId: ContractId) = {
+    val matchesByWildcard: Boolean = EventFilter.checkPartyFilter(templateWildcardParties, parties)
 
     def matchesByTemplateId(templateId: NameTypeConRef): Boolean =
       relation.get(templateId) match {
-        case Some(Some(include)) =>
-          parties.exists(include.map(_.toString)) // specific parties for the template
-        case Some(None) => parties.nonEmpty // party wildcard
+        case Some(filterParties) => EventFilter.checkPartyFilter(filterParties, parties)
         case None => false // templateId is not in the filter
       }
 
@@ -46,4 +44,30 @@ final case class TemplatePartiesFilter(
       Some(partiesO.flatten.flatten.toSet)
     }
   }
+}
+
+/** Filters events by the contracts they belong to.
+  *
+  * @param contractIds
+  *   the contract ids to match, mapped to their internal contract ids
+  * @param readAsParty
+  *   if defined, only events witnessed by at least one of these parties match
+  */
+final case class ContractIdEventFilter(
+    contractIds: Map[ContractId, Long],
+    readAsParty: Option[Set[Party]],
+) extends EventFilter {
+  def apply(templateId: NameTypeConRef, parties: Set[String], contractId: ContractId): Boolean =
+    contractIds.contains(contractId) && EventFilter.checkPartyFilter(readAsParty, parties)
+  override def allFilterParties: Option[Set[Party]] = readAsParty
+
+}
+
+object EventFilter {
+  def checkPartyFilter(filterParties: Option[Set[Party]], eventWitnesses: Set[String]): Boolean =
+    filterParties match {
+      case Some(include) => eventWitnesses.exists(p => include.map(_.toString)(p))
+      case None => eventWitnesses.nonEmpty // the witnesses should not be empty
+    }
+
 }

@@ -1,0 +1,127 @@
+name: Nightly Test Upgrades Matrix And Check
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+      SLACK_WEBHOOK_TEAM_CANTON_INTERNAL:
+        required: false
+      GCLOUD_SERVICE_KEY:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SESSION_TOKEN:
+        required: false
+      AWS_REGION:
+        required: false
+
+permissions:
+  actions: write
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  nightly_test_upgrades_matrix_and_check:
+    name: Nightly Test Upgrades Matrix And Check
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 220
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_RETRY_MODE: adaptive
+      AWS_MAX_ATTEMPTS: "10"
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 1}
+
+      - name: Start Postgres container
+        id: start_postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: 0
+
+      - name: Allow automatic protocol version selection
+        uses: ./.github/actions/test/set_automatic_protocol_version
+
+      # Parallelism matches the CircleCI job, which inherits $EXECUTOR_NUM_CPUS (8) for both.
+      # Neither run has a failed-only rerun, as on CircleCI: a flake must fail the job
+      # instead of passing on retry, and a rerun would not fit in the job's timeout-minutes.
+      - name: Run Upgrade Check Tests
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: '"daml-lf-upgrade-check-test / Test / test"'
+          execution_context_size: '8'
+          failed_only_rerun: 'false'
+          num_parallel_tasks: '8'
+          num_test_buckets: '0'
+          report_to_datadog: 'false'
+          # Cleanup runs once, after the matrix run below, as on CircleCI.
+          skip_cleanup: 'true'
+          timeout: '20m'
+
+      # Each UpgradesMatrixIntegration class runs its own Canton environment, and
+      # ConcurrentEnvironmentLimiter allows only 2 at once by default, so num_parallel_tasks
+      # alone leaves most classes waiting. Append to SBT_OPTS rather than setting it in env:,
+      # which would drop the runner's maven mirror settings.
+      - name: Raise integration test environment concurrency
+        run: echo "SBT_OPTS=${SBT_OPTS:-} -Dcanton-test.integration.concurrency=4" >> "$GITHUB_ENV"
+        shell: bash
+
+      - name: Run Upgrades Matrix Tests
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: >-
+            dumpClassPath "testOnly com.digitalasset.canton.integration.tests.UpgradesMatrixIntegration*
+            -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+          execution_context_size: '8'
+          failed_only_rerun: 'false'
+          num_parallel_tasks: '8'
+          num_test_buckets: '0'
+          # Kept off the flaky test rota, failures ping the owner directly (see the Slack step below).
+          report_to_datadog: 'false'
+          # Already restored and set up by the upgrade check run above.
+          restore_compile_sbt_caches: 'false'
+          setup_gcp_kms: 'false'
+          # Must stay below the job's timeout-minutes so the sbt wrapper reports the timeout
+          # and the cleanup steps still run.
+          timeout: '180m'
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.start_postgres.outputs.container-name }}
+
+      - name: Slack Failure Notification
+        # Posts to DA Slack and needs DA secrets, so skip on the OSS mirror, like _notify.yml.
+        if: (failure() || cancelled()) && github.repository == 'DACH-NY/canton'
+        uses: ./.github/actions/slack/slack_notify_failure_with_volunteer
+        with:
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_TEAM_CANTON_INTERNAL }}
+          failed_job: nightly_test_upgrades_matrix_and_check
+          fixed_volunteer: U03HCPABC9M # Dylan
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: nightly_test_upgrades_matrix_and_check
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: nightly_test_upgrades_matrix_and_check
+      shard_job_result: ${{ needs.nightly_test_upgrades_matrix_and_check.result }}
+      protocol_version: ""

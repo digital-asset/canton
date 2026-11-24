@@ -46,9 +46,10 @@ object UpdatesPageToken {
     * structure or the request checksum algorithm is changed.
     *
     * Version 2: the request checksum includes the
-    * UpdateFormat.include_transactions_and_reassignments field.
+    * UpdateFormat.include_transactions_and_reassignments field. Version 3: the request checksum
+    * includes filtersByContractId field of update format
     */
-  val Version: Int = 2
+  val Version: Int = 3
 
   def requestChecksum(request: update_service.GetUpdatesPageRequest): ByteString =
     PageTokenUtils.toChecksum(

@@ -16,7 +16,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
 
       - name: Restore SBT caches
         id: restore_sbt_cache
@@ -40,7 +40,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
       - name: Check SQL table definitions
         uses: ./.github/actions/build/check_sql
 
@@ -50,7 +50,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
       - name: Check Protobuf Required/Optional requirements
         uses: ./.github/actions/nix/nix_run
         with:
@@ -75,7 +75,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
       - name: Lint workflows with actionlint
         uses: ./.github/actions/nix/nix_run
         with:

@@ -68,24 +68,28 @@ class MemberAuthenticationStore(
   // NONCE OPERATIONS
   // ==============================================================================================
 
-  /** If a nonce exists for the member, return it. If not, generate it using the passed generation
-    * logic in the by-name parameter.
+  /** If a valid nonce exists for the member, return it. If not, generate it using the passed
+    * generation logic in the by-name parameter.
     */
-  def fetchOrGenerateNonce(member: Member, freshNonce: => StoredNonce): StoredNonce =
+  def fetchOrGenerateNonce(
+      member: Member,
+      now: CantonTimestamp,
+      freshNonce: => StoredNonce,
+  ): StoredNonce =
     nonces.get().get(member) match {
-      case Some(existing) => existing
+      case Some(existing) if existing.expireAt > now => existing
       // case where the member doesn't exist as a key in the map
-      case None =>
+      case _ =>
         // The nonce is generated only if it doesn't already exist
         val generated = freshNonce
 
         val finalMap = nonces.updateAndGet { currentMap =>
-          // Check again if the member exists as a key in the map.
+          // Check again if a valid, non-expired nonce exists for the member.
           // This prevents race conditions between threads calling the
           // method concurrently, by ensuring the insertion is done
           // only once by the winning thread.
-          if (currentMap.contains(member)) currentMap
-          // Insert the nonce only if the member is not in the current map
+          if (currentMap.get(member).exists(_.expireAt > now)) currentMap
+          // Insert or replace the nonce if missing or expired
           else currentMap + (member -> generated)
         }
 

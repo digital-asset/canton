@@ -14,7 +14,6 @@ import com.digitalasset.canton.ledger.participant.state.RepairUpdate
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
@@ -288,21 +287,6 @@ private[repair] final class RepairServiceHelpers(
       )
     } yield dp
 
-  def runConsecutiveAndAwaitUS[B](
-      description: String,
-      code: => EitherT[FutureUnlessShutdown, String, B],
-  )(implicit
-      traceContext: TraceContext
-  ): Either[String, B] = {
-    logger.info(s"Queuing $description")
-
-    // repair commands can take an unbounded amount of time
-    parameters.processingTimeouts.unbounded.awaitUS(description) {
-      logger.info(s"Queuing $description")
-      executionQueue.executeEUS(code, description).value
-    }
-  }.onShutdown(throw GrpcErrors.AbortedDueToShutdown.Error().asGrpcError)
-
   def runConsecutive[B](
       description: String,
       code: => EitherT[FutureUnlessShutdown, String, B],
@@ -310,7 +294,12 @@ private[repair] final class RepairServiceHelpers(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, B] = {
     logger.info(s"Queuing $description")
-    executionQueue.executeEUS(code, description)
+
+    /*
+     We don't want to fail the queue if the operation fails:
+     clean up of the stores will be done upon next reconnect to synchronizer.
+     */
+    executionQueue.executeEUS(code, description, forceRecoverOnFailure = true)
   }
 
   def withRepairIndexer(code: FutureQueue[RepairUpdate] => EitherT[Future, String, Unit])(implicit

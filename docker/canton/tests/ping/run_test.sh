@@ -8,6 +8,20 @@ oci_path=${OCI_PATH:-"local/da-images/public-unstable/docker/"}
 
 export RELEASE_SUFFIX="$release_suffix"
 export OCI_PATH="$oci_path"
+
+# PQS_IMAGE enables the pqs profile and phase 3, otherwise phase 3 is skipped.
+declare -a COMPOSE_PROFILE_ARGS=()
+declare -a UP_SERVICES=(test)
+if [[ -n "${PQS_IMAGE:-}" ]]; then
+  echo "▶️ PQS_IMAGE set ($PQS_IMAGE): running full smoke with PQS."
+  COMPOSE_PROFILE_ARGS+=(--profile pqs)
+  UP_SERVICES=(test pqs)
+  export SMOKE_PQS_PGHOST="canton-postgres"
+else
+  echo "▶️ PQS_IMAGE unset: running base smoke (phases 0-2), skipping PQS phase."
+  export SMOKE_PQS_PGHOST=""
+fi
+
 # Where to dump logs if the test fails
 LOG_DIR="ci-artifacts/compose-logs"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,23 +33,23 @@ collect_logs() {
   echo "📥 Collecting docker compose diagnostics to $LOG_DIR"
 
   # ps (json), full stack logs
-  docker compose ps --format json     > "$LOG_DIR/ps.json"          || true
-  docker compose logs --no-color --timestamps > "$LOG_DIR/stack.log" || true
+  docker compose "${COMPOSE_PROFILE_ARGS[@]}" ps --format json     > "$LOG_DIR/ps.json"          || true
+  docker compose "${COMPOSE_PROFILE_ARGS[@]}" logs --no-color --timestamps > "$LOG_DIR/stack.log" || true
 
   # Per-service logs (helps when one chatty service drowns the rest)
-  for s in $(docker compose config --services 2>/dev/null || true); do
-    docker compose logs --no-color --timestamps "$s" > "$LOG_DIR/$s.log" || true
+  for s in $(docker compose "${COMPOSE_PROFILE_ARGS[@]}" config --services 2>/dev/null || true); do
+    docker compose "${COMPOSE_PROFILE_ARGS[@]}" logs --no-color --timestamps "$s" > "$LOG_DIR/$s.log" || true
   done
 
   # Capture the resolved compose config for debugging
-  docker compose config > "$LOG_DIR/resolved-compose.yml" 2>/dev/null || true
+  docker compose "${COMPOSE_PROFILE_ARGS[@]}" config > "$LOG_DIR/resolved-compose.yml" 2>/dev/null || true
 }
 
 check_service_logs() {
   local found=0
   local scanned=0
 
-  for service in participant sequencer mediator synchronizer; do
+  for service in participant participant2 sequencer mediator synchronizer; do
     local log="$LOG_DIR/$service.log"
     [[ -f "$log" ]] || continue
     scanned=$((scanned + 1))
@@ -67,7 +81,7 @@ check_service_logs() {
 
 down_stack() {
   echo "🧹 Cleaning up docker compose..."
-  docker compose down -v || true
+  docker compose "${COMPOSE_PROFILE_ARGS[@]}" down -v || true
 }
 
 # Ensure we clean up the stack even on Ctrl-C etc.
@@ -76,7 +90,8 @@ trap 'down_stack' EXIT
 # --- run ---------------------------------------------------------------------
 echo "▶️ Building & starting stack (RELEASE_SUFFIX=$RELEASE_SUFFIX)..."
 set +e
-docker compose up --build --abort-on-container-exit --exit-code-from test test
+docker compose "${COMPOSE_PROFILE_ARGS[@]}" up --build \
+  --abort-on-container-exit --exit-code-from test "${UP_SERVICES[@]}"
 rc=$?
 set -e
 

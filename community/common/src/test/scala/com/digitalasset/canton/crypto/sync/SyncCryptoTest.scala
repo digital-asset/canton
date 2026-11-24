@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.crypto.sync
 
+import cats.syntax.either.*
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.config.KmsConfig.Driver
@@ -262,6 +263,35 @@ trait SyncCryptoTest
         )
         .futureValueUS
         .valueOrFail("verification failed")
+    }
+
+    "sign several hashes with one signature" in {
+      val hashes = NonEmpty(Seq, TestHash.digest(1), TestHash.digest(2), TestHash.digest(3))
+      val cryptoSnapshot = p1.snapshot(testSnapshot.timestamp).futureValueUS
+
+      val signatures = cryptoSnapshot
+        .signHashes(hashes, defaultUsage, None)
+        .valueOrFail("sign failed")
+        .futureValueUS
+
+      signatures.forgetNE should have size hashes.size.toLong
+      // One signature over the root, shared by all hashes
+      val rootSignature = signatures.head1.signature
+      signatures.map(_.signature).toSet shouldBe Set(rootSignature)
+
+      hashes.zip(signatures).foreach { case (hash, multiHashSignature) =>
+        withClue(s"at inclusion path ${multiHashSignature.inclusionPath}") {
+          syncCryptoVerifierP2
+            .verifySignature(
+              testSnapshot,
+              multiHashSignature.rootHash(hash),
+              participant1.member,
+              multiHashSignature.signature,
+              defaultUsage,
+            )
+            .futureValueUS shouldBe Either.unit
+        }
+      }
     }
 
     "correctly sign and verify message from distinct participants" in {

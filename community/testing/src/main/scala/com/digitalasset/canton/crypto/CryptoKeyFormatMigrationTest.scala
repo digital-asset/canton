@@ -84,7 +84,7 @@ trait CryptoKeyFormatMigrationTest
             legacyPrivateKey.format shouldBe expectedLegacyFormat
 
             val newPublicKey = EncryptionPublicKey
-              .fromProtoV30(legacyPublicKey.toProtoV30)
+              .fromProtoV30(testedProtocolVersionValidation, legacyPublicKey.toProtoV30)
               .valueOrFail("deserialize public")
 
             newPublicKey.format shouldBe CryptoKeyFormat.DerX509Spki

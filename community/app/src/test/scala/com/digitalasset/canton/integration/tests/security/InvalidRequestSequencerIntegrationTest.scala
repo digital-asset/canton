@@ -60,6 +60,10 @@ sealed trait InvalidRequestSequencerIntegrationTest
       SequencerTestHelper
         .requestToken(
           daChannel,
+          com.digitalasset.canton.networking.Endpoint(
+            sequencer1.config.publicApi.address,
+            sequencer1.config.publicApi.port,
+          ),
           daId,
           participant1.id,
           SynchronizerCrypto(participant1.crypto, staticSynchronizerParameters1),
@@ -274,6 +278,10 @@ trait InvalidRequestSequencerDefaultLimitsIntegrationTest
       SequencerTestHelper
         .requestToken(
           daChannel,
+          com.digitalasset.canton.networking.Endpoint(
+            sequencer1.config.publicApi.address,
+            sequencer1.config.publicApi.port,
+          ),
           daId,
           participant1.id,
           SynchronizerCrypto(participant1.crypto, staticSynchronizerParameters1),

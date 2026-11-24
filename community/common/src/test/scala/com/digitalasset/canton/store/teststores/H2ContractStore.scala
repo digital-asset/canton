@@ -15,8 +15,9 @@ trait H2ContractStore extends H2StoresTest {
   def createContractStore(): DbContractStore = new DbContractStore(
     storage = inMemoryH2Storage,
     cacheConfig = CacheConfig(maximumSize = PositiveNumeric.tryCreate(100)),
-    dbQueryBatcherConfig = BatchAggregatorConfig.defaultsForTesting,
-    insertBatchAggregatorConfig = BatchAggregatorConfig.defaultsForTesting,
+    readBatchAggregatorConfig = BatchAggregatorConfig.defaultsForTesting,
+    writeBatchAggregatorConfig = BatchAggregatorConfig.defaultsForTesting,
+    insertMaxBatchSizeBytes = PositiveNumeric.tryCreate(1024 * 1024),
     timeouts = timeouts,
     loggerFactory = loggerFactory,
   )(h2InMemoryEc)

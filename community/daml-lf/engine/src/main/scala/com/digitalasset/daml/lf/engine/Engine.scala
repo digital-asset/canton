@@ -36,6 +36,7 @@ import com.digitalasset.daml.lf.transaction.{
   GlobalKey,
   NeedKeyProgression,
   Node,
+  SerializationVersion,
   SubmittedTransaction,
   Versioned,
   VersionedTransaction,
@@ -1219,10 +1220,10 @@ class Engine(
         case SResultQuestion(nothing) => nothing: Nothing
       }
     for {
-      view <- preprocessor.preprocessInterfaceView(templateId, argument, interfaceId)
+      expr <- preprocessor.preprocessInterfaceView(templateId, argument, interfaceId)
       sexpr <- runCompilerSafely(
         NameOf.qualifiedNameOfCurrentFunc,
-        compiledPackages.compiler.unsafeCompileInterfaceView(view),
+        compiledPackages.compiler.unsafeCompileInterfaceView(expr),
       )
       machine = Machine.fromPureSExpr(
         compiledPackages,
@@ -1231,8 +1232,11 @@ class Engine(
         config.iterationsBetweenInterruptions,
       )
       r <- interpret(machine, () => { machine.abort(); None })
-      version = machine.assignSerializationVersion(hasKey = false)
-    } yield Versioned(version, r.toNormalizedValue)
+      view = r.toNormalizedValue
+      version =
+        if (Value.hasUint256(view)) SerializationVersion.minUint256
+        else machine.assignSerializationVersion(hasKey = false)
+    } yield Versioned(version, view)
   }
 
   private def machineLogger(validating: Boolean)(implicit traceContext: TraceContext) = {

@@ -23,10 +23,6 @@ on:
           the shards never finished and merged timings are neither built nor uploaded, so a partial
           set does not overwrite the latest timings; the summary steps still run.
         type: string
-      runner:
-        description: GitHub Actions runner label
-        required: true
-        type: string
       protocol_version:
         required: true
         type: string
@@ -55,13 +51,13 @@ jobs:
         inputs.job_name != '' && inputs.job_name || inputs.caller_job,
         inputs.protocol_version != '' && format(' and PV={0}', inputs.protocol_version) || ''
       ) }}
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     if: always()
     env:
       CALLER_JOB: ${{ inputs.caller_job }}
       ALLOW_EMPTY_CURRENT_TIMINGS: ${{ inputs.allow_empty_current_timings }}
       # Prefix for both the run-over-run "latest" aggregate artifacts and the per-run shard
-      # bundle download pattern below. Keyed on the per-leg job_name when the caller sets one
+      # outputs download pattern below. Keyed on the per-leg job_name when the caller sets one
       # so that legs sharing a caller_job (github.job is constant per reusable workflow,
       # regardless of which top-level job/alias invoked it) stop colliding on each other's
       # artifacts, and falls back to caller_job for every other caller, keeping their artifact
@@ -71,30 +67,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           sparse-checkout-cone-mode: false
           sparse-checkout: |
-            .github/actions/nix/nix_run
-            .ci/nix-exec
-            shell.nix
-            nix
             scripts/ci/test_output/aggregate_test_summaries.py
             scripts/ci/test_output/summarize_test_results.py
             scripts/ci/split-tests/merge_timings.py
 
       - name: Create directories for aggregated outputs
-        uses: ./.github/actions/nix/nix_run
-        with:
-          command: |
-            mkdir -p \
-              "$CALLER_JOB/.timings" \
-              "$CALLER_JOB/.summary-state"
+        shell: bash
+        run: mkdir -p "$CALLER_JOB/.timings" "$CALLER_JOB/.summary-state"
 
-      - name: Download shard bundle artifacts
+      - name: Download shard outputs artifacts
         uses: actions/download-artifact@v7
         with:
-          pattern: ${{ env.LATEST_ARTIFACT_PREFIX }}-bundle-run-${{ github.run_id }}-pv-${{ inputs.protocol_version || 'default' }}-*
-          path: ${{ env.CALLER_JOB }}/.shard-bundles
+          pattern: ${{ env.LATEST_ARTIFACT_PREFIX }}-outputs-run-${{ github.run_id }}-pv-${{ inputs.protocol_version || 'default' }}-*
+          path: ${{ env.CALLER_JOB }}/.shard-outputs
         continue-on-error: true
 
       - name: Download summary state from previous run (reruns only)
@@ -114,14 +102,13 @@ jobs:
         continue-on-error: true
 
       - name: Build global summary
-        uses: ./.github/actions/nix/nix_run
-        with:
-          command: |
-            python3 scripts/ci/test_output/aggregate_test_summaries.py \
-              --input-glob "$CALLER_JOB/.shard-bundles/**/summary/test-summary.json" \
-              --summary-path "$GITHUB_STEP_SUMMARY" \
-              --previous-state "$CALLER_JOB/.summary-state/previous/summary-state.json" \
-              --state-output "$CALLER_JOB/.summary-state/summary-state.json"
+        shell: bash
+        run: |
+          python3 scripts/ci/test_output/aggregate_test_summaries.py \
+            --input-glob "$CALLER_JOB/.shard-outputs/**/summary/test-summary.json" \
+            --summary-path "$GITHUB_STEP_SUMMARY" \
+            --previous-state "$CALLER_JOB/.summary-state/previous/summary-state.json" \
+            --state-output "$CALLER_JOB/.summary-state/summary-state.json"
 
       - name: Link Datadog Test Optimization results
         # Experiment (PR #35868): the JUnit upload happens four levels deep inside
@@ -147,19 +134,18 @@ jobs:
 
       - name: Build merged timings
         if: ${{ inputs.shard_job_result == 'success' || inputs.shard_job_result == 'failure' }}
-        uses: ./.github/actions/nix/nix_script_run
-        with:
-          command: |
-            EXTRA_ARGS=()
-            if [[ "$ALLOW_EMPTY_CURRENT_TIMINGS" == "true" ]]; then
-              EXTRA_ARGS+=(--allow-empty-current)
-            fi
+        shell: bash
+        run: |
+          EXTRA_ARGS=()
+          if [[ "$ALLOW_EMPTY_CURRENT_TIMINGS" == "true" ]]; then
+            EXTRA_ARGS+=(--allow-empty-current)
+          fi
 
-            python3 scripts/ci/split-tests/merge_timings.py \
-              --input-glob "$CALLER_JOB/.shard-bundles/**/timings/timings.json" \
-              --output "$CALLER_JOB/.timings/timings.json" \
-              --previous-timings "$CALLER_JOB/.timings/previous/timings.json" \
-              "${EXTRA_ARGS[@]}"
+          python3 scripts/ci/split-tests/merge_timings.py \
+            --input-glob "$CALLER_JOB/.shard-outputs/**/timings/timings.json" \
+            --output "$CALLER_JOB/.timings/timings.json" \
+            --previous-timings "$CALLER_JOB/.timings/previous/timings.json" \
+            "${EXTRA_ARGS[@]}"
 
       - name: Upload merged timings
         if: ${{ inputs.shard_job_result == 'success' || inputs.shard_job_result == 'failure' }}

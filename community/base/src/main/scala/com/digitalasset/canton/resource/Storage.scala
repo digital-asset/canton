@@ -19,7 +19,11 @@ import com.digitalasset.canton.health.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, *}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   NamedLoggerFactory,
@@ -459,7 +463,7 @@ object DbStorage {
   final case class NoConnectionAvailable()
       extends SQLTransientException("No free connection available")
 
-  sealed trait Profile extends Product with Serializable with PrettyPrinting {
+  sealed trait Profile extends Product with Serializable with PrettyPrintingFromCompanion {
     def jdbc: JdbcProfile
 
     object DbStorageAPI extends Aliases {
@@ -482,10 +486,18 @@ object DbStorage {
 
   object Profile {
     final case class H2(jdbc: H2Profile) extends Profile {
-      override protected def pretty: Pretty[H2] = prettyOfObject[H2]
+      override def prettyCompanion: PrettyPrintingCompanion[H2] = H2
+    }
+
+    object H2 extends PrettyPrintingCompanion[H2] {
+      override protected val pretty: Pretty[H2] = prettyOfObject[H2]
     }
     final case class Postgres(jdbc: PostgresProfile) extends Profile with DbLockSupport {
-      override protected def pretty: Pretty[Postgres] = prettyOfObject[Postgres]
+      override def prettyCompanion: PrettyPrintingCompanion[Postgres] = Postgres
+    }
+
+    object Postgres extends PrettyPrintingCompanion[Postgres] {
+      override protected val pretty: Pretty[Postgres] = prettyOfObject[Postgres]
     }
   }
 

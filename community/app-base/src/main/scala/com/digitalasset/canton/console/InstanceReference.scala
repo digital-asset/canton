@@ -739,7 +739,7 @@ class RemoteParticipantReference(environment: ConsoleEnvironment, override val n
     with RemoteInstanceReference {
 
   override protected[console] def adminApiToken: Option[String] =
-    config.adminApiToken.orElse(config.token)
+    config.adminApiToken.orElse(config.token).map(_.unwrap)
 
   @Help.Summary("Return remote participant config")
   def config: RemoteParticipantConfig =
@@ -752,10 +752,11 @@ class RemoteParticipantReference(environment: ConsoleEnvironment, override val n
       name,
       command,
       config.clientLedgerApi,
-      config.token,
+      ledgerApiToken,
     )
 
-  override protected[console] def ledgerApiToken: Option[String] = config.token
+  override protected[console] def ledgerApiToken: Option[String] =
+    config.token.map(_.unwrap)
 
   private lazy val testing_ = new ParticipantTestingGroup(this, consoleEnvironment, loggerFactory)
 

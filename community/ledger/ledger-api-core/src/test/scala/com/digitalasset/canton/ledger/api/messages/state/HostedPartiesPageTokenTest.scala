@@ -44,12 +44,8 @@ class HostedPartiesPageTokenTest extends AnyWordSpec with SizeLimitTestUtils {
       originalHostedAt,
       PageTokenUtils.emptyChecksum,
     )
-  private val originalToken = HostedPartiesPageToken.encode(
-    originalRequest,
-    partyLowerBoundExcl,
-    hostedAtOffset = originalHostedAt,
-    participantId,
-  )
+  private val originalToken =
+    HostedPartiesPageToken.encode(originalRequest, originalContinuationToken, participantId)
   private val participantIdChecksum = HostedPartiesPageToken.calcParticipantChecksum(participantId)
   private val originalRequestChecksum = HostedPartiesPageToken.calcRequestChecksum(originalRequest)
 
@@ -154,12 +150,8 @@ class HostedPartiesPageTokenTest extends AnyWordSpec with SizeLimitTestUtils {
 
     "fail if not the same hostedAt is used" in {
       val requestWithHostedAt = originalRequest.copy(hostedAtOffset = Some(originalHostedAt.unwrap))
-      val newToken = HostedPartiesPageToken.encode(
-        requestWithHostedAt,
-        partyLowerBoundExcl,
-        hostedAtOffset = originalHostedAt,
-        participantId,
-      )
+      val newToken =
+        HostedPartiesPageToken.encode(requestWithHostedAt, originalContinuationToken, participantId)
       val requestWithToken = requestWithHostedAt.copy(
         hostedAtOffset = requestWithHostedAt.hostedAtOffset.map(_ + 1),
         pageToken = Some(newToken),

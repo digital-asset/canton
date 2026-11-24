@@ -231,6 +231,7 @@ sealed trait EnvironmentSetup[C <: SharedCantonConfig[C], E <: Environment[C]]
     * this can be used for heavy tests to ensure that we have less other tests running concurrently
     */
   protected def numPermits: PositiveInt = PositiveInt.one
+
 }
 
 /** Starts an environment in a beforeAll test and uses it for all tests. Destroys it in an afterAll

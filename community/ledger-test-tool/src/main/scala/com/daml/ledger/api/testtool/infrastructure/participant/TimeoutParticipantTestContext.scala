@@ -64,6 +64,10 @@ import com.daml.ledger.api.v2.state_service.{
   GetActiveContractsPageResponse,
   GetActiveContractsRequest,
   GetActiveContractsResponse,
+  GetHostedPartiesPageRequest,
+  GetHostedPartiesPageResponse,
+  GetHostedPartiesRequest,
+  GetHostedPartiesResponse,
   GetLedgerEndResponse,
 }
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
@@ -299,8 +303,8 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
     delegate.listKnownParties(),
   )
 
-  // No per-call guard here: this is a composite topology wait with its own `Eventually` loops.
-  // A guard would cut those short and hide their more useful failures.
+  // No per-call guard here: this is a composite topology wait with its own deadline.
+  // A guard would cut it short and hide its more useful failure.
   override def waitForPartiesOnOtherParticipants(
       otherParticipants: Iterable[ParticipantTestContext],
       expectedParties: Set[Party],
@@ -922,20 +926,11 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
   override def pruneMustFail(pruneUpTo: Long, message: String): Future[Throwable] =
     delegate.pruneMustFail(pruneUpTo, message)
 
-  override def pruneWithAcsCheck(
-      parties: Option[Seq[Party]],
-      pruneUpTo: Long,
-      attempts: Int,
-      activeAtOffset0: Option[Long],
-  )(implicit ec: ExecutionContext): Future[Unit] =
-    delegate.pruneWithAcsCheck(parties, pruneUpTo, attempts, activeAtOffset0)
-
   override def pruneCantonSafe(
       pruneUpTo: Long,
       party: Party,
-      dummyCommand: Party => JList[Command],
   )(implicit ec: ExecutionContext): Future[Unit] =
-    delegate.pruneCantonSafe(pruneUpTo, party, dummyCommand)
+    delegate.pruneCantonSafe(pruneUpTo, party)
 
   private def withTimeout[T](hint: String, future: => Future[T]): Future[T] =
     Future.firstCompletedOf(
@@ -1002,5 +997,19 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
   ): Future[Offset] = withTimeout(
     "Convert record time to offset",
     delegate.convertRecordTimeToOffset(synchronizerId, recordTime),
+  )
+
+  override def getHostedParties(
+      request: GetHostedPartiesRequest
+  ): Future[Vector[GetHostedPartiesResponse]] = withTimeout(
+    "Get hosted parties",
+    delegate.getHostedParties(request),
+  )
+
+  override def getHostedPartiesPage(
+      request: GetHostedPartiesPageRequest
+  ): Future[GetHostedPartiesPageResponse] = withTimeout(
+    "Get hosted parties page",
+    delegate.getHostedPartiesPage(request),
   )
 }

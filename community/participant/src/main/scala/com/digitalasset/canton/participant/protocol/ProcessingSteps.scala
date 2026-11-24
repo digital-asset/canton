@@ -597,10 +597,8 @@ trait ProcessingSteps[
 
   /** Phase 7, step 2:
     *
-    * @param event
-    *   The signed [[com.digitalasset.canton.sequencing.protocol.Deliver]] event containing the
-    *   confirmation result. It is ensured that the `event` contains exactly one
-    *   [[com.digitalasset.canton.protocol.messages.ConfirmationResultMessage]]
+    * @param resultTs
+    *   The timestamp of the Deliver event containing the confirmation result message
     * @param verdict
     *   The verdict that is contained in the `event`
     * @param pendingRequestData
@@ -613,7 +611,7 @@ trait ProcessingSteps[
     *   contracts from Phase 3 to be persisted to the contract store, and the event to be published
     */
   def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      resultTs: CantonTimestamp,
       verdict: Verdict,
       pendingRequestData: requestType.PendingRequestData,
       pendingSubmissionDataO: Option[PendingSubmissionData],

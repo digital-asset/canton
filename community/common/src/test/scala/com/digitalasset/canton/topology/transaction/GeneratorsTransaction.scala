@@ -132,7 +132,7 @@ final class GeneratorsTransaction(
     Arbitrary(
       for {
         namespace <- Arbitrary.arbitrary[Namespace]
-        owners <- Arbitrary.arbitrary[NonEmpty[Set[Namespace]]]
+        owners <- Generators.nonEmptySetGen[Namespace]
         // Not using Arbitrary.arbitrary[PositiveInt] for threshold to honor constraint
         threshold <- Gen.choose(1, owners.size).map(PositiveInt.tryCreate)
       } yield DecentralizedNamespaceDefinition.create(namespace, threshold, owners).value
@@ -142,10 +142,10 @@ final class GeneratorsTransaction(
     for {
       synchronizerId <- Arbitrary.arbitrary[SynchronizerId]
       group <- Arbitrary.arbitrary[NonNegativeInt]
-      active <- Arbitrary.arbitrary[NonEmpty[Seq[MediatorId]]]
+      active <- Generators.nonEmptyListGen[MediatorId]
       // Not using Arbitrary.arbitrary[PositiveInt] for threshold to honor constraint
       threshold <- Gen.choose(1, active.size).map(PositiveInt.tryCreate)
-      observers <- Arbitrary.arbitrary[NonEmpty[Seq[MediatorId]]]
+      observers <- Generators.nonEmptyListGen[MediatorId]
     } yield MediatorSynchronizerState
       .create(synchronizerId, group, threshold, active, observers)
       .value
@@ -203,11 +203,7 @@ final class GeneratorsTransaction(
     for {
       namespace <- Arbitrary.arbitrary[Namespace]
       // target key must include the `Namespace` usage
-      target <- Arbitrary
-        .arbitrary[SigningPublicKey]
-        .retryUntil(key =>
-          SigningKeyUsage.matchesRelevantUsages(key.usage, SigningKeyUsage.NamespaceOnly)
-        )
+      target <- signingKeyWithUsages(SigningKeyUsage.NamespaceOnly)
       delegationRestriction <- // honor constraint that the delegation must be able to sign namespace delegations if fingerprints match
         if (namespace.fingerprint == target.fingerprint)
           restrictionWithNamespaceDelegation
@@ -250,14 +246,14 @@ final class GeneratorsTransaction(
   implicit val ownerToKeyTopologyTransactionArb: Arbitrary[OwnerToKeyMapping] = Arbitrary(
     for {
       member <- Arbitrary.arbitrary[Member]
-      keys <- Arbitrary.arbitrary[NonEmpty[Seq[PublicKey]]]
+      keys <- Generators.nonEmptyListGen[PublicKey]
     } yield OwnerToKeyMapping.create(member, keys).value
   )
 
   implicit val partyToKeyTopologyTransactionArb: Arbitrary[PartyToKeyMapping] = Arbitrary(
     for {
       partyId <- Arbitrary.arbitrary[PartyId]
-      signingKeys <- Arbitrary.arbitrary[NonEmpty[Seq[SigningPublicKey]]]
+      signingKeys <- Generators.nonEmptyListGen[SigningPublicKey]
       // Not using Arbitrary.arbitrary[PositiveInt] for threshold to honor constraint
       threshold <- Gen
         .choose(1, signingKeys.size)
@@ -270,10 +266,10 @@ final class GeneratorsTransaction(
   implicit val sequencerSynchronizerStateArb: Arbitrary[SequencerSynchronizerState] = Arbitrary(
     for {
       synchronizerId <- Arbitrary.arbitrary[SynchronizerId]
-      active <- Arbitrary.arbitrary[NonEmpty[Seq[SequencerId]]]
+      active <- Generators.nonEmptyListGen[SequencerId]
       // Not using Arbitrary.arbitrary[PositiveInt] for threshold to honor constraint
       threshold <- Gen.choose(1, active.size).map(PositiveInt.tryCreate)
-      observers <- Arbitrary.arbitrary[NonEmpty[Seq[SequencerId]]]
+      observers <- Generators.nonEmptyListGen[SequencerId]
     } yield SequencerSynchronizerState.create(synchronizerId, threshold, active, observers).value
   )
 
@@ -297,7 +293,7 @@ final class GeneratorsTransaction(
   )
 
   def multiTransactionSignaturesGen(transactionHash: TxHash): Gen[MultiTransactionSignature] = for {
-    hashes <- Arbitrary.arbitrary[NonEmpty[Set[TxHash]]]
+    hashes <- Generators.nonEmptySetGen[TxHash]
     signatures <- Arbitrary.arbitrary[Signature]
   } yield MultiTransactionSignature(
     // Guarantees that the transaction hash is in the multi hash set

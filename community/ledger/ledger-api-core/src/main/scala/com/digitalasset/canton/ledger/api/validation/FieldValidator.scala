@@ -10,6 +10,7 @@ import com.daml.ledger.api.v2.crypto.Signature
 import com.daml.ledger.api.v2.value.Identifier
 import com.digitalasset.canton.LfTimestamp
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
+import com.digitalasset.canton.config.CantonRequireTypes.String36
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.util.TimestampConversion
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator.{
@@ -28,7 +29,7 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
   PartyId as TopologyPartyId,
 }
-import com.digitalasset.canton.user.IdentityProviderId
+import com.digitalasset.canton.user.{Audience, IdentityProviderId, Issuer, JwksUrlLengthLimited}
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.validation.ProtoValidation.{validateCondition, validateLength}
 import com.digitalasset.canton.validation.ValidationParam
@@ -107,25 +108,54 @@ object FieldValidator {
   def requireResourceVersion(raw: String, fieldName: String)(implicit
       errorLogger: ErrorLoggingContext
   ): Either[StatusRuntimeException, Long] =
-    Try {
-      raw.toLong
-    } match {
-      case Success(resourceVersionNumber) => Right(resourceVersionNumber)
-      case Failure(_) =>
-        Left(
-          invalidField(fieldName = fieldName, message = "Invalid resource version number")
-        )
-    }
+    // bound the length first: toLong accepts any number of leading zeros
+    String36
+      .create(raw, Some(fieldName))
+      .leftMap(error => invalidField(fieldName = fieldName, message = error))
+      .flatMap(_ =>
+        Try {
+          raw.toLong
+        } match {
+          case Success(resourceVersionNumber) => Right(resourceVersionNumber)
+          case Failure(_) =>
+            Left(
+              invalidField(fieldName = fieldName, message = "Invalid resource version number")
+            )
+        }
+      )
 
-  def requireJwksUrl(raw: String, fieldName: String)(implicit
+  def requireJwksUrl(rawUnvalidated: String, fieldName: String)(implicit
       errorLogger: ErrorLoggingContext
-  ): Either[StatusRuntimeException, JwksUrl] =
+  ): Either[StatusRuntimeException, JwksUrlLengthLimited] =
     for {
-      _ <- requireNonEmptyString(raw, fieldName)
-      value <- JwksUrl.fromString(raw).left.map { error =>
+      _ <- requireNonEmptyString(rawUnvalidated, fieldName)
+      raw <- JwksUrlLengthLimited
+        .create(rawUnvalidated)
+        .left
+        .map(error => invalidField(fieldName = fieldName, message = error))
+      _ <- JwksUrl.fromString(raw.unwrap).left.map { error =>
         invalidField(fieldName = fieldName, message = s"Malformed URL: $error")
       }
-    } yield value
+    } yield raw
+
+  def requireIssuer(rawUnvalidated: String, fieldName: String)(implicit
+      errorLogger: ErrorLoggingContext
+  ): Either[StatusRuntimeException, Issuer] =
+    for {
+      _ <- requireNonEmptyString(rawUnvalidated, fieldName)
+      raw <- Issuer
+        .create(rawUnvalidated)
+        .left
+        .map(error => invalidField(fieldName = fieldName, message = error))
+    } yield raw
+
+  def requireAudience(rawUnvalidated: String, fieldName: String)(implicit
+      errorLogger: ErrorLoggingContext
+  ): Either[StatusRuntimeException, Audience] =
+    Audience
+      .create(rawUnvalidated)
+      .left
+      .map(error => invalidField(fieldName = fieldName, message = error))
 
   def requireParties(parties: Set[String])(implicit
       errorLoggingContext: ErrorLoggingContext

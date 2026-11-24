@@ -1,0 +1,90 @@
+name: Test Performance Runner
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test_performance_runner:
+    name: Test Performance Runner
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Download performance runner artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: community-release
+          path: /tmp/workspace
+
+      - name: Start Postgres container
+        id: start_postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: 0
+
+      - name: Allow automatic protocol version selection
+        uses: ./.github/actions/test/set_automatic_protocol_version
+
+      - name: Extract performance runner
+        run: tar -zxf /tmp/workspace/canton-performance.tar.gz
+
+      # The runner connects as test-user (performance/postgres/db.env), so create that role
+      # with the admin credentials exported by the Postgres step. Then create the databases
+      # as test-user, so it owns their public schema: since Postgres 15 other roles cannot
+      # create tables there. db.sh only falls back to db.env when a POSTGRES_* variable is
+      # unset, which on CircleCI held by accident (no POSTGRES_HOST/PORT), so source it.
+      - name: Set up performance runner databases
+        uses: ./.github/actions/nix/nix_script_run
+        with:
+          working_directory: canton/performance/postgres
+          command: |
+            echo "CREATE ROLE \"test-user\" LOGIN PASSWORD 'test-password'; ALTER USER \"test-user\" createdb;" | \
+              PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost postgres "$POSTGRES_USER"
+            source ./db.env
+            ../../config/utils/postgres/db.sh setup
+
+      # Daemon mode (-w daemon) runs performance.canton as a bootstrap script without the
+      # interactive console, which needs a tty that GHA steps do not have. CircleCI steps get
+      # a pty, and its flags="--no-tty -v" export is dead since run.sh stopped reading $flags.
+      # EXIT_WHEN_DONE makes the runner exit the process after NUM_CYCLES.
+      - name: Run performance runner
+        uses: ./.github/actions/nix/nix_run
+        env:
+          TERM: dumb
+          NUM_CYCLES: "210"
+          EXIT_WHEN_DONE: "1"
+        with:
+          command: ./canton/performance/run.sh -s -w daemon -n two-synchronizers-topology
+
+      - name: Pack log files
+        if: always()
+        run: |
+          if [[ -d canton/log ]]; then
+            find canton/log -not -name "*.gz" -not -type d -print0 | xargs -0 -r .ci/nix-exec pigz
+          fi
+
+      - name: Upload log files
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-performance-runner-logs
+          path: canton/log
+          # Same as the test log shard bundles in cleanup_test_job.
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.start_postgres.outputs.container-name }}

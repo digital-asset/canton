@@ -130,6 +130,12 @@ object ConfigTransforms {
             .replace(enable)
         )
       )
+
+  def toggleCantonAcsConsistencyChecks(enable: Boolean): ConfigTransform =
+    ConfigTransforms.updateAllParticipantConfigs_(
+      _.focus(_.parameters.enableCantonAcsConsistencyChecks).replace(enable)
+    )
+
   val increaseTimeoutsInCI: ConfigTransform = if (BaseTest.isRunningInCI) {
     // Ensure that bounded timeouts are large enough to avoid spurious failures in CI due to resource starvation
     _.focus(_.parameters.timeouts.console.bounded)
@@ -166,6 +172,7 @@ object ConfigTransforms {
             .replace(true)
         ),
         toggleTopologyStateConsistencyChecks(nightlyExpensiveTest),
+        toggleCantonAcsConsistencyChecks(nightlyExpensiveTest),
         _.focus(_.parameters.enableAdditionalConsistencyChecks)
           .replace(true)
           .focus(_.monitoring.logging.logSlowFutures)
@@ -770,9 +777,9 @@ object ConfigTransforms {
   /** For performance tests...
     */
   def disableAdditionalConsistencyChecks: ConfigTransform =
-    toggleTopologyStateConsistencyChecks(false).compose(
-      _.focus(_.parameters.enableAdditionalConsistencyChecks).replace(false)
-    )
+    toggleTopologyStateConsistencyChecks(false)
+      .compose(toggleCantonAcsConsistencyChecks(false))
+      .compose(_.focus(_.parameters.enableAdditionalConsistencyChecks).replace(false))
 
   def setParticipantMaxConnections(maxConnections: PositiveInt): ConfigTransform =
     modifyAllStorageConfigs { (nodeType, _, config) =>

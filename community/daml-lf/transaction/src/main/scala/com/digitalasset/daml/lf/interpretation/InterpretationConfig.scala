@@ -29,10 +29,16 @@ object InterpretationConfig {
     errorOnContractKeyHashMismatch = false,
   )
 
-  // PV37 is still alpha: this constant may change until PV37 becomes stable.
   val PV37: InterpretationConfig = InterpretationConfig(
     allowedLanguageVersions =
       LanguageVersion.allLfVersions.filter(LanguageVersion.featurePV37.enabledIn),
+    errorOnContractKeyHashMismatch = true,
+  )
+
+  // PV38 is still alpha: this constant may change until PV37 becomes stable.
+  val PV38: InterpretationConfig = InterpretationConfig(
+    allowedLanguageVersions =
+      LanguageVersion.allLfVersions.filter(LanguageVersion.featurePV38.enabledIn),
     errorOnContractKeyHashMismatch = true,
   )
 

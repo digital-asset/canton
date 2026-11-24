@@ -7,6 +7,7 @@ import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
+import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.concerns
 import com.daml.ledger.api.testtool.suites.v2_2.TransactionServiceCorrectnessIT.*
 import com.daml.ledger.api.v2.event.Event.Event
 import com.daml.ledger.api.v2.event.Event.Event.{Archived, Created, Empty, Exercised}
@@ -113,7 +114,6 @@ class TransactionServiceCorrectnessIT(testDars: TestDars) extends LedgerTestSuit
     "TXSingleMultiSameLedgerEffectsBasic",
     "The same ledger effects transactions should be served regardless of subscribing as one, multiple or wildcard parties",
     allocate(TwoParties),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(alice, bob))) =>
     for {
       endOffsetAtTestStart <- ledger.currentEnd()
@@ -132,7 +132,7 @@ class TransactionServiceCorrectnessIT(testDars: TestDars) extends LedgerTestSuit
           ledger.transactionFormat(None, transactionShape = LedgerEffects, verbose = true),
         begin = endOffsetAtTestStart,
       )
-      wildcardPartyView <- ledger.transactions(txReq)
+      wildcardPartyView <- ledger.transactions(txReq).map(_.filter(concerns(alice, bob)))
     } yield {
       val jointView = aliceView ++ bobView
       assertEquals(

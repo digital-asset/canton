@@ -8,14 +8,15 @@ import com.daml.crypto.MessageDigestPrototype
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.language.LanguageVersion.{Major, Minor}
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf
 
-sealed abstract class ArchivePayload {
+private[archive] sealed abstract class ArchivePayload {
   def pkgId: PackageId
   def version: LanguageVersion
 }
 
-object ArchivePayload {
+private[archive] object ArchivePayload {
 
   final case class Lf1(
       pkgId: PackageId,
@@ -35,7 +36,7 @@ object ArchivePayload {
   }
 }
 
-object Reader {
+private[archive] object Reader {
 
   private def validateUnknownFields(m: protobuf.Message, schemaMode: Boolean): Either[Error, Unit] =
     if (schemaMode)
@@ -43,16 +44,16 @@ object Reader {
     else
       com.digitalasset.daml.SafeProto.ensureNoUnknownFields(m).left.map(Error.Parsing.apply)
 
-  /* Convert an Archive proto message into a scala ArchivePayload.
+  /* Checks the Archive wrapper without parsing its payload: the hash function is supported,
+   * the hash is well formed and matches the SHA-256 of the payload bytes, and, if `schemaMode`
+   * is `false`, the wrapper has no unknown fields.
    *
-   * Checks that the hash of the payload matches the hash field, that the version is
-   * supported, and if `schemaMode` is `false`, ensures the message has no unknown fields.
+   * Returns the verified hash, which uniquely identifies the payload bytes.
    */
-  def readArchive(
+  def validateArchive(
       lf: DamlLf.Archive,
       schemaMode: Boolean,
-  ): Either[Error, ArchivePayload] = for {
-    _ <- validateUnknownFields(lf, schemaMode)
+  ): Either[Error, PackageId] = for {
     theirHash <- lf.getHashFunction match {
       case DamlLf.HashFunction.SHA256 =>
         PackageId
@@ -62,6 +63,7 @@ object Reader {
       case DamlLf.HashFunction.UNRECOGNIZED =>
         Left(Error.Parsing("Unrecognized hash function"))
     }
+    _ <- validateUnknownFields(lf, schemaMode)
     ourHash = MessageDigestPrototype.Sha256.newDigest
       .digest(lf.getPayload.toByteArray)
       .map("%02x" format _)
@@ -71,17 +73,41 @@ object Reader {
       (),
       Error.Parsing(s"Mismatching hashes! Expected $ourHash but got $theirHash"),
     )
-    proto <- ArchivePayloadParser.fromByteString(lf.getPayload)
-    payload <- readArchivePayload(theirHash, proto, schemaMode)
+  } yield theirHash
 
+  /* Parses the payload of an Archive whose hash has already been validated by `validateArchive`
+   * and converts it into a scala ArchivePayload.
+   *
+   * Checks that the version is supported and, if `schemaMode` is `false`, ensures the payload
+   * has no unknown fields.
+   */
+  def readValidatedArchive(
+      hash: PackageId,
+      lf: DamlLf.Archive,
+      schemaMode: Boolean,
+  ): Either[Error, ArchivePayload] = for {
+    proto <- ArchivePayloadParser.fromByteString(lf.getPayload)
+    payload <- readArchivePayload(hash, proto, schemaMode)
   } yield payload
+
+  /* Convert an Archive proto message into a scala ArchivePayload.
+   *
+   * Checks that the hash of the payload matches the hash field, that the version is
+   * supported, and if `schemaMode` is `false`, ensures the message has no unknown fields.
+   */
+  @VisibleForTesting
+  def readArchive(
+      lf: DamlLf.Archive,
+      schemaMode: Boolean,
+  ): Either[Error, ArchivePayload] =
+    validateArchive(lf, schemaMode).flatMap(readValidatedArchive(_, lf, schemaMode))
 
   /* Converts a DamlLf.ArchivePayload Protocol Buffer message to a Scala ArchivePayload.
    *
    * Checks that the payload's version is supported and, if `schemaMode` is `false`,
    * ensures the message has no unknown fields.
    */
-  def readArchivePayload(
+  private[archive] def readArchivePayload(
       hash: PackageId,
       lf: DamlLf.ArchivePayload,
       schemaMode: Boolean,

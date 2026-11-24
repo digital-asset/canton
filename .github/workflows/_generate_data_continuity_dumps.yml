@@ -79,7 +79,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings
@@ -194,5 +194,4 @@ jobs:
     with:
       caller_job: generate_data_continuity_dumps
       shard_job_result: ${{ needs.generate_data_continuity_dumps.result }}
-      runner: ${{ inputs.runner }}
       protocol_version: ''

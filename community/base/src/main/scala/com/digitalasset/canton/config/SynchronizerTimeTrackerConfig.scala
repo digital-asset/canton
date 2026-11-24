@@ -5,7 +5,11 @@ package com.digitalasset.canton.config
 
 import cats.syntax.option.*
 import com.digitalasset.canton.admin.time.v30
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
@@ -38,7 +42,7 @@ final case class SynchronizerTimeTrackerConfig(
     minObservationDuration: NonNegativeFiniteDuration =
       SynchronizerTimeTrackerConfig.defaultMinObservationDuration,
     timeRequest: TimeProofRequestConfig = TimeProofRequestConfig(),
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   def toProtoV30: v30.SynchronizerTimeTrackerConfig = v30.SynchronizerTimeTrackerConfig(
     observationLatency.toProtoPrimitive.some,
     patienceDuration.toProtoPrimitive.some,
@@ -46,7 +50,14 @@ final case class SynchronizerTimeTrackerConfig(
     timeRequest.toProtoV30.some,
   )
 
-  override protected def pretty: Pretty[SynchronizerTimeTrackerConfig] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[SynchronizerTimeTrackerConfig] =
+    SynchronizerTimeTrackerConfig
+
+}
+
+object SynchronizerTimeTrackerConfig
+    extends PrettyPrintingCompanion[SynchronizerTimeTrackerConfig] {
+  override protected val pretty: Pretty[SynchronizerTimeTrackerConfig] = prettyOfClass(
     paramIfNotDefault(
       "observationLatency",
       _.observationLatency,
@@ -64,10 +75,6 @@ final case class SynchronizerTimeTrackerConfig(
     ),
     paramIfNotDefault("timeRequest", _.timeRequest, TimeProofRequestConfig()),
   )
-
-}
-
-object SynchronizerTimeTrackerConfig {
 
   private val defaultObservationLatency: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofMillis(250)

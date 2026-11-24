@@ -89,6 +89,24 @@ trait UpdateStreamsDbMetrics {
     val fetchEventDeactivateIdsStakeholderFilteredIds: DatabaseMetrics = createDbMetrics(
       "fetch_event_deactivate_ids_stakeholder_filtered_ids"
     )
+    val fetchEventActivateIdsContractId: DatabaseMetrics = createDbMetrics(
+      "fetch_event_activate_ids_contract_id"
+    )
+    val fetchEventActivateIdsContractIdFilteredRange: DatabaseMetrics = createDbMetrics(
+      "fetch_event_activate_ids_contract_id_filtered_range"
+    )
+    val fetchEventActivateIdsContractIdFilteredIds: DatabaseMetrics = createDbMetrics(
+      "fetch_event_activate_ids_contract_id_filtered_ids"
+    )
+    val fetchEventDeactivateIdsContractId: DatabaseMetrics = createDbMetrics(
+      "fetch_event_deactivate_ids_contract_id"
+    )
+    val fetchEventDeactivateIdsContractIdFilteredRange: DatabaseMetrics = createDbMetrics(
+      "fetch_event_deactivate_ids_contract_id_filtered_range"
+    )
+    val fetchEventDeactivateIdsContractIdFilteredIds: DatabaseMetrics = createDbMetrics(
+      "fetch_event_deactivate_ids_contract_id_filtered_ids"
+    )
     val fetchEventActivatePayloads: DatabaseMetrics = createDbMetrics(
       "fetch_event_activate_payloads"
     )
@@ -547,6 +565,18 @@ class MainIndexDBMetrics(
   val getHostedPartyBatch: DatabaseMetrics = createDbMetrics("get_hosted_party_batch")
   val loadStringInterningEntries: DatabaseMetrics = createDbMetrics(
     "load_string_interning_entries"
+  )
+  val loadStringInterningEntriesRange: DatabaseMetrics = createDbMetrics(
+    "load_string_interning_entries_range"
+  )
+  val batchLookupInternalIdsStringInterning: DatabaseMetrics = createDbMetrics(
+    "batch_lookup_internal_ids_string_interning"
+  )
+  val batchLookupExternalStrings: DatabaseMetrics = createDbMetrics(
+    "batch_lookup_external_strings"
+  )
+  val lastExternalStringInRange: DatabaseMetrics = createDbMetrics(
+    "last_external_string_in_range"
   )
 
   val getAssingIdsForOffsets: DatabaseMetrics = createDbMetrics(

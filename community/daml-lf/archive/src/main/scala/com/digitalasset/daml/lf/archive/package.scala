@@ -44,16 +44,18 @@ package object archive {
 
   val ArchiveParser: GenReader[DamlLf.Archive] =
     GenReader(getClass.getCanonicalName + ".ArchiveParser", DamlLf.Archive.parseFrom)
-  val ArchiveReader: GenReader[ArchivePayload] =
-    ArchiveParser.andThen(Reader.readArchive(_, schemaMode = false))
   val ArchiveDecoder: GenReader[(PackageId, Ast.Package)] =
-    ArchiveReader.andThen(Decode.decodeArchivePayload)
-  val ArchiveSchemaReader: GenReader[ArchivePayload] =
-    ArchiveParser.andThen(Reader.readArchive(_, schemaMode = true))
+    ArchiveParser.andThen(Decode.decodeArchive)
   val ArchiveSchemaDecoder: GenReader[(PackageId, Ast.PackageSignature)] =
-    ArchiveSchemaReader.andThen(Decode.decodeArchivePayloadSchema)
+    ArchiveParser.andThen(Decode.decodeArchiveSchema)
 
-  val ArchivePayloadParser: GenReader[DamlLf.ArchivePayload] =
+  /** Validates the archive wrapper (hash function, unknown fields, hash matching the payload bytes)
+    * and returns its package id, i.e. its hash. The payload itself is not parsed.
+    */
+  val ArchivePackageIdReader: GenReader[PackageId] =
+    ArchiveParser.andThen(Reader.validateArchive(_, schemaMode = false))
+
+  private[archive] val ArchivePayloadParser: GenReader[DamlLf.ArchivePayload] =
     GenReader(
       getClass.getCanonicalName + ".ArchivePayloadParser",
       DamlLf.ArchivePayload.parseFrom,
@@ -97,15 +99,12 @@ package object archive {
     ModuleParser(ver).andThen(new DecodeV2(ver.minor).decodeSingleModulePackage(pkgId, _))
 
   val DarParser: GenDarReader[DamlLf.Archive] = GenDarReader(ArchiveParser)
-  val DarReader: GenDarReader[ArchivePayload] = GenDarReader(ArchiveReader)
+  val DarPackageIdReader: GenDarReader[PackageId] = GenDarReader(ArchivePackageIdReader)
   val DarDecoder: GenDarReader[(PackageId, Ast.Package)] = GenDarReader(ArchiveDecoder)
-  val DarSchemaReader: GenDarReader[ArchivePayload] = GenDarReader(ArchiveSchemaReader)
   val DarSchemaDecoder: GenDarReader[(PackageId, Ast.PackageSignature)] = GenDarReader(
     ArchiveSchemaDecoder
   )
 
-  val UniversalArchiveReader: GenUniversalArchiveReader[ArchivePayload] =
-    new GenUniversalArchiveReader(ArchiveReader)
   val UniversalArchiveDecoder: GenUniversalArchiveReader[(PackageId, Ast.Package)] =
     new GenUniversalArchiveReader(ArchiveDecoder)
 

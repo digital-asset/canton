@@ -43,7 +43,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PekkoUtil.FutureQueue
 import com.digitalasset.daml.lf.data.Bytes
-import com.digitalasset.daml.lf.transaction.CreationTime
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source as PekkoSource}
@@ -167,12 +166,12 @@ final class RepairServiceContractsImporter(
   // This function requires that all contracts in contractsToAdd are already present in the
   // contract store and therefore their internal contract ids can be looked up.
   private def tryAddInternalContractIds(
-      contractsToAdd: Seq[(TimeOfRepair, (CreationTime.CreatedAt, Seq[ContractToAdd]))],
+      contractsToAdd: Seq[(TimeOfRepair, Seq[ContractToAdd])],
       internalContractIds: Map[LfContractId, Long],
   )(implicit
       traceContext: TraceContext
-  ): Seq[(TimeOfRepair, (CreationTime.CreatedAt, Seq[(ContractToAdd, Long)]))] =
-    contractsToAdd.map { case (timeOfRepair, (createdAt, batch)) =>
+  ): Seq[(TimeOfRepair, Seq[(ContractToAdd, Long)])] =
+    contractsToAdd.map { case (timeOfRepair, batch) =>
       val batchWithInternalIds = batch.map { contractToAdd =>
         val internalContractId =
           internalContractIds.getOrElse(
@@ -184,7 +183,7 @@ final class RepairServiceContractsImporter(
           )
         (contractToAdd, internalContractId)
       }
-      (timeOfRepair, (createdAt, batchWithInternalIds))
+      (timeOfRepair, batchWithInternalIds)
     }
 
   /** Participant repair utility for manually adding contracts to a synchronizer in an offline
@@ -240,62 +239,65 @@ final class RepairServiceContractsImporter(
     val skippedAlreadyActiveCount = new AtomicLong(0L)
     val persistedContractsCount = new AtomicLong(0L)
 
-    helpers.withRepairIndexer { repairIndexer =>
-      val indexedContractBatches: PekkoSource[(Seq[RepairContract], Long), NotUsed] =
-        contracts.grouped(batchSize).zipWithIndex
+    helpers.runConsecutive(
+      "acs-import",
+      helpers.withRepairIndexer { repairIndexer =>
+        val indexedContractBatches: PekkoSource[(Seq[RepairContract], Long), NotUsed] =
+          contracts.grouped(batchSize).zipWithIndex
 
-      val doneF = for {
-        synchronizer <- toFutureForIndexer(
-          helpers.readSynchronizerData(synchronizerId, repairIndexer)
-        )
-        // 1. Explicitly trigger crash recovery cleanup and verify ACS commitment watermarks
-        _ <- toFutureForIndexer(
-          helpers.verifyRepairPreconditions(
-            synchronizer,
-            forceRepairWhenTopologyTransactionAtLedgerEnd,
+        val doneF = for {
+          synchronizer <- toFutureForIndexer(
+            helpers.readSynchronizerData(synchronizerId, repairIndexer)
           )
-        )
-        // 2. Execute the stream only after the Active Contract Store is clean
-        _ <- indexedContractBatches
-          .mapAsync(parallelism) { data =>
-            toFutureForIndexer(
-              validateAndPersistContracts(
-                synchronizer = synchronizer,
-                contractImportMode = contractImportMode,
-                selectRepresentativePackageIds = selectRepresentativePackageIds,
-                batchSize = batchSize,
-                droppedContractsCount = droppedContractsCount,
-                skippedAlreadyActiveCount = skippedAlreadyActiveCount,
-                persistedContractsCount = persistedContractsCount,
-              )(data)
+          // 1. Explicitly trigger crash recovery cleanup and verify ACS commitment watermarks
+          _ <- toFutureForIndexer(
+            helpers.verifyRepairPreconditions(
+              synchronizer,
+              forceRepairWhenTopologyTransactionAtLedgerEnd,
             )
-          }
-          // Publish events to the indexer
-          .mapAsync(1) { contractsToAddWithInternalContractIds =>
-            publishAddedEvents(
-              synchronizerId,
-              contractsToAddWithInternalContractIds,
-              workflowProvider,
-              repairIndexer,
-            )
-          }
-          .toMat(Sink.ignore)(Keep.right)
-          .run()
-      } yield ()
+          )
+          // 2. Execute the stream only after the Active Contract Store is clean
+          _ <- indexedContractBatches
+            .mapAsync(parallelism) { data =>
+              toFutureForIndexer(
+                validateAndPersistContracts(
+                  synchronizer = synchronizer,
+                  contractImportMode = contractImportMode,
+                  selectRepresentativePackageIds = selectRepresentativePackageIds,
+                  batchSize = batchSize,
+                  droppedContractsCount = droppedContractsCount,
+                  skippedAlreadyActiveCount = skippedAlreadyActiveCount,
+                  persistedContractsCount = persistedContractsCount,
+                )(data)
+              )
+            }
+            // Publish events to the indexer
+            .mapAsync(1) { contractsToAddWithInternalContractIds =>
+              publishAddedEvents(
+                synchronizerId,
+                contractsToAddWithInternalContractIds,
+                workflowProvider,
+                repairIndexer,
+              )
+            }
+            .toMat(Sink.ignore)(Keep.right)
+            .run()
+        } yield ()
 
-      EitherT.liftF(doneF.map { _ =>
-        val totalPersisted = persistedContractsCount.get()
-        val totalSkipped = skippedAlreadyActiveCount.get()
-        val totalDropped = droppedContractsCount.get()
+        EitherT.liftF(doneF.map { _ =>
+          val totalPersisted = persistedContractsCount.get()
+          val totalSkipped = skippedAlreadyActiveCount.get()
+          val totalDropped = droppedContractsCount.get()
 
-        logger.info(
-          s"Contract import pipeline for synchronizer $synchronizerId finished. " +
-            s"Persisted: $totalPersisted new active contracts written. " +
-            s"Skipped: $totalSkipped pre-existing contracts safely bypassed (idempotent). " +
-            s"Dropped: $totalDropped foreign payloads ignored (synchronizer mismatch)."
-        )
-      })
-    }
+          logger.info(
+            s"Contract import pipeline for synchronizer $synchronizerId finished. " +
+              s"Persisted: $totalPersisted new active contracts written. " +
+              s"Skipped: $totalSkipped pre-existing contracts safely bypassed (idempotent). " +
+              s"Dropped: $totalDropped foreign payloads ignored (synchronizer mismatch)."
+          )
+        })
+      },
+    )
   }
 
   /** Validates a batch of repair contracts and synchronously persists new ones to Canton internal
@@ -349,7 +351,7 @@ final class RepairServiceContractsImporter(
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
     String,
-    Seq[(TimeOfRepair, (CreationTime.CreatedAt, Seq[(ContractToAdd, Long)]))],
+    Seq[(TimeOfRepair, Seq[(ContractToAdd, Long)])],
   ] = {
     val (contractsUnchecked, idx) = data
 
@@ -413,7 +415,7 @@ final class RepairServiceContractsImporter(
 
       // Group per create time and per Ledger API representation (Created vs Assigned events),
       // so that every group results in exactly one homogeneous update.
-      contractsByCreationTime = filteredContracts
+      contractsSortedByCreationTime = filteredContracts
         .groupBy(c =>
           (c.contract.inst.createdAt, eventMode.useReassignmentEvent(c.reassignmentCounter))
         )
@@ -422,7 +424,7 @@ final class RepairServiceContractsImporter(
           (ledgerCreateTime.time, useReassignmentEvent)
         }
         .map { case ((ledgerCreateTime, _), contractsOfGroup) =>
-          (ledgerCreateTime, contractsOfGroup)
+          contractsOfGroup
         }
 
       /*
@@ -434,7 +436,7 @@ final class RepairServiceContractsImporter(
         .from(idx.toInt * batchSize, 1)
         .map(i => TimeOfRepair(synchronizer.currentRecordTime, synchronizer.nextRepairCounter + i))
 
-      contractsToAdd = timesOfRepair.zip(contractsByCreationTime).toSeq
+      contractsToAdd = timesOfRepair.zip(contractsSortedByCreationTime).toSeq
 
       // Logging exactly once per non-empty chunk provides a non-spammy, reliable progress heartbeat
       // while atomically accumulating the exact volume for a final summary.
@@ -445,7 +447,7 @@ final class RepairServiceContractsImporter(
         )
       }
 
-      contractsWithTimeOfChange = contractsToAdd.flatMap { case (tor, (_, cs)) =>
+      contractsWithTimeOfChange = contractsToAdd.flatMap { case (tor, cs) =>
         cs.map(_ -> tor.toToc)
       }
 
@@ -595,7 +597,7 @@ final class RepairServiceContractsImporter(
 
   private def publishAddedEvents(
       synchronizerId: SynchronizerId,
-      contractsAdded: Seq[(TimeOfRepair, (CreationTime.CreatedAt, Seq[(ContractToAdd, Long)]))],
+      contractsAdded: Seq[(TimeOfRepair, Seq[(ContractToAdd, Long)])],
       workflowIds: Iterator[Option[LfWorkflowId]],
       repairIndexer: FutureQueue[RepairUpdate],
   )(implicit traceContext: TraceContext): Future[Unit] =
@@ -607,7 +609,7 @@ final class RepairServiceContractsImporter(
             synchronizerId = synchronizerId,
             recordTime = timeOfChange.timestamp,
             repairCounter = timeOfChange.repairCounter,
-            contractsAdded = contractsToAdd._2,
+            contractsAdded = contractsToAdd,
             workflowIdProvider = () => workflowIds.next(),
             eventMode,
           )

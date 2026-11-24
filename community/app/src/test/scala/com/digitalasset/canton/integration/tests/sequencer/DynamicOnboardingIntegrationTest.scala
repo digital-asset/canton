@@ -291,6 +291,12 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       val conn2 = sequencer2.sequencerConnection
       mediator2.sequencer_connection.set(SequencerConnections.single(conn2))
       mediator2.sequencer_connection.get() shouldBe Some(SequencerConnections.single(conn2))
+      // Setting the connection does not wait for the new connection to be validated, and a send
+      // fails immediately with "No connection available" until it is; so wait until the
+      // sequencer client is subscribed again (via seq2) before sending.
+      eventually() {
+        mediator2.underlying.value.replicaManager.mediatorRuntime.value.mediator.sequencerClient.healthComponent.isOk shouldBe true
+      }
 
       val (m2SequencerClient, m2Crypto) = sequencerClientAndCryptoApiOf(mediator2)
       TraceContext.withNewTraceContext("agg1_2") { implicit traceContext =>

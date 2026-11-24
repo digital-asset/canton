@@ -84,7 +84,6 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.*
 
 class DatabaseSequencer(
-    writerStorageFactory: SequencerWriterStoreFactory,
     sequencerStore: SequencerStore,
     config: DatabaseSequencerConfig,
     eventSignaller: EventSignaller[SequencerMemberId, Unit],
@@ -119,10 +118,8 @@ class DatabaseSequencer(
 
   private val writer = SequencerWriter(
     config.writer,
-    writerStorageFactory,
     keepAliveInterval,
     timeouts,
-    storage,
     sequencerStore,
     rateLimitManagerO,
     clock,

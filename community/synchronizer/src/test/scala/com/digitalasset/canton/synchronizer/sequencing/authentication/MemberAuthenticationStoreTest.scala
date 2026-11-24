@@ -53,7 +53,7 @@ class MemberAuthenticationStoreTest extends AsyncWordSpec with BaseTest {
       val store = mk()
       val fresh = generateNonce(participant1)
 
-      val result = store.fetchOrGenerateNonce(participant1, fresh)
+      val result = store.fetchOrGenerateNonce(participant1, CantonTimestamp.Epoch, fresh)
 
       result shouldBe fresh
       store.fetchNonce(participant1) should contain(fresh)
@@ -66,10 +66,29 @@ class MemberAuthenticationStoreTest extends AsyncWordSpec with BaseTest {
 
       val _ = store.fetchOrSaveNonce(original)
 
-      val result = store.fetchOrGenerateNonce(participant1, second)
+      val result = store.fetchOrGenerateNonce(participant1, defaultExpiry.minusSeconds(1), second)
 
       result shouldBe original
       store.fetchNonce(participant1) should contain(original)
+    }
+
+    "replace an existing expired nonce and preserve the new nonce across cleanup sweeps" in {
+      val store = mk()
+      val expired = generateNonce(participant1, expiry = defaultExpiry)
+      val replacement = generateNonce(participant1, expiry = defaultExpiry.plusSeconds(120))
+
+      val _ = store.fetchOrSaveNonce(expired)
+
+      // At or after defaultExpiry, the stored nonce is expired and should be replaced
+      val result = store.fetchOrGenerateNonce(participant1, defaultExpiry, replacement)
+
+      result shouldBe replacement
+      store.fetchNonce(participant1) should contain(replacement)
+
+      // Running a cleanup sweep up to defaultExpiry polls the old expired entry from expiryQueue
+      // without removing the newer replacement nonce
+      store.expireNoncesAndTokens(defaultExpiry)
+      store.fetchNonce(participant1) should contain(replacement)
     }
   }
 

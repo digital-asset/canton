@@ -7,6 +7,7 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics.updateTimer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId
@@ -111,16 +112,19 @@ abstract class P2PGrpcStreamingReceiver(
   final override def onNext(message: BftOrderingMessage): Unit = {
     implicit val traceContext: TraceContext = TraceContext.fromW3CTraceParent(message.traceContext)
     logger.trace(s"Received gRPC message from '$remotePeerId': $message")
-    message.sentAt.foreach(sendInstant =>
-      updateTimer(
-        metrics.p2p.send.grpcLatency,
-        Duration.between(sendInstant.asJavaInstant, Instant.now),
-      )(
-        metricsContext.withExtraLabels(
-          metrics.p2p.send.labels.SourceSequencer -> message.sentBy
+    // `sentAt` is untrusted and not yet authenticated: skip the latency metric if it is out of range.
+    message.sentAt
+      .flatMap(ProtoConverter.InstantConverter.fromProtoPrimitive(_).toOption)
+      .foreach(sendInstant =>
+        updateTimer(
+          metrics.p2p.send.grpcLatency,
+          Duration.between(sendInstant, Instant.now),
+        )(
+          metricsContext.withExtraLabels(
+            metrics.p2p.send.labels.SourceSequencer -> message.sentBy
+          )
         )
       )
-    )
     // Reuse the `ConnectionOpened` message as a low-frequency application-level RTT echo: the prober
     //  measures the round-trip time and the reflector echoes the probe back (see `isRttProber`).
     if (rttEnabled && message.body.exists(_.message.isConnectionOpened))

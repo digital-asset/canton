@@ -363,13 +363,9 @@ class CantonSyncService(
         val trafficCreditPackagesIfShouldVet =
           if (parameters.damlTopUpEnabled) AdminWorkflowServices.TrafficCreditPackages.keySet
           else Set.empty
-        // TODO(#38227): Always vet the AcsReplication packages
-        val acsReplicationPackagesIfShouldVet =
-          if (parameters.alphaAcsReplicationSupport.isDefined)
-            AdminWorkflowServices.AcsReplicationPackages.keySet
-          else Set.empty
         val packagesToVet =
-          AdminWorkflowServices.PingPackages.keySet ++ acsReplicationPackagesIfShouldVet ++
+          AdminWorkflowServices.PingPackages.keySet ++
+            AdminWorkflowServices.AcsReplicationPackages.keySet ++
             trafficCreditPackagesIfShouldVet
         logger.debug("Checking whether admin workflows need to be vetted still.")
 
@@ -1376,7 +1372,7 @@ class CantonSyncService(
             .leftMap[SyncServiceError](
               SyncServiceError.SyncServiceMigrationError(source, target.map(_.synchronizerAlias), _)
             ),
-          "migrate synchronizer",
+          s"migrate-synchronizer-$source-$target",
         )
 
       _ <- purgeDeactivatedSynchronizer(source.unwrap)

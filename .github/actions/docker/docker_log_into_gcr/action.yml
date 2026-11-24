@@ -12,6 +12,8 @@ runs:
     - name: Authenticate to Google Cloud
       id: gcp
       uses: ./.github/actions/publish/setup_gcp_gar
+      with:
+        service_account_key: ${{ env.GCLOUD_SERVICE_KEY }}
 
     - name: Log Docker into GCR
       shell: bash

@@ -18,9 +18,6 @@ trait CommonStorageBackendFactory extends StorageBackendFactory {
   override val createIntegrityStorageBackend: IntegrityStorageBackend =
     IntegrityStorageBackendImpl
 
-  override val createStringInterningStorageBackend: StringInterningStorageBackend =
-    StringInterningStorageBackendImpl
-
   override val createUserManagementStorageBackend: UserManagementStorageBackend =
     UserManagementStorageBackendImpl
 

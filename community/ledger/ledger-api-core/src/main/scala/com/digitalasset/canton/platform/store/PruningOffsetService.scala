@@ -55,12 +55,12 @@ final class PruningOffsetServiceImpl(
                 other
             }.discard
           case Success(v) =>
-            logger.debug(s"Pruning offset fetched and cached: $v")
+            logger.trace(s"Pruning offset fetched and cached: $v")
         })
       case other => other
     } match {
       case Defined(f) =>
-        logger.debug("Pruning offset served from cache")
+        logger.trace("Pruning offset served from cache")
         f
       case Disabled =>
         logger.debug("Pruning offset cache disabled, returning uncached result")

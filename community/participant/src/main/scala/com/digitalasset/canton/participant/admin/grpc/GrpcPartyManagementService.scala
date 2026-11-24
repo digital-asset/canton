@@ -895,7 +895,7 @@ class GrpcPartyManagementService(
           synchronizerOffsetBeforeOrAtRequestedTimestamp =
             synchronizerOffsetBeforeOrAtRequestedTimestamp,
           forceFlag = forceFlag,
-          cleanSynchronizerTimestamp = lastSynchronizerOffset.syncrhonizerIndex.recordTime,
+          cleanSynchronizerTimestamp = lastSynchronizerOffset.synchronizerIndex.recordTime,
           ledgerEnd = lastSynchronizerOffset.ledgerEnd,
           synchronizerId = synchronizerId,
         )

@@ -166,8 +166,8 @@ final case class RemoteParticipantConfig(
     adminApi: FullClientConfig,
     ledgerApi: FullClientConfig,
     ledgerJsonApi: Option[JsonClientConfig] = None,
-    token: Option[String] = None,
-    adminApiToken: Option[String] = None,
+    token: Option[Confidential[String]] = None,
+    adminApiToken: Option[Confidential[String]] = None,
     httpHealth: Option[HttpHealthServerConfig] = None,
 ) extends BaseParticipantConfig {
   override def clientAdminApi: ClientConfig = adminApi
@@ -403,6 +403,9 @@ object TestingTimeServiceConfig {
   *   Configuration options for ACS commitments
   * @param alphaAcsReplicationSupport
   *   ACS replication alpha config.
+  * @param enableCantonAcsConsistencyChecks
+  *   Enables additional consistency checks for the Canton ACS store. This is an expensive operation
+  *   and should only be enabled for testing and debugging purposes.
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -451,6 +454,7 @@ final case class ParticipantNodeParameterConfig(
     connectToSynchronizersOnStartup: Boolean = true,
     acsCommitments: AcsCommitmentConfig = AcsCommitmentConfig(),
     alphaAcsReplicationSupport: Option[AlphaAcsReplicationConfig] = None,
+    enableCantonAcsConsistencyChecks: Boolean = false,
 ) extends LocalNodeParametersConfig
 
 /** Config for the ACS commitment processing pipeline.

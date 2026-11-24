@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -116,7 +116,7 @@ final class SenderBoundRequestTest
           RetransmissionRequest
             .fromProto(
               ProtocolVersionValidation.AlwaysValidation,
-              BftOrdererLimits.default,
+              BftOrdererLimitsView.default,
               sentBy,
               wire,
             )
@@ -136,7 +136,7 @@ final class SenderBoundRequestTest
           )(
             IssConsensusModule.parseStateTransferMessage(
               ProtocolVersionValidation.AlwaysValidation,
-              BftOrdererLimits.default,
+              BftOrdererLimitsView.default,
               sentBy,
               _,
             )
@@ -156,7 +156,7 @@ final class SenderBoundRequestTest
           )(
             IssConsensusModule.parseStateTransferMessage31(
               ProtocolVersionValidation.AlwaysValidation,
-              BftOrdererLimits.default,
+              BftOrdererLimitsView.default,
               sentBy,
               _,
             )

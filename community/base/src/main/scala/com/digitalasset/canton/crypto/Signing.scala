@@ -359,7 +359,7 @@ object Signature
         signatureP.signingAlgorithmSpec,
       )
       signatureDelegationO <- signatureP.signatureDelegation.traverse(signatureDelegationP =>
-        SignatureDelegation.fromProtoV30(signatureDelegationP, longTermKeyId)
+        SignatureDelegation.fromProtoV30(pvv, signatureDelegationP, longTermKeyId)
       )
       // If a signature delegation is present, the `signedBy` field in the protobuf message does not contain
       // the key that signed the message. Instead, it holds the long-term key that was used to sign
@@ -598,6 +598,7 @@ object SignatureDelegation extends PrettyPrintingCompanion[SignatureDelegation] 
   }
 
   def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       signatureP: v30.SignatureDelegation,
       longTermKeyId: Fingerprint,
   ): ParsingResult[SignatureDelegation] =
@@ -615,6 +616,7 @@ object SignatureDelegation extends PrettyPrintingCompanion[SignatureDelegation] 
             CryptoParseAndValidationError(err.show)
           )
         )
+      _ <- PublicKey.validateNamedCurve(pvv, sessionKey)
       fromInclusive <-
         CantonTimestamp.fromProtoPrimitive(
           signatureP.validityPeriodFromInclusive
@@ -1618,6 +1620,7 @@ object SigningPublicKey
             CryptoParseAndValidationError(err.toString)
           )
         )
+      _ <- PublicKey.validateCurve(pvv, signingPublicKey)
     } yield signingPublicKey
 
   def collect(initialKeys: Map[Member, Seq[PublicKey]]): Map[Member, Seq[SigningPublicKey]] =
@@ -1934,6 +1937,17 @@ object SigningError {
   object UnknownSigningKey extends PrettyPrintingCompanion[UnknownSigningKey] {
     override protected val pretty: Pretty[UnknownSigningKey] = prettyOfClass(
       param("keyId", _.keyId)
+    )
+  }
+
+  /** The hashes to sign together with one signature cannot form a tree, e.g., there are too many */
+  final case class InvalidHashSequence(error: String) extends SigningError {
+    override def prettyCompanion: PrettyPrintingCompanion[InvalidHashSequence] =
+      InvalidHashSequence
+  }
+  object InvalidHashSequence extends PrettyPrintingCompanion[InvalidHashSequence] {
+    override protected val pretty: Pretty[InvalidHashSequence] = prettyOfClass(
+      unnamedParam(_.error.unquoted)
     )
   }
 

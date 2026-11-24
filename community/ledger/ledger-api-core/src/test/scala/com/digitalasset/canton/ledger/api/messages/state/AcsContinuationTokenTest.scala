@@ -183,7 +183,7 @@ class AcsContinuationTokenTest extends AnyWordSpec with SizeLimitTestUtils {
 
     "calculate the same checksum all the time" in {
       originalRequestChecksum should equal(
-        Checksum(ByteString.copyFrom(Array[Byte](111, -68, -89, 79)))
+        Checksum(ByteString.copyFrom(Array[Byte](-124, 115, 61, 63)))
       )
     }
   }

@@ -65,7 +65,7 @@ class RestartHAParticipantReliabilityIntegrationTest
             external,
             rp(loadBalancedParticipant1),
             rp(loadBalancedParticipant2),
-            hasCompleted,
+            () => hasCompleted()._1,
             logger,
           )
         )

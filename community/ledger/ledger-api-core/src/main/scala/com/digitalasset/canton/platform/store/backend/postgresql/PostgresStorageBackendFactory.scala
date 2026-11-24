@@ -65,4 +65,6 @@ final case class PostgresStorageBackendFactory(
   override val createResetStorageBackend: ResetStorageBackend =
     PostgresResetStorageBackend
 
+  override def createStringInterningStorageBackend: StringInterningStorageBackend =
+    new StringInterningStorageBackendImpl(queryStrategy)
 }

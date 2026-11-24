@@ -1235,7 +1235,6 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
           .filter(_._1) shouldBe empty
       }
 
-      // TODO(#34818): Enable this test to also run for PV36 onwards
       if (testedProtocolVersion <= ProtocolVersion.v35) {
         eventually(20.seconds) {
           val optSafeTs = stateInspection1.noOutstandingCommitmentsTs(daName, CantonTimestamp.now())

@@ -4,7 +4,11 @@
 package com.digitalasset.canton.metrics
 
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.sdk.metrics.data.*
 
@@ -12,7 +16,7 @@ import scala.annotation.tailrec
 import scala.jdk.CollectionConverters.*
 import scala.reflect.ClassTag
 
-sealed trait MetricValue extends PrettyPrinting {
+sealed trait MetricValue extends PrettyPrintingFromCompanion {
 
   def attributes: Map[String, String]
 
@@ -85,21 +89,29 @@ object MetricValue {
   final case class LongPoint(value: Long, attributes: Map[String, String])
       extends MetricValue
       with Point[Long] {
-    override protected def pretty: Pretty[LongPoint] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[LongPoint] = LongPoint
+
+  }
+
+  object LongPoint extends PrettyPrintingCompanion[LongPoint] {
+    override protected val pretty: Pretty[LongPoint] = prettyOfClass(
       param("value", _.value),
       param("attributes", _.attributes),
     )
-
   }
 
   final case class DoublePoint(value: Double, attributes: Map[String, String])
       extends MetricValue
       with Point[Double] {
-    override protected def pretty: Pretty[DoublePoint] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[DoublePoint] = DoublePoint
+
+  }
+
+  object DoublePoint extends PrettyPrintingCompanion[DoublePoint] {
+    override protected val pretty: Pretty[DoublePoint] = prettyOfClass(
       param("value", _.value.toString.unquoted),
       param("attributes", _.attributes),
     )
-
   }
 
   final case class Summary(
@@ -108,12 +120,7 @@ object MetricValue {
       quantiles: Seq[ValueAtQuantile],
       attributes: Map[String, String],
   ) extends MetricValue {
-    override protected def pretty: Pretty[Summary] = prettyOfClass(
-      param("sum", _.sum.toString.unquoted),
-      param("count", _.count),
-      param("quantiles", _.quantiles),
-      param("attributes", _.attributes),
-    )
+    override def prettyCompanion: PrettyPrintingCompanion[Summary] = Summary
 
     override def toCsvHeader(data: MetricData): String =
       (Seq("timestamp", "sum", "count") ++ quantiles
@@ -127,6 +134,15 @@ object MetricValue {
       ) :+ renderUnknownKeys(unknownKeys))
         .mkString(",")
 
+  }
+
+  object Summary extends PrettyPrintingCompanion[Summary] {
+    override protected val pretty: Pretty[Summary] = prettyOfClass(
+      param("sum", _.sum.toString.unquoted),
+      param("count", _.count),
+      param("quantiles", _.quantiles),
+      param("attributes", _.attributes),
+    )
   }
 
   final case class Histogram(
@@ -158,13 +174,7 @@ object MetricValue {
       go(counts.zipAll(boundaries, 0, Double.MaxValue), 0)
     }
 
-    override protected def pretty: Pretty[Histogram] = prettyOfClass(
-      param("sum", _.sum.toString.unquoted),
-      param("count", _.count),
-      param("counts", _.counts),
-      param("boundaries", _.boundaries.map(_.toString.unquoted)),
-      param("attributes", _.attributes),
-    )
+    override def prettyCompanion: PrettyPrintingCompanion[Histogram] = Histogram
 
     override def toCsvHeader(data: MetricData): String =
       "timestamp,sum,count,attributes"
@@ -175,6 +185,16 @@ object MetricValue {
       ))
         .mkString(",")
 
+  }
+
+  object Histogram extends PrettyPrintingCompanion[Histogram] {
+    override protected val pretty: Pretty[Histogram] = prettyOfClass(
+      param("sum", _.sum.toString.unquoted),
+      param("count", _.count),
+      param("counts", _.counts),
+      param("boundaries", _.boundaries.map(_.toString.unquoted)),
+      param("attributes", _.attributes),
+    )
   }
 
   final case class ExponentialHistogram(
@@ -199,16 +219,15 @@ object MetricValue {
       ))
         .mkString(",")
 
-    override protected def pretty: Pretty[ExponentialHistogram] =
-      ExponentialHistogram.prettyInstance
+    override def prettyCompanion: PrettyPrintingCompanion[ExponentialHistogram] =
+      ExponentialHistogram
   }
-  private object ExponentialHistogram {
-    private val prettyInstance = {
-      import com.digitalasset.canton.logging.pretty.PrettyUtil.*
-      prettyOfClass[ExponentialHistogram](
+  private object ExponentialHistogram extends PrettyPrintingCompanion[ExponentialHistogram] {
+
+    override protected val pretty: Pretty[ExponentialHistogram] =
+      prettyOfClass(
         param("attributes", _.attributes)
       )
-    }
   }
 
   private def fromLongPoint(data: LongPointData): LongPoint =

@@ -133,7 +133,7 @@ class TopologyTransactionProcessor(
       effective: EffectiveTime,
       approximate: ApproximateTime,
   )(implicit traceContext: TraceContext): Unit = {
-    logger.debug(
+    logger.trace(
       s"Updating listener heads to $effective and $approximate."
     )
     listeners
@@ -403,7 +403,7 @@ class TopologyTransactionProcessor(
 
       _ <- synchronizeWithClosing("notify-topology-transaction-observers")(
         MonadUtil.sequentialTraverse(listeners.get()) { listenerGroup =>
-          logger.debug(
+          logger.trace(
             s"Notifying listener group (${listenerGroup.head1.executionOrder}) of $sequencingTimestamp, $effectiveTimestamp and SC $sc"
           )
           listenerGroup.forgetNE.parTraverse_(

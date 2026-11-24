@@ -22,7 +22,7 @@ object Utils {
   )(implicit errorLoggingContext: ErrorLoggingContext): In => Out = { in =>
     val started = System.nanoTime()
     val result = f(in)
-    errorLoggingContext.debug(
+    errorLoggingContext.trace(
       s"DB Query for ${log(result)} took: ${elapsedMillis(started)}ms"
     )
     result

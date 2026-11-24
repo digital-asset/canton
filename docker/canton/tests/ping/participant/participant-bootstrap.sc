@@ -4,6 +4,8 @@ import com.digitalasset.canton.console.{CommandFailure, LocalInstanceReference}
 
 import scala.concurrent.duration._
 
+import java.nio.file.{Files, Paths}
+
 def main() = {
   def participantInit(node: LocalInstanceReference): Unit = {
     // Create a signing key used to define the node identity.
@@ -80,6 +82,50 @@ def main() = {
   logger.info("=== finished connecting to synchronizer ===")
 
   participant.health.ping(participant)
+
+  // PQS setup, participant1 only (participant2 has no pqs-user). PQS needs read
+  // rights for its user and a user Daml model on the ledger, else it aborts.
+  val pqsUser = "pqs-user"
+  if (participant.ledger_api.users.list(filterUser = pqsUser).users.exists(_.id == pqsUser)) {
+    participant.ledger_api.users.rights.grant(id = pqsUser, readAsAnyParty = true)
+    logger.info(s"=== granted read-as-any-party to $pqsUser ===")
+
+    participant.dars.upload("/app/CantonExamples.dar")
+    val examplesPackageId =
+      participant.packages
+        .find_by_module("Iou")
+        .headOption
+        .map(_.packageId)
+        .getOrElse(sys.error("Iou module not found after uploading CantonExamples.dar"))
+
+    // The admin token may act as the admin party without extra config.
+    // optTimeout = None skips the console's post-submit read as every synchronizer
+    // party, which is denied for participant2's parties.
+    val issuer = participant.adminParty
+    participant.ledger_api.commands.submit(
+      actAs = Seq(issuer),
+      commands = Seq(
+        ledger_api_utils.create(
+          examplesPackageId,
+          "Iou",
+          "Iou",
+          Map[String, Any](
+            "payer" -> issuer,
+            "owner" -> issuer,
+            "amount" -> Map[String, Any]("value" -> 1.0, "currency" -> "USD"),
+            "viewers" -> List.empty[String],
+          ),
+        )
+      ),
+      optTimeout = None,
+    )
+    logger.info("=== created seed Iou contract for PQS ===")
+  } else {
+    logger.info(s"=== no $pqsUser user, skipping PQS seed ===")
+  }
+
+  // Written last. The compose healthcheck waits for it, so PQS starts after the seed.
+  Files.write(Paths.get("/tmp/smoke-bootstrap-complete"), Array.emptyByteArray)
   logger.info("=== finishing participant bootstrap ===")
 
 }

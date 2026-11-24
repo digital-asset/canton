@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.networking.grpc.ratelimiting
 
+import org.scalatest.Inspectors.forEvery
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -16,6 +17,37 @@ class IpCidrTest extends AnyWordSpec with Matchers {
       IpCidr.tryParse("10.1.2.3/32").toString shouldBe "10.1.2.3/32"
       IpCidr.tryParse("10.1.2.3/0").toString shouldBe "0.0.0.0/0"
       IpCidr.tryParse("10.1.2.3/23").toString shouldBe "10.1.2.0/23"
+    }
+
+    "accept an IPv4-mapped IPv6 address as the IPv4 address it stands for" in {
+      IpCidr.tryParse("::ffff:192.0.2.1").toString shouldBe "192.0.2.1/32"
+      IpCidr.tryParse("0:0:0:0:0:ffff:c000:0201").toString shouldBe "192.0.2.1/32"
+      IpCidr.tryParse("::ffff:192.0.2.1/32").addressBits shouldBe 32
+    }
+
+    "accept an IPv6 address with a numeric zone id, which is not part of the address" in {
+      IpCidr.tryParse("fe80::1%1").toString shouldBe "fe80:0:0:0:0:0:0:1/128"
+    }
+
+    "throw on an address naming an interface that does not exist on this host" in {
+      // Guava's isInetAddress accepts this but forString throws on it, so a value from a request
+      // header has to be parsed before it gets here, see GrpcAddressHelper.extractHeaderIpLiteral
+      an[IllegalArgumentException] should be thrownBy IpCidr.parse("fe80::1%eth999")
+    }
+
+    "reject values that are not plain IP literals" in {
+      forEvery(
+        Seq(
+          "203.0.113.5:443",
+          "[2001:db8::1]",
+          "[2001:db8::1]:443",
+          "010.1.2.3",
+          "1.2.3.4.5",
+          "example.com",
+          "unknown",
+          "_hidden",
+        )
+      )(value => IpCidr.parse(value) shouldBe None)
     }
 
     "normalize IPv6 networks and hosts, including across the 64 bit word boundary" in {

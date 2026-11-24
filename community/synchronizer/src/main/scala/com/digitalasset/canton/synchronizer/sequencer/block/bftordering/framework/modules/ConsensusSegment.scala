@@ -7,7 +7,7 @@ import cats.syntax.functor.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -248,7 +248,7 @@ object ConsensusSegment {
     final case class ConsensusSegmentDeserializationContext(
         claimedOriginator: BftNodeId,
         actualSender: Option[BftNodeId],
-        limits: BftOrdererLimits,
+        limits: BftOrdererLimitsView,
     )
 
     object PrePrepare
@@ -302,7 +302,7 @@ object ConsensusSegment {
 
       private def fromProto(
           pvv: ProtocolVersionValidation,
-          limits: BftOrdererLimits,
+          limits: BftOrdererLimitsView,
           blockMetadata: BlockMetadata,
           viewNumber: ViewNumber,
           prePrepare: v30.PrePrepare,
@@ -640,7 +640,7 @@ object ConsensusSegment {
 
       private def fromProto(
           pvv: ProtocolVersionValidation,
-          limits: BftOrdererLimits,
+          limits: BftOrdererLimitsView,
           blockMetadata: BlockMetadata,
           viewNumber: ViewNumber,
           viewChange: v30.ViewChange,
@@ -770,7 +770,7 @@ object ConsensusSegment {
 
       private def fromProto(
           pvv: ProtocolVersionValidation,
-          limits: BftOrdererLimits,
+          limits: BftOrdererLimitsView,
           blockMetadata: BlockMetadata,
           viewNumber: ViewNumber,
           newView: v30.NewView,

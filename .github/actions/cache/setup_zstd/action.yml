@@ -1,0 +1,16 @@
+name: Set up zstd
+description: >-
+  Puts zstd on the PATH, so actions/cache compresses with multi-threaded zstd instead of gzip.
+  NOTE: actions/cache only restores entries saved with the same compression, so every save and
+  restore of a cache must run this first.
+
+runs:
+  using: composite
+  steps:
+    - name: Put zstd on the PATH
+      shell: bash
+      run: |
+        if ! command -v zstd >/dev/null; then
+          zstd_bin=$(nix-build -I nixpkgs=./nix/nixpkgs.nix '<nixpkgs>' -A zstd.bin --no-out-link)
+          echo "$zstd_bin/bin" >> "$GITHUB_PATH"
+        fi

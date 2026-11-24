@@ -71,7 +71,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
 
       - name: Set Canton Protocol Version
         uses: ./.github/actions/test/set_canton_protocol_version
@@ -137,6 +137,5 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: toxiproxy_test_slow
-      runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}
       shard_job_result: ${{ needs.toxiproxy_test_slow.result }}

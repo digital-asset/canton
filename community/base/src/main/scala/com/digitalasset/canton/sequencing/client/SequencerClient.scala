@@ -124,7 +124,7 @@ import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
 import org.apache.pekko.{Done, NotUsed}
 import org.slf4j.event.Level
 
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.compat.java8.DurationConverters.FiniteDurationops
 import scala.concurrent.*
 import scala.concurrent.duration.*
@@ -285,7 +285,7 @@ abstract class SequencerClientImpl(
     with Spanning
     with HasCloseContext
     with HasAcceptableSequencers {
-  import SequencerClientImpl.LinkDetails
+  import SequencerClientImpl.{LinkDetails, SentCopies}
 
   override def logout()(implicit
       traceContext: TraceContext
@@ -457,6 +457,8 @@ abstract class SequencerClientImpl(
   private final class ReplayPreparedSubmission extends SequencerClientSend.PreparedSubmission {
     override def trafficCost: Option[Long] = None
 
+    override def mayHaveSentMultipleCopies: Boolean = false
+
     override def sendAsync(
         callback: SendCallback,
         amplify: Boolean,
@@ -494,6 +496,10 @@ abstract class SequencerClientImpl(
       override val trafficCost: Option[Long],
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext)
       extends SequencerClientSend.PreparedSubmission {
+
+    private val sentCopies = new SentCopies
+
+    override def mayHaveSentMultipleCopies: Boolean = sentCopies.multiple
 
     override def sendAsync(
         callback: SendCallback,
@@ -542,6 +548,7 @@ abstract class SequencerClientImpl(
             useConfirmationResponseAmplificationParameters,
           () => peekAtSendResult(),
           latestAttemptRef,
+          sentCopies,
           snapshot,
           timestamps.approximateTimestampForSigning,
           acceptableSequencersO,
@@ -613,6 +620,7 @@ abstract class SequencerClientImpl(
       useConfirmationResponseAmplificationParameters: Boolean,
       peekAtSendResult: () => Option[UnlessShutdown[SendResult]],
       latestAttemptRef: LatestAttemptRef,
+      sentCopies: SentCopies,
       topologySnapshot: SyncCryptoApi,
       approximateTimestampForSigning: CantonTimestamp,
       acceptableSequencersO: Option[Set[SequencerId]],
@@ -663,6 +671,7 @@ abstract class SequencerClientImpl(
             useConfirmationResponseAmplificationParameters,
             peekAtSendResult,
             latestAttemptRef,
+            sentCopies,
             acceptableSequencersO,
           )
         }
@@ -734,6 +743,7 @@ abstract class SequencerClientImpl(
       useConfirmationResponseAmplificationParameters: Boolean,
       peekAtSendResult: () => Option[UnlessShutdown[SendResult]],
       latestAttemptRef: LatestAttemptRef,
+      sentCopies: SentCopies,
       acceptableSequencersO: Option[Set[SequencerId]],
   )(implicit
       traceContext: TraceContext,
@@ -942,55 +952,79 @@ abstract class SequencerClientImpl(
             )
         }
 
-      linkDetailsO match {
-        case Some(LinkDetails(sequencerAlias, sequencerId, connection)) =>
-          synchronizeWithClosingF(s"sending message $messageId to sequencer $sequencerId") {
-            NonEmpty.from(previousSequencers) match {
-              case None =>
-                logger.debug(s"Sending message ID $messageId to sequencer $sequencerId")
-              case Some(previousNE) =>
-                logger.info(
-                  s"Amplifying submission request with message ID $messageId (attempt ${previousSequencers.size + 1}). Sending now to sequencer $sequencerId. Previous attempted sequencer ${previousNE.head1}."
-                )
+      def sendCopy(
+          link: LinkDetails
+      ): FutureUnlessShutdown[Either[State, Either[SendAsyncClientError, Unit]]] = {
+        val LinkDetails(sequencerAlias, sequencerId, connection) = link
+        synchronizeWithClosingF(s"sending message $messageId to sequencer $sequencerId") {
+          NonEmpty.from(previousSequencers) match {
+            case None =>
+              logger.debug(s"Sending message ID $messageId to sequencer $sequencerId")
+            case Some(previousNE) =>
+              logger.info(
+                s"Amplifying submission request with message ID $messageId (attempt ${previousSequencers.size + 1}). Sending now to sequencer $sequencerId. Previous attempted sequencer ${previousNE.head1}."
+              )
+          }
+          val submissionCostOrZero =
+            signedRequest.content.submissionCost.map(_.cost.value).getOrElse(0L)
+          metrics.trafficConsumption.trafficCostOfSubmittedEvent.mark(submissionCostOrZero)(
+            metricsContext.withExtraLabels("target-sequencer" -> sequencerAlias.toString)
+          )
+
+          val startTimeOfAttempt = clock.now
+
+          latestAttemptRef.set(
+            // If there is already a send in flight, we don't track the following attempt durations
+            Option.when(!sendInFlight)(LatestAttempt(sequencerAlias, System.nanoTime))
+          )
+
+          val sendResultETUS = connection.sendAsync(signedRequest, timeout)
+
+          // We are treating a shutdown result in the same way as a normal result, instead of propagating it up.
+          // Note that this is the shutdown of the transport, not the sequencer client (see `synchronizeWithClosingF` above).
+          // It can happen outside a regular shutdown when closing a connection for a fatal reason.
+          //
+          // If this send attempt is happening outside the application handler (e.g. a confirmation request),
+          // we don't want to abort amplification just because this particular transport has shut down, as others
+          // might be fine.
+          //
+          // If the send attempt is happening within the application handler (e.g. a confirmation response), propagating
+          // the shutdown has devastating consequences: the application handler will be marked as shutdown, and since
+          // this information is global to the sequencer client, the reception of a new event on any sequencer subscription
+          // will result in shutting down that subscription (because the handler has shut down), eventually leading to a
+          // disconnect from the synchronizer when the trust threshold is no longer satisfied.
+          sendResultETUS.value
+            .onShutdown(Either.unit)
+            .map(((clock.now - startTimeOfAttempt).toScala, _))
+        }.map {
+          case (durationOfAttempt, Right(())) =>
+            // Do not await the patience. This would defeat the point of asynchronous send.
+            scheduleAmplification(durationOfAttempt, sendInFlight = true)
+            Right(Either.unit)
+          case (_, Left(error)) =>
+            error match {
+              // The sequencer didn't accept this copy, so it can't be delivered.
+              case _: SendAsyncClientError.RequestFailed | _: SendAsyncClientError.RequestRefused =>
+                sentCopies.attemptNotSent()
+              case _: SendAsyncClientError.RequestAlreadyExists =>
             }
-            val submissionCostOrZero =
-              signedRequest.content.submissionCost.map(_.cost.value).getOrElse(0L)
-            metrics.trafficConsumption.trafficCostOfSubmittedEvent.mark(submissionCostOrZero)(
-              metricsContext.withExtraLabels("target-sequencer" -> sequencerAlias.toString)
-            )
+            handleSyncError(error, sequencerId, sequencerAlias, connection)
+        }
+      }
 
-            val startTimeOfAttempt = clock.now
-
-            latestAttemptRef.set(
-              // If there is already a send in flight, we don't track the following attempt durations
-              Option.when(!sendInFlight)(LatestAttempt(sequencerAlias, System.nanoTime))
-            )
-
-            val sendResultETUS = connection.sendAsync(signedRequest, timeout)
-
-            // We are treating a shutdown result in the same way as a normal result, instead of propagating it up.
-            // Note that this is the shutdown of the transport, not the sequencer client (see `synchronizeWithClosingF` above).
-            // It can happen outside a regular shutdown when closing a connection for a fatal reason.
-            //
-            // If this send attempt is happening outside the application handler (e.g. a confirmation request),
-            // we don't want to abort amplification just because this particular transport has shut down, as others
-            // might be fine.
-            //
-            // If the send attempt is happening within the application handler (e.g. a confirmation response), propagating
-            // the shutdown has devastating consequences: the application handler will be marked as shutdown, and since
-            // this information is global to the sequencer client, the reception of a new event on any sequencer subscription
-            // will result in shutting down that subscription (because the handler has shut down), eventually leading to a
-            // disconnect from the synchronizer when the trust threshold is no longer satisfied.
-            sendResultETUS.value
-              .onShutdown(Either.unit)
-              .map(((clock.now - startTimeOfAttempt).toScala, _))
-          }.map {
-            case (durationOfAttempt, Right(())) =>
-              // Do not await the patience. This would defeat the point of asynchronous send.
-              scheduleAmplification(durationOfAttempt, sendInFlight = true)
-              Right(Either.unit)
-            case (_, Left(error)) =>
-              handleSyncError(error, sequencerId, sequencerAlias, connection)
+      linkDetailsO match {
+        case Some(link) =>
+          // Count before checking the result, so every copy we send was counted before the
+          // result was known.
+          sentCopies.attemptStarted()
+          peekAtSendResult() match {
+            case None => sendCopy(link)
+            case Some(result) =>
+              sentCopies.attemptNotSent()
+              logger.debug(
+                s"Not sending message ID $messageId to sequencer ${link.sequencerId} because its send result is already known"
+              )
+              FutureUnlessShutdown.lift(result.map(_ => Right(Either.unit)))
           }
 
         case None if isClosing => FutureUnlessShutdown.abortedDueToShutdown
@@ -1321,6 +1355,17 @@ object SequencerClientImpl {
       isFirstStep: Boolean,
       sendInFlight: Boolean,
   )
+
+  /** Counts the copies of a request that may have reached a sequencer. */
+  private final class SentCopies {
+    private val count = new AtomicInteger(0)
+
+    def attemptStarted(): Unit = count.incrementAndGet().discard
+
+    def attemptNotSent(): Unit = count.decrementAndGet().discard
+
+    def multiple: Boolean = count.get() > 1
+  }
 
   private final class SequencerClientTimeSourcesPool(
       connectionPool: SequencerConnectionPool

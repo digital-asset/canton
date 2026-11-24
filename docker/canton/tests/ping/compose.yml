@@ -20,6 +20,18 @@ services:
       timeout: 5s
       retries: 30
 
+  # JWKS server and pre-minted RS256 token for the jwt-jwks ledger API auth.
+  auth:
+    build:
+      context: ./auth
+    image: "canton-smoke-auth:${RELEASE_SUFFIX:-local}"
+    container_name: auth
+    environment:
+      AUTH_TARGET_AUDIENCE: "participant"
+      AUTH_TOKEN_SUBJECT: "pqs-user"
+    volumes:
+      - auth-shared:/shared
+
   participant:
     build:
       context: ./participant
@@ -28,6 +40,8 @@ services:
     environment:
       AUTH_TARGET_AUDIENCE: "participant"
       AUTH_JWKS_URL: "http://auth:8080/.well-known/jwks.json"
+      # Ledger user for the minted token (sub=pqs-user).
+      CANTON_PARTICIPANT_ADMIN_USER_NAME: "pqs-user"
       CANTON_PARTICIPANT_POSTGRES_SERVER: "canton-postgres"
       CANTON_PARTICIPANT_POSTGRES_PORT: "5432"
     container_name: participant
@@ -37,8 +51,47 @@ services:
       - "5002:5002"
       - "7575:7575"
       - "10013:10013"
+    # The image healthcheck goes green mid-bootstrap. Also wait for the marker
+    # the bootstrap writes last, so dependents start after the seed exists.
+    healthcheck: &participant-bootstrap-healthcheck
+      test:
+        [
+          "CMD-SHELL",
+          "wget -Y off -q -T 5 -O /dev/null http://localhost:5071/health/ready && test -f /tmp/smoke-bootstrap-complete",
+        ]
+      start_period: 10m
+      interval: 5s
+      timeout: 5s
+      retries: 5
     depends_on:
       db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+
+  # Second participant on the same synchronizer, own database.
+  participant2:
+    build:
+      context: ./participant
+      args:
+        BASE_IMAGE: "${OCI_PATH:-}canton-participant:${RELEASE_SUFFIX:-local}"
+    environment:
+      AUTH_TARGET_AUDIENCE: "participant"
+      AUTH_JWKS_URL: "http://auth:8080/.well-known/jwks.json"
+      CANTON_PARTICIPANT_POSTGRES_SERVER: "canton-postgres"
+      CANTON_PARTICIPANT_POSTGRES_PORT: "5432"
+      CANTON_PARTICIPANT_POSTGRES_DB: "participant2"
+    container_name: participant2
+    ports:
+      - "5011:5001"
+      - "5012:5002"
+      - "7576:7575"
+    # Fails the run if participant2's bootstrap breaks.
+    healthcheck: *participant-bootstrap-healthcheck
+    depends_on:
+      db:
+        condition: service_healthy
+      auth:
         condition: service_healthy
 
   sequencer:
@@ -82,6 +135,40 @@ services:
       - sequencer
       - mediator
 
+  # Participant Query Store, projects participant1's ledger into the "pqs" database.
+  pqs:
+    # Only started when run_test.sh is given PQS_IMAGE.
+    profiles: [ "pqs" ]
+    image: "${PQS_IMAGE:-participant-query-store:local}"
+    container_name: pqs
+    # No token-file flag, so read the minted token and pass it inline. The image
+    # has no "cat", and the file has no trailing newline, so "read" fails at EOF
+    # but still sets TOKEN. "$$" escapes "$" for compose.
+    entrypoint: [ "/bin/sh", "-c" ]
+    command:
+      - |
+        read -r TOKEN < /shared/token
+        exec java -jar /pqs.jar pipeline ledger postgres-document --pipeline-oauth-accesstoken "$$TOKEN"
+    environment:
+      PQS_SOURCE_LEDGER_HOST: "participant"
+      PQS_SOURCE_LEDGER_PORT: "5001"
+      PQS_TARGET_POSTGRES_HOST: "canton-postgres"
+      PQS_TARGET_POSTGRES_PORT: "5432"
+      PQS_TARGET_POSTGRES_DATABASE: "pqs"
+      PQS_TARGET_POSTGRES_USERNAME: "cnadmin"
+      PQS_TARGET_POSTGRES_PASSWORD: "cnadmin"
+      PQS_PIPELINE_LEDGER_START: "${PQS_LEDGER_START:-Genesis}"
+      PQS_SOURCE_LEDGER_AUTH: "${PQS_LEDGER_AUTH:-OAuth}"
+    volumes:
+      - auth-shared:/shared:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      participant:
+        condition: service_healthy
+
   test:
     build:
       context: ./test
@@ -89,7 +176,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      auth:
+        condition: service_healthy
       participant:
+        condition: service_healthy
+      participant2:
         condition: service_healthy
       sequencer:
         condition: service_started
@@ -100,11 +191,30 @@ services:
     environment:
       # These are consumed by test/run.sh
       RELEASE_SUFFIX: "${RELEASE_SUFFIX:-local}"
+      # Phase 0: admin connectivity (unchanged)
       HOSTPORT: "participant:5002"
       SERVICE: "com.digitalasset.canton.admin.participant.v30.SynchronizerConnectivityService"
       METHOD: "ListConnectedSynchronizers"
-      # Covers the bootstrap's connect retry window (participant-bootstrap.sc) plus its last attempt and the ping
-      TIMEOUT: "240"
+      # Covers the bootstrap's connect retry window (participant-bootstrap.sc) plus its last attempt and the ping.
+      # Overridable for fast local iteration, e.g. SMOKE_TIMEOUT=20 ./run_test.sh
+      TIMEOUT: "${SMOKE_TIMEOUT:-240}"
       INTERVAL: "3"
-    # Don’t restart: we want a clean exit code and single log stream
+      # Phase 1-2: ledger API auth + activity
+      LEDGER_HOSTPORT: "participant:5001"
+      AUTH_TOKEN_URL: "http://auth:8080/token"
+      AUTH_TOKEN_FILE: "/shared/token"
+      # Phase 3: PQS visibility oracle
+      # Empty skips phase 3 (run_test.sh sets it when PQS_IMAGE is set).
+      PQS_PGHOST: "${SMOKE_PQS_PGHOST:-}"
+      PQS_PGPORT: "5432"
+      PQS_PGUSER: "cnadmin"
+      PQS_PGPASSWORD: "cnadmin"
+      PQS_PGDATABASE: "pqs"
+      PQS_TIMEOUT: "180"
+    volumes:
+      - auth-shared:/shared:ro
+    # Don't restart: we want a clean exit code and single log stream
     restart: "no"
+
+volumes:
+  auth-shared:

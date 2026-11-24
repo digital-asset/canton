@@ -11,6 +11,8 @@ runs:
   steps:
     - name: Setup GCP credentials for GAR
       uses: ./.github/actions/publish/setup_gcp_gar
+      with:
+        service_account_key: ${{ env.GCLOUD_SERVICE_KEY }}
 
     - name: Publish libraries to Google Artifact Registry
       uses: ./.github/actions/nix/nix_run

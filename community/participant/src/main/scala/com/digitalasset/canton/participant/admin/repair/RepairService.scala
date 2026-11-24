@@ -185,7 +185,7 @@ final class RepairService(
       contractIds: NonEmpty[Seq[LfContractId]],
       ignoreAlreadyPurged: Boolean,
       forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
-  )(implicit traceContext: TraceContext): Either[String, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
     val eventMode = RepairLedgerApiEventMode.fromParameters(parameters)
     val modeDescription = eventMode match {
       case RepairLedgerApiEventMode.Reassignments =>
@@ -205,7 +205,7 @@ final class RepairService(
       case RepairLedgerApiEventMode.Reassignments => PositiveInt.one
     }
 
-    helpers.runConsecutiveAndAwaitUS(
+    helpers.runConsecutive(
       "repair.purge",
       helpers.withRepairIndexer { repairIndexer =>
         (for {
@@ -365,6 +365,7 @@ final class RepairService(
             syncCrypto,
             repairIndexer,
             contractStore.value,
+            contractValidator,
             loggerFactory,
           )
 
@@ -373,7 +374,7 @@ final class RepairService(
           )
           // Note the following purposely fails if any contract fails which results in not all contracts being processed.
           _ <- changeAssignation
-            .changeAssignation(changeAssignationData, skipInactive)
+            .changeAssignation(changeAssignationData, skipInactive, packageMetadataView.getSnapshot)
             .map(_ => Seq[Unit]())
 
         } yield ()).mapK(FutureUnlessShutdown.failOnShutdownToAbortExceptionK("changeAssignation"))
@@ -412,102 +413,105 @@ final class RepairService(
       target: ReassignmentTag.Target[SynchronizerId],
       forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
   )(implicit context: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
-    helpers.withRepairIndexer { repairIndexer =>
-      (for {
-        // Initial init: looks up reassignmentData via target's persistent state. We don't yet know
-        // how many RepairCounters we'll need, so allocate the default (1) and rebuild below.
-        initialSourceRepairRequest <- source.traverse(
-          helpers.initRepairRequestAndVerifyPreconditions(
-            _,
+    helpers.runConsecutive(
+      s"rollback-$reassignmentId-$source-$target",
+      helpers.withRepairIndexer { repairIndexer =>
+        (for {
+          // Initial init: looks up reassignmentData via target's persistent state. We don't yet know
+          // how many RepairCounters we'll need, so allocate the default (1) and rebuild below.
+          initialSourceRepairRequest <- source.traverse(
+            helpers.initRepairRequestAndVerifyPreconditions(
+              _,
+              repairIndexer,
+              forceRepairWhenTopologyTransactionAtLedgerEnd,
+            )
+          )
+          initialTargetRepairRequest <- target.traverse(
+            helpers.initRepairRequestAndVerifyPreconditions(
+              _,
+              repairIndexer,
+              forceRepairWhenTopologyTransactionAtLedgerEnd,
+            )
+          )
+          reassignmentData <-
+            initialTargetRepairRequest.unwrap.synchronizer.persistentState.reassignmentStore
+              .lookup(reassignmentId)
+              .leftMap(_.message)
+
+          contractsCount <- EitherT.fromEither[FutureUnlessShutdown](
+            PositiveInt
+              .create(reassignmentData.contractsBatch.contractIds.size)
+              .leftMap(_.toString)
+          )
+
+          // Allocate one RepairCounter per emitted Update:
+          //  - source: one assign Update per batch in the back-swap (≤ contractsCount counters)
+          //  - target: one assign Update per batch in completeUnassigned plus one unassign Update
+          //    per batch in the back-swap (≤ 2 * contractsCount counters)
+          sourceCounters <- EitherT.fromEither[FutureUnlessShutdown](
+            helpers.repairCounterSequence(
+              initialSourceRepairRequest.unwrap.repairCounters.head1,
+              contractsCount,
+            )
+          )
+          targetCounters <- EitherT.fromEither[FutureUnlessShutdown](
+            helpers.repairCounterSequence(
+              initialTargetRepairRequest.unwrap.repairCounters.head1,
+              PositiveInt.tryCreate(contractsCount.value * 2),
+            )
+          )
+          sourceRepairRequest = initialSourceRepairRequest.map(
+            _.copy(repairCounters = sourceCounters)
+          )
+          targetRepairRequest = initialTargetRepairRequest.map(
+            _.copy(repairCounters = targetCounters)
+          )
+
+          changeAssignation = new ChangeAssignation(
+            sourceRepairRequest,
+            targetRepairRequest,
+            participantId,
+            syncCrypto,
             repairIndexer,
-            forceRepairWhenTopologyTransactionAtLedgerEnd,
+            contractStore.value,
+            contractValidator,
+            loggerFactory,
           )
-        )
-        initialTargetRepairRequest <- target.traverse(
-          helpers.initRepairRequestAndVerifyPreconditions(
-            _,
+
+          // completeUnassigned only emits assignments (target side), so it consumes the first
+          // contractsCount target times-of-repair.
+          unassignmentData = ChangeAssignation.Data(
+            reassignmentData,
+            ReassignmentTag.Source(Seq.empty[TimeOfRepair]),
+            targetRepairRequest.map(_.timesOfRepair.take(contractsCount.value)),
+          )
+          _ <- changeAssignation.completeUnassigned(unassignmentData)
+
+          // For the back-swap, the original target becomes the source (emits unassign Updates), so
+          // it consumes the remaining contractsCount target times-of-repair. The original source
+          // becomes the target (emits assign Updates) and consumes its full counter sequence.
+          changeAssignationBack = new ChangeAssignation(
+            ReassignmentTag.Source(targetRepairRequest.unwrap),
+            ReassignmentTag.Target(sourceRepairRequest.unwrap),
+            participantId,
+            syncCrypto,
             repairIndexer,
-            forceRepairWhenTopologyTransactionAtLedgerEnd,
+            contractStore.value,
+            contractValidator,
+            loggerFactory,
           )
-        )
-        reassignmentData <-
-          initialTargetRepairRequest.unwrap.synchronizer.persistentState.reassignmentStore
-            .lookup(reassignmentId)
-            .leftMap(_.message)
-
-        contractsCount <- EitherT.fromEither[FutureUnlessShutdown](
-          PositiveInt
-            .create(reassignmentData.contractsBatch.contractIds.size)
-            .leftMap(_.toString)
-        )
-
-        // Allocate one RepairCounter per emitted Update:
-        //  - source: one assign Update per batch in the back-swap (≤ contractsCount counters)
-        //  - target: one assign Update per batch in completeUnassigned plus one unassign Update
-        //    per batch in the back-swap (≤ 2 * contractsCount counters)
-        sourceCounters <- EitherT.fromEither[FutureUnlessShutdown](
-          helpers.repairCounterSequence(
-            initialSourceRepairRequest.unwrap.repairCounters.head1,
-            contractsCount,
+          changeData = ChangeAssignation.Data(
+            reassignmentData.contractsBatch,
+            ReassignmentTag.Source(
+              targetRepairRequest.unwrap.timesOfRepair.drop(contractsCount.value)
+            ),
+            ReassignmentTag.Target(sourceRepairRequest.unwrap.timesOfRepair),
           )
-        )
-        targetCounters <- EitherT.fromEither[FutureUnlessShutdown](
-          helpers.repairCounterSequence(
-            initialTargetRepairRequest.unwrap.repairCounters.head1,
-            PositiveInt.tryCreate(contractsCount.value * 2),
-          )
-        )
-        sourceRepairRequest = initialSourceRepairRequest.map(
-          _.copy(repairCounters = sourceCounters)
-        )
-        targetRepairRequest = initialTargetRepairRequest.map(
-          _.copy(repairCounters = targetCounters)
-        )
-
-        changeAssignation = new ChangeAssignation(
-          sourceRepairRequest,
-          targetRepairRequest,
-          participantId,
-          syncCrypto,
-          repairIndexer,
-          contractStore.value,
-          loggerFactory,
-        )
-
-        // completeUnassigned only emits assignments (target side), so it consumes the first
-        // contractsCount target times-of-repair.
-        unassignmentData = ChangeAssignation.Data(
-          reassignmentData,
-          ReassignmentTag.Source(Seq.empty[TimeOfRepair]),
-          targetRepairRequest.map(_.timesOfRepair.take(contractsCount.value)),
-        )
-        _ <- changeAssignation.completeUnassigned(unassignmentData)
-
-        // For the back-swap, the original target becomes the source (emits unassign Updates), so
-        // it consumes the remaining contractsCount target times-of-repair. The original source
-        // becomes the target (emits assign Updates) and consumes its full counter sequence.
-        changeAssignationBack = new ChangeAssignation(
-          ReassignmentTag.Source(targetRepairRequest.unwrap),
-          ReassignmentTag.Target(sourceRepairRequest.unwrap),
-          participantId,
-          syncCrypto,
-          repairIndexer,
-          contractStore.value,
-          loggerFactory,
-        )
-        contractIdsData = ChangeAssignation.Data[Seq[(LfContractId, Option[ReassignmentCounter])]](
-          reassignmentData.contractsBatch.contractIds.map(_ -> None).toSeq,
-          ReassignmentTag.Source(
-            targetRepairRequest.unwrap.timesOfRepair.drop(contractsCount.value)
-          ),
-          ReassignmentTag.Target(sourceRepairRequest.unwrap.timesOfRepair),
-        )
-        _ <- changeAssignationBack.changeAssignation(
-          contractIdsData,
-          skipInactive = false,
-        )
-      } yield ()).mapK(FutureUnlessShutdown.failOnShutdownToAbortExceptionK("rollbackUnassignment"))
-    }
+          _ <- changeAssignationBack.reverseAssignation(changeData)
+        } yield ())
+          .mapK(FutureUnlessShutdown.failOnShutdownToAbortExceptionK("rollbackUnassignment"))
+      },
+    )
 
   private def performIfRangeSuitableForIgnoreOperations[T](
       psid: PhysicalSynchronizerId,

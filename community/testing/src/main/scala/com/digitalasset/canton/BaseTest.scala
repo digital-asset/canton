@@ -24,7 +24,7 @@ import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   StaticSynchronizerParameters,
   SynchronizerLimits,
-  TopologyLimits,
+  TopologyLimitsView,
   TransactionProtocolLimits,
 }
 import com.digitalasset.canton.scalatest.{ScalaFuturesWithPatience, ScalatestEssentials}
@@ -93,7 +93,7 @@ trait TestEssentials extends ScalatestEssentials with NamedLogging {
     BaseTest.testedTopologyTransactionContext
   protected lazy val testedSynchronizerLimits: SynchronizerLimits =
     BaseTest.testedSynchronizerLimits
-  protected lazy val testedTopologyLimits: TopologyLimits = BaseTest.testedTopologyLimits
+  protected lazy val testedTopologyLimits: TopologyLimitsView = BaseTest.testedTopologyLimits
   protected lazy val testedReleaseProtocolVersion: ReleaseProtocolVersion =
     BaseTest.testedReleaseProtocolVersion
   protected lazy val defaultStaticSynchronizerParameters: StaticSynchronizerParameters =
@@ -709,7 +709,7 @@ object BaseTest extends EitherValues {
   lazy val testedTopologyTransactionContext: TopologyTransactionDeserializationContext =
     TopologyTransactionDeserializationContext(testedTopologyLimits)
 
-  lazy val testedTopologyLimits: TopologyLimits = testedSynchronizerLimits.topologyLimits
+  lazy val testedTopologyLimits: TopologyLimitsView = testedSynchronizerLimits.topologyLimitsView
 
   lazy val testedReleaseProtocolVersion: ReleaseProtocolVersion = ReleaseProtocolVersion(
     testedProtocolVersion

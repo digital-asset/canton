@@ -41,7 +41,12 @@ import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   PaginationFromTo,
   PaginationInput,
 }
-import com.digitalasset.canton.platform.store.dao.events.{ACSReader, OffsetRange}
+import com.digitalasset.canton.platform.store.dao.events.{
+  ACSReader,
+  DecomposedContractIdFilter,
+  DecomposedTemplatePartyFilter,
+  OffsetRange,
+}
 import com.digitalasset.canton.protocol.TestUpdateId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Ref.{
@@ -143,9 +148,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("signatory")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(1L, 2L, 3L), lastPage = true),
@@ -154,9 +158,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("observer1")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partyObserver1),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partyObserver1), templateId = None)
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(1L, 3L), lastPage = true),
@@ -165,9 +168,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("observer2")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partyObserver2),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partyObserver2), templateId = None)
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(2L), lastPage = true),
@@ -176,9 +178,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("super reader")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = None,
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = None, templateId = None)
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(1L, 2L, 3L), lastPage = true),
@@ -219,9 +220,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPageFiltered("signatory Create")(
       input = PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.Create))
         .fetchPage,
@@ -231,9 +231,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPageFiltered("signatory Assign")(
       input = PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.Assign))
         .fetchPage,
@@ -243,9 +242,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPageFiltered("signatory Add")(
       input = PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.Add))
         .fetchPage,
@@ -255,9 +253,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPageFiltered("signatory Create and Assign")(
       input = PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.Assign, PersistentEventType.Create))
         .fetchPage,
@@ -267,9 +264,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPageFiltered("signatory WitnessedCreate")(
       input = PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.WitnessedCreate))
         .fetchPage,
@@ -279,9 +275,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("foreign PaginationInput")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 100),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(1L, 5L, 6L), lastPage = true),
@@ -294,9 +289,8 @@ private[backend] trait StorageBackendTestsEvents
         limit = 100,
       ),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.Assign, PersistentEventType.Create))
         .fetchPageBounds,
@@ -311,9 +305,8 @@ private[backend] trait StorageBackendTestsEvents
         limit = 100,
       ),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.Create))
         .fetchPageBounds,
@@ -330,9 +323,8 @@ private[backend] trait StorageBackendTestsEvents
         limit = 1,
       ),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.Create))
         .fetchPageBounds,
@@ -347,9 +339,8 @@ private[backend] trait StorageBackendTestsEvents
         limit = 3,
       ),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .filteredForEventTypes(Set(PersistentEventType.Create))
         .fetchPageBounds,
@@ -390,9 +381,11 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("signatory with template")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = Some(someTemplateId),
+        .activateIds(
+          DecomposedTemplatePartyFilter(
+            party = Some(partySignatory),
+            templateId = Some(someTemplateId),
+          )
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(1L, 2L), lastPage = true),
@@ -401,9 +394,11 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("observer1 with template")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partyObserver1),
-          templateIdO = Some(someTemplateId),
+        .activateIds(
+          DecomposedTemplatePartyFilter(
+            party = Some(partyObserver1),
+            templateId = Some(someTemplateId),
+          )
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(1L), lastPage = true),
@@ -412,9 +407,11 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("observer2 with template")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partyObserver2),
-          templateIdO = Some(someTemplateId),
+        .activateIds(
+          DecomposedTemplatePartyFilter(
+            party = Some(partyObserver2),
+            templateId = Some(someTemplateId),
+          )
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(2L), lastPage = true),
@@ -423,9 +420,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("super reader with template")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = None,
-          templateIdO = Some(someTemplateId),
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = None, templateId = Some(someTemplateId))
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(1L, 2L), lastPage = true),
@@ -462,9 +458,11 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("signatory other template")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = Some(otherTemplate),
+        .activateIds(
+          DecomposedTemplatePartyFilter(
+            party = Some(partySignatory),
+            templateId = Some(otherTemplate),
+          )
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(), lastPage = true),
@@ -473,9 +471,11 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("observer1 other template")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partyObserver1),
-          templateIdO = Some(otherTemplate),
+        .activateIds(
+          DecomposedTemplatePartyFilter(
+            party = Some(partyObserver1),
+            templateId = Some(otherTemplate),
+          )
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(), lastPage = true),
@@ -484,9 +484,11 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("observer2 other template")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partyObserver2),
-          templateIdO = Some(otherTemplate),
+        .activateIds(
+          DecomposedTemplatePartyFilter(
+            party = Some(partyObserver2),
+            templateId = Some(otherTemplate),
+          )
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(), lastPage = true),
@@ -495,9 +497,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("super reader other template")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = None,
-          templateIdO = Some(otherTemplate),
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = None, templateId = Some(otherTemplate))
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(), lastPage = true),
@@ -527,9 +528,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("unknown party")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partyUnknown),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partyUnknown), templateId = None)
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(), lastPage = true),
@@ -538,9 +538,11 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("unknown template")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = Some(unknownTemplate),
+        .activateIds(
+          DecomposedTemplatePartyFilter(
+            party = Some(partySignatory),
+            templateId = Some(unknownTemplate),
+          )
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(), lastPage = true),
@@ -549,9 +551,11 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("unknown party and template")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partyUnknown),
-          templateIdO = Some(unknownTemplate),
+        .activateIds(
+          DecomposedTemplatePartyFilter(
+            party = Some(partyUnknown),
+            templateId = Some(unknownTemplate),
+          )
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(), lastPage = true),
@@ -560,9 +564,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("unknown template super reader")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 10L)), 10),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = None,
-          templateIdO = Some(unknownTemplate),
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = None, templateId = Some(unknownTemplate))
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(), lastPage = true),
@@ -598,9 +601,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("range [1,1] limit 2")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 1L)), 2),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(1L), lastPage = true),
@@ -609,9 +611,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("range [2,2] limit 2")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(2L, 2L)), 2),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(2L), lastPage = true),
@@ -620,9 +621,8 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("range [1,2] limit 1")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 2L)), 1),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(1L), lastPage = false),
@@ -631,13 +631,316 @@ private[backend] trait StorageBackendTestsEvents
     testBidirectionalFetchPage("range [1,2] limit 2")(
       input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 2L)), 2),
       query = backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = Some(partySignatory),
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = Some(partySignatory), templateId = None)
         )
         .fetchPage,
       ascendingExpected = IdPage(Vector(1L, 2L), lastPage = true),
       descendingExpected = IdPage(Vector(2L, 1L), lastPage = true),
+    )
+  }
+
+  /** Ingests the events of three contracts:
+    *   - contract 101: created at 1, unassigned at 3, assigned at 5, non-consuming exercised at 6,
+    *     archived at 8
+    *   - contract 102: assigned at 2, unassigned at 7
+    *   - contract 103: created at 4, never deactivated
+    */
+  private def ingestEventsForContractIdFilter(): Unit = {
+    val party = Ref.Party.assertFromString("party")
+    val dtos = Vector(
+      dtosCreate(
+        event_offset = 1,
+        event_sequential_id = 1L,
+        notPersistedContractId = hashCid("#101"),
+        internal_contract_id = 101L,
+      )(stakeholders = Set(party)),
+      dtosAssign(
+        event_offset = 2,
+        event_sequential_id = 2L,
+        notPersistedContractId = hashCid("#102"),
+        internal_contract_id = 102L,
+      )(stakeholders = Set(party)),
+      dtosUnassign(
+        event_offset = 3,
+        event_sequential_id = 3L,
+        deactivated_event_sequential_id = Some(1L),
+        contract_id = hashCid("#101"),
+        internal_contract_id = Some(101L),
+        stakeholders = Set(party),
+      ),
+      dtosCreate(
+        event_offset = 4,
+        event_sequential_id = 4L,
+        notPersistedContractId = hashCid("#103"),
+        internal_contract_id = 103L,
+      )(stakeholders = Set(party)),
+      dtosAssign(
+        event_offset = 5,
+        event_sequential_id = 5L,
+        notPersistedContractId = hashCid("#101"),
+        internal_contract_id = 101L,
+      )(stakeholders = Set(party)),
+      dtosWitnessedExercised(
+        event_offset = 6,
+        event_sequential_id = 6L,
+        consuming = false,
+        contract_id = hashCid("#101"),
+        internal_contract_id = Some(101L),
+      ),
+      dtosUnassign(
+        event_offset = 7,
+        event_sequential_id = 7L,
+        deactivated_event_sequential_id = Some(2L),
+        contract_id = hashCid("#102"),
+        internal_contract_id = Some(102L),
+        stakeholders = Set(party),
+      ),
+      dtosConsumingExercise(
+        event_offset = 8,
+        event_sequential_id = 8L,
+        deactivated_event_sequential_id = Some(5L),
+        contract_id = hashCid("#101"),
+        internal_contract_id = Some(101L),
+        stakeholders = Set(party),
+      ),
+    ).flatten
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(ingest(dtos, _))
+    executeSql(updateLedgerEnd(offset(8), 8L))
+  }
+
+  private val fullRange = PaginationFromTo.ascending(EventSeqIdRange(1L, 10L))
+
+  it should "find activations by contract id" in {
+    ingestEventsForContractIdFilter()
+
+    def activateIds(internalContractId: Long) =
+      backend.event.updateStreamingQueries.activateIds(
+        DecomposedContractIdFilter(internalContractId)
+      )
+
+    testBidirectionalFetchPage("contract 101")(
+      input = PaginationInput(fullRange, 10),
+      query = activateIds(101L).fetchPage,
+      ascendingExpected = IdPage(Vector(1L, 5L), lastPage = true),
+      descendingExpected = IdPage(Vector(5L, 1L), lastPage = true),
+    )
+    testBidirectionalFetchPage("contract 102")(
+      input = PaginationInput(fullRange, 10),
+      query = activateIds(102L).fetchPage,
+      ascendingExpected = IdPage(Vector(2L), lastPage = true),
+      descendingExpected = IdPage(Vector(2L), lastPage = true),
+    )
+    testBidirectionalFetchPage("contract 103")(
+      input = PaginationInput(fullRange, 10),
+      query = activateIds(103L).fetchPage,
+      ascendingExpected = IdPage(Vector(4L), lastPage = true),
+      descendingExpected = IdPage(Vector(4L), lastPage = true),
+    )
+    testBidirectionalFetchPage("unknown contract")(
+      input = PaginationInput(fullRange, 10),
+      query = activateIds(999L).fetchPage,
+      ascendingExpected = IdPage(Vector.empty, lastPage = true),
+      descendingExpected = IdPage(Vector.empty, lastPage = true),
+    )
+  }
+
+  it should "find deactivations by contract id" in {
+    ingestEventsForContractIdFilter()
+
+    def deactivateIds(internalContractId: Long) =
+      backend.event.updateStreamingQueries.deactivateIds(
+        DecomposedContractIdFilter(internalContractId)
+      )
+
+    testBidirectionalFetchPage("contract 101")(
+      input = PaginationInput(fullRange, 10),
+      query = deactivateIds(101L).fetchPage,
+      ascendingExpected = IdPage(Vector(3L, 8L), lastPage = true),
+      descendingExpected = IdPage(Vector(8L, 3L), lastPage = true),
+    )
+    testBidirectionalFetchPage("contract 102")(
+      input = PaginationInput(fullRange, 10),
+      query = deactivateIds(102L).fetchPage,
+      ascendingExpected = IdPage(Vector(7L), lastPage = true),
+      descendingExpected = IdPage(Vector(7L), lastPage = true),
+    )
+    testBidirectionalFetchPage("contract 103")(
+      input = PaginationInput(fullRange, 10),
+      query = deactivateIds(103L).fetchPage,
+      ascendingExpected = IdPage(Vector.empty, lastPage = true),
+      descendingExpected = IdPage(Vector.empty, lastPage = true),
+    )
+    testBidirectionalFetchPage("unknown contract")(
+      input = PaginationInput(fullRange, 10),
+      query = deactivateIds(999L).fetchPage,
+      ascendingExpected = IdPage(Vector.empty, lastPage = true),
+      descendingExpected = IdPage(Vector.empty, lastPage = true),
+    )
+  }
+
+  it should "find events by contract id and by event_type" in {
+    ingestEventsForContractIdFilter()
+
+    def activateIds(internalContractId: Long) =
+      backend.event.updateStreamingQueries.activateIds(
+        DecomposedContractIdFilter(internalContractId)
+      )
+    def deactivateIds(internalContractId: Long) =
+      backend.event.updateStreamingQueries.deactivateIds(
+        DecomposedContractIdFilter(internalContractId)
+      )
+
+    testBidirectionalFetchPageFiltered("contract 101 Create")(
+      input = fullRange,
+      query = activateIds(101L).filteredForEventTypes(Set(PersistentEventType.Create)).fetchPage,
+      ascendingExpected = Vector(1L),
+      descendingExpected = Vector(1L),
+    )
+    testBidirectionalFetchPageFiltered("contract 101 Assign")(
+      input = fullRange,
+      query = activateIds(101L).filteredForEventTypes(Set(PersistentEventType.Assign)).fetchPage,
+      ascendingExpected = Vector(5L),
+      descendingExpected = Vector(5L),
+    )
+    testBidirectionalFetchPageFiltered("contract 101 Create and Assign")(
+      input = fullRange,
+      query = activateIds(101L)
+        .filteredForEventTypes(Set(PersistentEventType.Create, PersistentEventType.Assign))
+        .fetchPage,
+      ascendingExpected = Vector(1L, 5L),
+      descendingExpected = Vector(5L, 1L),
+    )
+    testBidirectionalFetchPageFiltered("contract 101 Add")(
+      input = fullRange,
+      query = activateIds(101L).filteredForEventTypes(Set(PersistentEventType.Add)).fetchPage,
+      ascendingExpected = Vector.empty,
+      descendingExpected = Vector.empty,
+    )
+    testBidirectionalFetchPageFiltered("contract 102 Create and Assign")(
+      input = fullRange,
+      query = activateIds(102L)
+        .filteredForEventTypes(Set(PersistentEventType.Create, PersistentEventType.Assign))
+        .fetchPage,
+      ascendingExpected = Vector(2L),
+      descendingExpected = Vector(2L),
+    )
+    testBidirectionalFetchPageFiltered("contract 101 ConsumingExercise")(
+      input = fullRange,
+      query = deactivateIds(101L)
+        .filteredForEventTypes(Set(PersistentEventType.ConsumingExercise))
+        .fetchPage,
+      ascendingExpected = Vector(8L),
+      descendingExpected = Vector(8L),
+    )
+    testBidirectionalFetchPageFiltered("contract 101 Unassign")(
+      input = fullRange,
+      query =
+        deactivateIds(101L).filteredForEventTypes(Set(PersistentEventType.Unassign)).fetchPage,
+      ascendingExpected = Vector(3L),
+      descendingExpected = Vector(3L),
+    )
+    testBidirectionalFetchPageFiltered("contract 102 Unassign")(
+      input = fullRange,
+      query =
+        deactivateIds(102L).filteredForEventTypes(Set(PersistentEventType.Unassign)).fetchPage,
+      ascendingExpected = Vector(7L),
+      descendingExpected = Vector(7L),
+    )
+    testBidirectionalFetchPageFiltered("contract 102 ConsumingExercise")(
+      input = fullRange,
+      query = deactivateIds(102L)
+        .filteredForEventTypes(Set(PersistentEventType.ConsumingExercise))
+        .fetchPage,
+      ascendingExpected = Vector.empty,
+      descendingExpected = Vector.empty,
+    )
+
+    testBidirectionalFetchBounds("bounds contract 101 Create and Assign")(
+      input = PaginationInput(fullRange, limit = 100),
+      query = activateIds(101L)
+        .filteredForEventTypes(Set(PersistentEventType.Create, PersistentEventType.Assign))
+        .fetchPageBounds,
+      ascendingExpected = Some(IdPageBounds(fullRange, lastPage = true)),
+      descendingExpected = Some(IdPageBounds(fullRange.reverse, lastPage = true)),
+    )
+    testBidirectionalFetchBounds(
+      "bounds contract 101 Create, bounds pushed forward to right before the next element"
+    )(
+      input = PaginationInput(fullRange, limit = 1),
+      query =
+        activateIds(101L).filteredForEventTypes(Set(PersistentEventType.Create)).fetchPageBounds,
+      ascendingExpected =
+        Some(IdPageBounds(PaginationFromTo.ascending(EventSeqIdRange(1L, 4L)), lastPage = false)),
+      descendingExpected =
+        Some(IdPageBounds(PaginationFromTo.descending(EventSeqIdRange(2L, 10L)), lastPage = false)),
+    )
+    testBidirectionalFetchBounds(
+      "bounds contract 101 deactivations, bounds pushed forward to right before the next element"
+    )(
+      input = PaginationInput(fullRange, limit = 1),
+      query = deactivateIds(101L)
+        .filteredForEventTypes(Set(PersistentEventType.ConsumingExercise))
+        .fetchPageBounds,
+      ascendingExpected =
+        Some(IdPageBounds(PaginationFromTo.ascending(EventSeqIdRange(1L, 7L)), lastPage = false)),
+      descendingExpected =
+        Some(IdPageBounds(PaginationFromTo.descending(EventSeqIdRange(4L, 10L)), lastPage = false)),
+    )
+    testBidirectionalFetchBounds("bounds unknown contract")(
+      input = PaginationInput(fullRange, limit = 100),
+      query =
+        activateIds(999L).filteredForEventTypes(Set(PersistentEventType.Create)).fetchPageBounds,
+      ascendingExpected = None,
+      descendingExpected = None,
+    )
+  }
+
+  it should "respect bounds and limits when filtering by contract id" in {
+    ingestEventsForContractIdFilter()
+
+    val activateIds101 =
+      backend.event.updateStreamingQueries.activateIds(DecomposedContractIdFilter(101L))
+    val deactivateIds101 =
+      backend.event.updateStreamingQueries.deactivateIds(DecomposedContractIdFilter(101L))
+
+    testBidirectionalFetchPage("activations range [1,1] limit 2")(
+      input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1L, 1L)), 2),
+      query = activateIds101.fetchPage,
+      ascendingExpected = IdPage(Vector(1L), lastPage = true),
+      descendingExpected = IdPage(Vector(1L), lastPage = true),
+    )
+    testBidirectionalFetchPage("activations range [2,4] limit 2")(
+      input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(2L, 4L)), 2),
+      query = activateIds101.fetchPage,
+      ascendingExpected = IdPage(Vector.empty, lastPage = true),
+      descendingExpected = IdPage(Vector.empty, lastPage = true),
+    )
+    testBidirectionalFetchPage("activations range [1,10] limit 1")(
+      input = PaginationInput(fullRange, 1),
+      query = activateIds101.fetchPage,
+      ascendingExpected = IdPage(Vector(1L), lastPage = false),
+      descendingExpected = IdPage(Vector(5L), lastPage = false),
+    )
+    testBidirectionalFetchPage("activations range [1,10] limit 2")(
+      input = PaginationInput(fullRange, 2),
+      query = activateIds101.fetchPage,
+      ascendingExpected = IdPage(Vector(1L, 5L), lastPage = true),
+      descendingExpected = IdPage(Vector(5L, 1L), lastPage = true),
+    )
+    testBidirectionalFetchPage("deactivations range [4,8] limit 2")(
+      input = PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(4L, 8L)), 2),
+      query = deactivateIds101.fetchPage,
+      ascendingExpected = IdPage(Vector(8L), lastPage = true),
+      descendingExpected = IdPage(Vector(8L), lastPage = true),
+    )
+    testBidirectionalFetchPage("deactivations range [1,10] limit 1")(
+      input = PaginationInput(fullRange, 1),
+      query = deactivateIds101.fetchPage,
+      ascendingExpected = IdPage(Vector(3L), lastPage = false),
+      descendingExpected = IdPage(Vector(8L), lastPage = false),
     )
   }
 
@@ -3497,8 +3800,8 @@ private[backend] trait StorageBackendTestsEvents
     val achs = executeSql(
       backend.event.updateStreamingQueries
         .fetchAchsIds(
-          stakeholderO = Some(signatory),
-          templateIdO = None,
+          templatePartyFilter =
+            DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
           activeAtEventSeqId = 1000L,
         )
         .fetchPage(_)(
@@ -3561,8 +3864,8 @@ private[backend] trait StorageBackendTestsEvents
     val achsActiveAt2 = executeSql(
       backend.event.updateStreamingQueries
         .fetchAchsIds(
-          stakeholderO = Some(signatory),
-          templateIdO = None,
+          templatePartyFilter =
+            DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
           activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
         )
         .fetchPage(_)(
@@ -3592,8 +3895,8 @@ private[backend] trait StorageBackendTestsEvents
     val achsActiveAt3 = executeSql(
       backend.event.updateStreamingQueries
         .fetchAchsIds(
-          stakeholderO = Some(signatory),
-          templateIdO = None,
+          templatePartyFilter =
+            DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
           activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
         )
         .fetchPage(_)(
@@ -3625,8 +3928,8 @@ private[backend] trait StorageBackendTestsEvents
     val achsActiveAt4 = executeSql(
       backend.event.updateStreamingQueries
         .fetchAchsIds(
-          stakeholderO = Some(signatory),
-          templateIdO = None,
+          templatePartyFilter =
+            DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
           activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
         )
         .fetchPage(_)(
@@ -3682,8 +3985,8 @@ private[backend] trait StorageBackendTestsEvents
     val achs = executeSql(
       backend.event.updateStreamingQueries
         .fetchAchsIds(
-          stakeholderO = Some(signatory),
-          templateIdO = None,
+          templatePartyFilter =
+            DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
           activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
         )
         .fetchPage(_)(
@@ -3703,8 +4006,8 @@ private[backend] trait StorageBackendTestsEvents
     val achsAfter = executeSql(
       backend.event.updateStreamingQueries
         .fetchAchsIds(
-          stakeholderO = Some(signatory),
-          templateIdO = None,
+          templatePartyFilter =
+            DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
           activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
         )
         .fetchPage(_)(
@@ -3739,8 +4042,8 @@ private[backend] trait StorageBackendTestsEvents
       executeSql(
         backend.event.updateStreamingQueries
           .fetchAchsIds(
-            stakeholderO = Some(signatory),
-            templateIdO = None,
+            templatePartyFilter =
+              DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
             activeAtEventSeqId = activeAtEventSeqId,
           )
           .fetchPage(_)(
@@ -3794,8 +4097,8 @@ private[backend] trait StorageBackendTestsEvents
   it should "fetchPage: return empty when achsIsValid is false from the beginning" in withAchsData {
     val underlying = backend.event.updateStreamingQueries
       .fetchAchsIds(
-        stakeholderO = Some(signatory),
-        templateIdO = None,
+        templatePartyFilter =
+          DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
         activeAtEventSeqId = 0L,
       )
     val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(
@@ -3813,8 +4116,8 @@ private[backend] trait StorageBackendTestsEvents
   it should "fetchPage: delegate to underlying when achsIsValid is true" in withAchsData {
     val underlying = backend.event.updateStreamingQueries
       .fetchAchsIds(
-        stakeholderO = Some(signatory),
-        templateIdO = None,
+        templatePartyFilter =
+          DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
         activeAtEventSeqId = 0L,
       )
     val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(
@@ -3832,8 +4135,8 @@ private[backend] trait StorageBackendTestsEvents
   it should "fetchPageBounds: return None when achsIsValid is false from the beginning" in withAchsData {
     val underlying = backend.event.updateStreamingQueries
       .fetchAchsIds(
-        stakeholderO = Some(signatory),
-        templateIdO = None,
+        templatePartyFilter =
+          DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
         activeAtEventSeqId = 0L,
       )
     val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(
@@ -3849,8 +4152,8 @@ private[backend] trait StorageBackendTestsEvents
     val lastPopulated = 10L
     val underlying = backend.event.updateStreamingQueries
       .fetchAchsIds(
-        stakeholderO = Some(signatory),
-        templateIdO = None,
+        templatePartyFilter =
+          DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
         activeAtEventSeqId = 0L,
       )
     val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(
@@ -3872,8 +4175,8 @@ private[backend] trait StorageBackendTestsEvents
     val lastPopulated = 10L
     val underlying = backend.event.updateStreamingQueries
       .fetchAchsIds(
-        stakeholderO = Some(signatory),
-        templateIdO = None,
+        templatePartyFilter =
+          DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
         activeAtEventSeqId = 0L,
       )
     val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(
@@ -3894,8 +4197,8 @@ private[backend] trait StorageBackendTestsEvents
     val valid = new AtomicReference[Boolean](true)
     val underlying = backend.event.updateStreamingQueries
       .fetchAchsIds(
-        stakeholderO = Some(signatory),
-        templateIdO = None,
+        templatePartyFilter =
+          DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
         activeAtEventSeqId = 0L,
       )
     val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(
@@ -3920,8 +4223,8 @@ private[backend] trait StorageBackendTestsEvents
   def queryFullAchs: Seq[Long] = {
     val underlying = backend.event.updateStreamingQueries
       .fetchAchsIds(
-        stakeholderO = Some(signatory),
-        templateIdO = None,
+        templatePartyFilter =
+          DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
         activeAtEventSeqId = 0L,
       )
     val wrapped = new ACSReader.AchsValidatingIdFilterPageQuery(

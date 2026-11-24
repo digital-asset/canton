@@ -4,7 +4,11 @@
 package com.digitalasset.canton.config
 
 import com.digitalasset.canton.crypto.{SigningAlgorithmSpec, SigningKeySpec}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 
 /** Configuration for enabling session signing keys with a specified validity period. This setting
   * is applicable only when using a KMS provider with externally stored keys.
@@ -80,21 +84,24 @@ final case class SessionSigningKeysConfig(
     signingAlgorithmSpec: SigningAlgorithmSpec = SigningAlgorithmSpec.Ed25519,
     signingKeySpec: SigningKeySpec = SigningKeySpec.EcCurve25519,
     disableBoundChecks: Boolean = false,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[SessionSigningKeysConfig] =
-    prettyOfClass(
-      param("enabled", _.enabled),
-      param("keyValidityDuration", _.keyValidityDuration),
-      param("cutOffDuration", _.cutOffDuration),
-      param("keyEvictionPeriod", _.keyEvictionPeriod),
-      param("signingAlgorithmSpec", _.signingAlgorithmSpec),
-      param("signingKeySpec", _.signingKeySpec),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[SessionSigningKeysConfig] =
+    SessionSigningKeysConfig
 
 }
 
-object SessionSigningKeysConfig {
+object SessionSigningKeysConfig extends PrettyPrintingCompanion[SessionSigningKeysConfig] {
+
+  override protected val pretty: Pretty[SessionSigningKeysConfig] = prettyOfClass(
+    param("enabled", _.enabled),
+    param("keyValidityDuration", _.keyValidityDuration),
+    param("cutOffDuration", _.cutOffDuration),
+    param("keyEvictionPeriod", _.keyEvictionPeriod),
+    param("signingAlgorithmSpec", _.signingAlgorithmSpec),
+    param("signingKeySpec", _.signingKeySpec),
+  )
+
   val disabled: SessionSigningKeysConfig = SessionSigningKeysConfig(enabled = false)
   val enabled: SessionSigningKeysConfig = SessionSigningKeysConfig(enabled = true)
 }

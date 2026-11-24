@@ -299,6 +299,20 @@ class NonEmptySpec extends AnyWordSpec with Matchers with WordSpecCheckLaws {
     }
   }
 
+  "unzip" should {
+    "split pairs into two non-empty collections of the same kind" in {
+      val (lefts, rights) = NonEmpty(List, 1 -> "a", 2 -> "b").unzip
+      (lefts: NonEmpty[List[Int]]) should ===(NonEmpty(List, 1, 2))
+      (rights: NonEmpty[List[String]]) should ===(NonEmpty(List, "a", "b"))
+    }
+
+    "produce Seqs for Seqs" in {
+      val (lefts, rights) = NonEmpty(imm.Seq, 1 -> "a").unzip
+      (lefts: NonEmpty[imm.Seq[Int]]) should ===(NonEmpty(imm.Seq, 1))
+      (rights: NonEmpty[imm.Seq[String]]) should ===(NonEmpty(imm.Seq, "a"))
+    }
+  }
+
   "min" should {
     "'work' on sets, so to speak" in {
       val r = NonEmpty(Set, 1, 42, -5)

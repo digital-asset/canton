@@ -22,7 +22,6 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
-  PrettyPrinting,
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
@@ -448,7 +447,7 @@ object GrpcInternalSequencerConnection
     ): Unit
   }
 
-  private sealed trait LocalState extends Product with Serializable with PrettyPrinting
+  private sealed trait LocalState extends Product with Serializable with PrettyPrintingFromCompanion
   private sealed trait NonFatalLocalState extends LocalState
 
   /** {{{
@@ -485,23 +484,47 @@ object GrpcInternalSequencerConnection
     */
   private object LocalState {
     final case class Fatal(descriptionO: Option[String] = None) extends LocalState {
-      override protected def pretty: Pretty[Fatal] = prettyOfClass(
+      override def prettyCompanion: PrettyPrintingCompanion[Fatal] = Fatal
+    }
+
+    object Fatal extends PrettyPrintingCompanion[Fatal] {
+      override protected val pretty: Pretty[Fatal] = prettyOfClass(
         unnamedParamIfDefined(_.descriptionO.map(_.unquoted))
       )
     }
     case object Initial extends NonFatalLocalState {
-      override protected def pretty: Pretty[Initial.type] = prettyOfObject[Initial.type]
+      override def prettyCompanion: PrettyPrintingCompanion[Initial.this.type] =
+        InitialPrettyPrintingCompanion
+    }
+
+    private object InitialPrettyPrintingCompanion extends PrettyPrintingCompanion[Initial.type] {
+      override protected val pretty: Pretty[Initial.type] = prettyOfObject[Initial.type]
     }
     case object Starting extends NonFatalLocalState {
-      override protected def pretty: Pretty[Starting.type] = prettyOfObject[Starting.type]
+      override def prettyCompanion: PrettyPrintingCompanion[Starting.this.type] =
+        StartingPrettyPrintingCompanion
+    }
+
+    private object StartingPrettyPrintingCompanion extends PrettyPrintingCompanion[Starting.type] {
+      override protected val pretty: Pretty[Starting.type] = prettyOfObject[Starting.type]
     }
     final case class Stopping(descriptionO: Option[String] = None) extends NonFatalLocalState {
-      override protected def pretty: Pretty[Stopping] = prettyOfClass(
+      override def prettyCompanion: PrettyPrintingCompanion[Stopping] = Stopping
+    }
+
+    object Stopping extends PrettyPrintingCompanion[Stopping] {
+      override protected val pretty: Pretty[Stopping] = prettyOfClass(
         unnamedParamIfDefined(_.descriptionO.map(_.unquoted))
       )
     }
     case object Validated extends NonFatalLocalState {
-      override protected def pretty: Pretty[Validated.type] = prettyOfObject[Validated.type]
+      override def prettyCompanion: PrettyPrintingCompanion[Validated.this.type] =
+        ValidatedPrettyPrintingCompanion
+    }
+
+    private object ValidatedPrettyPrintingCompanion
+        extends PrettyPrintingCompanion[Validated.type] {
+      override protected val pretty: Pretty[Validated.type] = prettyOfObject[Validated.type]
     }
   }
 }

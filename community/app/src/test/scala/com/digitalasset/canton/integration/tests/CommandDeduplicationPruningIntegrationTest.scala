@@ -13,6 +13,7 @@ import com.digitalasset.canton.integration.plugins.{
   UsePostgres,
   UseProgrammableSequencer,
 }
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -149,6 +150,10 @@ class CommandDeduplicationPruningIntegrationTest
       val before2 = simClock.now
       val after2 = submit(commandId2)
       simClock.advance(maxDedupDuration)
+      // wait for the ordering service to sequence messages at the new simClock timestamp, otherwise
+      // the submission of commandId3 gets sequenced too early and the submission is rejected with
+      // Time validation has failed: The delta of the ledger time 1970-01-01T01:00:00.001Z and the record time 1970-01-01T00:00:00.021Z exceeds the max of 1m
+      TestUtils.waitForTargetTimeOnSequencer(sequencer1, simClock.now, logger)
       val after3 = submit(commandId3)
 
       // We must not prune anything published within the max deduplication duration,

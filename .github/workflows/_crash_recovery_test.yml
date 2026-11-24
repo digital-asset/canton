@@ -97,7 +97,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
 
       - name: Start Postgres container
         id: postgres
@@ -150,6 +150,5 @@ jobs:
       caller_job: crash_recovery_test
       shard_job_result: ${{ needs.crash_recovery_test.result }}
       job_name: ${{ inputs.job_name }}
-      runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}
     secrets: inherit

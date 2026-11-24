@@ -3,15 +3,22 @@
 
 package com.digitalasset.canton.sequencing.protocol.channel
 
-import com.digitalasset.canton.crypto.{AsymmetricEncrypted, v30 as crypto_v30}
-import com.digitalasset.canton.protocol.ProtocolSymmetricKey
+import com.digitalasset.canton.crypto.{AsymmetricEncrypted, Signature}
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.*
 
+/** Session key message sent by the session key owner to the other channel member.
+  *
+  * @param encryptedSessionKey
+  *   The session key and its context hash, encrypted to the receiver.
+  * @param signature
+  *   Signature of the session key owner over the channel context and the encrypted session key.
+  */
 final case class SequencerChannelSessionKey(
-    encryptedSessionKey: AsymmetricEncrypted[ProtocolSymmetricKey]
+    encryptedSessionKey: AsymmetricEncrypted[SequencerChannelSessionKeyContent],
+    signature: Signature,
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       SequencerChannelSessionKey.type
@@ -21,7 +28,10 @@ final case class SequencerChannelSessionKey(
     SequencerChannelSessionKey
 
   def toProtoV30: v30.SequencerChannelSessionKey =
-    v30.SequencerChannelSessionKey(Some(encryptedSessionKey.toProtoV30))
+    v30.SequencerChannelSessionKey(
+      encryptedSessionKey = Some(encryptedSessionKey.toProtoV30),
+      sessionKeySignature = Some(signature.toProtoV30),
+    )
 }
 
 object SequencerChannelSessionKey extends VersioningCompanion[SequencerChannelSessionKey] {
@@ -32,38 +42,37 @@ object SequencerChannelSessionKey extends VersioningCompanion[SequencerChannelSe
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.sequencerChannel)(
       v30.SequencerChannelSessionKey
     )(
-      supportedProtoVersion(_)(fromProtoV30),
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     ),
   )
 
   def apply(
-      encryptedSessionKey: AsymmetricEncrypted[ProtocolSymmetricKey],
+      encryptedSessionKey: AsymmetricEncrypted[SequencerChannelSessionKeyContent],
+      signature: Signature,
       protocolVersion: ProtocolVersion,
   ): SequencerChannelSessionKey =
-    SequencerChannelSessionKey(encryptedSessionKey)(
+    SequencerChannelSessionKey(encryptedSessionKey, signature)(
       protocolVersionRepresentativeFor(protocolVersion)
     )
 
   def fromProtoV30(
-      SequencerChannelSessionKeyP: v30.SequencerChannelSessionKey
+      pvv: ProtocolVersionValidation,
+      sessionKeyP: v30.SequencerChannelSessionKey,
   ): ParsingResult[SequencerChannelSessionKey] = {
-    val v30.SequencerChannelSessionKey(encryptedSessionKeyP) =
-      SequencerChannelSessionKeyP
+    val v30.SequencerChannelSessionKey(encryptedSessionKeyP, signatureP) = sessionKeyP
     for {
+      encryptedSessionKey <- ProtoConverter.parseRequired(
+        AsymmetricEncrypted.fromProtoV30[SequencerChannelSessionKeyContent],
+        "encrypted_session_key",
+        encryptedSessionKeyP,
+      )
+      signature <- ProtoConverter.parseRequired(
+        Signature.fromProtoV30(pvv, _),
+        "session_key_signature",
+        signatureP,
+      )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-
-      encryptedSessionKey <- parseEncryptedSessionKey(encryptedSessionKeyP)
-
-    } yield SequencerChannelSessionKey(encryptedSessionKey)(rpv)
+    } yield SequencerChannelSessionKey(encryptedSessionKey, signature)(rpv)
   }
-
-  def parseEncryptedSessionKey(
-      encryptedSessionKeyP: Option[crypto_v30.AsymmetricEncrypted]
-  ): ParsingResult[AsymmetricEncrypted[ProtocolSymmetricKey]] =
-    ProtoConverter.parseRequired(
-      AsymmetricEncrypted.fromProtoV30[ProtocolSymmetricKey],
-      "encrypted_session_key",
-      encryptedSessionKeyP,
-    )
 }

@@ -1176,6 +1176,20 @@ final class PartyFreezeScenario private (
               BaseTest.eventually() {
                 approversOfParty(responses.toMap) shouldBe respondingHosts.map(_.id).toSet
                 responses.keySet should contain(counterpartyParticipant.id)
+
+                // Wait until the send tracker store is empty so that we don't only know
+                // that the programmable sequencer has okay'ed sending the confirmation responses
+                // but that the sequencer tracker has observed their sequencing. This prevents
+                // timeouts on behalf of confirmation requests that we want to succeed by bumping
+                // the sim-clock only after successful confirmations.
+                respondingInTime.foreach(p =>
+                  p.testing.state_inspection.syncPersistentStateManager
+                    .get(synchronizerId)
+                    .value
+                    .sendTrackerStore
+                    .fetchPendingSends
+                    .map(p.id -> _) shouldBe Map.empty
+                )
               }
               // Their responses must be sequenced before the clock passes the deadline. While the
               // clock stands still, a participant counts the time it observed last as fresh, so

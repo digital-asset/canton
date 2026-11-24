@@ -1727,7 +1727,7 @@ class DecodeV2Spec
   "decodeModuleRef" should {
 
     lazy val Right(ArchivePayload.Lf2(pkgId, pkgProto, minorVersion, _)) =
-      ArchiveReader.fromFile(
+      TestReaders.readArchivePayloadFromFile(
         Paths.get(getClass.getClassLoader.getResource("DarReaderTest.dalf").toURI)
       )
 

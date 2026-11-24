@@ -1409,5 +1409,28 @@ class UpdateServiceRequestValidatorTest
       }
     }
 
+    "calculate the same checksum all the time" in {
+      val request = GetUpdatesPageRequest(
+        beginOffsetExclusive = Some(3L),
+        endOffsetInclusive = Some(20L),
+        maxPageSize = Some(17),
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), Some(Seq(templateId))),
+        descendingOrder = true,
+        pageToken = None,
+      )
+      com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken
+        .requestChecksum(request) should equal(
+        ByteString.copyFrom(Array[Byte](-126, -111, -84, -117))
+      )
+
+      val requestWithContractIdFilters = request.update(
+        _.updateFormat.includeTransactions.eventFormat.filtersByContractId := protoContractIdFilters
+      )
+      com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken
+        .requestChecksum(requestWithContractIdFilters) should equal(
+        ByteString.copyFrom(Array[Byte](-60, 38, 22, 96))
+      )
+    }
+
   }
 }

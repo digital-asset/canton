@@ -17,7 +17,11 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage.RetryConfig
 import com.digitalasset.canton.resource.WithDbLock.WithDbLockError.OperationError
@@ -406,27 +410,49 @@ object DbMigrations {
         sys.error(s"Data source not supported for migrations: ${unsupported.getClass}")
     }
 
-  sealed trait Error extends PrettyPrinting
+  sealed trait Error extends PrettyPrintingFromCompanion
   final case class FlywayError(err: FlywayException) extends Error {
-    override protected def pretty: Pretty[FlywayError] = prettyOfClass(unnamedParam(_.err))
+    override def prettyCompanion: PrettyPrintingCompanion[FlywayError] = FlywayError
+  }
+
+  object FlywayError extends PrettyPrintingCompanion[FlywayError] {
+    override protected val pretty: Pretty[FlywayError] = prettyOfClass(unnamedParam(_.err))
   }
   final case class PendingMigrationError(msg: String) extends Error {
-    override protected def pretty: Pretty[PendingMigrationError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[PendingMigrationError] =
+      PendingMigrationError
+  }
+
+  object PendingMigrationError extends PrettyPrintingCompanion[PendingMigrationError] {
+    override protected val pretty: Pretty[PendingMigrationError] = prettyOfClass(
       unnamedParam(_.msg.unquoted)
     )
   }
   final case class DatabaseError(error: String) extends Error {
-    override protected def pretty: Pretty[DatabaseError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[DatabaseError] = DatabaseError
+  }
+
+  object DatabaseError extends PrettyPrintingCompanion[DatabaseError] {
+    override protected val pretty: Pretty[DatabaseError] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
   final case class DatabaseVersionError(error: String) extends Error {
-    override protected def pretty: Pretty[DatabaseVersionError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[DatabaseVersionError] =
+      DatabaseVersionError
+  }
+
+  object DatabaseVersionError extends PrettyPrintingCompanion[DatabaseVersionError] {
+    override protected val pretty: Pretty[DatabaseVersionError] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
   final case class DatabaseConfigError(error: String) extends Error {
-    override protected def pretty: Pretty[DatabaseConfigError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[DatabaseConfigError] = DatabaseConfigError
+  }
+
+  object DatabaseConfigError extends PrettyPrintingCompanion[DatabaseConfigError] {
+    override protected val pretty: Pretty[DatabaseConfigError] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }

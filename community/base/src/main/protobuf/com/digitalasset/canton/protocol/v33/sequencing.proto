@@ -54,6 +54,7 @@ message SubmissionRequest {
 // Differences with v32:
 // - topology_limits is a v33.TopologyLimits, which adds new limits
 // - new field bft_orderer_limits
+// - new field max_sequencers_per_synchronizer
 message SynchronizerLimits {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
@@ -64,12 +65,16 @@ message SynchronizerLimits {
   AcsCommitmentLimits acs_commitment_limits = 3;
 
   BftOrdererLimits bft_orderer_limits = 4;
+
+  // Upper bound on the number of sequencers in the synchronizer.
+  // Shared by all components that bound collections by the number of sequencers, such as the BFT ordering service.
+  uint32 max_sequencers_per_synchronizer = 5;
 }
 
 // size limits on collections within topology transactions
 //
 // Differences with v32: adds max_vetted_packages_per_participant,
-// max_sequencers_per_synchronizer, max_mediators_per_group, max_signatures_per_transaction,
+// max_mediators_per_group, max_signatures_per_transaction,
 // max_transaction_hashes_per_multi_signature, max_transactions_per_broadcast and
 // max_endpoints_per_sequencer_connection.
 message TopologyLimits {
@@ -87,9 +92,6 @@ message TopologyLimits {
 
   // maximum number of packages a participant can vet in a vetted packages mapping
   uint32 max_vetted_packages_per_participant = 4;
-
-  // maximum number of active and observer sequencers combined in a sequencer synchronizer state
-  uint32 max_sequencers_per_synchronizer = 5;
 
   // maximum number of active and observer mediators combined in a mediator synchronizer state
   uint32 max_mediators_per_group = 6;
@@ -150,7 +152,6 @@ message TransactionProtocolLimits {
   uint32 max_transaction_sub_views = 10;
 
   // maximum depth of the view tree in a transaction
-  // TODO(i35845): investigate whether to update the semantics of this limit or remove it
   uint32 max_transaction_tree_depth = 11;
 
   // maximum number of signatures on a single envelope
@@ -190,8 +191,8 @@ message AcsCommitmentLimits {
 message BftOrdererLimits {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
-  // The maximum number of sequencers in the synchronizer is not configurable here, it is the constant
-  // SynchronizerLimits.MaxSequencersInSynchronizer. It bounds:
+  // The maximum number of sequencers in the synchronizer is not configured here, it is
+  // SynchronizerLimits.max_sequencers_per_synchronizer. It bounds:
   // - EpochStatus.segments
   // - SegmentInViewChange.view_change_messages_present
   // - BlockInProgress.prepares_present

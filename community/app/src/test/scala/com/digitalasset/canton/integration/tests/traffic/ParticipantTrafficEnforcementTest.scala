@@ -11,6 +11,7 @@ import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{AuthServiceConfig, PositiveFiniteDuration}
 import com.digitalasset.canton.console.{

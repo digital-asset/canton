@@ -20,6 +20,7 @@ object InterpretationConfig {
     protocolVersion match {
       case ProtocolVersion.v36 => LfInterpretationConfig.PV36
       case ProtocolVersion.v37 => LfInterpretationConfig.PV37
+      case ProtocolVersion.v38 => LfInterpretationConfig.PV38
       case pv if pv.isDev || pv.isAlpha => LfInterpretationConfig.Dev
       case other => throw new IllegalArgumentException(s"Unsupported protocol version: $other")
     }

@@ -54,10 +54,10 @@ private[platform] case class StateCache[K, V](
   def get(key: K)(implicit traceContext: TraceContext): Option[V] =
     cache.getIfPresent(key) match {
       case Some(value) =>
-        logger.debug(s"Cache hit for $key -> ${truncateValueForLogging(value)}")
+        logger.trace(s"Cache hit for $key -> ${truncateValueForLogging(value)}")
         Some(value)
       case None =>
-        logger.debug(s"Cache miss for $key ")
+        logger.trace(s"Cache miss for $key ")
         None
     }
 
@@ -125,7 +125,7 @@ private[platform] case class StateCache[K, V](
           cacheEventSeqIdIndex = validAtEventSeqId
           if (toInvalidate.nonEmpty) cache.invalidateAll(toInvalidate)
           if (toPut.nonEmpty) cache.putAll(toPut)
-          logger.debug(
+          logger.trace(
             s"Updated cache with a batch of ${toPut
                 .map { case (k, v) => s"$k -> ${truncateValueForLogging(v)}" }
                 .mkString("[", ", ", "]")} and invalidated ${toInvalidate
@@ -214,7 +214,7 @@ private[platform] case class StateCache[K, V](
                 // or that the entry has been updated synchronously with `put` with a recent Index DB entry.
                 if (pendingForKey.latestValidAt == validAtEventSeqId) {
                   cache.put(key, value)
-                  logger.debug(
+                  logger.trace(
                     s"Updated cache for $key with ${truncateValueForLogging(value)} at $validAtEventSeqId"
                   )
                 }

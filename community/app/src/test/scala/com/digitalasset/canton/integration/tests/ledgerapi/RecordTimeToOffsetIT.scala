@@ -118,6 +118,7 @@ class RecordTimeToOffsetIT
         participant2.ledger_api.updates.updates(
           transactionAndReassignmentsFormat,
           completeAfter = PositiveInt.tryCreate(20),
+          timeout = 200.milliseconds,
         ) should be(empty)
       }
 
@@ -131,6 +132,7 @@ class RecordTimeToOffsetIT
         .updates(
           transactionAndReassignmentsFormat,
           completeAfter = PositiveInt.tryCreate(20),
+          timeout = 200.milliseconds,
         )
         .loneElement("should contain only one transaction")
         .asInstanceOf[TransactionWrapper]
@@ -176,6 +178,7 @@ class RecordTimeToOffsetIT
         participant2.ledger_api.updates.updates(
           transactionAndReassignmentsFormat,
           completeAfter = PositiveInt.tryCreate(20),
+          timeout = 200.milliseconds,
         ) match {
           case Seq(
                 before: TransactionWrapper,
@@ -284,6 +287,7 @@ class RecordTimeToOffsetIT
       val updates = participant1.ledger_api.updates.topology_transactions(
         completeAfter = PositiveInt.one,
         beginOffsetExclusive = iou1._2.offset,
+        timeout = 200.milliseconds,
       )
       val topologyTransaction = updates.loneElement("Should fetch a single topology transaction")
 

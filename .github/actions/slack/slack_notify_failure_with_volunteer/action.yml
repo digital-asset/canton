@@ -16,6 +16,10 @@ inputs:
     description: Service-account key for the rota Google Sheet. Without it select_rota falls back to the roster pool.
     required: false
     default: ''
+  fixed_volunteer:
+    description: If set, skip the rota lookup and always ping this Slack user ID.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -30,19 +34,27 @@ runs:
       # job maps to the Release & Blackduck rota, test jobs to Flaky Canton, everything
       # else to the CI rota (see rotation_for_job in select_rota.py). FAILED_JOB can be
       # a comma-separated list, each job is resolved and the IDs combined. This
-      # mirrors the CircleCI path, which passes --job "$CIRCLE_JOB". Runs under .ci/nix-exec for the
+      # mirrors the CircleCI path, which passes --job "$CIRCLE_JOB", including its
+      # fixed_volunteer override that skips the rota. Runs under .ci/nix-exec for the
       # cryptography dep. select_rota.py falls back to the roster pool if the
       # sheet is unreadable, so it never fails.
       env:
         GCLOUD_SHEETS_SA_KEY: ${{ inputs.gcloud_sheets_sa_key }}
         FAILED_JOB: ${{ inputs.failed_job }}
+        FIXED_VOLUNTEER: ${{ inputs.fixed_volunteer }}
       run: |
-        RC=0
-        SELECTED_VOLUNTEER=$(.ci/nix-exec python3 scripts/ci/select_rota.py --job "$FAILED_JOB" 2> "$RUNNER_TEMP/select_rota.err") || RC=$?
-        cat "$RUNNER_TEMP/select_rota.err" >&2
-        if [ "$RC" -ne 0 ]
+        if [ -n "$FIXED_VOLUNTEER" ]
         then
-          exit "$RC"
+          SELECTED_VOLUNTEER="$FIXED_VOLUNTEER"
+          : > "$RUNNER_TEMP/select_rota.err"
+        else
+          RC=0
+          SELECTED_VOLUNTEER=$(.ci/nix-exec python3 scripts/ci/select_rota.py --job "$FAILED_JOB" 2> "$RUNNER_TEMP/select_rota.err") || RC=$?
+          cat "$RUNNER_TEMP/select_rota.err" >&2
+          if [ "$RC" -ne 0 ]
+          then
+            exit "$RC"
+          fi
         fi
         echo "$SELECTED_VOLUNTEER"
         echo "volunteer=${SELECTED_VOLUNTEER}" >> $GITHUB_OUTPUT

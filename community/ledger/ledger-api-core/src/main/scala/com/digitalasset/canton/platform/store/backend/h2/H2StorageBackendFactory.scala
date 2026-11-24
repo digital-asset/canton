@@ -11,6 +11,7 @@ import com.digitalasset.canton.platform.store.backend.common.{
   IngestionStorageBackendTemplate,
   ParameterStorageBackendImpl,
   PartyStorageBackendTemplate,
+  StringInterningStorageBackendImpl,
 }
 import com.digitalasset.canton.platform.store.backend.localstore.{
   PartyRecordStorageBackend,
@@ -27,6 +28,7 @@ import com.digitalasset.canton.platform.store.backend.{
   PartyStorageBackend,
   ResetStorageBackend,
   StorageBackendFactory,
+  StringInterningStorageBackend,
 }
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
@@ -85,4 +87,6 @@ final case class H2StorageBackendFactory(loggerFactory: NamedLoggerFactory)
   override val createResetStorageBackend: ResetStorageBackend =
     H2ResetStorageBackend
 
+  override def createStringInterningStorageBackend: StringInterningStorageBackend =
+    new StringInterningStorageBackendImpl(H2QueryStrategy)
 }

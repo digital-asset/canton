@@ -251,6 +251,9 @@ object NonEmptyCollInstances {
       (self: ESelf) to factory
     )
     def zipWithIndex: NonEmpty[CC[(A, Int)]] = un((self: ESelf).zipWithIndex)
+    def unzip[A1, A2](implicit asPair: A => (A1, A2)): (NonEmpty[CC[A1]], NonEmpty[CC[A2]]) =
+      NonEmptyColl.Instance
+        .subst[Lambda[`f[_]` => (f[CC[A1]], f[CC[A2]])]]((self: ESelf).unzip)
     def ++[B >: A](suffix: IterableOnce[B]): NonEmpty[CC[B]] = un((self: ESelf) ++ suffix)
 
     // (not so valuable unless also using wartremover to disable partial Seq ops)

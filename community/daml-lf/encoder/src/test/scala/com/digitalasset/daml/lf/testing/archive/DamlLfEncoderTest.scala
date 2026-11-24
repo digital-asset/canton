@@ -1,17 +1,11 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.daml.lf.testing.archive
+package com.digitalasset.daml.lf
+package testing.archive
 
-import com.digitalasset.daml.lf.archive.{
-  ArchivePayload,
-  DamlLf2,
-  Dar,
-  DarDecoder,
-  DarReader,
-  DecodeV2,
-}
-import com.digitalasset.daml.lf.data.Ref.{DottedName, ModuleName}
+import com.digitalasset.daml.lf.archive.{Dar, DarDecoder, DecodeV2}
+import com.digitalasset.daml.lf.data.Ref.{DottedName, ModuleName, PackageId}
 import com.digitalasset.daml.lf.language.LanguageVersion.{v2_1, v2_2, v2_3, v2_dev}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import org.scalatest.matchers.should.Matchers
@@ -19,7 +13,6 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.io.File
-import scala.jdk.CollectionConverters.*
 import scala.language.implicitConversions
 
 class DamlLfEncoderTest extends AnyWordSpec with Matchers with TableDrivenPropertyChecks {
@@ -63,6 +56,7 @@ class DamlLfEncoderTest extends AnyWordSpec with Matchers with TableDrivenProper
         "InterfaceExtMod",
         "TemplateWithKeyMod",
         "UnpackMod",
+        "Uint256Mod",
         "DA.Types", // stable package
       )
 
@@ -108,7 +102,7 @@ class DamlLfEncoderTest extends AnyWordSpec with Matchers with TableDrivenProper
       forEvery(versions) { (version, expectedModules) =>
         val darFile =
           new java.io.File(getClass.getClassLoader.getResource(s"test-${version.pretty}.dar").toURI)
-        val dar = DarReader.readArchiveFromFile(darFile)
+        val dar = DarDecoder.readArchiveFromFile(darFile)
 
         dar shouldBe a[Right[?, ?]]
 
@@ -122,31 +116,12 @@ class DamlLfEncoderTest extends AnyWordSpec with Matchers with TableDrivenProper
 
   }
 
-  private def getNonEmptyModules(dar: Dar[ArchivePayload]): Seq[ModuleName] =
+  private def getNonEmptyModules(dar: Dar[(PackageId, Ast.Package)]): Seq[ModuleName] =
     for {
-      payload <- dar.all
-      name <- payload match {
-        case ArchivePayload.Lf2(_, pkg, _, _) => getNonEmptyModules(pkg)
-        case _ => throw new RuntimeException(s"Unsupported language version: ${payload.version}")
-      }
-    } yield name
-
-  private def getNonEmptyModules(pkg: DamlLf2.Package): Seq[DottedName] = {
-    val internedStrings = pkg.getInternedStringsList.asScala.toArray
-    val dottedNames = pkg.getInternedDottedNamesList.asScala.map(
-      _.getSegmentsInternedStrList.asScala.map(internedStrings(_))
-    )
-    for {
-      segments <- pkg.getModulesList.asScala.toSeq.map {
-        case mod
-            if mod.getSynonymsCount != 0 ||
-              mod.getDataTypesCount != 0 ||
-              mod.getValuesCount != 0 ||
-              mod.getTemplatesCount != 0 =>
-          dottedNames(mod.getNameInternedDname)
-      }
-    } yield DottedName.assertFromSegments(segments)
-  }
+      (_, pkg) <- dar.all
+      mod <- pkg.modules.values.toSeq
+      if mod.definitions.nonEmpty || mod.templates.nonEmpty
+    } yield mod.name
 
   "BuiltinMod" should {
 

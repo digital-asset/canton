@@ -4,18 +4,25 @@
 package com.digitalasset.canton.pruning
 
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.store.db.DbSerializationException
 import slick.jdbc.{GetResult, SetParameter}
 
-sealed trait PruningPhase extends Product with Serializable with PrettyPrinting {
+sealed trait PruningPhase extends Product with Serializable with PrettyPrintingFromCompanion {
   def kind: String
   def index: Int
 
-  override protected def pretty: Pretty[PruningPhase] = prettyOfParam(_.kind.unquoted)
+  override def prettyCompanion: PrettyPrintingCompanion[PruningPhase] = PruningPhase
 }
 
-object PruningPhase {
+object PruningPhase extends PrettyPrintingCompanion[PruningPhase] {
+
+  override protected val pretty: Pretty[PruningPhase] = prettyOfParam(_.kind.unquoted)
+
   case object Started extends PruningPhase {
     override val kind: String = "started"
     override def index: Int = 0
@@ -43,15 +50,18 @@ final case class PruningStatus(
     phase: PruningPhase,
     timestamp: CantonTimestamp,
     lastSuccess: Option[CantonTimestamp],
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[PruningStatus] = prettyOfClass(
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[PruningStatus] = PruningStatus
+}
+
+object PruningStatus extends PrettyPrintingCompanion[PruningStatus] {
+
+  override protected val pretty: Pretty[PruningStatus] = prettyOfClass(
     param("phase", _.phase),
     param("timestamp", _.timestamp),
     param("lastSuccess", _.lastSuccess),
   )
-}
 
-object PruningStatus {
   implicit val orderingPruningStatus: Ordering[PruningStatus] =
     Ordering.by[PruningStatus, (CantonTimestamp, PruningPhase)](status =>
       (status.timestamp, status.phase)

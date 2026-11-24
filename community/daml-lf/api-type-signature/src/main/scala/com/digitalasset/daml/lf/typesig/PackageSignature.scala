@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml.lf.typesig
 
-import com.digitalasset.daml.lf.archive.{ArchivePayload, DamlLf}
+import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{
@@ -183,9 +183,6 @@ object PackageSignature {
   }
 
   def read(lf: DamlLf.Archive): (Errors[ErrorLoc, InvalidDataTypeDefinition], PackageSignature) =
-    readPackageSignature(lf)
-
-  def read(lf: ArchivePayload): (Errors[ErrorLoc, InvalidDataTypeDefinition], PackageSignature) =
     readPackageSignature(lf)
 
   private[typesig] def findTemplate[K](

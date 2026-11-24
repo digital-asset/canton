@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.{BftOrdererLimits, BftOrdererLimitsView}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
@@ -32,10 +32,10 @@ import org.scalatest.wordspec.AnyWordSpec
 class CommitCertificatesResponseLimitsTest extends AnyWordSpec with BftSequencerBaseTest {
 
   private val bound = 2
-  // maxCommitCertificates = maxSegmentLength * maxSequencersInSynchronizer = 1 * 2
-  private val limits = BftOrdererLimits.default.copy(
-    maxSequencersInSynchronizer = PositiveInt.two,
-    maxSegmentLength = PositiveInt.one,
+  // maxCommitCertificates = maxSegmentLength * maxSequencersPerSynchronizer = 1 * 2
+  private val limits = BftOrdererLimitsView(
+    BftOrdererLimits.default.copy(maxSegmentLength = PositiveInt.one),
+    maxSequencersPerSynchronizer = PositiveInt.two,
   )
   private val sender = BftNodeId("sender")
 

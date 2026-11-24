@@ -4,26 +4,37 @@
 package com.digitalasset.canton.crypto
 
 import cats.syntax.either.*
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.crypto.CryptoKeyFormat.DerX509Spki
 import com.digitalasset.canton.crypto.provider.jce.{JcePureCrypto, JceSecurityProvider}
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAsyncWordSpec}
 import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
 import org.bouncycastle.asn1.x509.{AlgorithmIdentifier, SubjectPublicKeyInfo}
-import org.bouncycastle.asn1.x9.{ECNamedCurveTable, X9ObjectIdentifiers}
-import org.bouncycastle.asn1.{ASN1Integer, BERTags, DERSequence}
+import org.bouncycastle.asn1.x9.{
+  ECNamedCurveTable,
+  X962Parameters,
+  X9ECParameters,
+  X9ECPoint,
+  X9ObjectIdentifiers,
+}
+import org.bouncycastle.asn1.{ASN1Integer, ASN1ObjectIdentifier, BERTags, DERSequence}
 import org.bouncycastle.jcajce.spec.MLDSAParameterSpec
 import org.scalatest.wordspec.AsyncWordSpec
 
+import java.math.BigInteger
 import java.security.spec.{ECGenParameterSpec, RSAKeyGenParameterSpec}
 import java.security.{KeyPairGenerator, SecureRandom}
 import scala.concurrent.Future
 
-trait PublicKeyValidationTest extends BaseTest with CryptoTestHelper { this: AsyncWordSpec =>
-  import PublicKeyValidationTest.invalidPublicKeys
+trait PublicKeyValidationTest
+    extends BaseTest
+    with CryptoTestHelper
+    with ProtocolVersionChecksAsyncWordSpec { this: AsyncWordSpec =>
+  import PublicKeyValidationTest.{invalidPublicKeys, withExplicitCurveParameters}
 
   private def modifyPublicKeyFormat(
       publicKey: PublicKey,
@@ -231,6 +242,158 @@ trait PublicKeyValidationTest extends BaseTest with CryptoTestHelper { this: Asy
           }
       }
 
+      "accept an EC signing key with the explicit parameters of its curve" in {
+        for {
+          crypto <- newCrypto
+          publicKey <- getSigningPublicKey(
+            crypto,
+            SigningKeyUsage.ProtocolOnly,
+            SigningKeySpec.EcP256,
+          ).failOnShutdown
+          explicitKey = SigningPublicKey
+            .create(
+              DerX509Spki,
+              withExplicitCurveParameters(publicKey.key),
+              SigningKeySpec.EcP256,
+              publicKey.usage,
+            )
+            .valueOrFail("create key with explicit curve parameters")
+        } yield SigningPublicKey
+          .fromProtoV30(
+            testedProtocolVersionValidation,
+            explicitKey.toProtoV30.valueOrFail("serialize key"),
+          )
+          .isRight shouldBe true
+      }
+
+      "an EC signing key with explicit curve parameters and another base point" when {
+        lazy val keyP: v30.SigningPublicKey =
+          (for {
+            crypto <- newCrypto
+            publicKey <- getSigningPublicKey(
+              crypto,
+              SigningKeyUsage.ProtocolOnly,
+              SigningKeySpec.EcP256,
+            ).failOnShutdown
+            explicitKey = SigningPublicKey
+              .create(
+                DerX509Spki,
+                withExplicitCurveParameters(publicKey.key, baseMultiple = 2),
+                SigningKeySpec.EcP256,
+                publicKey.usage,
+              )
+              .valueOrFail("create key with explicit curve parameters")
+          } yield explicitKey.toProtoV30.valueOrFail("serialize key")).futureValue
+
+        "accepted without the strict public key checks" onlyRunLessThan
+          ProtocolVersion.strictPublicKeyChecksPV in {
+            SigningPublicKey
+              .fromProtoV30(testedProtocolVersionValidation, keyP)
+              .isRight shouldBe true
+          }
+
+        "rejected with the strict public key checks" onlyRunWithOrGreaterThan
+          ProtocolVersion.strictPublicKeyChecksPV in {
+            SigningPublicKey
+              .fromProtoV30(testedProtocolVersionValidation, keyP)
+              .left
+              .value
+              .toString should include("Invalid EC public key")
+          }
+      }
+
+      "an Ed25519 signing key with curve parameters" when {
+        lazy val keyP: v30.SigningPublicKey =
+          (for {
+            crypto <- newCrypto
+            publicKey <- getSigningPublicKey(
+              crypto,
+              SigningKeyUsage.ProtocolOnly,
+              SigningKeySpec.EcCurve25519,
+            ).failOnShutdown
+            spki = SubjectPublicKeyInfo.getInstance(publicKey.key.toByteArray)
+            keyWithParameters = SigningPublicKey
+              .create(
+                DerX509Spki,
+                ByteString.copyFrom(
+                  new SubjectPublicKeyInfo(
+                    new AlgorithmIdentifier(
+                      EdECObjectIdentifiers.id_Ed25519,
+                      new X962Parameters(ECNamedCurveTable.getByName("secp256r1")),
+                    ),
+                    spki.getPublicKeyData.getBytes,
+                  ).getEncoded
+                ),
+                SigningKeySpec.EcCurve25519,
+                publicKey.usage,
+              )
+              .valueOrFail("create key with curve parameters")
+          } yield keyWithParameters.toProtoV30.valueOrFail("serialize key")).futureValue
+
+        "accepted without the strict public key checks" onlyRunLessThan
+          ProtocolVersion.strictPublicKeyChecksPV in {
+            SigningPublicKey
+              .fromProtoV30(testedProtocolVersionValidation, keyP)
+              .isRight shouldBe true
+          }
+
+        "rejected with the strict public key checks" onlyRunWithOrGreaterThan
+          ProtocolVersion.strictPublicKeyChecksPV in {
+            SigningPublicKey
+              .fromProtoV30(testedProtocolVersionValidation, keyP)
+              .left
+              .value
+              .toString should include("Invalid EC public key")
+          }
+      }
+
+      "accept an EC encryption key with the explicit parameters of its curve" in {
+        for {
+          crypto <- newCrypto
+          publicKey <- getEncryptionPublicKey(crypto, EncryptionKeySpec.EcP256).failOnShutdown
+          explicitKey = EncryptionPublicKey
+            .create(
+              DerX509Spki,
+              withExplicitCurveParameters(publicKey.key),
+              EncryptionKeySpec.EcP256,
+            )
+            .valueOrFail("create key with explicit curve parameters")
+        } yield EncryptionPublicKey
+          .fromProtoV30(testedProtocolVersionValidation, explicitKey.toProtoV30)
+          .isRight shouldBe true
+      }
+
+      "an EC encryption key with explicit curve parameters and another base point" when {
+        lazy val keyP: v30.EncryptionPublicKey =
+          (for {
+            crypto <- newCrypto
+            publicKey <- getEncryptionPublicKey(crypto, EncryptionKeySpec.EcP256).failOnShutdown
+            explicitKey = EncryptionPublicKey
+              .create(
+                DerX509Spki,
+                withExplicitCurveParameters(publicKey.key, baseMultiple = 2),
+                EncryptionKeySpec.EcP256,
+              )
+              .valueOrFail("create key with explicit curve parameters")
+          } yield explicitKey.toProtoV30).futureValue
+
+        "accepted without the strict public key checks" onlyRunLessThan
+          ProtocolVersion.strictPublicKeyChecksPV in {
+            EncryptionPublicKey
+              .fromProtoV30(testedProtocolVersionValidation, keyP)
+              .isRight shouldBe true
+          }
+
+        "rejected with the strict public key checks" onlyRunWithOrGreaterThan
+          ProtocolVersion.strictPublicKeyChecksPV in {
+            EncryptionPublicKey
+              .fromProtoV30(testedProtocolVersionValidation, keyP)
+              .left
+              .value
+              .toString should include("Invalid EC public key")
+          }
+      }
+
       "fail if ML-DSA-65 public key is invalid" in {
         val kpGen = KeyPairGenerator.getInstance("MLDSA", JceSecurityProvider.bouncyCastleProvider)
         // Generate a ML-DSA-44 key and claim it's a ML-DSA-65 key
@@ -312,6 +475,37 @@ trait PublicKeyValidationTest extends BaseTest with CryptoTestHelper { this: Asy
 }
 
 object PublicKeyValidationTest {
+
+  /** Re-encodes an EC public key in SPKI format with the explicit parameters of its named curve.
+    *
+    * @param spkiBytes
+    *   the key in SPKI format with a named curve
+    * @param baseMultiple
+    *   the multiple of the curve's base point to use as base point
+    */
+  private def withExplicitCurveParameters(
+      spkiBytes: ByteString,
+      baseMultiple: Int = 1,
+  ): ByteString = {
+    val spki = SubjectPublicKeyInfo.getInstance(spkiBytes.toByteArray)
+    val curveOid = ASN1ObjectIdentifier.getInstance(spki.getAlgorithm.getParameters)
+    val named = ECNamedCurveTable.getByOID(curveOid)
+    val parameters = new X9ECParameters(
+      named.getCurve,
+      new X9ECPoint(
+        named.getG.multiply(BigInteger.valueOf(baseMultiple.toLong)).normalize(),
+        false,
+      ),
+      named.getN,
+      named.getH,
+    )
+    ByteString.copyFrom(
+      new SubjectPublicKeyInfo(
+        new AlgorithmIdentifier(X9ObjectIdentifiers.id_ecPublicKey, new X962Parameters(parameters)),
+        spki.getPublicKeyData.getBytes,
+      ).getEncoded
+    )
+  }
 
   /** A public key encoding that every key spec must reject.
     *

@@ -14,6 +14,10 @@ on:
       include_only_requires_external_kms_tests:
         default: false
         type: boolean
+      test_environment_concurrency:
+        description: Concurrent integration-test environments per sbt project; 0 keeps the test harness default (2)
+        default: 0
+        type: number
       enable_expensive_checks:
         description: Enable expensive runtime checks in the tests (CANTON_ENABLE_EXPENSIVE_CHECKS)
         default: false
@@ -52,6 +56,7 @@ permissions:
 # to turn it off.
 env:
   DATADOG_TEST_OPTIMIZATION: "true"
+  TEST_LOG_IMMEDIATE_FLUSH: "false"
 
 jobs:
   resolve_timings:
@@ -99,6 +104,9 @@ jobs:
     # a wedged shard from running for three hours.
     timeout-minutes: 60
     env:
+      TEST_ENVIRONMENT_CONCURRENCY_PARAMETERS: >-
+        ${{ inputs.test_environment_concurrency > 0
+        && format('-J-Dcanton-test.integration.concurrency={0}', inputs.test_environment_concurrency) || '' }}
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
       # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
       SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
@@ -120,7 +128,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
 
       - name: Start Postgres container
         id: postgres
@@ -141,7 +149,7 @@ jobs:
         uses: ./.github/actions/test/run_ordinary_tests
         with:
           setup_gcp_kms: ${{ inputs.include_only_requires_external_kms_tests }}
-          execution_context_size: "8"
+          execution_context_size: ${{ inputs.test_environment_concurrency > 2 && '12' || '8' }}
           exclude_unstable_tests: "true"
           include_only_requires_external_kms_tests: ${{ inputs.include_only_requires_external_kms_tests }}
           num_test_buckets: ${{ inputs.include_only_requires_external_kms_tests && '2' || '12' }}
@@ -171,7 +179,6 @@ jobs:
       caller_job: test
       shard_job_result: ${{ needs.test.result }}
       job_name: ${{ inputs.job_name }}
-      runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}
       # Experiment (PR #35868): this workflow enables the Datadog Test Optimization
       # upload via the DATADOG_TEST_OPTIMIZATION env above, so also surface the

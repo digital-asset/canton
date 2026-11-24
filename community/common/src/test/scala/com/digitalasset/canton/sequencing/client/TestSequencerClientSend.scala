@@ -61,6 +61,8 @@ class TestSequencerClientSend(
     new PreparedSubmission {
       override def trafficCost: Option[Long] = None
 
+      override def mayHaveSentMultipleCopies: Boolean = false
+
       override def sendAsync(
           callback: SendCallback,
           amplify: Boolean,

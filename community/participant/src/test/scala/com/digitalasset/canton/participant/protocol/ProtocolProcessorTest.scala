@@ -194,10 +194,16 @@ class ProtocolProcessorTest
   }
 
   // With a cost, the processor registers and has a correlation to release.
-  private def prepared(send: Send, cost: Option[Long] = Some(1L)): Prepare =
+  private def prepared(
+      send: Send,
+      cost: Option[Long] = Some(1L),
+      multipleCopies: Boolean = false,
+  ): Prepare =
     EitherT.rightT[FutureUnlessShutdown, SendAsyncClientError](
       new SequencerClientSend.PreparedSubmission {
         override def trafficCost: Option[Long] = cost
+
+        override def mayHaveSentMultipleCopies: Boolean = multipleCopies
 
         override def sendAsync(
             callback: SendCallback,
@@ -208,8 +214,12 @@ class ProtocolProcessorTest
       }
     )
 
-  private def sendReturns(result: SendResult, cost: Option[Long] = Some(1L)): Prepare =
-    prepared(callsBack(UnlessShutdown.Outcome(result)), cost)
+  private def sendReturns(
+      result: SendResult,
+      cost: Option[Long] = Some(1L),
+      multipleCopies: Boolean = false,
+  ): Prepare =
+    prepared(callsBack(UnlessShutdown.Outcome(result)), cost, multipleCopies)
 
   private def preparingClient(prepare: Prepare): SequencerClientSend = {
     val client = mock[SequencerClientSend]
@@ -769,10 +779,21 @@ class ProtocolProcessorTest
         releases = true,
       ),
       SubmitCase(
+        "the send times out after several copies",
+        sendReturns(SendResult.Timeout(CantonTimestamp.Epoch), multipleCopies = true),
+        submitFails(SequencerTimeoutError),
+        releases = true,
+      ),
+      SubmitCase(
         "the sequencer refuses the request",
         sendReturns(SendResult.Error(refused)),
         submitFails(ProtocolProcessor.SequencerDeliverError(refused)),
         releases = true,
+      ),
+      SubmitCase(
+        "the sequencer refuses the request after several copies",
+        sendReturns(SendResult.Error(refused), multipleCopies = true),
+        submitFails(ProtocolProcessor.SequencerDeliverError(refused)),
       ),
       SubmitCase(
         "the aggregate submission was already sent",
@@ -1273,13 +1294,6 @@ class ProtocolProcessorTest
         .thenReturn(EitherT.rightT(()))
       sut
         .processResultInternal1(
-          NoOpeningErrors(
-            AggregatedSignedContent(
-              mock[Deliver[Batch[DefaultOpenEnvelope]]],
-              Signature.noSignature,
-              testedProtocolVersion,
-            )
-          ),
           mockSignedProtocolMessage,
           requestId,
           timestamp,

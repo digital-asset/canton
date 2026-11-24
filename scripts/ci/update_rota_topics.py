@@ -11,8 +11,9 @@ and rewrites three channel topics with whoever is on duty:
 The date shown is the current week's Monday, refreshed every week. By default the script
 is a dry run (it logs the topics and writes nothing). Pass --apply to call
 conversations.setTopic. Any slot that cannot be resolved falls back to a "(nobody on
-rota)" placeholder so a topic is always well-formed. A run with any placeholder logs which
-rotations failed and exits non-zero, so the workflow's failure alert fires.
+rota)" placeholder so a topic is always well-formed. A rotation with nobody listed for the
+week is valid and does not fail the run. Any other placeholder logs which rotations failed
+and exits non-zero, so the workflow's failure alert fires.
 
 Environment: GCLOUD_SHEETS_SA_KEY (Viewer on the sheet), ROTA_SHEET_ID (optional
 override), SLACK_BOT_QA_NOTIFICATIONS (bot token, needs channels:manage or groups:write
@@ -88,7 +89,8 @@ def make_resolver(
 ) -> tuple[Resolver, set[str]]:
     """Build a rotation-name -> Slack-ids resolver for the week. Any lookup failure degrades
     to an empty list (logged), and the failed rotation names accumulate in the returned
-    ``failures`` set, which fails the run once all channels are built."""
+    ``failures`` set, which fails the run once all channels are built. A week with no name
+    in the sheet is valid (a rota may be empty), so it shows the placeholder without failing."""
     id_by_name = roster["slack_id_by_name"]
     failures: set[str] = set()
 
@@ -99,14 +101,14 @@ def make_resolver(
                 select_rota.ROTATION_HEADERS[rotation],
                 select_rota.expected_columns(rotation),
             )
-            slack_ids = select_rota.resolve_slack_ids(
-                select_rota.names_for_week(values, row, cols, monday), id_by_name
-            )
+            names = select_rota.names_for_week(values, row, cols, monday)
+            slack_ids = select_rota.resolve_slack_ids(names, id_by_name)
         except Exception as exc:
             # failure-surfaced: adds rotation to failures below, main() then logs it and exits 1
             select_rota.log(f"warning: could not resolve rotation {rotation!r}: {exc!r}")
-            slack_ids = []
-        if not slack_ids:
+            names, slack_ids = [], []
+            failures.add(rotation)
+        if names and not slack_ids:
             failures.add(rotation)
         return slack_ids
 
@@ -120,7 +122,7 @@ def build_gap_message(failed_rotations: set[str], date_str: str, sheet_url: str)
     return (
         f"could not resolve the rota for the week of {date_str}: {labels}. "
         'The affected Slack topics show a "(nobody on rota)" placeholder. '
-        f"Fill in the rota sheet: {sheet_url}"
+        f"Check the sheet header and week row, and roster_people.json: {sheet_url}"
     )
 
 
@@ -193,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
                 select_rota.log(f"    ERROR: {exc!r}")
                 exit_code = 1
 
-    # Any rotation that resolved to nobody fails the run. The workflow's failure alert is the
+    # Any rotation that failed to resolve (lookup error or name not in the roster) fails the run. The workflow's failure alert is the
     # notification, the log says which rotations and where to fix them. A total sheet-read
     # failure was already logged above.
     if failures:
@@ -284,6 +286,15 @@ def self_test() -> None:
     )
     assert single("flaky-sdk") == [] and single_failures == {"flaky-sdk"}
 
+    # an empty rota (all slots blank for the week) is valid: placeholder, no failure
+    nobody, nobody_failures = make_resolver(
+        [header, [serial, "", "Bo", "Ci", "Rb", "Ca", "Cb", "", "", ""]], monday, roster
+    )
+    assert nobody("flaky-sdk") == [] and nobody("l3") == [] and nobody_failures == set()
+    assert _flaky_topic(nobody, "June 30") == (
+        "Rota from June 30: <@UC1>, <@UC2> (Canton), (nobody on rota) (SDK)"
+    )
+
     # missing header/name -> placeholder, and the failed rotations feed the log in order
     broken, broken_failures = make_resolver([["Week", "L4"], [serial, "Bo"]], monday, roster)
     assert broken("l3") == [] and broken("l4") == ["UL4"] and broken("ci") == []
@@ -291,7 +302,7 @@ def self_test() -> None:
     assert build_gap_message(broken_failures, "June 30", "https://sheet") == (
         "could not resolve the rota for the week of June 30: L3, CI. "
         'The affected Slack topics show a "(nobody on rota)" placeholder. '
-        "Fill in the rota sheet: https://sheet"
+        "Check the sheet header and week row, and roster_people.json: https://sheet"
     )
 
     # empty values (the total sheet-read-failure path): every rotation fails and every topic
@@ -312,12 +323,13 @@ def self_test() -> None:
 def _self_test_main_exit_codes(
     monday: dt.date, header: list[str], serial: int, roster: dict
 ) -> None:
-    """A full week exits 0, a week with a gap exits 1 (documented placeholder contract). Driven
+    """A full week and an empty rota exit 0, a name missing from the roster exits 1. Driven
     through --values-file and a temp roster so no network and no repo files are touched."""
     import tempfile
 
     full = [header, [serial, "Al", "Bo", "Ci", "Rb", "Ca", "Cb", "", "Sd", ""]]
-    gap = [header, [serial, "", "Bo", "Ci", "Rb", "Ca", "Cb", "", "Sd", ""]]
+    empty_rota = [header, [serial, "", "Bo", "Ci", "Rb", "Ca", "Cb", "", "Sd", ""]]
+    gap = [header, [serial, "Zed", "Bo", "Ci", "Rb", "Ca", "Cb", "", "Sd", ""]]
     date = monday.isoformat()
     original_roster_path = select_rota.ROSTER_PATH
     with tempfile.TemporaryDirectory() as tmp:
@@ -325,11 +337,14 @@ def _self_test_main_exit_codes(
         roster_file.write_text(json.dumps(roster), encoding="utf-8")
         full_file = Path(tmp) / "full.json"
         full_file.write_text(json.dumps(full), encoding="utf-8")
+        empty_file = Path(tmp) / "empty.json"
+        empty_file.write_text(json.dumps(empty_rota), encoding="utf-8")
         gap_file = Path(tmp) / "gap.json"
         gap_file.write_text(json.dumps(gap), encoding="utf-8")
         select_rota.ROSTER_PATH = roster_file
         try:
             assert main(["--date", date, "--values-file", str(full_file)]) == 0
+            assert main(["--date", date, "--values-file", str(empty_file)]) == 0
             assert main(["--date", date, "--values-file", str(gap_file)]) == 1
             _self_test_apply_posts_no_message(date, str(gap_file))
         finally:

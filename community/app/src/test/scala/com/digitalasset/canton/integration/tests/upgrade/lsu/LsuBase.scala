@@ -139,13 +139,17 @@ private[lsu] trait LsuBase
       SynchronizerNodes(newOldSequencers.keySet.toSeq.map(ls), newOldMediators.keySet.toSeq.map(lm))
   }
 
+  /** Set the dynamic synchronizer parameters used by default in the LSU tests. If traffic control
+    * is enabled, also purchase traffic for a member that is not registered, see
+    * [[purchaseTrafficForUnregisteredMember]].
+    */
   protected def setDefaultsDynamicSynchronizerParameters(
       psid: PhysicalSynchronizerId,
       synchronizerOwners: Set[InstanceReference],
       hasTrafficControl: Boolean = true,
       reconciliationInterval: config.PositiveDurationSeconds =
         config.PositiveDurationSeconds.ofSeconds(1),
-  ): Unit = {
+  )(implicit env: TestConsoleEnvironment): Unit = {
     synchronizerOwners.foreach(
       _.topology.synchronizer_parameters.propose_update(
         psid,
@@ -165,6 +169,11 @@ private[lsu] trait LsuBase
           .reconciliationInterval shouldBe reconciliationInterval
       )
     }
+
+    if (hasTrafficControl)
+      synchronizerOwners
+        .collectFirst { case sequencer: LocalSequencerReference => sequencer }
+        .foreach(purchaseTrafficForUnregisteredMember)
   }
 
   /** Transfer traffic from old sequencers to new ones.

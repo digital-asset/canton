@@ -32,13 +32,22 @@ final case class CantonTimestamp(underlying: LfTimestamp)
     extends Ordered[CantonTimestamp]
     with Timestamp {
 
+  /** Throws an `IllegalArgumentException` if the result is out of bounds, or an
+    * `ArithmeticException` for `Duration.ofSeconds(Long.MinValue)`. Prefer `safeSubtract`.
+    */
   def minus(d: Duration): CantonTimestamp = new CantonTimestamp(
     underlying.add(Duration.ZERO.minus(d))
   )
 
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. Prefer `safeAdd`. */
   def plus(d: Duration): CantonTimestamp = new CantonTimestamp(underlying.add(d))
 
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. Prefer `safeAdd`. */
   def add(d: Duration): CantonTimestamp = new CantonTimestamp(underlying.add(d))
+
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. Prefer
+    * `safeAdd(d.toJava)`.
+    */
   def add(d: FiniteDuration): CantonTimestamp = new CantonTimestamp(underlying.add(d.toJava))
 
   /** Adds `d` to this timestamp.
@@ -65,23 +74,73 @@ final case class CantonTimestamp(underlying: LfTimestamp)
 
   def safeAdd(d: RefinedDuration): Either[String, CantonTimestamp] = safeAdd(d.unwrap)
 
+  /** Subtracts `d` from this timestamp.
+    *
+    * @return
+    *   Left if the result is not a valid [[CantonTimestamp]], either because it is out of bounds or
+    *   because the computation overflows.
+    */
+  def safeSubtract(d: Duration): Either[String, CantonTimestamp] =
+    Either
+      .cond(
+        // `Duration.ofSeconds(Long.MinValue)` is the only duration whose negation overflows
+        d != Duration.ofSeconds(Long.MinValue),
+        d.negated(),
+        s"Duration $d cannot be negated",
+      )
+      .flatMap(safeAdd)
+
+  def safeSubtract(d: RefinedDuration): Either[String, CantonTimestamp] = safeSubtract(d.unwrap)
+
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. Prefer
+    * `safeAdd(Duration.of(micros, ChronoUnit.MICROS))`.
+    */
   def addMicros(micros: Long): CantonTimestamp = new CantonTimestamp(underlying.addMicros(micros))
 
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. Prefer
+    * `safeAdd(Duration.ofSeconds(seconds))`.
+    */
   def plusSeconds(seconds: Long): CantonTimestamp =
     new CantonTimestamp(underlying.add(Duration.ofSeconds(seconds)))
 
+  /** Throws an `IllegalArgumentException` if the result is out of bounds, or an
+    * `ArithmeticException` for `Long.MinValue`. Prefer `safeSubtract(Duration.ofSeconds(seconds))`.
+    */
   def minusSeconds(seconds: Long): CantonTimestamp = this.minus(Duration.ofSeconds(seconds))
 
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. Prefer
+    * `safeAdd(Duration.ofMillis(millis))`.
+    */
   def plusMillis(millis: Long): CantonTimestamp = new CantonTimestamp(
     underlying.add(Duration.ofMillis(millis))
   )
 
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. Prefer
+    * `safeSubtract(Duration.ofMillis(millis))`.
+    */
   def minusMillis(millis: Long): CantonTimestamp =
     new CantonTimestamp(underlying.add(Duration.ZERO.minus(Duration.ofMillis(millis))))
 
+  /** Throws an `IllegalArgumentException` on [[CantonTimestamp.MinValue]]. Prefer
+    * `safeImmediatePredecessor`.
+    */
   def immediatePredecessor: CantonTimestamp = minus(TimeGranularity.toJava)
 
+  /** Throws an `IllegalArgumentException` on [[CantonTimestamp.MaxValue]]. Prefer
+    * `safeImmediateSuccessor`.
+    */
   def immediateSuccessor: CantonTimestamp = add(TimeGranularity.toJava)
+
+  /** @return
+    *   Left if this timestamp is [[CantonTimestamp.MinValue]]
+    */
+  def safeImmediatePredecessor: Either[String, CantonTimestamp] =
+    safeSubtract(TimeGranularity.toJava)
+
+  /** @return
+    *   Left if this timestamp is [[CantonTimestamp.MaxValue]]
+    */
+  def safeImmediateSuccessor: Either[String, CantonTimestamp] = safeAdd(TimeGranularity.toJava)
 
   override def compare(that: CantonTimestamp): Int = underlying.compare(that.underlying)
 
@@ -94,7 +153,10 @@ final case class CantonTimestamp(underlying: LfTimestamp)
   def -(other: CantonTimestamp): Duration =
     Duration.between(other.underlying.toInstant, this.underlying.toInstant)
 
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. Prefer `safeAdd`. */
   def +(duration: RefinedDuration): CantonTimestamp = plus(duration.unwrap)
+
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. Prefer `safeSubtract`. */
   def -(duration: RefinedDuration): CantonTimestamp = minus(duration.unwrap)
 
   def <=(other: CantonTimestampSecond): Boolean = this <= other.forgetRefinement

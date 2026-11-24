@@ -28,7 +28,7 @@ import com.digitalasset.canton.networking.{Endpoint, UrlValidator}
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   SequencingParameters,
-  TopologyLimits,
+  TopologyLimitsView,
   v30,
   v31,
 }
@@ -426,7 +426,7 @@ object TopologyMapping {
   @nowarn("cat=deprecation")
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      topologyLimits: TopologyLimits,
+      topologyLimits: TopologyLimitsView,
       proto: v30.TopologyMapping,
   ): ParsingResult[TopologyMapping] =
     proto.mapping match {
@@ -467,7 +467,7 @@ object TopologyMapping {
   @nowarn("cat=deprecation")
   def fromProtoV31(
       pvv: ProtocolVersionValidation,
-      topologyLimits: TopologyLimits,
+      topologyLimits: TopologyLimitsView,
       proto: v31.TopologyMapping,
   ): ParsingResult[TopologyMapping] =
     proto.mapping match {
@@ -922,7 +922,7 @@ object DecentralizedNamespaceDefinition
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      topologyLimits: TopologyLimits,
+      topologyLimits: TopologyLimitsView,
       value: v30.DecentralizedNamespaceDefinition,
   ): ParsingResult[DecentralizedNamespaceDefinition] = {
     val v30.DecentralizedNamespaceDefinition(decentralizedNamespaceP, thresholdP, ownersP) = value
@@ -1109,7 +1109,7 @@ object OwnerToKeyMapping
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      topologyLimits: TopologyLimits,
+      topologyLimits: TopologyLimitsView,
       value: v30.OwnerToKeyMapping,
   ): ParsingResult[OwnerToKeyMapping] = {
     val v30.OwnerToKeyMapping(memberP, keysP) = value
@@ -1267,7 +1267,7 @@ object PartyToKeyMapping
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      topologyLimits: TopologyLimits,
+      topologyLimits: TopologyLimitsView,
       value: v30.PartyToKeyMapping,
   ): ParsingResult[PartyToKeyMapping] = {
     val v30.PartyToKeyMapping(partyP, thresholdP, signingKeysP) = value
@@ -1642,18 +1642,6 @@ object ParticipantSynchronizerPermission
 
   override def code: Code = Code.ParticipantSynchronizerPermission
 
-  def default(
-      synchronizerId: SynchronizerId,
-      participantId: ParticipantId,
-  ): ParticipantSynchronizerPermission =
-    ParticipantSynchronizerPermission(
-      synchronizerId,
-      participantId,
-      ParticipantPermission.Submission,
-      None,
-      None,
-    )
-
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
       valueP: v30.ParticipantSynchronizerPermission,
@@ -1920,7 +1908,7 @@ object VettedPackages
   @nowarn("cat=deprecation")
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      topologyLimits: TopologyLimits,
+      topologyLimits: TopologyLimitsView,
       value: v30.VettedPackages,
   ): ParsingResult[VettedPackages] = {
     val maxPackages = ValidationParam(
@@ -2450,7 +2438,7 @@ object PartyToParticipant
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      topologyLimits: TopologyLimits,
+      topologyLimits: TopologyLimitsView,
       value: v30.PartyToParticipant,
   ): ParsingResult[PartyToParticipant] =
     for {
@@ -2478,7 +2466,7 @@ object PartyToParticipant
 
   def fromProtoV31(
       pvv: ProtocolVersionValidation,
-      topologyLimits: TopologyLimits,
+      topologyLimits: TopologyLimitsView,
       value: v31.PartyToParticipant,
   ): ParsingResult[PartyToParticipant] =
     for {
@@ -2797,7 +2785,7 @@ object MediatorSynchronizerState
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      topologyLimits: TopologyLimits,
+      topologyLimits: TopologyLimitsView,
       value: v30.MediatorSynchronizerState,
   ): ParsingResult[MediatorSynchronizerState] = {
     val v30.MediatorSynchronizerState(synchronizerIdP, groupP, thresholdP, activeP, observersP) =
@@ -2959,7 +2947,7 @@ object SequencerSynchronizerState
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      topologyLimits: TopologyLimits,
+      topologyLimits: TopologyLimitsView,
       value: v30.SequencerSynchronizerState,
   ): ParsingResult[SequencerSynchronizerState] = {
     val v30.SequencerSynchronizerState(synchronizerIdP, thresholdP, activeP, observersP) = value
@@ -3146,7 +3134,7 @@ object GrpcConnection {
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      topologyLimits: TopologyLimits,
+      topologyLimits: TopologyLimitsView,
       value: v30.LsuSequencerConnectionSuccessor.SequencerConnection,
   ): ParsingResult[GrpcConnection] =
     ProtoValidation
@@ -3233,7 +3221,7 @@ object LsuSequencerConnectionSuccessor
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      topologyLimits: TopologyLimits,
+      topologyLimits: TopologyLimitsView,
       value: v30.LsuSequencerConnectionSuccessor,
   ): ParsingResult[LsuSequencerConnectionSuccessor] =
     for {

@@ -56,7 +56,8 @@ services:
       - toxiproxy
 
   toxiproxy:
-    image: "shopify/toxiproxy:2.1.4"
+    # Multi-arch image (runs natively on arm64); configured from the host through its HTTP API.
+    image: "ghcr.io/shopify/toxiproxy:2.9.0"
     container_name: "${PROJECT_NAME}_toxiproxy"
     ports:
       - "$POSTGRES_PRIMARY_APPLICATION_PORT:$POSTGRES_PRIMARY_APPLICATION_PORT"

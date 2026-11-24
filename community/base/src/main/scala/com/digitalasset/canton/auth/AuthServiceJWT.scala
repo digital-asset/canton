@@ -13,7 +13,7 @@ import com.daml.jwt.{
   StandardJWTPayload,
   StandardJWTTokenFormat,
 }
-import com.digitalasset.canton.config.DeprecatedFeaturesConfig
+import com.digitalasset.canton.config.{Confidential, DeprecatedFeaturesConfig}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import io.circe.parser
@@ -29,7 +29,7 @@ object AccessLevel {
 }
 
 final case class AuthorizedUser(
-    userId: String,
+    userId: Confidential[String],
     allowedServices: Seq[String],
 )
 
@@ -177,7 +177,7 @@ class UserConfigAuthService private[auth] (
     case payload: PartyJWTPayload => ClaimSet.Unauthenticated
     case payload: StandardJWTPayload => {
       users
-        .find(_.userId == payload.userId)
+        .find(_.userId.unwrap == payload.userId)
         .flatMap(_.allowedServices.find(_ == serviceName))
         .fold[ClaimSet](ClaimSet.Unauthenticated)(_ => ClaimSet.Claims.Admin)
     }

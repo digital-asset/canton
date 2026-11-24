@@ -42,6 +42,7 @@ import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.util.collection.BoundedQueue.DropStrategy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
+import com.google.common.annotations.VisibleForTesting
 
 import java.time.Instant
 import scala.util.{Failure, Success}
@@ -109,6 +110,12 @@ class StateTransferManager[E <: Env[E]](
     config.epochStateTransferFutureEpochQueueMaxSize,
     config.epochStateTransferFutureEpochQueuePerNodeQuota,
     DropStrategy.DropNewest,
+    maxTotalItemSizePerNodeQuota =
+      config.epochStateTransferFutureEpochQueueMaxTotalItemSizePerNodeQuota,
+    itemSizeOf =
+      if (config.epochStateTransferFutureEpochQueueMaxTotalItemSizePerNodeQuota.isDefined) { x =>
+        x.message.signedMessage.toProtoV1.serializedSize
+      } else { _ => 0 },
   )
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var highestEpochWeSpeculativelyRequestedBlocksOf: Option[EpochNumber] = None
@@ -288,7 +295,9 @@ class StateTransferManager[E <: Env[E]](
     val epochWeAreCurrentlyTransferring = latestCompletedEpoch + 1
     val windowSize = config.epochStateTransferHowManyFutureEpochsToDownloadInParallel.value
 
-    epochWeAreCurrentlyTransferring < epochOfCommitCertificate && epochOfCommitCertificate <= epochWeAreCurrentlyTransferring + windowSize
+    inStateTransfer && // We should only accept future epoch blocks if we are in state transfer
+    epochWeAreCurrentlyTransferring < epochOfCommitCertificate &&
+    epochOfCommitCertificate <= epochWeAreCurrentlyTransferring + windowSize
   }
 
   /** Handles a state transfer message; if it's a response, it's handled in the context of the epoch
@@ -604,6 +613,17 @@ class StateTransferManager[E <: Env[E]](
     logger.debug(s"State transfer sending block $blockMetadata to Output")
     messageSender.sendBlockToOutput(prePrepare, isBlockLastInEpoch)
   }
+
+  @VisibleForTesting
+  private[statetransfer] def startStateTransferForTesting(startEpoch: EpochNumber)(
+      abort: String => Nothing
+  ): Unit =
+    initStateTransfer(startEpoch)(abort)
+
+  @VisibleForTesting
+  private[statetransfer] def getPostponedResponsesForTesting
+      : Seq[StateTransferMessage.UnverifiedStateTransferMessage] =
+    postponedResponses.dump.map(_.message)
 }
 
 sealed trait StateTransferMessageResult extends Product with Serializable

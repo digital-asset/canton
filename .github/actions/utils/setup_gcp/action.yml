@@ -1,0 +1,93 @@
+name: Setup GCP credentials
+description: >
+  Set up Google Cloud credentials for a specific workload, using Workload Identity Federation
+  when OIDC is available, or a service-account JSON key as fallback.
+  DACH-NY/canton and digital-asset/canton use workload identity, so the calling job needs `id-token: write`.
+  Other repos, and runs without an OIDC token (e.g. Dependabot), need a service-account
+  JSON key passed via the service_account_key input.
+
+inputs:
+  workload_identity_provider:
+    description: Full WIF provider resource to exchange the GitHub OIDC token for GCP credentials.
+    required: false
+    default: ''
+  service_account:
+    description: GCP service account email to impersonate via WIF.
+    required: false
+    default: ''
+  token_format:
+    description: Optional token format for google-github-actions/auth.
+    required: false
+    default: ''
+  service_account_key:
+    description: Service-account JSON key for key-based authentication when WIF is unavailable.
+    required: false
+    default: ''
+
+outputs:
+  access_token:
+    description: Short-lived access token, when token_format is set.
+    value: ${{ steps.auth.outputs.access_token }}
+  credentials_file_path:
+    description: Path to the generated credentials file for the active WIF session.
+    value: ${{ steps.auth.outputs.credentials_file_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Choose GCP credentials mode
+      id: mode
+      shell: bash
+      run: |
+        if [[ "$GITHUB_REPOSITORY" != "DACH-NY/canton" && "$GITHUB_REPOSITORY" != "digital-asset/canton" ]]; then
+          echo "mode=key" >> "$GITHUB_OUTPUT"
+        elif [[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
+          echo "mode=wif" >> "$GITHUB_OUTPUT"
+        else
+          echo "::notice::No OIDC token for this run, falling back to a GCP JSON key"
+          echo "mode=key" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Validate required GCP auth inputs
+      if: ${{ steps.mode.outputs.mode == 'wif' && (inputs.workload_identity_provider == '' || inputs.service_account == '') }}
+      shell: bash
+      run: |
+        echo "WIF auth requires both workload_identity_provider and service_account inputs." >&2
+        exit 1
+
+    - name: Authenticate to Google Cloud with workload identity
+      id: auth
+      if: ${{ steps.mode.outputs.mode == 'wif' && inputs.workload_identity_provider != '' && inputs.service_account != '' }}
+      uses: google-github-actions/auth@v3
+      with:
+        workload_identity_provider: ${{ inputs.workload_identity_provider }}
+        service_account: ${{ inputs.service_account }}
+        token_format: ${{ inputs.token_format }}
+        export_environment_variables: false
+
+    - name: Export workload identity credentials file
+      if: ${{ steps.mode.outputs.mode == 'wif' && inputs.workload_identity_provider != '' && inputs.service_account != '' }}
+      shell: bash
+      env:
+        CREDENTIALS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
+      run: |
+        echo "GOOGLE_APPLICATION_CREDENTIALS=$CREDENTIALS_FILE" >> "$GITHUB_ENV"
+
+    - name: Setup GCP credentials from a service account key
+      if: ${{ steps.mode.outputs.mode == 'key' }}
+      shell: bash
+      env:
+        SERVICE_ACCOUNT_KEY: ${{ inputs.service_account_key }}
+      run: |
+        set -euo pipefail
+
+        if [[ -z "$SERVICE_ACCOUNT_KEY" ]]; then
+          echo "service_account_key is required for key-based GCP authentication." >&2
+          exit 1
+        fi
+
+        umask 077
+        key="$(mktemp)"
+        printf '%s' "$SERVICE_ACCOUNT_KEY" > "$key"
+        chmod 600 "$key"
+        echo "GOOGLE_APPLICATION_CREDENTIALS=$key" >> "$GITHUB_ENV"

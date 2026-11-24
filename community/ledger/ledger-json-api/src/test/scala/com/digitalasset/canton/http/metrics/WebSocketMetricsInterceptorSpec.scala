@@ -7,6 +7,7 @@ import com.daml.metrics.api.MetricHandle.{Histogram, Meter}
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
 import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification, MetricsContext}
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
+import com.digitalasset.canton.BaseTest
 import org.apache.pekko.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
 import org.apache.pekko.stream.scaladsl.{Flow, Sink, Source}
 import org.apache.pekko.util.ByteString
@@ -46,6 +47,13 @@ class WebSocketMetricsInterceptorSpec
   private val streamedBinaryMessageSize =
     streamedBinaryMessageData.foldLeft(0L)((acc, bs) => acc + bs.length)
 
+  private val allMessages = List[Message](
+    strictTextMessage,
+    streamedTextMessage,
+    strictBinaryMessage,
+    streamedBinaryMessage,
+  )
+
   private val labels = List(("label1", "abc"), ("other", "label2"))
   private val labelFilters = labels.map { case (key, value) => LabelFilter(key, value) }
 
@@ -65,42 +73,45 @@ class WebSocketMetricsInterceptorSpec
     f(duplicatingFlowWithMetrics, metrics)
   }
 
+  // The message counts are final when this completes, because a message is counted before it is
+  // passed on.
+  private def metricsAfter(messages: Message*): Future[TestMetrics] =
+    withDuplicatingFlowAndMetrics { (flow, metrics) =>
+      Source(messages).via(flow).runWith(drainStreamedMessages).map(_ => metrics)
+    }
+
+  // The size of a streamed message can be recorded after the stream has completed and after the
+  // sizes of later messages, so this waits for the sizes and ignores their order. Reading a metric
+  // with no value yet throws, so all exceptions are retried.
+  private def eventuallySizes(actual: => Seq[Long], expected: Long*): Assertion =
+    BaseTest.eventually(retryOnTestFailuresOnly = false) {
+      actual.sorted should be(expected.sorted)
+    }
+
   "websocket_message_received_total" should {
     "count passing strict text messages" in {
-      checkCountThroughFlow(strictTextMessage, getMessagesReceivedTotalValue, 1L)
+      metricsAfter(strictTextMessage).map(_.messagesReceivedTotalValue() should be(1L))
     }
 
     "count passing streamed text messages" in {
-      checkCountThroughFlow(streamedTextMessage, getMessagesReceivedTotalValue, 1L)
+      metricsAfter(streamedTextMessage).map(_.messagesReceivedTotalValue() should be(1L))
     }
 
     "count passing strict binary messages" in {
-      checkCountThroughFlow(strictBinaryMessage, getMessagesReceivedTotalValue, 1L)
+      metricsAfter(strictBinaryMessage).map(_.messagesReceivedTotalValue() should be(1L))
     }
 
     "count passing streamed binary messages" in {
-      checkCountThroughFlow(streamedBinaryMessage, getMessagesReceivedTotalValue, 1L)
+      metricsAfter(streamedBinaryMessage).map(_.messagesReceivedTotalValue() should be(1L))
     }
 
     "count a set of passing messages" in {
-      checkCountThroughFlow(
-        List[Message](
-          strictTextMessage,
-          streamedTextMessage,
-          strictBinaryMessage,
-          streamedBinaryMessage,
-        ),
-        getMessagesReceivedTotalValue,
-        4L,
-      )
+      metricsAfter(allMessages*).map(_.messagesReceivedTotalValue() should be(4L))
     }
 
     "contains the configured labels" in {
-      checkCountThroughFlowForLabels(
-        List(strictTextMessage),
-        getMessagesReceivedTotalValue,
-        1L,
-        labelFilters*
+      metricsAfter(strictTextMessage).map(
+        _.messagesReceivedTotalValue(labelFilters*) should be(1L)
       )
     }
   }
@@ -110,102 +121,73 @@ class WebSocketMetricsInterceptorSpec
     // of messages given as test data.
 
     "count passing strict text messages" in {
-      checkCountThroughFlow(strictTextMessage, getMessagesSentTotalValue, 2L)
+      metricsAfter(strictTextMessage).map(_.messagesSentTotalValue() should be(2L))
     }
 
     "count passing streamed text messages" in {
-      checkCountThroughFlow(streamedTextMessage, getMessagesSentTotalValue, 2L)
+      metricsAfter(streamedTextMessage).map(_.messagesSentTotalValue() should be(2L))
     }
 
     "count passing strict binary messages" in {
-      checkCountThroughFlow(strictBinaryMessage, getMessagesSentTotalValue, 2L)
+      metricsAfter(strictBinaryMessage).map(_.messagesSentTotalValue() should be(2L))
     }
 
     "count passing streamed binary messages" in {
-      checkCountThroughFlow(streamedBinaryMessage, getMessagesSentTotalValue, 2L)
+      metricsAfter(streamedBinaryMessage).map(_.messagesSentTotalValue() should be(2L))
     }
 
     "count a set of passing messages" in {
-      checkCountThroughFlow(
-        List[Message](
-          strictTextMessage,
-          streamedTextMessage,
-          strictBinaryMessage,
-          streamedBinaryMessage,
-        ),
-        getMessagesSentTotalValue,
-        8L,
-      )
+      metricsAfter(allMessages*).map(_.messagesSentTotalValue() should be(8L))
     }
 
     "contains the configured labels" in {
-      checkCountThroughFlowForLabels(
-        List(strictTextMessage),
-        getMessagesSentTotalValue,
-        2L,
-        labelFilters*
+      metricsAfter(strictTextMessage).map(
+        _.messagesSentTotalValue(labelFilters*) should be(2L)
       )
     }
   }
 
   "websocket_message_received_bytes" should {
     "count size of passing strict text messages" in {
-      checkCountThroughFlow(
-        strictTextMessage,
-        getMessagesReceivedBytesValues,
-        Seq(strictTextMessageSize),
-      )
+      metricsAfter(strictTextMessage).map { metrics =>
+        eventuallySizes(metrics.messagesReceivedBytesValues(), strictTextMessageSize)
+      }
     }
 
     "count size of passing streamed text messages" in {
-      checkCountThroughFlow(
-        streamedTextMessage,
-        getMessagesReceivedBytesValues,
-        Seq(streamedTextMessageSize),
-      )
+      metricsAfter(streamedTextMessage).map { metrics =>
+        eventuallySizes(metrics.messagesReceivedBytesValues(), streamedTextMessageSize)
+      }
     }
 
     "count size of passing strict binary messages" in {
-      checkCountThroughFlow(
-        strictBinaryMessage,
-        getMessagesReceivedBytesValues,
-        Seq(strictBinaryMessageSize),
-      )
+      metricsAfter(strictBinaryMessage).map { metrics =>
+        eventuallySizes(metrics.messagesReceivedBytesValues(), strictBinaryMessageSize)
+      }
     }
 
     "count size of passing streamed binary messages" in {
-      checkCountThroughFlow(
-        streamedBinaryMessage,
-        getMessagesReceivedBytesValues,
-        Seq(streamedBinaryMessageSize),
-      )
+      metricsAfter(streamedBinaryMessage).map { metrics =>
+        eventuallySizes(metrics.messagesReceivedBytesValues(), streamedBinaryMessageSize)
+      }
     }
 
     "count the size of a set of passing messages" in {
-      checkCountThroughFlow(
-        List[Message](
-          strictTextMessage,
-          streamedTextMessage,
-          strictBinaryMessage,
-          streamedBinaryMessage,
-        ),
-        getMessagesReceivedBytesValues,
-        Seq(
+      metricsAfter(allMessages*).map { metrics =>
+        eventuallySizes(
+          metrics.messagesReceivedBytesValues(),
           strictTextMessageSize,
           streamedTextMessageSize,
           strictBinaryMessageSize,
           streamedBinaryMessageSize,
-        ),
-      )
+        )
+      }
     }
 
     "contains the configured labels" in {
-      checkCountThroughFlowForLabels(
-        List(strictTextMessage),
-        getMessagesReceivedBytesValues,
-        Seq(strictTextMessageSize),
-        labelFilters*
-      )
+      metricsAfter(strictTextMessage).map { metrics =>
+        eventuallySizes(metrics.messagesReceivedBytesValues(labelFilters*), strictTextMessageSize)
+      }
     }
   }
 
@@ -214,47 +196,49 @@ class WebSocketMetricsInterceptorSpec
     // of the messages given as test data.
 
     "count size of passing strict text messages" in {
-      checkCountThroughFlow(
-        strictTextMessage,
-        getMessagesSentBytesValues,
-        Seq(strictTextMessageSize, strictTextMessageSize),
-      )
+      metricsAfter(strictTextMessage).map { metrics =>
+        eventuallySizes(
+          metrics.messagesSentBytesValues(),
+          strictTextMessageSize,
+          strictTextMessageSize,
+        )
+      }
     }
 
     "count size of passing streamed text messages" in {
-      checkCountThroughFlow(
-        streamedTextMessage,
-        getMessagesSentBytesValues,
-        Seq(streamedTextMessageSize, streamedTextMessageSize),
-      )
+      metricsAfter(streamedTextMessage).map { metrics =>
+        eventuallySizes(
+          metrics.messagesSentBytesValues(),
+          streamedTextMessageSize,
+          streamedTextMessageSize,
+        )
+      }
     }
 
     "count size of passing strict binary messages" in {
-      checkCountThroughFlow(
-        strictBinaryMessage,
-        getMessagesSentBytesValues,
-        Seq(strictBinaryMessageSize, strictBinaryMessageSize),
-      )
+      metricsAfter(strictBinaryMessage).map { metrics =>
+        eventuallySizes(
+          metrics.messagesSentBytesValues(),
+          strictBinaryMessageSize,
+          strictBinaryMessageSize,
+        )
+      }
     }
 
     "count size of passing streamed binary messages" in {
-      checkCountThroughFlow(
-        streamedBinaryMessage,
-        getMessagesSentBytesValues,
-        Seq(streamedBinaryMessageSize, streamedBinaryMessageSize),
-      )
+      metricsAfter(streamedBinaryMessage).map { metrics =>
+        eventuallySizes(
+          metrics.messagesSentBytesValues(),
+          streamedBinaryMessageSize,
+          streamedBinaryMessageSize,
+        )
+      }
     }
 
     "count the size of a set of passing messages" in {
-      checkCountThroughFlow(
-        List[Message](
-          strictTextMessage,
-          streamedTextMessage,
-          strictBinaryMessage,
-          streamedBinaryMessage,
-        ),
-        getMessagesSentBytesValues,
-        Seq(
+      metricsAfter(allMessages*).map { metrics =>
+        eventuallySizes(
+          metrics.messagesSentBytesValues(),
           strictTextMessageSize,
           strictTextMessageSize,
           streamedTextMessageSize,
@@ -263,17 +247,18 @@ class WebSocketMetricsInterceptorSpec
           strictBinaryMessageSize,
           streamedBinaryMessageSize,
           streamedBinaryMessageSize,
-        ),
-      )
+        )
+      }
     }
 
     "contains the configured labels" in {
-      checkCountThroughFlowForLabels(
-        List(strictTextMessage),
-        getMessagesSentBytesValues,
-        Seq(strictTextMessageSize, strictTextMessageSize),
-        labelFilters*
-      )
+      metricsAfter(strictTextMessage).map { metrics =>
+        eventuallySizes(
+          metrics.messagesSentBytesValues(labelFilters*),
+          strictTextMessageSize,
+          strictTextMessageSize,
+        )
+      }
     }
   }
 
@@ -294,51 +279,6 @@ class WebSocketMetricsInterceptorSpec
       checkMessageContentThroughFlow(streamedBinaryMessage)
     }
   }
-
-  private def getMessagesReceivedTotalValue(metrics: TestMetrics, labels: Seq[LabelFilter]): Long =
-    metrics.messagesReceivedTotalValue(labels*)
-
-  private def getMessagesSentTotalValue(metrics: TestMetrics, labels: Seq[LabelFilter]): Long =
-    metrics.messagesSentTotalValue(labels*)
-
-  private def getMessagesReceivedBytesValues(
-      metrics: TestMetrics,
-      labels: Seq[LabelFilter],
-  ): Seq[Long] =
-    metrics.messagesReceivedBytesValues(labels*)
-
-  private def getMessagesSentBytesValues(
-      metrics: TestMetrics,
-      labels: Seq[LabelFilter],
-  ): Seq[Long] =
-    metrics.messagesSentBytesValues(labels*)
-
-  private def checkCountThroughFlowForLabels[T](
-      messages: List[Message],
-      metricExtractor: (TestMetrics, Seq[LabelFilter]) => T,
-      expected: T,
-      labels: LabelFilter*
-  ): Future[Assertion] =
-    withDuplicatingFlowAndMetrics { (flow, metrics) =>
-      val done = Source(messages).via(flow).runWith(drainStreamedMessages)
-      done.map { _ =>
-        metricExtractor(metrics, labels) should be(expected)
-      }
-    }
-
-  private def checkCountThroughFlow[T](
-      messages: List[Message],
-      metricExtractor: (TestMetrics, Seq[LabelFilter]) => T,
-      expected: T,
-  ): Future[Assertion] =
-    checkCountThroughFlowForLabels(messages, metricExtractor, expected)
-
-  private def checkCountThroughFlow[T](
-      message: Message,
-      metricExtractor: (TestMetrics, Seq[LabelFilter]) => T,
-      expected: T,
-  ): Future[Assertion] =
-    checkCountThroughFlow(List(message), metricExtractor, expected)
 
   private def checkMessageContentThroughFlow(testMessage: Message) =
     withDuplicatingFlowAndMetrics { (flow, _) =>

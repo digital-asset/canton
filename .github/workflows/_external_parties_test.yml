@@ -96,7 +96,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
 
       - name: Start Postgres container
         id: postgres
@@ -147,5 +147,4 @@ jobs:
     with:
       caller_job: external_parties_test
       shard_job_result: ${{ needs.external_parties_test.result }}
-      runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}

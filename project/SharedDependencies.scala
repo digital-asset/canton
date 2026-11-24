@@ -44,7 +44,7 @@ object SharedDependencies {
   lazy val jackson_databind = "com.fasterxml.jackson.core" % "jackson-databind" % jackson_version
   lazy val google_common_protos = "com.google.api.grpc" % "proto-google-common-protos" % "2.59.2"
   lazy val google_findbugs = "com.google.code.findbugs" % "jsr305" % "3.0.2"
-  lazy val guava = "com.google.guava" % "guava" % "33.3.0-jre"
+  lazy val guava = "com.google.guava" % "guava" % "33.8.0-jre"
   lazy val google_protobuf_java = "com.google.protobuf" % "protobuf-java" % protobuf_version
   lazy val google_protobuf_java_util =
     "com.google.protobuf" % "protobuf-java-util" % protobuf_version

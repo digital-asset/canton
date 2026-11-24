@@ -20,7 +20,11 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdown,
   RunOnClosing,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.SequencerAggregator.{
   MessageAggregationConfig,
@@ -325,13 +329,22 @@ object SequencerAggregator {
       )
   }
 
-  sealed trait SequencerAggregatorError extends Product with Serializable with PrettyPrinting
+  sealed trait SequencerAggregatorError
+      extends Product
+      with Serializable
+      with PrettyPrintingFromCompanion
 
   object SequencerAggregatorError {
     final case class NotTheSameContentHash(hashes: NonEmpty[Set[Hash]])
         extends SequencerAggregatorError {
-      override protected def pretty: Pretty[NotTheSameContentHash] =
-        prettyOfClass(param("hashes", _.hashes))
+      override def prettyCompanion: PrettyPrintingCompanion[NotTheSameContentHash] =
+        NotTheSameContentHash
+    }
+
+    object NotTheSameContentHash extends PrettyPrintingCompanion[NotTheSameContentHash] {
+      override protected val pretty: Pretty[NotTheSameContentHash] = prettyOfClass(
+        param("hashes", _.hashes)
+      )
     }
 
     /** Indicates an event rejected by the [[SequencerAggregator]], either because it was in the
@@ -346,7 +359,11 @@ object SequencerAggregator {
       */
     final case class BogusEvent(sequencerId: SequencerId, event: ConnectionSerializedEvent)
         extends SequencerAggregatorError {
-      override protected def pretty: Pretty[BogusEvent] =
+      override def prettyCompanion: PrettyPrintingCompanion[BogusEvent] = BogusEvent
+    }
+
+    object BogusEvent extends PrettyPrintingCompanion[BogusEvent] {
+      override protected val pretty: Pretty[BogusEvent] =
         prettyOfClass(param("sequencerId", _.sequencerId), param("event", _.event))
     }
 
@@ -369,13 +386,17 @@ object SequencerAggregator {
         largestGroup: Int,
         threshold: Int,
     ) extends SequencerAggregatorError {
-      override protected def pretty: Pretty[ThresholdUnreachable] =
-        prettyOfClass(
-          param("decided", _.decided),
-          param("undecided", _.undecided),
-          param("largestGroup", _.largestGroup),
-          param("threshold", _.threshold),
-        )
+      override def prettyCompanion: PrettyPrintingCompanion[ThresholdUnreachable] =
+        ThresholdUnreachable
+    }
+
+    object ThresholdUnreachable extends PrettyPrintingCompanion[ThresholdUnreachable] {
+      override protected val pretty: Pretty[ThresholdUnreachable] = prettyOfClass(
+        param("decided", _.decided),
+        param("undecided", _.undecided),
+        param("largestGroup", _.largestGroup),
+        param("threshold", _.threshold),
+      )
     }
   }
 

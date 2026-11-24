@@ -6,6 +6,7 @@ package com.daml.ledger.api.testtool.suites.v2_2
 import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
+import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.createdFor
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
 import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party, TestConstraints}
 import com.daml.ledger.api.v2.event.Event.Event.Created
@@ -66,15 +67,13 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
     "ACSallContracts",
     "The ActiveContractService should return all active contracts",
     allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
-      offsetAtTestStart <- ledger.currentEnd()
       (dummy, dummyWithParam, dummyFactory) <- createDummyContracts(party, ledger)
       activeContracts <- ledger.activeContracts(Some(Seq(party)))
       activeContractsPartyWildcard <- ledger
         .activeContracts(None)
-        .map(_.filter(_.offset > offsetAtTestStart))
+        .map(createdFor(party))
       end <- ledger.currentEnd()
       activeContractsPartyWildcardAndSpecificParty <- ledger
         .activeContracts(
@@ -89,7 +88,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             includeIncompleteReassignments = false,
           )
         )
-        .map(_.filter(_.offset > offsetAtTestStart))
+        .map(createdFor(party))
 
       // archive the contracts to not be active on the next tests
       _ <- archive(ledger, party)(dummy, dummyWithParam, dummyFactory)
@@ -146,10 +145,8 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
     "ACSfilterContracts",
     "The ActiveContractService should return contracts filtered by templateId",
     allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
-      offsetAtTestStart <- ledger.currentEnd()
       (dummy, dummyWithParam, dummyFactory) <- createDummyContracts(party, ledger)
       activeContracts <- ledger.activeContractsByTemplateIdWithVariants(
         Seq(Dummy.TEMPLATE_ID),
@@ -157,7 +154,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
       )
       activeContractsPartyWildcard <- ledger
         .activeContractsByTemplateIdWithVariants(Seq(Dummy.TEMPLATE_ID), None)
-        .map(_.filter(_.offset > offsetAtTestStart))
+        .map(createdFor(party))
       _ <- archive(ledger, party)(dummy, dummyWithParam, dummyFactory)
     } yield {
       assert(
@@ -274,7 +271,6 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
     "ACSverbosity",
     "The ActiveContractService should emit field names only if the verbose flag is set to true",
     allocate(SingleParty),
-    runConcurrently = false,
     limitation = TestConstraints.GrpcOnly("Labels are always emitted by Transcode/SchemaProcessor"),
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
@@ -286,12 +282,16 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
       nonVerboseRequest = verboseRequest.update(_.eventFormat.verbose := false)
       verboseEvents <- ledger.activeContractsWithVariants(verboseRequest)
       nonVerboseEvents <- ledger.activeContractsWithVariants(nonVerboseRequest)
-      verboseEventsPartyWildcard <- ledger.activeContractsWithVariants(
-        ledger.activeContractsRequest(None, end).update(_.eventFormat.verbose := true)
-      )
-      nonVerboseEventsPartyWildcard <- ledger.activeContractsWithVariants(
-        ledger.activeContractsRequest(None, end).update(_.eventFormat.verbose := false)
-      )
+      verboseEventsPartyWildcard <- ledger
+        .activeContractsWithVariants(
+          ledger.activeContractsRequest(None, end).update(_.eventFormat.verbose := true)
+        )
+        .map(createdFor(party))
+      nonVerboseEventsPartyWildcard <- ledger
+        .activeContractsWithVariants(
+          ledger.activeContractsRequest(None, end).update(_.eventFormat.verbose := false)
+        )
+        .map(createdFor(party))
       _ <- ledger.exercise(party, dummy.exerciseArchive())
     } yield {
       val verboseCreateArgs = verboseEvents.map(_.getCreateArguments).flatMap(_.fields)
@@ -326,10 +326,8 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
     "ACSmultiParty",
     "The ActiveContractsService should return contracts for the requesting parties",
     allocate(TwoParties),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(alice, bob))) =>
     for {
-      offsetAtTestStart <- ledger.currentEnd()
       dummyAlice <- createDummyContracts(alice, ledger)
       dummyBob <- createDummyContracts(bob, ledger)
       allContractsForAlice <- ledger.activeContractsWithVariants(Some(Seq(alice)))
@@ -337,7 +335,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
       allContractsForAliceAndBob <- ledger.activeContractsWithVariants(Some(Seq(alice, bob)))
       allContractsPartyWildcard <- ledger
         .activeContractsWithVariants(None)
-        .map(_.filter(_.offset > offsetAtTestStart))
+        .map(createdFor(alice, bob))
       dummyContractsForAlice <- ledger.activeContractsByTemplateIdWithVariants(
         Seq(Dummy.TEMPLATE_ID),
         Some(Seq(alice)),
@@ -351,7 +349,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
           templateIds = Seq(Dummy.TEMPLATE_ID),
           parties = None,
         )
-        .map(_.filter(_.offset > offsetAtTestStart))
+        .map(createdFor(alice, bob))
       _ <- (archive(ledger, alice) _).tupled(dummyAlice)
       _ <- (archive(ledger, bob) _).tupled(dummyBob)
     } yield {
@@ -533,10 +531,8 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
     "ACSnoWitnessedContracts",
     "The ActiveContractService should not return witnessed contracts",
     allocate(TwoParties),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(alice, bob))) =>
     for {
-      offsetAtTestStart <- ledger.currentEnd()
       witnesses: TestWitnesses.ContractId <- ledger.create(
         alice,
         new TestWitnesses(alice, bob, bob),
@@ -549,7 +545,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
       aliceContracts <- ledger.activeContractsWithVariants(Some(Seq(alice)))
       partyWildcardContracts <- ledger
         .activeContractsWithVariants(None)
-        .map(_.filter(_.offset > offsetAtTestStart))
+        .map(createdFor(alice, bob))
       _ <- ledger.exercise(alice, witnesses.exerciseArchive())
       _ <- ledger.exercise(bob, newWitnesses.exerciseArchive())
     } yield {
@@ -620,10 +616,8 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
     "ACFilterWitnesses",
     "The ActiveContractService should filter witnesses by the transaction filter",
     allocate(Parties(3)),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(alice, bob, charlie))) =>
     for {
-      offsetAtTestStart <- ledger.currentEnd()
       contract <- ledger.create(
         alice,
         new WithObservers(alice, List(bob, charlie).map(_.getValue).asJava),
@@ -633,7 +627,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
       bobCharlieContracts <- ledger.activeContracts(Some(Seq(bob, charlie)))
       partyWildcardContracts <- ledger
         .activeContracts(None)
-        .map(_.filter(_.offset > offsetAtTestStart))
+        .map(createdFor(alice, bob, charlie))
       _ <- ledger.exercise(alice, contract.exerciseArchive())
     } yield {
       def assertWitnesses(contracts: Vector[CreatedEvent], requesters: Set[Party]): Unit = {
@@ -658,7 +652,6 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
     "ACSFilterCombinations",
     "Testing ACS filter combinations",
     allocate(Parties(3)),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(p1, p2, p3))) =>
     // Let us have 3 templates
     val templateIds: Vector[Identifier] =
@@ -810,7 +803,6 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
     def testForFixtures(
         fixtures: Vector[(ACSFilter, Set[FilterCoord])],
         allContracts: Map[FilterCoord, Set[String]],
-        offsetAtTestStart: Long,
     ) = {
       def filtersForTemplates(templates: Set[Int]) =
         Filters(
@@ -866,7 +858,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
                 includeIncompleteReassignments = false,
               )
             )
-            .map(_.filter(_.offset > offsetAtTestStart))
+            .map(createdFor(parties*))
         } yield createdEvents.map(_.contractId)
 
       def testForFixture(actual: Vector[String], expected: Set[FilterCoord], hint: String): Unit = {
@@ -911,9 +903,8 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
     }
 
     for {
-      offsetAtTestStart <- ledger.currentEnd()
       allContracts <- createContracts
-      _ <- testForFixtures(fixtures, allContracts, offsetAtTestStart)
+      _ <- testForFixtures(fixtures, allContracts)
     } yield ()
   })
 
@@ -921,7 +912,6 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
     "ActiveAtOffsetInfluencesAcs",
     "Allow to specify optional active_at_offset",
     partyAllocation = allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     val eventFormat =
       Some(
@@ -982,11 +972,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
       c1 <- ledger.create(party, new Dummy(party))
       anOffset <- ledger.currentEnd()
       _ <- ledger.create(party, new Dummy(party))
-      _ <- ledger.pruneCantonSafe(
-        pruneUpTo = anOffset,
-        party = party,
-        dummyCommand = p => new Dummy(p).create.commands,
-      )
+      _ <- ledger.pruneCantonSafe(pruneUpTo = anOffset, party = party)
       acs <- ledger
         .activeContractsIds(
           GetActiveContractsRequest(
@@ -1021,11 +1007,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
       _ <- ledger.create(party, new Dummy(party))
       offset2 <- ledger.currentEnd()
       _ <- ledger.create(party, new Dummy(party))
-      _ <- ledger.pruneCantonSafe(
-        pruneUpTo = offset2,
-        party = party,
-        p => new Dummy(p).create.commands,
-      )
+      _ <- ledger.pruneCantonSafe(pruneUpTo = offset2, party = party)
       _ <- ledger
         .activeContractsIds(
           GetActiveContractsRequest(
@@ -1197,20 +1179,18 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
       end <- ledger.currentEnd()
-      _ <- ledger
+      failure <- ledger
         .activeContracts(
           ledger
             .activeContractsRequest(parties = Some(Seq(party)), activeAtOffset = end)
             .update(_.eventFormat.filtersByParty := Map.empty)
         )
-        .mustFailWith(
-          "event format without filters",
-          RequestValidationErrors.InvalidArgument,
-          Some(
-            "filtersByParty, filtersForAnyParty and filtersByContractId cannot be empty simultaneously"
-          ),
-        )
-    } yield ()
+        .mustFail("event format without filters")
+    } yield assertGrpcErrorRegex(
+      failure,
+      RequestValidationErrors.InvalidArgument,
+      Some(emptyEventFormatErrorMessagePattern),
+    )
   })
 
   test(
@@ -1419,7 +1399,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
     partyAllocation = allocate(SingleParty),
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
-      _ <- ledger
+      failure <- ledger
         .activeContractsPage(
           GetActiveContractsPageRequest(
             eventFormat = Some(
@@ -1433,14 +1413,12 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             includeIncompleteReassignments = false,
           )
         )
-        .mustFailWith(
-          "event format without filters",
-          RequestValidationErrors.InvalidArgument,
-          Some(
-            "filtersByParty, filtersForAnyParty and filtersByContractId cannot be empty simultaneously"
-          ),
-        )
-    } yield ()
+        .mustFail("event format without filters")
+    } yield assertGrpcErrorRegex(
+      failure,
+      RequestValidationErrors.InvalidArgument,
+      Some(emptyEventFormatErrorMessagePattern),
+    )
   })
 
   test(

@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.security
 import com.daml.jwt.{AuthServiceJWTCodec, JwtSigner, StandardJWTPayload, StandardJWTTokenFormat}
 import com.digitalasset.canton.auth.AuthorizedUser
 import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmptyString}
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.{AuthServiceConfig, DeprecatedFeaturesConfig}
 import com.digitalasset.canton.console.{CommandFailure, ExternalLedgerApiClient}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}

@@ -107,6 +107,10 @@ sealed trait ReplayedRequestsIntegrationTest
           SequencerTestHelper
             .requestToken(
               sequencerChannel,
+              com.digitalasset.canton.networking.Endpoint(
+                sequencer1.config.publicApi.address,
+                sequencer1.config.publicApi.port,
+              ),
               daId,
               participant2.id,
               SynchronizerCrypto(participant2.crypto, staticSynchronizerParameters1),

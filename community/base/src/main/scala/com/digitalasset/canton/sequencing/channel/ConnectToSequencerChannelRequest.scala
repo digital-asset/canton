@@ -4,8 +4,6 @@
 package com.digitalasset.canton.sequencing.channel
 
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.crypto.AsymmetricEncrypted
-import com.digitalasset.canton.protocol.ProtocolSymmetricKey
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencer.api.v30.ConnectToSequencerChannelRequest.Request as v30_ChannelRequest
 import com.digitalasset.canton.sequencing.protocol.channel.{
@@ -91,7 +89,7 @@ object ConnectToSequencerChannelRequest
             .fromProtoV30(pvv, metadataP)
             .map(Metadata.apply)
         case v30_ChannelRequest.SessionKey(keyP) =>
-          SequencerChannelSessionKey.fromProtoV30(keyP).map(SessionKey.apply)
+          SequencerChannelSessionKey.fromProtoV30(pvv, keyP).map(SessionKey.apply)
         case v30_ChannelRequest.SessionKeyAcknowledgement(encrypted) =>
           SequencerChannelSessionKeyAck.fromProtoV30(encrypted).map(SessionKeyAck.apply)
         case v30_ChannelRequest.Payload(payload) =>
@@ -132,11 +130,11 @@ object ConnectToSequencerChannelRequest
       ConnectToSequencerChannelRequest.protocolVersionRepresentativeFor(protocolVersion)
     )
 
-  def sessionKey(key: AsymmetricEncrypted[ProtocolSymmetricKey], protocolVersion: ProtocolVersion)(
-      implicit traceContext: TraceContext
+  def sessionKey(sessionKey: SequencerChannelSessionKey, protocolVersion: ProtocolVersion)(implicit
+      traceContext: TraceContext
   ): ConnectToSequencerChannelRequest =
     ConnectToSequencerChannelRequest(
-      SessionKey(SequencerChannelSessionKey(key, protocolVersion)),
+      SessionKey(sessionKey),
       traceContext,
     )(ConnectToSequencerChannelRequest.protocolVersionRepresentativeFor(protocolVersion))
 

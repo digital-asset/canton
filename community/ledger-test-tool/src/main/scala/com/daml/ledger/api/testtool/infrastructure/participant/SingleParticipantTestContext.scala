@@ -15,6 +15,7 @@ import com.daml.ledger.api.testtool.infrastructure.time.{
   TimeDelayMechanism,
 }
 import com.daml.ledger.api.testtool.infrastructure.{
+  AwaitPartiesHosted,
   ChannelEndpoint,
   ExternalParty,
   ExternalPartyKeySpec,
@@ -88,6 +89,7 @@ import com.daml.ledger.api.v2.update_service.*
 import com.daml.ledger.api.v2.{crypto as lapicrypto, value as v1}
 import com.daml.ledger.javaapi.data.codegen.{ContractCompanion, ContractId, Exercised, Update}
 import com.daml.ledger.javaapi.data.{Command, ExerciseByKeyCommand, Identifier, Template, Value}
+import com.daml.ledger.test.java.model.test.Dummy
 import com.daml.logging.LoggingContext
 import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -548,35 +550,20 @@ final class SingleParticipantTestContext private[participant] (
       val expectedPartyNames = expectedParties.map(_.underlying.getValue)
       Future
         .sequence(otherParticipants.filter(_.endpointId != endpointId).map { participant =>
-          for {
-            _ <- eventually(s"Wait for parties on ${participant.endpointId}") {
-              participant
-                .listKnownPartiesExpanded()
-                .map { actualParties =>
-                  val actualPartyNames = actualParties.map(_.underlying.getValue)
-                  val missingPartyNames = expectedPartyNames -- actualPartyNames
-                  assert(
-                    missingPartyNames.isEmpty,
-                    s"Parties $missingPartyNames from $endpointId never appeared on " +
-                      s"${participant.endpointId}; observed ${actualPartyNames.size} parties",
-                  )
-                }
-            }
-            _ <- Future.sequence(expectedParties.map { party =>
-              eventually(
-                s"Wait for synchronizers for ${party.underlying.getValue} on ${participant.endpointId}"
-              )(
-                participant
-                  .getConnectedSynchronizers(Some(party), Some(participantId))
-                  .map(synchronizers =>
-                    assert(
-                      synchronizers.sizeIs == connectedSynchronizers,
-                      s"Expecting party ${party.underlying.getValue} created on $endpointId to be connected to $connectedSynchronizers synchronizers on ${participant.endpointId} but found ${synchronizers.size}",
-                    )
-                  )
-              )
-            })
-          } yield ()
+          // Each test case allocates its parties after its contexts are created, so streaming from
+          // the observing participant's reference offset covers all their topology events.
+          val request = participant.getUpdatesRequestWithEnd(
+            topologyFilterO = Some(expectedParties.toSeq),
+            begin = participant.referenceOffset,
+          )
+          AwaitPartiesHosted(
+            subscribe = participant.services.update.getUpdates(request, _),
+            parties = expectedPartyNames,
+            hostingParticipantId = participantId,
+            expectedSynchronizers = connectedSynchronizers,
+            timeout = AwaitPartiesHosted.DefaultTimeout,
+            description = s"Wait for parties from $endpointId on ${participant.endpointId}",
+          )
         })
         .map(_ => ())
     } else
@@ -1811,10 +1798,10 @@ final class SingleParticipantTestContext private[participant] (
         .prune(PruneRequest(pruneUpTo, nextSubmissionId(), pruneAllDivulgedContracts = true))
     }
 
-  def pruneWithAcsCheck(
+  private def pruneWithAcsCheck(
       parties: Option[Seq[Party]],
       pruneUpTo: Long,
-      attempts: Int = 10,
+      attempts: Int,
       activeAtOffset0: Option[Long] = None,
   )(implicit ec: ExecutionContext): Future[Unit] = for {
     acsBefore <- activeContracts(parties, activeAtOffset0, verbose = false)
@@ -1832,23 +1819,24 @@ final class SingleParticipantTestContext private[participant] (
   override def pruneCantonSafe(
       pruneUpTo: Long,
       party: Party,
-      dummyCommand: Party => JList[Command],
   )(implicit ec: ExecutionContext): Future[Unit] =
-    FutureAssertions.succeedsEventually(
-      retryDelay = 100.millis,
-      maxRetryDuration = 10.seconds,
-      delayMechanism,
-      "Pruning",
-    ) {
-      for {
-        _ <- submitAndWait(submitAndWaitRequest(party, dummyCommand(party)))
-        _ <- pruneWithAcsCheck(
-          parties = Some(Seq(party)),
-          pruneUpTo = pruneUpTo,
-          attempts = 1,
-        )
-      } yield ()
-    }(ec, LoggingContext.ForTesting)
+    allocateParty().flatMap { bystander =>
+      FutureAssertions.succeedsEventually(
+        retryDelay = 100.millis,
+        maxRetryDuration = 10.seconds,
+        delayMechanism,
+        "Pruning",
+      ) {
+        for {
+          _ <- submitAndWait(submitAndWaitRequest(bystander, new Dummy(bystander).create.commands))
+          _ <- pruneWithAcsCheck(
+            parties = Some(Seq(party)),
+            pruneUpTo = pruneUpTo,
+            attempts = 1,
+          )
+        } yield ()
+      }(ec, LoggingContext.ForTesting)
+    }
 
   private[infrastructure] override def preallocateParties(
       n: Int,
@@ -1944,6 +1932,17 @@ final class SingleParticipantTestContext private[participant] (
           .withSynchronizerId(synchronizerId.toProtoPrimitive)
       )
       .map(o => Offset.tryFromLong(o.offset))
+
+  override def getHostedParties(
+      request: GetHostedPartiesRequest
+  ): Future[Vector[GetHostedPartiesResponse]] = new StreamConsumer[GetHostedPartiesResponse](
+    services.state.getHostedParties(request, _)
+  ).all()
+
+  override def getHostedPartiesPage(
+      request: GetHostedPartiesPageRequest
+  ): Future[GetHostedPartiesPageResponse] =
+    services.state.getHostedPartiesPage(request)
 }
 
 object SingleParticipantTestContext {

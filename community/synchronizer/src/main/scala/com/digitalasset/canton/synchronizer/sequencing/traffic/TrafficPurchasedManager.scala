@@ -24,6 +24,8 @@ import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.synchronizer.sequencing.traffic.TrafficPurchasedManager.{
   PendingBalanceUpdate,
+  PendingProcessing,
+  PendingUpdate,
   PrePurchaseMinimumProtocolVersion,
   TrafficPurchasedAlreadyPruned,
   TrafficPurchasedForMember,
@@ -69,9 +71,9 @@ class TrafficPurchasedManager(
   private val lock = new Mutex()
   private val lastUpdateAt: AtomicReference[Option[CantonTimestamp]] =
     new AtomicReference[Option[CantonTimestamp]](None)
-  private val pendingBalanceUpdates = new mutable.PriorityQueue[PendingBalanceUpdate]()(
+  private val pendingBalanceUpdates = new mutable.PriorityQueue[PendingUpdate]()(
     // Reverse because higher timestamp means "younger", and we want to dequeue from oldest to youngest
-    Ordering.by[PendingBalanceUpdate, CantonTimestamp](_.lastSeen).reverse
+    Ordering.by[PendingUpdate, CantonTimestamp](_.lastSeen).reverse
   )
   // Holds a timestamp, signalled externally, before which it is safe to prune traffic purchased entries.
   // If empty, we cannot prune.
@@ -307,11 +309,13 @@ class TrafficPurchasedManager(
       case previous if previous.forall(_ <= timestamp) => {
         lock.exclusive {
           logger.trace(s"Dequeueing pending balances up until $timestamp")
-          dequeueUntil(timestamp).foreach { update =>
-            logger.trace(s"Providing balance update at timestamp ${update.desired}")
-            update.promise
-              .completeWithUS(getBalanceAt(update.member, update.desired).value)
-              .discard
+          dequeueUntil(timestamp).foreach {
+            case update: PendingBalanceUpdate =>
+              logger.trace(s"Providing balance update at timestamp ${update.desired}")
+              update.promise
+                .completeWithUS(getBalanceAt(update.member, update.desired).value)
+                .discard
+            case PendingProcessing(_, promise) => promise.outcome_(())
           }
         }
       }
@@ -326,9 +330,9 @@ class TrafficPurchasedManager(
     }
   }
 
-  private def dequeueUntil(timestamp: CantonTimestamp): List[PendingBalanceUpdate] = {
+  private def dequeueUntil(timestamp: CantonTimestamp): List[PendingUpdate] = {
     @tailrec
-    def go(acc: List[PendingBalanceUpdate]): List[PendingBalanceUpdate] =
+    def go(acc: List[PendingUpdate]): List[PendingUpdate] =
       if (pendingBalanceUpdates.headOption.exists(_.lastSeen <= timestamp))
         go(pendingBalanceUpdates.dequeue() +: acc)
       else
@@ -444,6 +448,37 @@ class TrafficPurchasedManager(
       }
     }
 
+  /** Completes once this manager has processed the sequenced events up to and including
+    * `timestamp`, that is once [[tick]] or [[addTrafficPurchased]] has been called for that
+    * timestamp or a later one. Completes immediately if that is already the case.
+    *
+    * Use this before reading state that is written while processing a traffic purchased entry, such
+    * as the registration of a member for which traffic is purchased before it is registered.
+    *
+    * @param timestamp
+    *   the sequencing timestamp to wait for
+    */
+  def awaitUpdatesUntil(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    // Same synchronization as in makePromiseForBalance, so that the promise cannot be enqueued after
+    // the update completing it has been dequeued
+    lock
+      .exclusive {
+        Option.when(lastUpdateAt.get().forall(_ < timestamp)) {
+          logger.trace(
+            s"Waiting to observe an event at $timestamp. Last update: ${lastUpdateAt.get()}"
+          )
+          val promise = mkPromise[Unit](
+            s"waiting for the traffic purchased entries until $timestamp to be processed",
+            futureSupervisor,
+          )
+          pendingBalanceUpdates.addOne(PendingProcessing(timestamp, promise)).discard
+          promise
+        }
+      }
+      .fold(FutureUnlessShutdown.unit)(_.futureUS)
+
   /** Prune traffic purchased for members such as it can be queried for timestamps as old as
     * "timestamp"
     */
@@ -487,6 +522,11 @@ object TrafficPurchasedManager {
       eligibleForPruningBefore: AtomicReference[Option[CantonTimestamp]] = new AtomicReference(None),
   )
 
+  /** A promise to complete once the updates up to `lastSeen` have been processed */
+  private sealed trait PendingUpdate extends Product with Serializable {
+    def lastSeen: CantonTimestamp
+  }
+
   /** Internal class holding a promise for a request for a balance value at a timestamp that isn't
     * available yet
     * @param desired
@@ -503,5 +543,11 @@ object TrafficPurchasedManager {
       lastSeen: CantonTimestamp,
       member: Member,
       promise: PromiseUnlessShutdown[Either[TrafficPurchasedManagerError, Option[TrafficPurchased]]],
-  )
+  ) extends PendingUpdate
+
+  /** Internal class holding a promise for a request to wait for the updates up to `lastSeen` */
+  private final case class PendingProcessing(
+      lastSeen: CantonTimestamp,
+      promise: PromiseUnlessShutdown[Unit],
+  ) extends PendingUpdate
 }

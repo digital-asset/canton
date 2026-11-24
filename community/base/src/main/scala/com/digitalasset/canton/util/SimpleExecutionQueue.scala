@@ -114,39 +114,80 @@ class SimpleExecutionQueue(
 
   /** Will execute the given function after all previous executions have completed successfully and
     * return the future with the result of this execution.
+    *
+    * @param execution
+    *   Task to be executed.
+    * @param description
+    *   Human-readable description of the task
+    * @param forceRecoverOnFailure
+    *   * If true, will schedule the next task even if the queue uses
+    *   [[FailureMode.StopAfterFailure]]
     */
-  def execute[A](execution: => Future[A], description: String)(implicit
+  def execute[A](
+      execution: => Future[A],
+      description: String,
+      forceRecoverOnFailure: Boolean = false,
+  )(implicit
       loggingContext: ErrorLoggingContext
   ): FutureUnlessShutdown[A] =
     genExecute(
       FutureUnlessShutdown.outcomeF(execution)(directExecutionContext),
       description,
+      forceRecoverOnFailure = forceRecoverOnFailure,
     )
 
+  /** @param execution
+    *   Task to be executed.
+    * @param description
+    *   Human-readable task of the task
+    * @param forceRecoverOnFailure
+    *   * If true, will schedule the next task even if the queue uses
+    *   [[FailureMode.StopAfterFailure]]
+    */
   def executeE[A, B](
       execution: => EitherT[Future, A, B],
       description: String,
+      forceRecoverOnFailure: Boolean = false,
   )(implicit loggingContext: ErrorLoggingContext): EitherT[FutureUnlessShutdown, A, B] =
-    EitherT(execute(execution.value, description))
+    EitherT(execute(execution.value, description, forceRecoverOnFailure = forceRecoverOnFailure))
 
+  /** @param execution
+    *   Task to be executed.
+    * @param description
+    *   Human-readable task of the task
+    * @param forceRecoverOnFailure
+    *   If true, will schedule the next task even if the queue uses [[FailureMode.StopAfterFailure]]
+    */
   def executeEUS[A, B](
       execution: => EitherT[FutureUnlessShutdown, A, B],
       description: String,
+      forceRecoverOnFailure: Boolean = false,
   )(implicit loggingContext: ErrorLoggingContext): EitherT[FutureUnlessShutdown, A, B] =
-    EitherT(executeUS(execution.value, description))
+    EitherT(executeUS(execution.value, description, forceRecoverOnFailure = forceRecoverOnFailure))
 
+  /** @param execution
+    *   Task to be executed.
+    * @param description
+    *   Human-readable task of the task
+    * @param forceRecoverOnFailure
+    *   * If true, will schedule the next task even if the queue uses
+    *   [[FailureMode.StopAfterFailure]]
+    */
   def executeUS[A](
       execution: => FutureUnlessShutdown[A],
       description: String,
+      forceRecoverOnFailure: Boolean = false,
   )(implicit
       loggingContext: ErrorLoggingContext
-  ): FutureUnlessShutdown[A] = genExecute(execution, description)
+  ): FutureUnlessShutdown[A] =
+    genExecute(execution, description, forceRecoverOnFailure = forceRecoverOnFailure)
 
   private def genExecute[A](
       execution: => FutureUnlessShutdown[A],
       description: String,
+      forceRecoverOnFailure: Boolean,
   )(implicit loggingContext: ErrorLoggingContext): FutureUnlessShutdown[A] = {
-    val next = new TaskCell(queueConfig, description)
+    val next = new TaskCell(queueConfig, description, forceRecoverOnFailure = forceRecoverOnFailure)
     val oldHead = queueHead.getAndSet(next) // linearization point
     next.chain(
       oldHead,
@@ -271,6 +312,7 @@ object SimpleExecutionQueue {
   private class TaskCell(
       private val queueConfig: QueueConfig,
       val description: String,
+      val forceRecoverOnFailure: Boolean,
   )(implicit errorLoggingContext: ErrorLoggingContext) {
 
     import queueConfig.*
@@ -393,8 +435,12 @@ object SimpleExecutionQueue {
                   implicit val traceContext: TraceContext = loggingContext.traceContext
                   FatalError.exitOnFatalError(message, exception, loggingContext.logger)
                 case StopAfterFailure | StopAfterFailureContinueAfterAbort =>
-                  logNotRunningTask(isShutdown = false)
-                  FutureUnlessShutdown.pure(Failure(exception))
+                  if (pred.forceRecoverOnFailure)
+                    runTask()
+                  else {
+                    logNotRunningTask(isShutdown = false)
+                    FutureUnlessShutdown.pure(Failure(exception))
+                  }
                 case ContinueAfterFailure =>
                   // this failureMode always runs the next task, independent of the previous task's failure
                   runTask()
@@ -461,7 +507,9 @@ object SimpleExecutionQueue {
       // We don't care about the logging context here because the promise is already completed
       import TraceContext.Implicits.Empty.*
       val errorLoggingContext = ErrorLoggingContext.fromTracedLogger(NamedLogging.noopLogger)
-      val cell = new TaskCell(queueConfig, "sentinel")(errorLoggingContext)
+      val cell = new TaskCell(queueConfig, "sentinel", forceRecoverOnFailure = false)(
+        errorLoggingContext
+      )
       cell.predecessorCell.set(None)
       cell.completionPromise.outcome_(Success(UnlessShutdown.Outcome(())))
       cell

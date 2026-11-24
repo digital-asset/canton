@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.store.backend
 
-import com.daml.jwt.JwksUrl
 import com.digitalasset.canton.platform.store.backend.localstore.UserManagementStorageBackend
 import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.user.UserRight.{
@@ -13,7 +12,14 @@ import com.digitalasset.canton.user.UserRight.{
   CanReadAs,
   ParticipantAdmin,
 }
-import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId, UserRight}
+import com.digitalasset.canton.user.{
+  Audience,
+  IdentityProviderConfig,
+  IdentityProviderId,
+  Issuer,
+  JwksUrlLengthLimited,
+  UserRight,
+}
 import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -43,9 +49,9 @@ private[backend] trait StorageBackendTestsUserManagement
   private val idpConfig = IdentityProviderConfig(
     identityProviderId = idpId,
     isDeactivated = false,
-    jwksUrl = JwksUrl("http//identityprovider.org/"),
-    issuer = "issuer",
-    audience = Some("audience"),
+    jwksUrl = JwksUrlLengthLimited.tryCreate("http//identityprovider.org/"),
+    issuer = Issuer.tryCreate("issuer"),
+    audience = Some(Audience.tryCreate("audience")),
   )
 
   private def tested = backend.userManagement

@@ -23,11 +23,11 @@ final case class SynchronizerLimits(
     topologyLimits: TopologyLimits,
     acsCommitmentLimits: AcsCommitmentLimits,
     bftOrdererLimits: BftOrdererLimits,
+    maxSequencersPerSynchronizer: PositiveInt,
 ) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[SynchronizerLimits] = SynchronizerLimits
 
-  def toInternal: SynchronizerLimitsInternal =
-    this.into[SynchronizerLimitsInternal].enableDefaultValues.transform
+  def toInternal: SynchronizerLimitsInternal = this.transformInto[SynchronizerLimitsInternal]
 }
 
 object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
@@ -36,6 +36,7 @@ object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
     param("topology limits", _.topologyLimits),
     param("acs commitment limits", _.acsCommitmentLimits),
     param("bft orderer limits", _.bftOrdererLimits),
+    param("max sequencers per synchronizer", _.maxSequencersPerSynchronizer),
   )
 
   lazy val default: SynchronizerLimits =
@@ -115,7 +116,6 @@ final case class TopologyLimits(
     maxOwnersPerDecentralizedNamespace: PositiveInt,
     maxHostingParticipantsPerParty: PositiveInt,
     maxVettedPackagesPerParticipant: PositiveInt,
-    maxSequencersPerSynchronizer: PositiveInt,
     maxMediatorsPerGroup: PositiveInt,
     maxSignaturesPerTransaction: PositiveInt,
     maxTransactionHashesPerMultiSignature: PositiveInt,
@@ -133,7 +133,6 @@ object TopologyLimits extends PrettyPrintingCompanion[TopologyLimits] {
     param("max owners per decentralized namespace", _.maxOwnersPerDecentralizedNamespace),
     param("max hosting participants per party", _.maxHostingParticipantsPerParty),
     param("max vetted packages per participant", _.maxVettedPackagesPerParticipant),
-    param("max sequencers per synchronizer", _.maxSequencersPerSynchronizer),
     param("max mediators per group", _.maxMediatorsPerGroup),
     param("max signatures per transaction", _.maxSignaturesPerTransaction),
     param("max transaction hashes per multi signature", _.maxTransactionHashesPerMultiSignature),
@@ -152,8 +151,7 @@ final case class BftOrdererLimits(
 ) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[BftOrdererLimits] = BftOrdererLimits
 
-  def toInternal: BftOrdererLimitsInternal =
-    this.into[BftOrdererLimitsInternal].enableDefaultValues.transform
+  def toInternal: BftOrdererLimitsInternal = this.transformInto[BftOrdererLimitsInternal]
 }
 
 object BftOrdererLimits extends PrettyPrintingCompanion[BftOrdererLimits] {

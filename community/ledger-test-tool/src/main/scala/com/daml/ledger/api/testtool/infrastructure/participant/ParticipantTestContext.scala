@@ -67,6 +67,10 @@ import com.daml.ledger.api.v2.state_service.{
   GetActiveContractsPageResponse,
   GetActiveContractsRequest,
   GetActiveContractsResponse,
+  GetHostedPartiesPageRequest,
+  GetHostedPartiesPageResponse,
+  GetHostedPartiesRequest,
+  GetHostedPartiesResponse,
   GetLedgerEndResponse,
 }
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
@@ -237,7 +241,9 @@ trait ParticipantTestContext extends UserManagementTestContext {
   def listKnownParties(): Future[ListKnownPartiesResponse]
 
   /** @return
-    *   a future that completes when all the participants can list all the expected parties
+    *   a future that completes when all the other participants have observed, via their topology
+    *   event streams, that this participant hosts all the expected parties on the expected number
+    *   of synchronizers. The parties must have been allocated within the current test case.
     */
   def waitForPartiesOnOtherParticipants(
       otherParticipants: Iterable[ParticipantTestContext],
@@ -687,19 +693,16 @@ trait ParticipantTestContext extends UserManagementTestContext {
   /** We are retrying a command submission + pruning to get a safe-to-prune offset for Canton.
     * That's because in Canton pruning will fail unless ACS commitments have been exchanged between
     * participants. To this end, repeatedly submitting commands is prompting Canton to exchange ACS
-    * commitments and allows the pruning call to eventually succeed.
+    * commitments and allows the pruning call to eventually succeed. The submissions also advance
+    * the latest publication time, which Canton requires to be at least the max deduplication
+    * duration past the pruned offset.
+    *
+    * The dummy commands are submitted by a freshly allocated bystander party, so they stay
+    * invisible to `party`, whose active contract set is checked to be unaffected by pruning.
     */
   def pruneCantonSafe(
       pruneUpTo: Long,
       party: Party,
-      dummyCommand: Party => JList[Command],
-  )(implicit ec: ExecutionContext): Future[Unit]
-
-  def pruneWithAcsCheck(
-      parties: Option[Seq[Party]],
-      pruneUpTo: Long,
-      attempts: Int = 10,
-      activeAtOffset0: Option[Long] = None,
   )(implicit ec: ExecutionContext): Future[Unit]
 
   def latestPrunedOffsets(): Future[(Long, Long)]
@@ -729,6 +732,14 @@ trait ParticipantTestContext extends UserManagementTestContext {
       synchronizerId: SynchronizerId,
       recordTime: Timestamp,
   ): Future[Offset]
+
+  def getHostedParties(
+      request: GetHostedPartiesRequest
+  ): Future[Vector[GetHostedPartiesResponse]]
+
+  def getHostedPartiesPage(
+      request: GetHostedPartiesPageRequest
+  ): Future[GetHostedPartiesPageResponse]
 }
 
 object ParticipantTestContext {

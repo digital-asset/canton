@@ -3,10 +3,13 @@
 
 package com.digitalasset.canton.integration.tests.snapshot
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.daml.lf.testing.snapshot.GetAndSetTimeReplayBenchmarkITBase
 import com.digitalasset.daml.lf.value.ContractIdVersion
 
 // TODO(#23971) This will likely break when Canton starts to produce V2 contract IDs.
 // Ping Andreas Lochbihler on the #team-daml-language slack channel when this happens.
+// TODO(#38478)
+@UnstableTest
 class GetAndSetTimeReplayBenchmarkIT_V1
     extends GetAndSetTimeReplayBenchmarkITBase(ContractIdVersion.V1)

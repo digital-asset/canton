@@ -503,13 +503,35 @@ private[lf] final class PhaseOne(
 
           case BFailWithStatus => SBFailWithStatus
 
-          case BAddUint256 | BSubUint256 | BMulUint256 | BDivUint256 | BModUint256 | BExpUint256 |
-              BAndUint256 | BOrUint256 | BXorUint256 | BNotUint256 | BShlUint256 | BShrUint256 |
-              BUint256ToText | BTextToUint256 | BInt64ToUint256 | BUint256ToInt64 | BAddModUint256 |
-              BMulModUint256 | BSDivUint256 | BSModUint256 | BSltUint256 | BSgtUint256 |
-              BSarUint256 | BByteUint256 | BSignExtendUint256 =>
-            new NotImplement(bf.getClass.getSimpleName, 1)
-
+          // Uint256 unsafe arithmetic
+          case BAddUint256 => SBAddUint256
+          case BSubUint256 => SBSubUint256
+          case BMulUint256 => SBMulUint256
+          case BDivUint256 => SBDivUint256
+          case BModUint256 => SBModUint256
+          case BExpUint256 => SBExpUint256
+          // Uint256 bitwise
+          case BAndUint256 => SBAndUint256
+          case BOrUint256 => SBOrUint256
+          case BXorUint256 => SBXorUint256
+          case BNotUint256 => SBNotUint256
+          case BShlUint256 => SBShlUint256
+          case BShrUint256 => SBShrUint256
+          // Uint256 conversions
+          case BUint256ToText => SBToText
+          case BTextToUint256 => SBTextToUint256
+          case BInt64ToUint256 => SBInt64ToUint256
+          case BUint256ToInt64 => SBUint256ToInt64
+          // Uint256 EVM-specific operations
+          case BAddModUint256 => SBAddModUint256
+          case BMulModUint256 => SBMulModUint256
+          case BSDivUint256 => SBSDivUint256
+          case BSModUint256 => SBSModUint256
+          case BSltUint256 => SBSltUint256
+          case BSgtUint256 => SBSgtUint256
+          case BSarUint256 => SBSarUint256
+          case BByteUint256 => SBByteUint256
+          case BSignExtendUint256 => SBSignExtendUint256
         })
     }
   }
@@ -530,7 +552,7 @@ private[lf] final class PhaseOne(
       case BLDate(d) => SDate(d)
       case BLRoundingMode(roundingMode) => SInt64(roundingMode.ordinal.toLong)
       case BLFailureCategory(failureCategory) => SInt64(failureCategory.cantonCategoryId.toLong)
-      case BLUint256(_) => throw CompilationError(s"UInt256 not supported")
+      case BLUint256(v) => SUint256(v)
     })
 
   // ERecUpd(_, f2, ERecUpd(_, f1, e0, e1), e2) => (e0, [f1, f2], [e1, e2])

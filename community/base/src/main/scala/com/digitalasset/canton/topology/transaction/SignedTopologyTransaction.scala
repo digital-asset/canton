@@ -23,7 +23,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.{TopologyLimits, v30}
+import com.digitalasset.canton.protocol.{TopologyLimitsView, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.topology.TopologyManager.assignExpectedUsageToKeys
@@ -527,7 +527,7 @@ object SignedTopologyTransaction
     GetResult { r =>
       // Trusted bytes from the node's own store, so the validators pass the content through and
       // the limits in the context are never read.
-      fromTrustedByteString(TopologyTransactionDeserializationContext(TopologyLimits.default))(
+      fromTrustedByteString(TopologyTransactionDeserializationContext(TopologyLimitsView.default))(
         r.<<[ByteString]
       ).valueOr { err =>
         throw new DbSerializationException(

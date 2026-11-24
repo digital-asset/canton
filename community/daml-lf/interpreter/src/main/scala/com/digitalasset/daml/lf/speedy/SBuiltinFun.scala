@@ -225,6 +225,12 @@ private[lf] object SBuiltinFun {
       case otherwise => unexpectedType(i, "SBigNumeric", otherwise)
     }
 
+  final protected def getSUint256(args: ArraySeq[SValue], i: Int): data.Uint256.Uint256 =
+    args(i) match {
+      case SUint256(value) => value
+      case otherwise => unexpectedType(i, "SUint256", otherwise)
+    }
+
   final protected def getSList(args: ArraySeq[SValue], i: Int): FrontStack[SValue] =
     args(i) match {
       case SList(value) => value
@@ -513,6 +519,7 @@ private[lf] object SBuiltinFun {
       case SDate(date) => date.toString
       case SBigNumeric(x) => Numeric.toUnscaledString(x)
       case SNumeric(x) => Numeric.toUnscaledString(x)
+      case SUint256(x) => data.Uint256.toString(x)
       case _: SContractId | SToken | _: SAny | _: SEnum | _: SList | _: SMap | _: SOptional |
           _: SPAP | _: SRecord | _: SStruct | _: STypeRep | _: SVariant =>
         throw SError.Crash(location, s"litToText: unexpected $x")
@@ -3476,6 +3483,192 @@ private[lf] object SBuiltinFun {
           contractInfoStruct,
         )
         k(contract)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Uint256 builtins
+  // ---------------------------------------------------------------------------
+
+  private type Uint256 = data.Uint256.Uint256
+
+  // Unsafe (modular / wrapping) binary operations — always succeed
+  sealed abstract class SBBinaryOpUint256Unsafe(op: (Uint256, Uint256) => Uint256)
+      extends SBuiltinPure(2) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SUint256 =
+      SUint256(op(getSUint256(args, 0), getSUint256(args, 1)))
+  }
+
+  final case object SBAddUint256 extends SBBinaryOpUint256Unsafe(data.Uint256.add)
+  final case object SBSubUint256 extends SBBinaryOpUint256Unsafe(data.Uint256.sub)
+  final case object SBMulUint256 extends SBBinaryOpUint256Unsafe(data.Uint256.mul)
+  final case object SBDivUint256 extends SBBinaryOpUint256Unsafe(data.Uint256.div)
+  final case object SBModUint256 extends SBBinaryOpUint256Unsafe(data.Uint256.mod)
+  final case object SBExpUint256 extends SBBinaryOpUint256Unsafe(data.Uint256.exp)
+
+  // Safe (throwing) binary operations — throw ArithmeticError on overflow
+  sealed abstract class SBBinaryOpUint256Safe(name: String, op: (Uint256, Uint256) => Uint256)
+      extends SBuiltinArithmetic(name, 2) {
+    override private[speedy] def compute(args: ArraySeq[SValue]): Option[SValue] =
+      handleArithmeticException(SUint256(op(getSUint256(args, 0), getSUint256(args, 1))))
+  }
+
+  // Bitwise operations
+  final case object SBAndUint256 extends SBBinaryOpUint256Unsafe(data.Uint256.and)
+  final case object SBOrUint256 extends SBBinaryOpUint256Unsafe(data.Uint256.or)
+  final case object SBXorUint256 extends SBBinaryOpUint256Unsafe(data.Uint256.xor)
+
+  final case object SBNotUint256 extends SBuiltinPure(1) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SUint256 =
+      SUint256(data.Uint256.not(getSUint256(args, 0)))
+  }
+
+  final case object SBShlUint256 extends SBuiltinPure(2) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SUint256 = {
+      val x = getSUint256(args, 0)
+      val n = getSUint256(args, 1)
+      val shift =
+        try { (n: java.math.BigInteger).intValueExact() }
+        catch { case _: ArithmeticException => 256 }
+      SUint256(data.Uint256.shl(x, shift))
+    }
+  }
+
+  final case object SBShrUint256 extends SBuiltinPure(2) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SUint256 = {
+      val x = getSUint256(args, 0)
+      val n = getSUint256(args, 1)
+      val shift =
+        try { (n: java.math.BigInteger).intValueExact() }
+        catch { case _: ArithmeticException => 256 }
+      SUint256(data.Uint256.shr(x, shift))
+    }
+  }
+
+  final case object SBTextToUint256 extends SBuiltinPure(1) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SOptional = {
+      val text = getSText(args, 0)
+      SOptional(data.Uint256.fromString(text).toOption.map(SUint256.apply))
+    }
+  }
+
+  final case object SBInt64ToUint256 extends SBuiltinArithmetic("INT64_TO_UINT256", 1) {
+    override private[speedy] def compute(args: ArraySeq[SValue]): Option[SValue] =
+      data.Uint256.fromLong(getSInt64(args, 0)).toOption.map(SUint256.apply)
+  }
+
+  final case object SBUint256ToInt64 extends SBuiltinArithmetic("UINT256_TO_INT64", 1) {
+    override private[speedy] def compute(args: ArraySeq[SValue]): Option[SValue] = {
+      val x = getSUint256(args, 0)
+      try {
+        Some(SInt64((x: java.math.BigInteger).longValueExact()))
+      } catch {
+        case _: ArithmeticException => None
+      }
+    }
+  }
+
+  // EVM-specific operations
+  final case object SBAddModUint256 extends SBuiltinPure(3) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SUint256 =
+      SUint256(
+        data.Uint256.addMod(getSUint256(args, 0), getSUint256(args, 1), getSUint256(args, 2))
+      )
+  }
+
+  final case object SBMulModUint256 extends SBuiltinPure(3) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SUint256 =
+      SUint256(
+        data.Uint256.mulMod(getSUint256(args, 0), getSUint256(args, 1), getSUint256(args, 2))
+      )
+  }
+
+  final case object SBSDivUint256 extends SBuiltinPure(2) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SUint256 =
+      SUint256(data.Uint256.sDiv(getSUint256(args, 0), getSUint256(args, 1)))
+  }
+
+  final case object SBSModUint256 extends SBuiltinPure(2) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SUint256 =
+      SUint256(data.Uint256.sMod(getSUint256(args, 0), getSUint256(args, 1)))
+  }
+
+  final case object SBSltUint256 extends SBuiltinPure(2) {
+    override private[speedy] def executePure(args: ArraySeq[SValue], machine: Machine[?]): SBool =
+      SBool(data.Uint256.slt(getSUint256(args, 0), getSUint256(args, 1)))
+  }
+
+  final case object SBSgtUint256 extends SBuiltinPure(2) {
+    override private[speedy] def executePure(args: ArraySeq[SValue], machine: Machine[?]): SBool =
+      SBool(data.Uint256.sgt(getSUint256(args, 0), getSUint256(args, 1)))
+  }
+
+  final case object SBSarUint256 extends SBuiltinPure(2) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SUint256 = {
+      val x = getSUint256(args, 0)
+      val n = getSUint256(args, 1)
+      val shift =
+        try { (n: java.math.BigInteger).intValueExact() }
+        catch { case _: ArithmeticException => 256 }
+      SUint256(data.Uint256.sar(x, shift))
+    }
+  }
+
+  final case object SBByteUint256 extends SBuiltinPure(2) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SUint256 = {
+      val i = getSUint256(args, 0)
+      val x = getSUint256(args, 1)
+      val idx =
+        try { (i: java.math.BigInteger).intValueExact() }
+        catch { case _: ArithmeticException => 32 }
+      SUint256(data.Uint256.byteAt(x, idx))
+    }
+  }
+
+  final case object SBSignExtendUint256 extends SBuiltinPure(2) {
+    override private[speedy] def executePure(
+        args: ArraySeq[SValue],
+        machine: Machine[?],
+    ): SUint256 = {
+      val b = getSUint256(args, 0)
+      val x = getSUint256(args, 1)
+      val byteNum =
+        try { (b: java.math.BigInteger).intValueExact() }
+        catch { case _: ArithmeticException => 31 }
+      SUint256(data.Uint256.signExtend(x, byteNum))
     }
   }
 

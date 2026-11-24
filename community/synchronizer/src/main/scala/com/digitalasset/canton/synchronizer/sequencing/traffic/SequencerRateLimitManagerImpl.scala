@@ -99,13 +99,16 @@ class SequencerRateLimitManagerImpl(
       paramsO: Option[TrafficControlParameters],
   ): Boolean =
     isSenderSubjectToTraffic(submissionRequest.sender) && {
-      val freeConfirmationResponses = paramsO.exists(_.freeConfirmationResponses)
-      val isConfirmationResponse = submissionRequest.isConfirmationResponse
-
-      // If it's not a confirmation response we charge
-      !isConfirmationResponse ||
-      // If it is a confirmation response, we charge if it has been configured in the parameters
-      !freeConfirmationResponses
+      submissionRequest.requestType match {
+        case SubmissionRequestType.ConfirmationResponse =>
+          // we don't charge for confirmation responses if configured
+          val freeConfirmationResponses = paramsO.exists(_.freeConfirmationResponses)
+          !freeConfirmationResponses
+        case SubmissionRequestType.Commitment =>
+          // we don't charge for commitments with pv38 (but we rate limit them)
+          protocolVersion <= ProtocolVersion.v37
+        case _ => true
+      }
     }
 
   // Only participants and mediators are rate limited

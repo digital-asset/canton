@@ -785,12 +785,10 @@ class UpdateServiceQueryIT(testDars: TestDars) extends LedgerTestSuite {
         .updateByHash(request)
         .mustFail("looking up an update by hash with an empty event format")
     } yield {
-      assertGrpcError(
+      assertGrpcErrorRegex(
         failure,
         RequestValidationErrors.InvalidArgument,
-        Some(
-          "filtersByParty, filtersForAnyParty and filtersByContractId cannot be empty simultaneously"
-        ),
+        Some(emptyEventFormatErrorMessagePattern),
       )
     }
   })

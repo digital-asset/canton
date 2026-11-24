@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """Guard that keeps the aggregate jobs in `canton_build_required` in sync.
 
-Two jobs in `.github/workflows/canton_build_required.yml` are expected to gather
+Three jobs in `.github/workflows/canton_build_required.yml` are expected to gather
 every other job through their `needs:` list:
 
   - `canton_build_required_gate` aggregates every job so branch protection can
     require a single stable check
   - `notify` sends the red-main failure alert, so it must see every job for the
     alert to fire (and name the culprit) whenever any of them fails
+  - `ci_costs` summarises the OpenCost cost of the run, so it must run after
+    every job for the summary to cover them all
 
-Both lists are hand-maintained, so they can silently drift from the jobs they
+All lists are hand-maintained, so they can silently drift from the jobs they
 are meant to cover:
 
   - a new job added without being appended to a list is left un-gated or
     un-alerted, and the aggregator stays green even when that job fails
   - a renamed or removed job leaves a `needs` entry pointing at nothing
-  - an excluded job (`notify`, the gate itself) wrongly added to `needs` makes
+  - an excluded job (`notify`, `ci_costs`, the gate itself) wrongly added to `needs` makes
     the aggregator depend on something it should not
 
 This script asserts the invariant that each aggregator's `needs` equals the set
@@ -43,6 +45,7 @@ import yaml
 WORKFLOW = Path(__file__).parents[2] / ".github/workflows/canton_build_required.yml"
 GATE = "canton_build_required_gate"
 NOTIFY = "notify"
+COSTS = "ci_costs"
 
 # Repo-relative path to the classification file, so drift messages point the
 # reader straight at the file to edit rather than a bare basename. Both modules
@@ -53,13 +56,14 @@ CLASSIFICATION_PATH = notify_job_classification.CLASSIFICATION.relative_to(
 ).as_posix()
 
 # Aggregator jobs expected to cover every *other* job, and so kept in sync here.
-AGGREGATORS = (GATE, NOTIFY)
+AGGREGATORS = (GATE, NOTIFY, COSTS)
 
-# Jobs no aggregator should depend on. `notify` and the gate report alert or
-# aggregate status rather than build health, and a job cannot depend on itself,
-# so both are excluded from every aggregator's expected coverage. Adding to this
+# Jobs no aggregator should depend on. `notify`, `ci_costs` and the gate report
+# alert, cost or aggregate status rather than build health, and a job cannot
+# depend on itself, so all three are excluded from every aggregator's expected
+# coverage. Adding to this
 # set is a conscious, reviewable choice, which is the whole point of the guard.
-EXCLUDED = {NOTIFY, GATE}
+EXCLUDED = {NOTIFY, COSTS, GATE}
 
 
 def _needs_list(job):
@@ -176,7 +180,7 @@ def main():
         sys.exit(1)
 
     print(
-        f"`{GATE}` and `{NOTIFY}` each cover all {len(job_names - EXCLUDED)} jobs "
+        f"{', '.join(f'`{name}`' for name in AGGREGATORS)} each cover all {len(job_names - EXCLUDED)} jobs "
         f"(excluding {', '.join(sorted(EXCLUDED))}), and every job is classified "
         f"in {CLASSIFICATION_PATH}."
     )

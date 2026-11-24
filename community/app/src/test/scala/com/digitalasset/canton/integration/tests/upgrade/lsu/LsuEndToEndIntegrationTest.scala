@@ -129,6 +129,7 @@ sealed trait LsuEndToEndIntegrationTest extends LsuBase {
 
       oldSynchronizerNodes.all.stop()
       waitForTargetTimeOnSequencer(sequencer2, upgradeTime.immediateSuccessor, logger)
+      purchaseTrafficForUnregisteredMember(sequencer2)
 
       /*
       We do several ping, disconnect, reconnect because reconnect comes with crash-recovery

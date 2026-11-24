@@ -46,7 +46,7 @@ class CachedIdentityProviderConfigStore(
   ): Future[Result[IdentityProviderConfig]] =
     delegate
       .createIdentityProviderConfig(identityProviderConfig)
-      .thereafter(invalidateByIssuerOnSuccess(identityProviderConfig.issuer))
+      .thereafter(invalidateByIssuerOnSuccess(identityProviderConfig.issuer.unwrap))
 
   override def getIdentityProviderConfig(id: IdentityProviderId.Id)(implicit
       loggingContext: LoggingContextWithTrace

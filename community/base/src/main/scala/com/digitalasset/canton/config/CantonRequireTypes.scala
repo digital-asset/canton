@@ -12,7 +12,11 @@ import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName.InvalidInstanceName
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.InvalidLengthString
 import com.digitalasset.canton.config.RequireTypes.{InvariantViolation, NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.resource.ToDbPrimitive
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
@@ -335,6 +339,30 @@ object CantonRequireTypes {
       new String300(str)(name)
   }
 
+  final case class String500 private (str: String)(override val name: Option[String])
+      extends LengthLimitedString {
+    override def maxLength: PositiveInt = String500.maxLength
+  }
+
+  object String500 extends LengthLimitedStringCompanion[String500] {
+    override def maxLength = PositiveInt.tryCreate(500)
+
+    override protected def factoryMethod(str: String)(name: Option[String]): String500 =
+      new String500(str)(name)
+  }
+
+  final case class String1000 private (str: String)(override val name: Option[String])
+      extends LengthLimitedString {
+    override def maxLength: PositiveInt = String1000.maxLength
+  }
+
+  object String1000 extends LengthLimitedStringCompanion[String1000] {
+    override def maxLength = PositiveInt.tryCreate(1000)
+
+    override protected def factoryMethod(str: String)(name: Option[String]): String1000 =
+      new String1000(str)(name)
+  }
+
   /** Length limitation for an [[com.digitalasset.canton.protocol.LfTemplateId]]. A
     * [[com.digitalasset.canton.protocol.LfTemplateId]] consists of
     *   - The module name ([[com.digitalasset.daml.lf.data.Ref.DottedName]])
@@ -355,6 +383,18 @@ object CantonRequireTypes {
 
     override protected def factoryMethod(str: String)(name: Option[String]): String2066 =
       new String2066(str)(name)
+  }
+
+  final case class String4096 private (str: String)(override val name: Option[String])
+      extends LengthLimitedString {
+    override def maxLength: PositiveInt = String4096.maxLength
+  }
+
+  object String4096 extends LengthLimitedStringCompanion[String4096] {
+    override def maxLength = PositiveInt.tryCreate(4096)
+
+    override protected def factoryMethod(str: String)(name: Option[String]): String4096 =
+      new String4096(str)(name)
   }
 
   /** Length limitation of a `TEXT` or unbounded `VARCHAR` field in postgres.
@@ -547,7 +587,9 @@ object CantonRequireTypes {
     def empty: Wrapper = tryCreate("")
   }
 
-  final case class InstanceName private (unwrap: String) extends NoCopy with PrettyPrinting {
+  final case class InstanceName private (unwrap: String)
+      extends NoCopy
+      with PrettyPrintingFromCompanion {
 
     if (!unwrap.matches("^[a-zA-Z0-9_-]*$")) {
       throw InvalidInstanceName(
@@ -571,10 +613,13 @@ object CantonRequireTypes {
 
     def toProtoPrimitive: String = unwrap
 
-    override protected def pretty: Pretty[InstanceName] = prettyOfParam(_.unwrap.unquoted)
+    override def prettyCompanion: PrettyPrintingCompanion[InstanceName] = InstanceName
   }
 
-  object InstanceName {
+  object InstanceName extends PrettyPrintingCompanion[InstanceName] {
+
+    override protected val pretty: Pretty[InstanceName] = prettyOfParam(_.unwrap.unquoted)
+
     val maxLength: Int = 30
 
     def create(str: String): Either[InvalidInstanceName, InstanceName] = Either

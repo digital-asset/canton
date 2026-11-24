@@ -8,12 +8,11 @@
 #   them as `[main] Flaky <test>` issues and pings the Flaky Canton rota.
 # infra_jobs: build/infra failures that block main and ARE alerted here.
 #
-# `notify` and `canton_build_required_gate` are excluded (they report status, not
-# build health), like the guard excludes them from the aggregators' `needs`.
+# `notify`, `ci_costs` and `canton_build_required_gate` are excluded (they report
+# status or cost, not build health), like the guard excludes them from the
+# aggregators' `needs`.
 test_jobs:
   - test_36
-  - test_36_requires_external_kms
-  - sequential_test_37
   - test_37
   - test_37_requires_external_kms
   - test_dev
@@ -26,6 +25,8 @@ test_jobs:
   - unstable_test_37
   - variations_test_37
   - variations_test_37_selected_users
+  - crash_recovery_test_37
+  - crash_recovery_test_37_requires_external_kms
 infra_jobs:
   - pick_runner
   - plan_ci
@@ -42,10 +43,6 @@ infra_jobs:
   # Image build + compose ping smoke test, not run_tests/cleanup_test_job, so its
   # failures never reach the flaky pipeline and would be silent if not alerted.
   - test_docker_images
-  # Runs cleanup_test_job with report_to_datadog: false, so it never feeds the
-  # flaky pipeline. Alert here, otherwise its failures would be silent.
-  - crash_recovery_test_37
-  - crash_recovery_test_37_requires_external_kms
 
   # Pull-request only: publishes PV37 results for later runs of the same PR head to reuse.
   # It never runs on main, so it never alerts; listed only so every job is classified.

@@ -96,7 +96,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
 
       - name: Start Postgres container
         id: start_postgres
@@ -176,5 +176,4 @@ jobs:
       caller_job: toxiproxy_test_fast
       shard_job_result: ${{ needs.toxiproxy_test_fast.result }}
       job_name: ${{ inputs.job_name }}
-      runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}

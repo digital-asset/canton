@@ -64,8 +64,14 @@ import com.digitalasset.canton.platform.store.utils.{
   QueueBasedConcurrencyLimiter,
   Telemetry,
 }
-import com.digitalasset.canton.platform.{FatContract, TemplatePartiesFilter}
+import com.digitalasset.canton.platform.{
+  ContractIdEventFilter,
+  EventFilter,
+  FatContract,
+  TemplatePartiesFilter,
+}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.FullIdentifier
@@ -114,7 +120,7 @@ class ACSReader(
   private val paginatingAsyncStream = new PaginatingAsyncStream(loggerFactory)
 
   def streamActiveContracts(
-      filteringConstraints: TemplatePartiesFilter,
+      filter: EventFilter,
       activeAt: (Offset, Long),
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
@@ -123,6 +129,15 @@ class ACSReader(
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] = {
+    val filteringConstraints = filter match {
+      case (f: TemplatePartiesFilter) => f
+      case (_: ContractIdEventFilter) =>
+        ErrorUtil.internalError(
+          new IllegalArgumentException(
+            "This should not happen as ACS queries validation rejects contract id filters"
+          )
+        )
+    }
     val (activeAtOffset, activeAtLong) = activeAt
     val span =
       Telemetry.Updates.createSpan(tracer, activeAtOffset)(qualifiedNameOfCurrentFunc)
@@ -180,7 +195,10 @@ class ACSReader(
         )
     }
     val allFilterParties = filter.allFilterParties
-    val decomposedFilters = FilterUtils.decomposeFilters(filter).toVector
+    val decomposedFilters = FilterUtils
+      .decomposeFilters(filter)
+      .collect { case (f: DecomposedTemplatePartyFilter) => f }
+      .toVector // TODO (#38125) move filter type split in the type hierarchy
     val activeIdQueriesLimiter =
       new QueueBasedConcurrencyLimiter(effectiveConfig.maxParallelActiveIdQueries, executionContext)
     val localPayloadQueriesLimiter =
@@ -202,12 +220,11 @@ class ACSReader(
     def achsIsValid: Boolean = activeAtEventSeqId >= achsStateCache.get().validAt
 
     def fetchAchsIdFilterPageQuery(
-        filter: DecomposedFilter
+        filter: DecomposedTemplatePartyFilter
     ): IdFilterPageQuery = {
       val achsQuery: IdFilterPageQuery =
         eventStorageBackend.updateStreamingQueries.fetchAchsIds(
-          stakeholderO = filter.party,
-          templateIdO = filter.templateId,
+          templatePartyFilter = filter,
           activeAtEventSeqId = activeAtEventSeqId,
         )
 
@@ -219,7 +236,7 @@ class ACSReader(
     }
 
     def fetchActiveIds(initialFromIdInclusive: Long)(
-        filter: DecomposedFilter
+        filter: DecomposedTemplatePartyFilter
     ): Source[Long, NotUsed] =
       if (achsStateCache.get().lastPointers.lastPopulated == 0 || !achsIsValid) {
         if (!achsIsValid) {
@@ -301,7 +318,7 @@ class ACSReader(
         achsLastInput: Option[PaginationInput],
         initialFromIdInclusive: Long,
     )(
-        filter: DecomposedFilter
+        filter: DecomposedTemplatePartyFilter
     ): Source[(PaginationInput, Vector[Long]), NotUsed] = {
       val startInclusive = achsLastInput
         .map(_.fromTo.eventSeqIdRange.endInclusive + 1)
@@ -324,8 +341,7 @@ class ACSReader(
               descendingOrder = false,
             )(
               eventStorageBackend.updateStreamingQueries.fetchActiveIds(
-                stakeholderO = filter.party,
-                templateIdO = filter.templateId,
+                templatePartyFilter = filter,
                 activeAtEventSeqId = activeAtEventSeqId,
               )
             )(
@@ -529,9 +545,7 @@ class ACSReader(
                   s"unassignEventBatch returned $resultSize/$idsSize $last"
                 }
               )
-              .map(_.collect { case raw: RawUnassignEvent =>
-                raw
-              })
+              .map(_.collect { case raw: RawUnassignEvent => raw })
           )
         )
       )

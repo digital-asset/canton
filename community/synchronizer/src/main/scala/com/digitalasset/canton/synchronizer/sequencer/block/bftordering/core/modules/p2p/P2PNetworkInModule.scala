@@ -3,10 +3,12 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p
 
+import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics.updateTimer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -14,6 +16,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.P2PMetrics.{
   emitReceiveStats,
+  emitUnparseableMessage,
   receiveMetricsContext,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
@@ -38,7 +41,7 @@ import java.time.{Duration, Instant}
 class P2PNetworkInModule[E <: Env[E]](
     metrics: BftOrderingMetrics,
     pvv: ProtocolVersionValidation,
-    limits: BftOrdererLimits,
+    limits: BftOrdererLimitsView,
     override val availability: ModuleRef[Availability.Message[E]],
     override val consensus: ModuleRef[Consensus.Message[E]],
     override val loggerFactory: NamedLoggerFactory,
@@ -97,38 +100,27 @@ class P2PNetworkInModule[E <: Env[E]](
         metrics.p2p.receive.labels.source.values.Empty(sentBy)
 
       case Message.AvailabilityMessage(availabilityMessage) =>
-        AvailabilityModule
-          .parseNetworkMessage(pvv, limits, availabilityMessage)
-          .fold(
-            errorMessage =>
-              logger.warn(
-                s"Dropping availability message from $sentBy as it couldn't be parsed: $errorMessage"
-              ),
-            msg => availability.asyncSend(msg),
-          )
+        parseUntrusted(sentBy, "availability")(
+          AvailabilityModule.parseNetworkMessage(pvv, limits, availabilityMessage)
+        )(msg => availability.asyncSend(msg))
         metrics.p2p.receive.labels.source.values.Availability(sentBy)
 
       case Message.ConsensusMessage(consensusMessage) =>
-        IssConsensusModule
-          .parseNetworkMessage(pvv, limits, consensusMessage, actualSender = sentBy)
-          .map(msg => Consensus.ConsensusMessage.PbftUnverifiedNetworkMessage(msg))
-          .fold(
-            errorMessage =>
-              logger.warn(
-                s"Dropping consensus message from $sentBy as it couldn't be parsed: $errorMessage"
-              ),
-            unverifiedNetworkMessage => {
-              val claimedOriginator = unverifiedNetworkMessage.underlyingNetworkMessage.message.from
-              if (claimedOriginator != sentBy) {
-                val epoch =
-                  unverifiedNetworkMessage.underlyingNetworkMessage.message.blockMetadata.epochNumber
-                logger.debug(
-                  s"Received retransmitted message at epoch $epoch sent by $sentBy originally created by $claimedOriginator"
-                )
-              }
-              consensus.asyncSend(unverifiedNetworkMessage)
-            },
-          )
+        parseUntrusted(sentBy, "consensus")(
+          IssConsensusModule
+            .parseNetworkMessage(pvv, limits, consensusMessage, actualSender = sentBy)
+            .map(msg => Consensus.ConsensusMessage.PbftUnverifiedNetworkMessage(msg))
+        ) { unverifiedNetworkMessage =>
+          val claimedOriginator = unverifiedNetworkMessage.underlyingNetworkMessage.message.from
+          if (claimedOriginator != sentBy) {
+            val epoch =
+              unverifiedNetworkMessage.underlyingNetworkMessage.message.blockMetadata.epochNumber
+            logger.debug(
+              s"Received retransmitted message at epoch $epoch sent by $sentBy originally created by $claimedOriginator"
+            )
+          }
+          consensus.asyncSend(unverifiedNetworkMessage)
+        }
         metrics.p2p.receive.labels.source.values.Consensus(sentBy)
 
       // For retransmission and state transfer messages, we assume that the authenticated sender
@@ -139,19 +131,13 @@ class P2PNetworkInModule[E <: Env[E]](
       //  is just ignored. See `SenderBoundRequestTest`.
 
       case Message.RetransmissionMessage(message) =>
-        IssConsensusModule
-          .parseRetransmissionMessage(pvv, limits, sentBy, message)
-          .fold(
-            errorMessage =>
-              logger.warn(
-                s"Dropping retransmission message from $sentBy as it couldn't be parsed: $errorMessage"
-              ),
-            message => consensus.asyncSend(message),
-          )
+        parseUntrusted(sentBy, "retransmission")(
+          IssConsensusModule.parseRetransmissionMessage(pvv, limits, sentBy, message)
+        )(message => consensus.asyncSend(message))
         metrics.p2p.receive.labels.source.values.Retransmissions(sentBy)
 
       case Message.StateTransferMessage(message) =>
-        val parsedSignedMessage =
+        parseUntrusted(sentBy, "state transfer")(
           if (synchronizerProtocolVersion >= ProtocolVersion.v37)
             SignedMessage
               .fromProto(pvv, v31.StateTransferMessage, SupportedVersions.ProtoData31)(
@@ -164,21 +150,39 @@ class P2PNetworkInModule[E <: Env[E]](
                 IssConsensusModule
                   .parseStateTransferMessage(pvv, limits, sentBy, _)
               )(message)
-        parsedSignedMessage
-          .fold(
-            errorMessage =>
-              logger.warn(
-                s"Dropping state transfer message from $sentBy as it couldn't be parsed: $errorMessage"
-              ),
-            signedMessage =>
-              consensus.asyncSend(
-                Consensus.StateTransferMessage.UnverifiedStateTransferMessage(signedMessage)
-              ),
+        )(signedMessage =>
+          consensus.asyncSend(
+            Consensus.StateTransferMessage.UnverifiedStateTransferMessage(signedMessage)
           )
+        )
         metrics.p2p.receive.labels.source.values.StateTransfer(sentBy)
 
       case Message.ConnectionOpened(_) =>
         logger.debug(s"Received connection opener from $sentBy")
         metrics.p2p.receive.labels.source.values.ConnectionOpener(sentBy)
+    }
+
+  /** Parses a message from an untrusted peer and forwards the result.
+    *
+    * A parser is expected to report invalid input as a `Left`. If it throws instead, that is a bug
+    * in the parser, but one that the sender can trigger at will, so the message is dropped and the
+    * sender is flagged as non-compliant rather than aborting the module (and, by default, the
+    * node). Exceptions thrown by `forward` are not caught.
+    */
+  private[p2p] def parseUntrusted[A](sentBy: BftNodeId, kind: String)(
+      parse: => ParsingResult[A]
+  )(forward: A => Unit)(implicit traceContext: TraceContext): Unit =
+    Either.catchNonFatal(parse) match {
+      case Left(exception) =>
+        logger.error(
+          s"Internal: exception while parsing $kind message from $sentBy, dropping it",
+          exception,
+        )
+        emitUnparseableMessage(metrics, sentBy)
+      case Right(Left(errorMessage)) =>
+        logger.warn(
+          s"Dropping $kind message from $sentBy as it couldn't be parsed: $errorMessage"
+        )
+      case Right(Right(parsed)) => forward(parsed)
     }
 }

@@ -1,0 +1,66 @@
+# Runs the given tests many times on a branch, to reproduce a flake or check a fix for one.
+#
+# How to trigger:
+#   gh workflow run manual_test_many_times.yml -R DACH-NY/canton --ref <branch> \
+#     -f tests=com.digitalasset.canton.integration.tests.FooIntegrationTest -f protocol_version=dev
+name: Manual Test Many Times
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: Whitespace-separated fully qualified test class names or globs
+        required: true
+        type: string
+      protocol_version:
+        description: Protocol version to run the tests with, e.g. 37 or dev
+        required: true
+        type: string
+      runners:
+        description: Number of runners, each running all the tests (at most 20)
+        default: 10
+        type: number
+      repetitions:
+        description: Number of times each runner runs the tests (at most 20)
+        default: 5
+        type: number
+
+permissions:
+  actions: write
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    if: ${{ contains(fromJSON('["DACH-NY/canton", "digital-asset/canton"]'), github.repository) }}
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  compile:
+    name: Compile
+    needs: pick_runner
+    uses: ./.github/workflows/_compile.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  test_many_times:
+    name: Test Many Times
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_test_many_times.yml
+    secrets: inherit
+    with:
+      tests: ${{ inputs.tests }}
+      protocol_version: ${{ inputs.protocol_version }}
+      runners: ${{ inputs.runners }}
+      repetitions: ${{ inputs.repetitions }}
+      runner: ${{ needs.pick_runner.outputs.runner }}

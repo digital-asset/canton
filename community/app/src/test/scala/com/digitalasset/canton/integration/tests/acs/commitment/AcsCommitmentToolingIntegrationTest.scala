@@ -152,6 +152,14 @@ trait AcsCommitmentToolingIntegrationTest
           p.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
         }
         passTopologyRegistrationTimeout()
+        // The BFT block time is derived from the previous block's commits, so the first block after a
+        // sim clock jump can still carry a time from before it. Wait until both synchronizers sequence
+        // at the new time, so that the first contract of the first test does not land in an earlier
+        // commitment period than the test expects.
+        val now = environment.simClock.value.now
+        Seq(sequencer1, sequencer2).foreach(
+          TestUtils.waitForTargetTimeOnSequencer(_, now, logger)
+        )
       }
 
   "Commitment retrieval inspection" should {
@@ -777,6 +785,7 @@ trait AcsCommitmentToolingIntegrationTest
         }
 
         simClock.advance(pruningTimeout)
+        TestUtils.waitForTargetTimeOnSequencer(sequencer1, simClock.now, logger)
         logger.info(
           "Participant1 deploy some more contracts to advance the clean replay, so that it can prune past data"
         )

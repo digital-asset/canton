@@ -71,6 +71,8 @@ object TypeSig {
 
     case object Party extends SerializableType
 
+    case object Uint256 extends SerializableType
+
     case object Bool extends SerializableType
 
     case object Unit extends SerializableType
@@ -161,6 +163,7 @@ object TypeSig {
                 case Ast.BTUnit => SerializableType.Unit
                 case Ast.BTBool => SerializableType.Bool
                 case Ast.BTDate => SerializableType.Date
+                case Ast.BTUint256 => SerializableType.Uint256
                 case _ =>
                   nonSerializable
               }

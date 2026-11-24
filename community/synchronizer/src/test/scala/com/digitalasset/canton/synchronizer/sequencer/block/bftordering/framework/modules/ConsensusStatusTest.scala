@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.{BftOrdererLimits, BftOrdererLimitsView}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.ConsensusStatusDeserializationContext
@@ -23,7 +23,8 @@ class ConsensusStatusTest extends AnyWordSpec with BftSequencerBaseTest {
       "as it can otherwise lead to a divide-by-zero when processing it" in {
         val proto = v30.EpochStatus(epochNumber = 0L, segments = Seq.empty)
 
-        val context = ConsensusStatusDeserializationContext(from, limits = BftOrdererLimits.default)
+        val context =
+          ConsensusStatusDeserializationContext(from, limits = BftOrdererLimitsView.default)
 
         ConsensusStatus.EpochStatus.fromProto(
           ProtocolVersionValidation.PV(synchronizerProtocolVersion),
@@ -37,11 +38,13 @@ class ConsensusStatusTest extends AnyWordSpec with BftSequencerBaseTest {
 
   "EpochStatus size limits" should {
     // Every derived limit is 2 (2 sequencers, segment length 1, so 2 blocks per epoch)
-    val limits = BftOrdererLimits(
-      maxSequencersInSynchronizer = PositiveInt.two,
-      maxSegmentLength = PositiveInt.one,
-      maxOrderingRequests = PositiveInt.two,
-      maxProofs = PositiveInt.two,
+    val limits = BftOrdererLimitsView(
+      BftOrdererLimits(
+        maxSegmentLength = PositiveInt.one,
+        maxOrderingRequests = PositiveInt.two,
+        maxProofs = PositiveInt.two,
+      ),
+      maxSequencersPerSynchronizer = PositiveInt.two,
     )
     val bound = 2
     val context = ConsensusStatusDeserializationContext(from, limits)

@@ -9,6 +9,16 @@ on:
       protocol_version:
         required: true
         type: string
+      job_name:
+        description: >-
+          Distinct name of the calling leg, used for the flaky-test pipeline and to keep
+          timings and test-split artifacts apart when several legs call this workflow.
+        default: nightly_integration_test
+        type: string
+      session_signing_keys_enabled:
+        description: Run the tests with session signing keys enabled.
+        default: false
+        type: boolean
     secrets:
       DATADOG_API_KEY:
         required: true
@@ -58,7 +68,7 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/utils/resolve_previous_artifact_run
         with:
-          artifact-name: nightly_integration_test-timings-latest
+          artifact-name: ${{ inputs.job_name }}-timings-latest
 
   nightly_integration_test:
     name: Nightly Integration Test (shard ${{ matrix.shard }})
@@ -87,10 +97,13 @@ jobs:
       AWS_RETRY_MODE: adaptive
       AWS_MAX_ATTEMPTS: "10"
       EXECUTOR_JVM_HEAP_SIZE: 14000M
+      CANTON_CI_JOB_NAME: ${{ inputs.job_name }}
+      # Read by ConfigTransforms in the integration tests.
+      SESSION_SIGNING_KEYS_ENABLED: ${{ inputs.session_signing_keys_enabled }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
 
       - name: Start Postgres container
         id: start_postgres
@@ -113,7 +126,7 @@ jobs:
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings
         with:
-          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-artifact-name: ${{ inputs.job_name }}-timings-latest
           timings-path: ${{ github.job }}/.timings
           github-token: ${{ github.token }}
           previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
@@ -131,6 +144,7 @@ jobs:
           include_patterns: |
             ^com\.digitalasset\.canton\.integration\.tests\.nightly(?:\.(?!bftordering(?:\.|$)|topology(?:\.|$)).*)?$
           timings_file: ${{ github.job }}/.timings/timings.json
+          job_name: ${{ inputs.job_name }}
 
       - name: Stop Postgres container
         if: always()
@@ -151,6 +165,6 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: nightly_integration_test
+      job_name: ${{ inputs.job_name }}
       shard_job_result: ${{ needs.nightly_integration_test.result }}
-      runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}

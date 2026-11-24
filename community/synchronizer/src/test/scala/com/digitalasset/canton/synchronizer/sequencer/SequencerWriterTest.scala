@@ -3,13 +3,10 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
-import cats.data.EitherT
 import cats.syntax.option.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.resource.{MemoryStorage, Storage}
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   MessageId,
@@ -20,7 +17,6 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SequencerWriter.RunningSequencerWriterFlow
 import com.digitalasset.canton.synchronizer.sequencer.store.{
   InMemorySequencerStore,
-  SequencerStore,
   SequencerWriterStore,
 }
 import com.digitalasset.canton.time.SimClock
@@ -51,24 +47,12 @@ class SequencerWriterTest extends AsyncWordSpec with BaseTest {
     }
   }
 
-  class MockWriterStoreFactory() extends SequencerWriterStoreFactory {
-    override def close(): Unit = ()
-
-    override def create(storage: Storage, generalStore: SequencerStore)(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, WriterStartupError, SequencerWriterStore] =
-      EitherT.pure(
-        SequencerWriterStore.singleInstance(generalStore)
-      )
-  }
-
   def withEnv(f: Env => Future[Assertion]): Future[Assertion] =
     f(new Env)
 
   class Env {
     val clock = new SimClock(loggerFactory = loggerFactory)
     val runningFlows = mutable.Buffer[MockRunningWriterFlow]()
-    val storage = new MemoryStorage(loggerFactory, timeouts)
     val sequencerMember: Member = SequencerId(
       UniqueIdentifier.tryFromProtoPrimitive("sequencer::namespace")
     )
@@ -81,13 +65,10 @@ class SequencerWriterTest extends AsyncWordSpec with BaseTest {
       sequencerMetrics = SequencerMetrics.noop("sequencer-writer-test"),
     )
     val instanceIndex = 0
-    val storageFactory = new MockWriterStoreFactory()
 
     val writer =
       new SequencerWriter(
-        writerStoreFactory = storageFactory,
         writerFlowFactory = TestSequencerWriterFlowFactory,
-        storage = storage,
         rateLimitManagerO = None,
         generalStore = store,
         clock = clock,

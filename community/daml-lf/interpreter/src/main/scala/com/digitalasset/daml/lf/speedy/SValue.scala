@@ -90,6 +90,7 @@ sealed abstract class SValue extends AnyRef {
         case SBool(x) => V.ValueBool(x)
         case SUnit => V.ValueUnit
         case SDate(x) => V.ValueDate(x)
+        case SUint256(x) => V.ValueUint256(x)
         case SRecord(id, names0, values0) =>
           val n =
             if (keepTrailingNoneFields)
@@ -413,6 +414,7 @@ object SValue {
   final case object SUnit extends SBuiltinLit
   final case class SDate(value: Time.Date) extends SBuiltinLit
   final case class SContractId(value: V.ContractId) extends SBuiltinLit
+  final case class SUint256(value: data.Uint256.Uint256) extends SBuiltinLit
   final case class STypeRep(ty: Type) extends SValue
   // The "effect" token for update or scenario builtin functions.
   final case object SToken extends SValue

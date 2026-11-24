@@ -52,7 +52,7 @@ private[platform] trait LedgerDaoUpdateReader {
 
   def getActiveContracts(
       activeAt: Option[Offset],
-      filter: TemplatePartiesFilter,
+      filter: EventFilter,
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
       configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],

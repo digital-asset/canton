@@ -18,6 +18,7 @@ import com.daml.tls.{
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmptyString}
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.console.{
   CommandFailure,

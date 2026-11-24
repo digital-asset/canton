@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FairBoundedQueue.{
   DeduplicationStrategy,
@@ -164,6 +165,102 @@ class FairBoundedQueueTest extends AnyWordSpec with BaseTest {
             queue.enqueue(itemsToEnqueue.nodeId, itemsToEnqueue.item) shouldBe itemsToEnqueue.result
           )
           queue.dump shouldBe finalDump
+      }
+    }
+
+    "enqueue messages one by one, drop messages according to strategies, and dump (with item size limit)" in {
+      Table[Int, Int, DropStrategy, DeduplicationStrategy, Seq[Enqueue], Seq[
+        (BftNodeId, ItemType)
+      ]](
+        (
+          "per node quota",
+          "per node item size limit",
+          "drop strategy",
+          "deduplication strategy",
+          "items to enqueue and results",
+          "final dump",
+        ),
+        (
+          /*per-node quota = */ 2,
+          /*per-node item size limit = */ 5,
+          DropStrategy.DropOldest,
+          DeduplicationStrategy.Noop,
+          Seq(
+            Enqueue(node1, 1, EnqueueResult.Success),
+            Enqueue(node2, 2, EnqueueResult.Success),
+            Enqueue(node1, 3, EnqueueResult.Success),
+            Enqueue(node1, 4, EnqueueResult.PerNodeQuotaExceeded(node1)),
+          ),
+          Seq(node2 -> 2, node1 -> 4),
+        ),
+        (
+          /*per-node quota = */ 4,
+          /*per-node item size limit = */ 5,
+          DropStrategy.DropOldest,
+          DeduplicationStrategy.Noop,
+          Seq(
+            Enqueue(node1, 2, EnqueueResult.Success),
+            Enqueue(node2, 2, EnqueueResult.Success),
+            Enqueue(node1, 2, EnqueueResult.Success),
+            Enqueue(
+              node1,
+              4,
+              EnqueueResult.PerNodeQuotaExceeded(node1),
+            ), // even though per-node quota is not exceeded, the total item size limit is exceeded so we remove the two oldest items.
+          ),
+          Seq(node2 -> 2, node1 -> 4),
+        ),
+        (
+          /*per-node quota = */ 4,
+          /*per-node item size limit = */ 5,
+          DropStrategy.DropNewest,
+          DeduplicationStrategy.Noop,
+          Seq(
+            Enqueue(node1, 2, EnqueueResult.Success),
+            Enqueue(node2, 2, EnqueueResult.Success),
+            Enqueue(node1, 2, EnqueueResult.Success),
+            Enqueue(node1, 4, EnqueueResult.PerNodeQuotaExceeded(node1)),
+          ),
+          Seq(node1 -> 2, node2 -> 2, node1 -> 2),
+        ),
+        (
+          /*per-node quota = */ 4,
+          /*per-node item size limit = */ 5,
+          DropStrategy.DropOldest,
+          DeduplicationStrategy.Noop,
+          Seq(
+            Enqueue(node1, 1, EnqueueResult.Success),
+            Enqueue(node2, 2, EnqueueResult.Success),
+            Enqueue(
+              node1,
+              6,
+              EnqueueResult.PerNodeQuotaExceeded(node1),
+            ), // everything from node1 gets dropped because the item size limit is exceeded
+          ),
+          Seq(node2 -> 2),
+        ),
+      ).forEvery {
+        (
+            perNodeQuota,
+            perNodeItemSizeLimit,
+            dropStrategy,
+            deduplicationStrategy,
+            itemsToEnqueue,
+            finalDump,
+        ) =>
+          val maxQueueSize = 10
+          val queue = new FairBoundedQueue[ItemType](
+            maxQueueSize,
+            perNodeQuota,
+            dropStrategy,
+            deduplicationStrategy,
+            maxTotalItemSizePerNodeQuota = Some(PositiveInt.tryCreate(perNodeItemSizeLimit)),
+            itemSizeOf = x => x.toInt,
+          )
+          itemsToEnqueue.foreach(itemsToEnqueue =>
+            queue.enqueue(itemsToEnqueue.nodeId, itemsToEnqueue.item) shouldBe itemsToEnqueue.result
+          )
+          queue.dumpWithNodeInfo shouldBe finalDump
       }
     }
 

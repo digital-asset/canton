@@ -1161,25 +1161,14 @@ final class SequencerClientTest
         val env = RichEnvFactory.create(
           topologyO = Some(topologyWithTrafficControl)
         )
-        implicit val metricsContext: MetricsContext = MetricsContext.Empty
-        val now = env.clock.now
         val testF = for {
           _ <- env.subscribeAfter()
-          prepared <- env.client
-            .prepareSend(
-              Batch.of(
-                testedProtocolVersion,
-                (new TestProtocolMessage(), Recipients.cc(participant1)),
-              ),
-              currentSnapshotApproximation = None,
-              timestamps = SequencerClientSend.SendRequestTimestamps(
-                approximateTimestampForSigning = now,
-                maxSequencingTime = env.client.generateMaxSequencingTime(now),
-              ),
-              messageId = env.client.generateMessageId,
-              aggregationRule = None,
+          prepared <- env.prepareSend(
+            Batch.of(
+              testedProtocolVersion,
+              (new TestProtocolMessage(), Recipients.cc(participant1)),
             )
-            .valueOrFail("prepareSend")
+          )
           _ = prepared.trafficCost shouldBe defined
           _ = env.pool.connection.lastSend.get() shouldBe None
           _ <- prepared
@@ -1224,20 +1213,7 @@ final class SequencerClientTest
               messageId = messageId,
             )
             .value
-          _ <- env.subscriber.value.sendToHandler(
-            ConnectionSequencedEvent(
-              SequencerTestUtils.sign(
-                SequencerTestUtils.mockDeliverError(
-                  CantonTimestamp.MinValue.immediateSuccessor,
-                  DefaultTestIdentities.physicalSynchronizerId,
-                  messageId = messageId,
-                  trafficReceipt = Some(trafficReceipt),
-                )
-              )
-            )(
-              traceContext
-            )
-          )
+          _ <- env.sendDeliverErrorToHandler(messageId, Some(trafficReceipt))
           _ <- env.client.flushClean()
         } yield {
           env.trafficStateController.getTrafficConsumed shouldBe TrafficConsumed(
@@ -1501,6 +1477,118 @@ final class SequencerClientTest
       }
     }
 
+    "mayHaveSentMultipleCopies" should {
+      def prepareAndSend(
+          env: Env[SequencerClient],
+          messageId: MessageId,
+          callback: SendCallback = SendCallback.empty,
+      ): SequencerClientSend.PreparedSubmission = {
+        val prepared =
+          env.prepareSend(Batch.empty(testedProtocolVersion), messageId).futureValueUS
+        prepared
+          .sendAsync(
+            callback,
+            amplify = true,
+            useConfirmationResponseAmplificationParameters = false,
+          )
+          .value
+          .flatMap(identity)
+          .value
+          .futureValueUS shouldBe Right(())
+        prepared
+      }
+
+      "count a copy sent after the patience" in {
+        val env = RichEnvFactory.create(
+          amplificationConfig = SubmissionRequestAmplification(
+            factor = PositiveInt.two,
+            patience = NonNegativeFiniteDuration.tryOfSeconds(10),
+          )
+        )
+
+        val prepared = prepareAndSend(env, MessageId.tryCreate("one-copy"))
+        prepared.mayHaveSentMultipleCopies shouldBe false
+
+        env.clock.advance(10.seconds.toJava)
+        eventually()(env.pool.connection.sendAsyncCount.get() shouldBe 2)
+        prepared.mayHaveSentMultipleCopies shouldBe true
+
+        env.client.close()
+      }
+
+      "count a copy that the sequencer already has" in {
+        val env = RichEnvFactory.create(
+          amplificationConfig = SubmissionRequestAmplification(
+            factor = PositiveInt.two,
+            patience = NonNegativeFiniteDuration.tryOfSeconds(10),
+          )
+        )
+
+        val prepared = prepareAndSend(env, MessageId.tryCreate("already-exists"))
+        val secondAttempt = env.pool.connection.holdNextSendAsync()
+        env.clock.advance(10.seconds.toJava)
+        eventually()(env.pool.connection.sendAsyncCount.get() shouldBe 2)
+
+        secondAttempt.success(Left(SendAsyncClientError.RequestAlreadyExists("already exists")))
+        always(durationOfSuccess = 1.second) {
+          prepared.mayHaveSentMultipleCopies shouldBe true
+        }
+
+        env.client.close()
+      }
+
+      "not count a copy that the sequencer refused" in {
+        val env = RichEnvFactory.create(
+          options = SequencerClientConfig(enableAmplificationImprovements = true),
+          amplificationConfig = SubmissionRequestAmplification(
+            factor = PositiveInt.two,
+            patience = NonNegativeFiniteDuration.Zero,
+          ),
+          firstSendAsyncResponseO = Some(Left(overloadedError)),
+        )
+
+        val prepared = prepareAndSend(env, MessageId.tryCreate("refused-copy"))
+        env.pool.connection.sendAsyncCount.get() shouldBe 2
+        prepared.mayHaveSentMultipleCopies shouldBe false
+
+        env.client.close()
+      }
+
+      "not send another copy once the result is known" in {
+        val env = RichEnvFactory.create(
+          amplificationConfig = SubmissionRequestAmplification(
+            factor = PositiveInt.tryCreate(3),
+            patience = NonNegativeFiniteDuration.tryOfSeconds(10),
+          )
+        )
+        val messageId = MessageId.tryCreate("result-known")
+        val sendResult = Promise[UnlessShutdown[SendResult]]()
+        env.subscribeAfter().futureValueUS
+
+        val prepared =
+          prepareAndSend(env, messageId, result => sendResult.trySuccess(result).discard)
+
+        val secondAttempt = env.pool.connection.holdNextSendAsync()
+        env.clock.advance(10.seconds.toJava)
+        eventually()(env.pool.connection.sendAsyncCount.get() shouldBe 2)
+        prepared.mayHaveSentMultipleCopies shouldBe true
+
+        env.sendDeliverErrorToHandler(messageId).futureValueUS
+        env.client.flushClean().futureValueUS
+        sendResult.future.futureValue should matchPattern {
+          case UnlessShutdown.Outcome(_: SendResult.Error) =>
+        }
+
+        secondAttempt.success(Left(SendAsyncClientError.RequestFailed("connection lost")))
+        always(durationOfSuccess = 1.second) {
+          env.pool.connection.sendAsyncCount.get() shouldBe 2
+        }
+        prepared.mayHaveSentMultipleCopies shouldBe false
+
+        env.client.close()
+      }
+    }
+
     // TODO(i27260): Decide whether these tests should be ported for the new pool or removed altogether
 //    "changeTransport" should {
 //      "create second subscription from the same counter as the previous one when there are no events" ignore {
@@ -1753,6 +1841,41 @@ final class SequencerClientTest
       )
     }
 
+    def prepareSend(
+        batch: Batch[DefaultOpenEnvelope],
+        messageId: MessageId = client.generateMessageId,
+    )(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[SequencerClientSend.PreparedSubmission] = {
+      implicit val metricsContext: MetricsContext = MetricsContext.Empty
+      val now = clock.now
+      client
+        .prepareSend(
+          batch,
+          currentSnapshotApproximation = None,
+          timestamps = SequencerClientSend.SendRequestTimestamps(
+            approximateTimestampForSigning = now,
+            maxSequencingTime = client.generateMaxSequencingTime(now),
+          ),
+          messageId = messageId,
+          aggregationRule = None,
+        )
+        .valueOrFail("prepareSend")
+    }
+
+    def sendDeliverErrorToHandler(
+        messageId: MessageId,
+        trafficReceipt: Option[TrafficReceipt] = None,
+    ): FutureUnlessShutdown[Unit] =
+      subscriber.value.sendToHandler(
+        SequencerTestUtils.mockDeliverError(
+          CantonTimestamp.MinValue.immediateSuccessor,
+          DefaultTestIdentities.physicalSynchronizerId,
+          messageId = messageId,
+          trafficReceipt = trafficReceipt,
+        )
+      )
+
     def logout(): EitherT[FutureUnlessShutdown, Status, Unit] = client.logout()
   }
 
@@ -1818,17 +1941,34 @@ final class SequencerClientTest
     val lastSend = new AtomicReference[Option[SentSubmission]](None)
     def lastSubmissionTime: Option[CantonTimestamp] = lastSend.get.map(_.submissionTime)
 
+    val sendAsyncCount = new AtomicInteger(0)
+
+    private val heldSendAsync =
+      new AtomicReference[Option[Promise[Either[SendAsyncClientResponseError, Unit]]]](None)
+
+    /** Makes the next `sendAsync` return only once the promise completes. */
+    def holdNextSendAsync(): Promise[Either[SendAsyncClientResponseError, Unit]] = {
+      val promise = Promise[Either[SendAsyncClientResponseError, Unit]]()
+      heldSendAsync.set(Some(promise))
+      promise
+    }
+
     override def sendAsync(request: SignedContent[SubmissionRequest], timeout: Duration)(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, SendAsyncClientResponseError, Unit] = {
       lastSend.set(Some(SentSubmission(clock.now, request.content)))
+      sendAsyncCount.incrementAndGet().discard
 
-      val responseE = sendAsyncResponseRef.getAndSet(None) match {
-        case None => Right(())
-        case Some(Left(error)) => Left(error)
-        case Some(Right(action)) => Right(action.apply(clock))
+      heldSendAsync.getAndSet(None) match {
+        case Some(held) => EitherT(FutureUnlessShutdown.outcomeF(held.future))
+        case None =>
+          val responseE = sendAsyncResponseRef.getAndSet(None) match {
+            case None => Right(())
+            case Some(Left(error)) => Left(error)
+            case Some(Right(action)) => Right(action.apply(clock))
+          }
+          responseE.toEitherT
       }
-      responseE.toEitherT
     }
 
     override def acknowledgeSigned(

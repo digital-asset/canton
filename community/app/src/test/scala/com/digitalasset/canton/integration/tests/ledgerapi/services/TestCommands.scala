@@ -12,7 +12,7 @@ import com.daml.ledger.api.v2.value.Value.Sum.{Bool, Party, Text, Timestamp}
 import com.daml.ledger.api.v2.value.{Identifier, Record, RecordField, Value, Variant}
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.ValueConversions.*
 import com.digitalasset.canton.ledger.api.MockMessages as M
-import com.digitalasset.daml.lf.archive.DarReader
+import com.digitalasset.daml.lf.archive.DarPackageIdReader
 import com.digitalasset.daml.lf.data.Ref.PackageId
 
 import java.io.File
@@ -24,7 +24,7 @@ trait TestCommands {
 
   protected def darFile: File
 
-  protected def packageId: PackageId = DarReader.assertReadArchiveFromFile(darFile).main.pkgId
+  protected def packageId: PackageId = DarPackageIdReader.assertReadArchiveFromFile(darFile).main
 
   protected def templateIds = new TestTemplateIdentifiers(packageId)
 

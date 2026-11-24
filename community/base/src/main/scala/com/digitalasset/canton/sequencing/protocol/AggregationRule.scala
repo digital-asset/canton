@@ -14,7 +14,6 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
-  PrettyPrinting,
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
@@ -26,6 +25,7 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
@@ -84,7 +84,7 @@ object AggregationBySender extends PrettyPrintingCompanion[AggregationBySender] 
   * So only signed submissions can trigger the completion of an aggregation, not a topology
   * transaction.
   */
-sealed trait AggregationRuleInput extends PrettyPrinting {
+sealed trait AggregationRuleInput extends PrettyPrintingFromCompanion {
 
   def resolveToMembers(sender: Member, snapshot: TopologySnapshot)(implicit
       traceContext: TraceContext,
@@ -172,7 +172,7 @@ object AggregationRuleInput extends HasLoggerName {
           )
       )
 
-    override protected def pretty: Pretty[MediatorGroup] = prettyMediatorGroup
+    override def prettyCompanion: PrettyPrintingCompanion[MediatorGroup] = MediatorGroup
 
     def appendForAggregationId(builder: HashBuilder, sender: Member): Unit = {
       builder.addInt(magicNumberMediatorGroup)
@@ -199,11 +199,11 @@ object AggregationRuleInput extends HasLoggerName {
 
   }
 
-  private val prettyMediatorGroup: Pretty[MediatorGroup] = {
-    import com.digitalasset.canton.logging.pretty.PrettyUtil.*
-    prettyOfClass[MediatorGroup](
-      param("index", _.index)
-    )
+  object MediatorGroup extends PrettyPrintingCompanion[MediatorGroup] {
+    override protected val pretty: Pretty[MediatorGroup] =
+      prettyOfClass(
+        param("index", _.index)
+      )
   }
 
   /** Validates sender eligibility and cryptographic signatures for a set of aggregations.
@@ -337,7 +337,8 @@ object AggregationRuleInput extends HasLoggerName {
           })
           .map(_.map(_.toSet).toRight(s"No sequencers at ${snapshot.timestamp}"))
       )
-    override protected def pretty: Pretty[SequencerGroup.type] = prettySequencerGroup
+    override def prettyCompanion: PrettyPrintingCompanion[SequencerGroup.this.type] =
+      SequencerGroupPrettyPrintingCompanion
     def appendForAggregationId(builder: HashBuilder, sender: Member): Unit =
       builder.addInt(magicNumberSequencerGroup)
 
@@ -360,9 +361,11 @@ object AggregationRuleInput extends HasLoggerName {
       }
 
   }
-  private val prettySequencerGroup: Pretty[SequencerGroup.type] = {
-    import com.digitalasset.canton.logging.pretty.PrettyUtil.*
-    prettyOfObject[SequencerGroup.type]
+
+  private object SequencerGroupPrettyPrintingCompanion
+      extends PrettyPrintingCompanion[SequencerGroup.type] {
+    override protected val pretty: Pretty[SequencerGroup.type] =
+      prettyOfObject[SequencerGroup.type]
   }
   case object SenderDedup extends AggregationRuleInput {
     override def resolveToMembers(sender: Member, snapshot: TopologySnapshot)(implicit
@@ -371,7 +374,8 @@ object AggregationRuleInput extends HasLoggerName {
     ): EitherT[FutureUnlessShutdown, String, NonEmpty[Set[Member]]] =
       EitherT.rightT(NonEmpty.mk(Set, sender))
 
-    override protected def pretty: Pretty[SenderDedup.type] = prettySenderDedup
+    override def prettyCompanion: PrettyPrintingCompanion[SenderDedup.this.type] =
+      SenderDedupPrettyPrintingCompanion
     def appendForAggregationId(builder: HashBuilder, sender: Member): Unit = {
       builder.addInt(magicNumberSenderDedup)
       builder.addString(sender.toProtoPrimitive)
@@ -405,9 +409,10 @@ object AggregationRuleInput extends HasLoggerName {
 
   }
 
-  private val prettySenderDedup: Pretty[SenderDedup.type] = {
-    import com.digitalasset.canton.logging.pretty.PrettyUtil.*
-    prettyOfObject[SenderDedup.type]
+  private object SenderDedupPrettyPrintingCompanion
+      extends PrettyPrintingCompanion[SenderDedup.type] {
+    override protected val pretty: Pretty[SenderDedup.type] =
+      prettyOfObject[SenderDedup.type]
   }
 
 }

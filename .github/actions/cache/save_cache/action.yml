@@ -12,6 +12,9 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Set up zstd
+      uses: ./.github/actions/cache/setup_zstd
+
     - name: Save cache
       uses: actions/cache/save@v5
       with:

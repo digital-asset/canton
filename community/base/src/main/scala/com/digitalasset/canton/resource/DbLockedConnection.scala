@@ -19,7 +19,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   NamedLoggerFactory,
@@ -573,40 +577,78 @@ class DbLockedConnection private (
 
 object DbLockedConnection {
 
-  sealed trait State extends Product with Serializable with PrettyPrinting
+  sealed trait State extends Product with Serializable with PrettyPrintingFromCompanion
   object State {
 
     // The initial state
     case object Init extends State {
-      override protected def pretty: Pretty[Init.type] = prettyOfObject[Init.type]
+      override def prettyCompanion: PrettyPrintingCompanion[Init.this.type] =
+        InitPrettyPrintingCompanion
+    }
+
+    private object InitPrettyPrintingCompanion extends PrettyPrintingCompanion[Init.type] {
+      override protected val pretty: Pretty[Init.type] = prettyOfObject[Init.type]
     }
 
     // The healthy state with a connection and db lock
     final case class Connected(connection: KeepAliveConnection, lock: DbLock) extends State {
-      override protected def pretty: Pretty[Connected] =
+      override def prettyCompanion: PrettyPrintingCompanion[Connected] = Connected
+    }
+
+    object Connected extends PrettyPrintingCompanion[Connected] {
+      override protected val pretty: Pretty[Connected] =
         prettyOfClass(param("connection", _.connection), param("lock", _.lock))
     }
 
     // The database and connection is explicitly being closed
     case object Disconnecting extends State {
-      override protected def pretty: Pretty[Disconnecting.type] = prettyOfObject[Disconnecting.type]
+      override def prettyCompanion: PrettyPrintingCompanion[Disconnecting.this.type] =
+        DisconnectingPrettyPrintingCompanion
 
     }
+
+    private object DisconnectingPrettyPrintingCompanion
+        extends PrettyPrintingCompanion[Disconnecting.type] {
+      override protected val pretty: Pretty[Disconnecting.type] = prettyOfObject[Disconnecting.type]
+    }
     case object Disconnected extends State {
-      override protected def pretty: Pretty[Disconnected.type] = prettyOfObject[Disconnected.type]
+      override def prettyCompanion: PrettyPrintingCompanion[Disconnected.this.type] =
+        DisconnectedPrettyPrintingCompanion
+    }
+
+    private object DisconnectedPrettyPrintingCompanion
+        extends PrettyPrintingCompanion[Disconnected.type] {
+      override protected val pretty: Pretty[Disconnected.type] = prettyOfObject[Disconnected.type]
     }
 
     // The connection of the database has been lost and needs to be recovered
     case object Lost extends State {
-      override protected def pretty: Pretty[Lost.type] = prettyOfObject[Lost.type]
+      override def prettyCompanion: PrettyPrintingCompanion[Lost.this.type] =
+        LostPrettyPrintingCompanion
+    }
+
+    private object LostPrettyPrintingCompanion extends PrettyPrintingCompanion[Lost.type] {
+      override protected val pretty: Pretty[Lost.type] = prettyOfObject[Lost.type]
     }
     case object Recovering extends State {
-      override protected def pretty: Pretty[Recovering.type] = prettyOfObject[Recovering.type]
+      override def prettyCompanion: PrettyPrintingCompanion[Recovering.this.type] =
+        RecoveringPrettyPrintingCompanion
+    }
+
+    private object RecoveringPrettyPrintingCompanion
+        extends PrettyPrintingCompanion[Recovering.type] {
+      override protected val pretty: Pretty[Recovering.type] = prettyOfObject[Recovering.type]
     }
 
     // The connection was gracefully closed to become passive
     case object SetPassive extends State {
-      override protected def pretty: Pretty[SetPassive.type] = prettyOfObject[SetPassive.type]
+      override def prettyCompanion: PrettyPrintingCompanion[SetPassive.this.type] =
+        SetPassivePrettyPrintingCompanion
+    }
+
+    private object SetPassivePrettyPrintingCompanion
+        extends PrettyPrintingCompanion[SetPassive.type] {
+      override protected val pretty: Pretty[SetPassive.type] = prettyOfObject[SetPassive.type]
     }
   }
 
@@ -1001,15 +1043,29 @@ object DbLockedConnection {
 
 }
 
-sealed trait DbLockedConnectionError extends Product with Serializable with PrettyPrinting
+sealed trait DbLockedConnectionError
+    extends Product
+    with Serializable
+    with PrettyPrintingFromCompanion
 object DbLockedConnectionError {
   case object DbLockNotAcquired extends DbLockedConnectionError {
-    override protected def pretty: Pretty[DbLockNotAcquired.type] =
+    override def prettyCompanion: PrettyPrintingCompanion[DbLockNotAcquired.this.type] =
+      DbLockNotAcquiredPrettyPrintingCompanion
+  }
+
+  private object DbLockNotAcquiredPrettyPrintingCompanion
+      extends PrettyPrintingCompanion[DbLockNotAcquired.type] {
+    override protected val pretty: Pretty[DbLockNotAcquired.type] =
       prettyOfObject[DbLockNotAcquired.type]
   }
   final case class DbConnectionNotAvailable(state: DbLockedConnection.State)
       extends DbLockedConnectionError {
-    override protected def pretty: Pretty[DbConnectionNotAvailable] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[DbConnectionNotAvailable] =
+      DbConnectionNotAvailable
+  }
+
+  object DbConnectionNotAvailable extends PrettyPrintingCompanion[DbConnectionNotAvailable] {
+    override protected val pretty: Pretty[DbConnectionNotAvailable] = prettyOfClass(
       unnamedParam(_.state)
     )
   }

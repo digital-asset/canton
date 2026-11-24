@@ -770,6 +770,14 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         id = "TOPOLOGY_MISSING_MAPPING",
         ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
       ) {
+    final case class MissingLsuAnnouncement(successor: PhysicalSynchronizerId)(implicit
+        override val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = "The topology snapshot does not contain an LSU announcement " +
+            s"that is effective and fully authorized for successor $successor"
+        )
+        with TopologyManagerError
+
     final case class Reject(
         missingMappings: Map[Member, Seq[TopologyMapping.Code]]
     )(implicit

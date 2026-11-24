@@ -96,7 +96,7 @@ object Dependencies {
   lazy val scalafx_all_version = "17-ea+8"
   lazy val scalatest_version = "3.2.19"
   lazy val scalaz_version = "7.2.33"
-  lazy val scopt_version = "4.1.0"
+  lazy val scopt_version = "4.2.0"
   lazy val shapeless_version = "2.3.13"
   lazy val slf4j_version = org_slf4j_jul_to_slf4j.revision
   lazy val zio_version = "2.1.7"
@@ -403,7 +403,7 @@ object Dependencies {
   // Transcode dependencies
   lazy val boopickle = "io.suzaku" %% "boopickle" % "1.5.0"
   lazy val fastparse = "com.lihaoyi" %% "fastparse" % "3.1.1"
-  lazy val os_lib = "com.lihaoyi" %% "os-lib" % "0.11.8"
+  lazy val os_lib = "com.lihaoyi" %% "os-lib" % "0.11.10"
   lazy val semver = "org.semver4j" % "semver4j" % "6.0.0"
   lazy val sourcecode = "com.lihaoyi" %% "sourcecode" % "0.4.2"
   lazy val ujson = "com.lihaoyi" %% "ujson" % upickle_version

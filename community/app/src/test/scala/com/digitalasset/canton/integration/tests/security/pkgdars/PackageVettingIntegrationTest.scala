@@ -61,7 +61,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, SynchronizerAlias, config}
-import com.digitalasset.daml.lf.archive.{DamlLf, Dar, DarParser, DarReader}
+import com.digitalasset.daml.lf.archive.{DamlLf, Dar, DarPackageIdReader, DarParser}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import org.scalatest.Assertion
 import org.slf4j.event.Level
@@ -191,7 +191,7 @@ sealed trait PackageVettingIntegrationTest
     participant1.dars.upload(CantonTestsPath, vetAllPackages = true, synchronizeVetting = true)
 
     val darPackageIds =
-      DarReader.assertReadArchiveFromFile(new File(CantonTestsPath)).all.map(_.pkgId).toSet
+      DarPackageIdReader.assertReadArchiveFromFile(new File(CantonTestsPath)).all.toSet
 
     // check that vettings from the DAR upload were registered with the sequencer
     val newPackagesInSync = getVetted(daId) -- before

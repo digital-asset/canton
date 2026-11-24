@@ -50,6 +50,7 @@ final case class ParticipantNodeParameters(
     enableRepairService: Boolean,
     damlTopUpEnabled: Boolean,
     alphaAcsReplicationSupport: Option[AlphaAcsReplicationConfig],
+    enableCantonAcsConsistencyChecks: Boolean,
     override val batchingConfig: ParticipantBatchingConfig = ParticipantBatchingConfig(),
     override val cachingConfigs: ParticipantCachingConfigs = ParticipantCachingConfigs(),
 ) extends CantonNodeParameters
@@ -135,5 +136,6 @@ object ParticipantNodeParameters {
       aggregator = BatchAggregatorConfig.defaultsForTesting,
     ),
     cachingConfigs = ParticipantCachingConfigs(),
+    enableCantonAcsConsistencyChecks = false,
   )
 }

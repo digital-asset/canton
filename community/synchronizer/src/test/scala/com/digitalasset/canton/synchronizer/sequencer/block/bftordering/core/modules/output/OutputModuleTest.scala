@@ -3,13 +3,14 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output
 
+import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
 import com.daml.metrics.api.testing.InMemoryMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashOps, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.protocol.SynchronizerLimits
+import com.digitalasset.canton.protocol.{BftOrdererLimitsView, SynchronizerLimits}
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.block.BlockFormat.OrderedRequest
@@ -123,9 +124,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
 }
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, Traced}
 import com.digitalasset.canton.util.{MaxBytesToDecompress, SingleUseCell}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext, LfTimestamp}
 import com.google.protobuf.ByteString
+import com.google.protobuf.timestamp.Timestamp
+import io.opentelemetry.api.OpenTelemetry
 import io.opentelemetry.api.trace.{Span, SpanBuilder, Tracer}
 import io.opentelemetry.context.Context
 import org.apache.pekko.stream.scaladsl.Sink
@@ -150,6 +153,51 @@ class OutputModuleTest
 
   "OutputModule" should {
     val initialBlock = anOrderedBlockForOutput(batchIds = Seq(BatchId.createForTesting("batchId")))
+
+    "output a parsed batch whose ordering latency exceeds the timer range" in {
+      val inventory = new HistogramInventory
+      val histograms = new SequencerHistograms(MetricName(getClass.getSimpleName))(inventory)
+      val metrics = new SequencerMetrics(
+        histograms,
+        new OpenTelemetryMetricsFactory(
+          OpenTelemetry.noop().getMeter(getClass.getSimpleName),
+          inventory.registered().map(_.name.toString).toSet,
+          onlyLogMissingHistograms = None,
+        ),
+      ).bftOrdering
+      implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext(resolveAwaits = true)
+      val subscription = mock[BlockSubscription]
+      val output = createOutputModule[ProgrammableUnitTestEnv](metrics = metrics)(subscription)
+      val originalBlock = completeBlockData(BlockNumber.First, aTimestamp)
+      val blockData = originalBlock.copy(
+        batches = originalBlock.batches.map { case (_, batch) =>
+          val protoBatch = batch.toProtoV30
+          val parsedBatch = OrderingRequestBatch
+            .fromProtoV30(
+              ProtocolVersionValidation.PV(testedProtocolVersion),
+              BftOrdererLimitsView.default,
+              protoBatch.withOrderingRequests(
+                protoBatch.orderingRequests.map(
+                  _.withOrderingStartInstant(Timestamp(seconds = -62135596800L, nanos = 0))
+                )
+              ),
+            )
+            .value
+          BatchId.from(parsedBatch, logger) -> parsedBatch
+        }
+      )
+
+      output.receive(Output.Start)
+      output.receive(Output.BlockDataFetched(blockData))
+      context.runPipedMessages().foreach(output.receive)
+
+      verify(subscription).receiveBlock(any[BlockFormat.Block])(
+        any[TraceContext],
+        any[MetricsContext],
+      )
+      succeed
+    }
 
     "log deserialization failures at the appropriate level" when {
       def inspect(

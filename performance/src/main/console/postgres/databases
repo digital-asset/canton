@@ -2,9 +2,9 @@ bft_orderer1
 bft_orderer2
 bft_orderer3
 bft_orderer4
-block_reference
-block_reference1
-block_reference2
+block_bft
+block_bft1
+block_bft2
 mediator
 mediator1
 mediator2

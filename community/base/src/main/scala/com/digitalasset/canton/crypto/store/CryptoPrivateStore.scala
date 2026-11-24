@@ -15,7 +15,11 @@ import com.digitalasset.canton.error.{CantonBaseError, CantonErrorGroups}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.tracing.TraceContext
@@ -221,7 +225,10 @@ object CryptoPrivateStore {
 
 }
 
-sealed trait CryptoPrivateStoreError extends Product with Serializable with PrettyPrinting
+sealed trait CryptoPrivateStoreError
+    extends Product
+    with Serializable
+    with PrettyPrintingFromCompanion
 object CryptoPrivateStoreError extends CantonErrorGroups.CommandErrorGroup {
 
   @Explanation("This error indicates that a key could not be stored.")
@@ -239,14 +246,24 @@ object CryptoPrivateStoreError extends CantonErrorGroups.CommandErrorGroup {
   }
 
   final case class FailedToGetWrapperKeyId(reason: String) extends CryptoPrivateStoreError {
-    override protected def pretty: Pretty[FailedToGetWrapperKeyId] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[FailedToGetWrapperKeyId] =
+      FailedToGetWrapperKeyId
+  }
+
+  object FailedToGetWrapperKeyId extends PrettyPrintingCompanion[FailedToGetWrapperKeyId] {
+    override protected val pretty: Pretty[FailedToGetWrapperKeyId] = prettyOfClass(
       unnamedParam(_.reason.unquoted)
     )
   }
 
   final case class FailedToSerializeKey(reason: String, pv: ProtocolVersion)
       extends CryptoPrivateStoreError {
-    override protected def pretty: Pretty[FailedToSerializeKey] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[FailedToSerializeKey] =
+      FailedToSerializeKey
+  }
+
+  object FailedToSerializeKey extends PrettyPrintingCompanion[FailedToSerializeKey] {
+    override protected val pretty: Pretty[FailedToSerializeKey] = prettyOfClass(
       param("protocol version", _.pv),
       param("reason", _.reason.unquoted),
     )
@@ -254,19 +271,31 @@ object CryptoPrivateStoreError extends CantonErrorGroups.CommandErrorGroup {
 
   final case class FailedToReadKey(keyId: Fingerprint, reason: String)
       extends CryptoPrivateStoreError {
-    override protected def pretty: Pretty[FailedToReadKey] =
+    override def prettyCompanion: PrettyPrintingCompanion[FailedToReadKey] = FailedToReadKey
+  }
+
+  object FailedToReadKey extends PrettyPrintingCompanion[FailedToReadKey] {
+    override protected val pretty: Pretty[FailedToReadKey] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
   final case class InvariantViolation(keyId: Fingerprint, reason: String)
       extends CryptoPrivateStoreError {
-    override protected def pretty: Pretty[InvariantViolation] =
+    override def prettyCompanion: PrettyPrintingCompanion[InvariantViolation] = InvariantViolation
+  }
+
+  object InvariantViolation extends PrettyPrintingCompanion[InvariantViolation] {
+    override protected val pretty: Pretty[InvariantViolation] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
   final case class FailedToInsertKey(keyId: Fingerprint, reason: String)
       extends CryptoPrivateStoreError {
-    override protected def pretty: Pretty[FailedToInsertKey] =
+    override def prettyCompanion: PrettyPrintingCompanion[FailedToInsertKey] = FailedToInsertKey
+  }
+
+  object FailedToInsertKey extends PrettyPrintingCompanion[FailedToInsertKey] {
+    override protected val pretty: Pretty[FailedToInsertKey] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -275,28 +304,45 @@ object CryptoPrivateStoreError extends CantonErrorGroups.CommandErrorGroup {
       existingKeyName: Option[String],
       newKeyName: Option[String],
   ) extends CryptoPrivateStoreError {
-    override protected def pretty: Pretty[KeyAlreadyExists] =
-      prettyOfClass(
-        param("keyId", _.keyId),
-        param("existingKeyName", _.existingKeyName.getOrElse("").unquoted),
-        param("newKeyName", _.newKeyName.getOrElse("").unquoted),
-      )
+    override def prettyCompanion: PrettyPrintingCompanion[KeyAlreadyExists] = KeyAlreadyExists
+  }
+
+  object KeyAlreadyExists extends PrettyPrintingCompanion[KeyAlreadyExists] {
+    override protected val pretty: Pretty[KeyAlreadyExists] = prettyOfClass(
+      param("keyId", _.keyId),
+      param("existingKeyName", _.existingKeyName.getOrElse("").unquoted),
+      param("newKeyName", _.newKeyName.getOrElse("").unquoted),
+    )
   }
 
   final case class FailedToDeleteKey(keyId: Fingerprint, reason: String)
       extends CryptoPrivateStoreError {
-    override protected def pretty: Pretty[FailedToDeleteKey] =
+    override def prettyCompanion: PrettyPrintingCompanion[FailedToDeleteKey] = FailedToDeleteKey
+  }
+
+  object FailedToDeleteKey extends PrettyPrintingCompanion[FailedToDeleteKey] {
+    override protected val pretty: Pretty[FailedToDeleteKey] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
   final case class EncryptedPrivateStoreError(reason: String) extends CryptoPrivateStoreError {
-    override protected def pretty: Pretty[EncryptedPrivateStoreError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[EncryptedPrivateStoreError] =
+      EncryptedPrivateStoreError
+  }
+
+  object EncryptedPrivateStoreError extends PrettyPrintingCompanion[EncryptedPrivateStoreError] {
+    override protected val pretty: Pretty[EncryptedPrivateStoreError] = prettyOfClass(
       unnamedParam(_.reason.unquoted)
     )
   }
 
   final case class WrapperKeyAlreadyInUse(reason: String) extends CryptoPrivateStoreError {
-    override protected def pretty: Pretty[WrapperKeyAlreadyInUse] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[WrapperKeyAlreadyInUse] =
+      WrapperKeyAlreadyInUse
+  }
+
+  object WrapperKeyAlreadyInUse extends PrettyPrintingCompanion[WrapperKeyAlreadyInUse] {
+    override protected val pretty: Pretty[WrapperKeyAlreadyInUse] = prettyOfClass(
       unnamedParam(_.reason.unquoted)
     )
   }

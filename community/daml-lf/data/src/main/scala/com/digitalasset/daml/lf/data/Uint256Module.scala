@@ -96,7 +96,7 @@ abstract class Uint256Module {
     assertRight(fromString(s))
 
   /** Canonical decimal string representation. */
-  final def toString(x: Uint256): String = x.toString
+  final def toString(x: Uint256): String = "0x" + toHexString(x)
 
   /** Hex string (no `0x` prefix) representation. */
   final def toHexString(x: Uint256): String = x.toString(16)

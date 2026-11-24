@@ -251,9 +251,9 @@ trait MessageDispatcher { this: NamedLogging =>
     */
   protected def processBatch(
       sequencerCounter: SequencerCounter,
-      eventE: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
   )(implicit traceContext: TraceContext): ProcessingResult = {
-    val deliver = eventE.event.content
+    val deliver = event.event.content
     // TODO(#13883) Validate the topology timestamp
     // TODO(#13883) Centralize the topology timestamp constraints in a single place so that they are well-documented
     val Deliver(_pts, ts, _, _, batch, _) = deliver
@@ -283,7 +283,7 @@ trait MessageDispatcher { this: NamedLogging =>
       )
       acsCommitmentResult <- processAcsCommitmentEnvelopes(envelopesWithCorrectSynchronizerId, ts)
       transactionReassignmentResult <- processTransactionAndReassignmentMessages(
-        eventE,
+        event,
         sequencerCounter,
         ts,
         envelopesWithCorrectSynchronizerId,
@@ -354,11 +354,11 @@ trait MessageDispatcher { this: NamedLogging =>
       confirmationResults,
     ) match {
       // Regular confirmation result
-      case (Seq(), Seq(), Seq(msg)) =>
-        val viewType = msg.protocolMessage.message.viewType
+      case (Seq(), Seq(), Seq(confirmationResult)) =>
+        val viewType = confirmationResult.protocolMessage.message.viewType
         val processor = tryProtocolProcessor(viewType)
 
-        doProcess(ResultKind(viewType, () => processor.processResult(sc, event)))
+        doProcess(ResultKind(viewType, () => processor.processResult(sc, ts, confirmationResult)))
 
       case _ =>
         // Alarm about invalid confirmation result messages

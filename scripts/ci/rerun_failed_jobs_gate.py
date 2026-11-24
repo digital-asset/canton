@@ -15,7 +15,9 @@ def compute_rerun_gate(
     failed_job_names: list[str], workflow_name: str
 ) -> tuple[bool, list[str], list[str]]:
     blocked_names = sorted(BLOCKED_JOBS_BY_WORKFLOW.get(workflow_name, set()))
-    blocked_failed = sorted(set(failed_job_names) & set(blocked_names))
+    # The API names a job of a called workflow "<caller job> / <job>"; the policy names the caller.
+    failed_caller_names = {name.split(" / ", 1)[0] for name in failed_job_names}
+    blocked_failed = sorted(failed_caller_names & set(blocked_names))
     should_rerun = not blocked_failed
     return should_rerun, blocked_failed, blocked_names
 

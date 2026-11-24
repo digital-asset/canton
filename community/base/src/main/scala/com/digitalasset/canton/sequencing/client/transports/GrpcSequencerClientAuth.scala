@@ -11,8 +11,7 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, L
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerConnectionPoolMetrics
 import com.digitalasset.canton.networking.Endpoint
-import com.digitalasset.canton.networking.grpc.{GrpcClient, GrpcManagedChannel}
-import com.digitalasset.canton.sequencer.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationServiceStub
+import com.digitalasset.canton.networking.grpc.GrpcManagedChannel
 import com.digitalasset.canton.sequencing.authentication.grpc.{
   AuthenticationTokenWithExpiry,
   SequencerClientTokenAuthentication,
@@ -20,10 +19,11 @@ import com.digitalasset.canton.sequencing.authentication.grpc.{
 import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenManagerConfig,
   AuthenticationTokenProvider,
+  P2PAuthenticationTokenProvider,
 }
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth.ChannelTokenFetcher
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.stub.AbstractStub
@@ -58,7 +58,7 @@ class GrpcSequencerClientAuth(
   )
 
   private val tokenProvider =
-    new AuthenticationTokenProvider(
+    AuthenticationTokenProvider(
       synchronizerId,
       member,
       crypto,
@@ -70,6 +70,9 @@ class GrpcSequencerClientAuth(
       loggerFactory,
     )
 
+  // This is an outgoing connection, not a callback to an authenticated caller,
+  //  so no verifier identity is known yet. Discover it from the challenge and bind the proof
+  //  to the dialed endpoint.
   private val tokenFetcher = new ChannelTokenFetcher(tokenProvider, endpoint, grpcChannel)
 
   private val clientAuthentication =
@@ -83,11 +86,8 @@ class GrpcSequencerClientAuth(
       loggerFactory,
     )
 
-  def logout()(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Status, Unit] = {
-    val authenticationClient =
-      GrpcClient.create(grpcChannel, new SequencerAuthenticationServiceStub(_))
-    tokenProvider.logout(endpoint, authenticationClient)
-  }
+  def logout()(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Status, Unit] =
+    tokenProvider.logout(endpoint, grpcChannel)
 
   /** Wrap a grpc client with components to appropriately perform authentication */
   def apply[S <: AbstractStub[S]](client: S): S =
@@ -105,18 +105,28 @@ object GrpcSequencerClientAuth {
     ): EitherT[FutureUnlessShutdown, Status, AuthenticationTokenWithExpiry]
   }
 
+  /** @param expectedVerifierO
+    *   For sequencers, pass the token-authenticated caller's sequencer ID when fetching a token
+    *   through a P2P reverse-authentication callback. From PV38, the provider checks this identity
+    *   before signing, preventing the caller from redirecting authentication to another sequencer
+    *   and receiving its token. Leave unset for ordinary outgoing connections, which discover the
+    *   verifier identity automatically. The legacy handshake below PV38 does not enforce this
+    *   check.
+    */
   final class ChannelTokenFetcher(
       tokenProvider: AuthenticationTokenProvider,
       endpoint: Endpoint,
       channel: GrpcManagedChannel,
+      expectedVerifierO: Option[SequencerId] = None,
   ) extends TokenFetcher {
 
     override def apply(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, Status, AuthenticationTokenWithExpiry] = {
-      val authenticationClient =
-        GrpcClient.create(channel, new SequencerAuthenticationServiceStub(_))
-      tokenProvider.generateToken(endpoint, authenticationClient)
-    }
+    ): EitherT[FutureUnlessShutdown, Status, AuthenticationTokenWithExpiry] =
+      (tokenProvider, expectedVerifierO) match {
+        case (provider: P2PAuthenticationTokenProvider, Some(expectedVerifier)) =>
+          provider.generateTokenForPeer(endpoint, channel, expectedVerifier)
+        case _ => tokenProvider.generateToken(endpoint, channel)
+      }
   }
 }
