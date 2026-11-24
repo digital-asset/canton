@@ -92,6 +92,7 @@ class IndexServiceImplSpec
             filtersByParty = Map.empty,
             filtersForAnyParty = None,
             verbose = true,
+            filtersByContractId = Seq.empty,
           )
         ),
         interfaceViewPackageUpgrade = EventProjectionProperties.UseOriginalViewPackageId,
@@ -111,6 +112,7 @@ class IndexServiceImplSpec
       ),
       filtersForAnyParty = None,
       verbose = true,
+      filtersByContractId = Seq.empty,
     )
     // subscribing to iface1
     val memoFuncTransactions = memoizedInternalUpdateFormat(
@@ -150,7 +152,7 @@ class IndexServiceImplSpec
     currentPackageMetadata = packageMetadata_iface1_template1 |+| packageMetadata_iface1_template2
 
     val internalEventFormat1 = InternalEventFormat(
-      templatePartiesFilter = TemplatePartiesFilter(
+      eventFilter = TemplatePartiesFilter(
         relation = Map(
           template1 -> Some(Set(party)),
           template2 -> Some(Set(party)),
@@ -182,6 +184,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe Some(Set.empty)
   }
@@ -198,6 +201,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe Some(Set.empty)
 
@@ -212,6 +216,7 @@ class IndexServiceImplSpec
           )
         ),
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe Some(Set.empty)
 
@@ -223,6 +228,7 @@ class IndexServiceImplSpec
         filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe Some(Set(party))
 
@@ -237,6 +243,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe Some(Set(party))
 
@@ -245,6 +252,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe None
 
@@ -259,6 +267,7 @@ class IndexServiceImplSpec
           )
         ),
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe None
   }
@@ -272,6 +281,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe Some(
       Set(
@@ -292,6 +302,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe Some(Set(party))
   }
@@ -305,6 +316,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe None
 
@@ -320,6 +332,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     ) shouldBe None
   }
@@ -331,6 +344,7 @@ class IndexServiceImplSpec
           filtersByParty = Map(party -> CumulativeFilter(Set(), Set(), None)),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         )
       )
 
@@ -339,6 +353,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(CumulativeFilter(Set(), Set(), None)),
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
     )
   }
@@ -352,6 +367,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map.empty
   }
@@ -363,6 +379,7 @@ class IndexServiceImplSpec
         filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map.empty
 
@@ -372,6 +389,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map.empty
 
@@ -381,6 +399,7 @@ class IndexServiceImplSpec
         filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
         filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map.empty
   }
@@ -395,6 +414,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map.empty
 
@@ -411,6 +431,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map(
       template1 -> Some(Set(party2))
@@ -428,6 +449,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = Some(CumulativeFilter.templateWildcardFilter()),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map(
       template1 -> Some(Set(party2))
@@ -441,6 +463,7 @@ class IndexServiceImplSpec
         filtersByParty = Map(party -> CumulativeFilter(Set(), Set(), None)),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map.empty
 
@@ -450,6 +473,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(CumulativeFilter(Set(), Set(), None)),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map.empty
   }
@@ -461,6 +485,7 @@ class IndexServiceImplSpec
         filtersByParty = Map(party -> CumulativeFilter(Set(template1Filter), Set(), None)),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map(template1 -> Some(Set(party)))
 
@@ -470,6 +495,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(CumulativeFilter(Set(template1Filter), Set(), None)),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map(template1 -> None)
   }
@@ -481,6 +507,7 @@ class IndexServiceImplSpec
         filtersByParty = Map(party -> CumulativeFilter(Set(), Set(iface1Filter), None)),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map.empty
 
@@ -490,6 +517,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(CumulativeFilter(Set(), Set(iface1Filter), None)),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map.empty
   }
@@ -501,6 +529,7 @@ class IndexServiceImplSpec
         filtersByParty = Map(party -> CumulativeFilter(Set(), Set(iface1Filter), None)),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map(template1 -> Some(Set(party)))
 
@@ -510,6 +539,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(CumulativeFilter(Set(), Set(iface1Filter), None)),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map(template1 -> None)
   }
@@ -523,6 +553,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map(template1 -> Some(Set(party)), template2 -> Some(Set(party)))
 
@@ -534,6 +565,7 @@ class IndexServiceImplSpec
           CumulativeFilter(Set(template1Filter), Set(iface1Filter), None)
         ),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map(template1 -> None, template2 -> None)
 
@@ -556,6 +588,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map(
       template1 -> Some(Set(party)),
@@ -587,6 +620,7 @@ class IndexServiceImplSpec
           )
         ),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map(
       template1 -> Some(Set(party)),
@@ -618,6 +652,7 @@ class IndexServiceImplSpec
           )
         ),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
     ) shouldBe Map(
       template1 -> None
@@ -632,6 +667,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       PackageMetadata(),
     ) shouldBe Either.unit
@@ -645,6 +681,7 @@ class IndexServiceImplSpec
         filtersByParty = Map(party -> filters),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       PackageMetadata(packageNameMap = Map(packageName1 -> packageResolutionForTemplate1)),
     ).left.value shouldBe RequestValidationErrors.NotFound.NoTemplatesForPackageNameAndQualifiedName
@@ -657,6 +694,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(filters),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       PackageMetadata(packageNameMap = Map(packageName1 -> packageResolutionForTemplate1)),
     ).left.value shouldBe RequestValidationErrors.NotFound.NoTemplatesForPackageNameAndQualifiedName
@@ -673,6 +711,7 @@ class IndexServiceImplSpec
         filtersByParty = Map(party -> filters),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       PackageMetadata(packageNameMap = Map(packageName1 -> packageResolutionForTemplate1)),
     ).left.value shouldBe RequestValidationErrors.NotFound.NoInterfaceForPackageNameAndQualifiedName
@@ -685,6 +724,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(filters),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       PackageMetadata(packageNameMap = Map(packageName1 -> packageResolutionForTemplate1)),
     ).left.value shouldBe RequestValidationErrors.NotFound.NoInterfaceForPackageNameAndQualifiedName
@@ -706,6 +746,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       PackageMetadata(),
     ).left.value shouldBe RequestValidationErrors.NotFound.PackageNamesNotFound.Reject(
@@ -732,6 +773,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       PackageMetadata(
         interfaces = Set(iface1Id),
@@ -765,6 +807,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       PackageMetadata(
         interfaces = Set(iface1Id),
@@ -790,6 +833,7 @@ class IndexServiceImplSpec
         filtersByParty = Map(party -> filters),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       PackageMetadata(
         interfaces = Set(iface1Id),
@@ -803,6 +847,7 @@ class IndexServiceImplSpec
         filtersByParty = Map.empty,
         filtersForAnyParty = Some(filters),
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       PackageMetadata(
         interfaces = Set(iface1Id),
@@ -821,6 +866,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       PackageMetadata(
         templates = Set(template1Id),
@@ -845,6 +891,7 @@ class IndexServiceImplSpec
         ),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       ),
       PackageMetadata(
         templates = Set(template1Id),
@@ -1510,6 +1557,7 @@ class IndexServiceImplSpec
       filtersByParty = Map.empty,
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
   )
 

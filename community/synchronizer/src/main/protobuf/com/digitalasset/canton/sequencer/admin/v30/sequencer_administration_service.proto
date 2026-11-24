@@ -17,7 +17,8 @@ service SequencerAdministrationService {
   rpc PruningStatus(PruningStatusRequest) returns (PruningStatusResponse);
 
   /* Return the status of the specified members. If the list is empty, return the status of all members.
-   * Requested members who are not registered or disabled in the Sequencer will not be in the response.
+   * Requested members who are not registered or disabled in the Sequencer will not be in the response,
+   * unless they are onboarding and the request sets include_onboarding_members.
    * Registered members with no sent or received event will return an empty status.
    */
   rpc TrafficControlState(TrafficControlStateRequest) returns (TrafficControlStateResponse);
@@ -43,6 +44,8 @@ service SequencerAdministrationService {
   rpc SetThroughputCap(SetThroughputCapRequest) returns (SetThroughputCapResponse);
   // Get the throughput caps configured on the sequencer
   rpc GetThroughputCap(GetThroughputCapRequest) returns (GetThroughputCapResponse);
+  // List all named throughput cap settings
+  rpc ListThroughputCaps(ListThroughputCapsRequest) returns (ListThroughputCapsResponse);
 
   // fetch a snapshot of the sequencer state based on the given timestamp
   rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
@@ -104,6 +107,11 @@ message TrafficControlStateRequest {
     // A relative timestamp based on the sequencer's state at the time of the request, see above for details
     RelativeTimestamp relative_timestamp = 3;
   }
+
+  // Also return the traffic state of onboarding members, i.e. members that traffic was purchased for
+  // before they joined the synchronizer. If members is set, only the onboarding members among them are added.
+  // Defaults to false.
+  bool include_onboarding_members = 4;
 }
 
 message TrafficControlStateResponse {
@@ -150,22 +158,29 @@ message IndividualThroughputCapConfig {
   double global_kbps_cap = 2;
   double per_client_tps_cap = 3;
   double per_client_kbps_cap = 4;
+  int32 observation_period_seconds = 5;
+  // Message type to which this setting applies, e.g. "confirmation request"
+  string request_type = 6;
 }
 
-/** Set throughput cap for the given type */
+/** Set throughput cap for the given setting name */
 message SetThroughputCapRequest {
-  // Message type for which the cap should apply
-  // "confirmation request", "topology transaction"
-  string type = 1;
+  // Name of the setting to create or replace
+  string name = 1;
   // Optional: send empty to disable
   IndividualThroughputCapConfig config = 2;
 }
 message SetThroughputCapResponse {}
 message GetThroughputCapRequest {
-  string type = 1;
+  string name = 1;
 }
 message GetThroughputCapResponse {
   IndividualThroughputCapConfig config = 1;
+}
+
+message ListThroughputCapsRequest {}
+message ListThroughputCapsResponse {
+  map<string, IndividualThroughputCapConfig> configs = 1;
 }
 
 message SnapshotRequest {

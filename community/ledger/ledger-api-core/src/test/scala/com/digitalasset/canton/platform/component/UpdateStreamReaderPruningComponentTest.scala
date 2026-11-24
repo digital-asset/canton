@@ -79,6 +79,7 @@ class UpdateStreamReaderPruningComponentTest
         queryValidRange = mock[QueryValidRange],
         dbDispatcher = dbDispatcher,
         queryName = "EventPayloadSourceForUpdatesLedgerEffects.Activate",
+        rawEventFilter = None,
       )
       .futureValue
 

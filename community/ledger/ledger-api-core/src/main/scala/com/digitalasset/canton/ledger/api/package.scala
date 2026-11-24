@@ -19,6 +19,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   UnrecognizedEnum,
   ValueConversionError,
 }
+import com.digitalasset.canton.config.CantonRequireTypes.String1000
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -132,6 +133,13 @@ package api {
       filtersByParty: immutable.Map[Ref.Party, CumulativeFilter],
       filtersForAnyParty: Option[CumulativeFilter],
       verbose: Boolean,
+      filtersByContractId: Seq[ContractIdFilter],
+  )
+
+  final case class ContractIdFilter(
+      contractId: Lf.ContractId,
+      includeCreatedEventBlob: Boolean,
+      includeInterfaceViews: Seq[Ref.NameTypeConRef],
   )
 
   final case class InterfaceFilter(
@@ -403,12 +411,15 @@ package api {
         field = "page_token",
       )
 
-    def decode(raw: String): ParsingResult[PageToken] =
-      if (raw.isEmpty) {
+    def decode(rawUnvalidated: String): ParsingResult[PageToken] =
+      if (rawUnvalidated.isEmpty) {
         Right(InitialPageToken)
       } else {
-        val bytes = raw.getBytes(StandardCharsets.UTF_8)
         for {
+          raw <- String1000
+            .create(rawUnvalidated)
+            .leftMap(_ => invalidPageToken(s"Longer than ${String1000.maxLength} characters"))
+          bytes = raw.unwrap.getBytes(StandardCharsets.UTF_8)
           decodedBytes <- Try[Array[Byte]](Base64.getUrlDecoder.decode(bytes)).toEither.left
             .map(_ => invalidPageToken("Failed base64 decoding"))
 
@@ -472,12 +483,12 @@ package api {
 
   final case class PackageMetadataFilter(
       packageIds: Seq[Ref.PackageId],
-      packageNamePrefixes: Seq[String],
+      packageNamePrefixes: Seq[Option[Ref.PackageName]],
   ) {
     def toProtoLAPI: package_service.PackageMetadataFilter =
       package_service.PackageMetadataFilter(
         packageIds.map(_.toString),
-        packageNamePrefixes,
+        packageNamePrefixes.map(_.fold("")(identity)),
       )
 
     def toPredicate(metadata: PackageMetadata): Ref.PackageId => Boolean = {
@@ -485,7 +496,7 @@ package api {
       lazy val allPackageIds = packageIds.toSet
       lazy val allNames = (for {
         name <- metadata.packageNameMap.keys
-        if packageNamePrefixes.exists(name.toString.startsWith(_))
+        if packageNamePrefixes.exists(_.forall(name.toString.startsWith))
       } yield name).toSet
 
       { (targetPkgId: Ref.PackageId) =>
@@ -503,11 +514,21 @@ package api {
     def fromProto(
         filter: package_service.PackageMetadataFilter
     ): ParsingResult[PackageMetadataFilter] =
-      filter.packageIds
-        .traverse(
+      for {
+        packageIds <- filter.packageIds.traverse(
           Ref.PackageId.fromString(_).leftMap(ValueConversionError("package_ids", _))
         )
-        .map(PackageMetadataFilter(_, filter.packageNamePrefixes))
+        packageNamePrefixes <- filter.packageNamePrefixes.traverse(prefix =>
+          Option
+            .when(prefix.nonEmpty)(prefix)
+            .traverse(
+              Ref.PackageName
+                .fromString(_)
+                .leftMap(ValueConversionError("package_name_prefixes", _))
+            )
+        )
+      } yield PackageMetadataFilter(packageIds, packageNamePrefixes)
+
   }
 
   final case class TopologyStateFilter(

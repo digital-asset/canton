@@ -383,7 +383,7 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
   "TargetParticipantPartyReplicationProcessor" when {
 
     "observing valid interaction" should {
-      "initialize" onlyRunWith ProtocolVersion.dev inUS { env =>
+      "initialize" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS { env =>
         import env.*
         for {
           _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
@@ -401,7 +401,7 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
         }
       }
 
-      "handle empty ACS" onlyRunWith ProtocolVersion.dev inUS { env =>
+      "handle empty ACS" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS { env =>
         import env.*
         for {
           _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
@@ -412,39 +412,41 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
         } yield tp.hasChannelCompleted shouldBe true
       }
 
-      "handle single ACS batch" onlyRunWith ProtocolVersion.dev inUS { env =>
-        import env.*
-        val firstBatchSize = contractsToRequestEachTime
-        for {
-          _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
-          acs = createAcs(firstBatchSize)
-          _ = { env.contractsReceived = contractIdsWithCounters(acs) }
-          acsBatch = createAcsBatch(acs)
-          _ <- execUntilDone(tp, "receive acs batch")(
-            _.handlePayload(acsBatch)
-          )
-          _ <- execUntilDone(tp, "end of acs")(_.handlePayload(endOfAcs))
-          _ = execUntilDone(tp)(_.progressAcsReplication())
-        } yield {
-          tp.hasChannelCompleted shouldBe true
-          tp.replicatedContractsCount shouldBe firstBatchSize.toNonNegative
-        }
+      "handle single ACS batch" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS {
+        env =>
+          import env.*
+          val firstBatchSize = contractsToRequestEachTime
+          for {
+            _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
+            acs = createAcs(firstBatchSize)
+            _ = { env.contractsReceived = contractIdsWithCounters(acs) }
+            acsBatch = createAcsBatch(acs)
+            _ <- execUntilDone(tp, "receive acs batch")(
+              _.handlePayload(acsBatch)
+            )
+            _ <- execUntilDone(tp, "end of acs")(_.handlePayload(endOfAcs))
+            _ = execUntilDone(tp)(_.progressAcsReplication())
+          } yield {
+            tp.hasChannelCompleted shouldBe true
+            tp.replicatedContractsCount shouldBe firstBatchSize.toNonNegative
+          }
       }
     }
 
     "encountering invalid messages from source participant (SP)" should {
-      "complain if SP sends malformed message" onlyRunWith ProtocolVersion.dev inUS { env =>
-        import env.*
-        for {
-          _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
-          malformedMessage = ByteString.copyFromUtf8("not a valid message")
-          err <- leftOrFail(tp.handlePayload(malformedMessage))("fail on malformed message")
-        } yield {
-          err should include regex "Failed to parse payload message from SP: .*"
-        }
+      "complain if SP sends malformed message" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS {
+        env =>
+          import env.*
+          for {
+            _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
+            malformedMessage = ByteString.copyFromUtf8("not a valid message")
+            err <- leftOrFail(tp.handlePayload(malformedMessage))("fail on malformed message")
+          } yield {
+            err should include regex "Failed to parse payload message from SP: .*"
+          }
       }
 
-      "complain if SP sends message before channel initialization" onlyRunWith ProtocolVersion.dev inUS {
+      "complain if SP sends message before channel initialization" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS {
         env =>
           import env.*
           for {
@@ -458,7 +460,7 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
           }
       }
 
-      "complain if SP sends more contract batches than requested" onlyRunWith ProtocolVersion.dev inUS {
+      "complain if SP sends more contract batches than requested" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS {
         env =>
           import env.*
           val batchSize = contractsToRequestEachTime
@@ -478,7 +480,7 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
           }
       }
 
-      "complain if SP sends more contracts than requested" onlyRunWith ProtocolVersion.dev inUS {
+      "complain if SP sends more contracts than requested" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS {
         env =>
           import env.*
           val batchSizeTooLarge = contractsToRequestEachTime.increment.value
@@ -496,7 +498,7 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
           }
       }
 
-      "complain if SP sends another message after EndOfACS" onlyRunWith ProtocolVersion.dev inUS {
+      "complain if SP sends another message after EndOfACS" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS {
         env =>
           import env.*
           for {
@@ -513,69 +515,73 @@ final class AcsReplicationProcessorTest extends AcsReplicationProcessorTestBaseW
     }
 
     "encountering local problems on target participant (TP)" should {
-      "fail double initialize" onlyRunWith ProtocolVersion.dev inUS { env =>
-        import env.*
-        for {
-          _ <- valueOrFail(tp.onConnected())("initialize tp")
-          err <- leftOrFail(tp.onConnected())("double initialize tp")
-        } yield {
-          err shouldBe "Channel already connected"
-        }
-      }
-
-      "log upon problem sending message to SP" onlyRunWith ProtocolVersion.dev inUS { env =>
-        import env.*
-        // Fail TP send on the second message to request more contracts
-        val acsBatchSize = contractsToRequestEachTime
-        val secondRequestUpperBound = acsBatchSize.unwrap * 2 - 1
-        tpSendErrorOverrides = Map(
-          s"request next set of contracts up to ordinal $secondRequestUpperBound" -> "simulated request batch error"
-        )
-        loggerFactory.assertLogs(
+      "fail double initialize" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS {
+        env =>
+          import env.*
           for {
             _ <- valueOrFail(tp.onConnected())("initialize tp")
-            _ <- execUntilDone(tp, "receive acs batch")(
-              _.handlePayload(createAcsBatch(contractsToRequestEachTime))
-            )
+            err <- leftOrFail(tp.onConnected())("double initialize tp")
           } yield {
-            // send error observed via logged warning instead of here due to async send
-            succeed
-          },
-          _.warningMessage should include regex "Respond to source participant .* failed .*simulated request batch error",
-        )
+            err shouldBe "Channel already connected"
+          }
       }
 
-      "log upon send completed notification failure" onlyRunWith ProtocolVersion.dev inUS { env =>
-        import env.*
-        tpSendErrorOverrides = Map(s"completed" -> "simulated complete error")
-        loggerFactory.assertLogs(
+      "log upon problem sending message to SP" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS {
+        env =>
+          import env.*
+          // Fail TP send on the second message to request more contracts
+          val acsBatchSize = contractsToRequestEachTime
+          val secondRequestUpperBound = acsBatchSize.unwrap * 2 - 1
+          tpSendErrorOverrides = Map(
+            s"request next set of contracts up to ordinal $secondRequestUpperBound" -> "simulated request batch error"
+          )
+          loggerFactory.assertLogs(
+            for {
+              _ <- valueOrFail(tp.onConnected())("initialize tp")
+              _ <- execUntilDone(tp, "receive acs batch")(
+                _.handlePayload(createAcsBatch(contractsToRequestEachTime))
+              )
+            } yield {
+              // send error observed via logged warning instead of here due to async send
+              succeed
+            },
+            _.warningMessage should include regex "Respond to source participant .* failed .*simulated request batch error",
+          )
+      }
+
+      "log upon send completed notification failure" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS {
+        env =>
+          import env.*
+          tpSendErrorOverrides = Map(s"completed" -> "simulated complete error")
+          loggerFactory.assertLogs(
+            for {
+              _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
+              _ <- execUntilDone(tp, "handle empty acs")(
+                _.handlePayload(endOfAcs)
+              )
+              _ = execUntilDone(tp)(_.progressAcsReplication())
+            } yield { tp.hasChannelCompleted shouldBe true },
+            _.warningMessage should include regex "Respond to source participant .* failed .*simulated complete error",
+          )
+      }
+
+      "error when unable to persist contracts" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS {
+        env =>
+          import env.*
+
+          persistContractMaybeInjectedError =
+            EitherT.fromEither[FutureUnlessShutdown](Left("simulated persist contracts error"))
+
           for {
             _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
-            _ <- execUntilDone(tp, "handle empty acs")(
-              _.handlePayload(endOfAcs)
+            err <- leftOrFail(tp.handlePayload(createAcsBatch(PositiveInt.one)))(
+              "fail on persist contracts"
             )
-            _ = execUntilDone(tp)(_.progressAcsReplication())
-          } yield { tp.hasChannelCompleted shouldBe true },
-          _.warningMessage should include regex "Respond to source participant .* failed .*simulated complete error",
-        )
-      }
-
-      "error when unable to persist contracts" onlyRunWith ProtocolVersion.dev inUS { env =>
-        import env.*
-
-        persistContractMaybeInjectedError =
-          EitherT.fromEither[FutureUnlessShutdown](Left("simulated persist contracts error"))
-
-        for {
-          _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
-          err <- leftOrFail(tp.handlePayload(createAcsBatch(PositiveInt.one)))(
-            "fail on persist contracts"
-          )
-        } yield {
-          err should include regex "Failed to persist contracts:.* simulated persist contracts error"
-          // channel completed because of error
-          tp.hasChannelCompleted shouldBe true
-        }
+          } yield {
+            err should include regex "Failed to persist contracts:.* simulated persist contracts error"
+            // channel completed because of error
+            tp.hasChannelCompleted shouldBe true
+          }
       }
     }
   }
@@ -617,7 +623,7 @@ final class AcsReplicationProcessorBadSourceParticipantSignatureTest
 
   "TargetParticipantPartyReplicationProcessor" when {
 
-    "complain if SP signs ACS digest with invalid signature" onlyRunWith ProtocolVersion.dev inUS {
+    "complain if SP signs ACS digest with invalid signature" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel inUS {
       env =>
         import env.*
         val firstBatchSize = contractsToRequestEachTime

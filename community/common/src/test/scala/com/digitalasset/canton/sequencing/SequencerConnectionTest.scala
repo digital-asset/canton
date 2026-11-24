@@ -8,7 +8,6 @@ import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.{BaseTest, SequencerAlias}
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
 final class SequencerConnectionTest extends AnyWordSpec with BaseTest {
@@ -30,12 +29,13 @@ final class SequencerConnectionTest extends AnyWordSpec with BaseTest {
 }
 
 private object SequencerConnectionTest {
+
   def endpoint(n: Int): Endpoint = Endpoint(s"host$n", Port.tryCreate(100 * n))
 
   val grpc1: GrpcSequencerConnection = GrpcSequencerConnection(
     NonEmpty(Set, endpoint(1), endpoint(2)),
     transportSecurity = false,
-    Some(ByteString.copyFromUtf8("certificates")),
+    None,
     SequencerAlias.Default,
     None,
   )
@@ -49,7 +49,7 @@ private object SequencerConnectionTest {
   val grpcMerged: GrpcSequencerConnection = GrpcSequencerConnection(
     NonEmpty(Set, endpoint(1), endpoint(2), endpoint(3), endpoint(4)),
     transportSecurity = false,
-    Some(ByteString.copyFromUtf8("certificates")),
+    None,
     SequencerAlias.Default,
     Some(DefaultTestIdentities.sequencerId),
   )

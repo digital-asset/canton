@@ -53,8 +53,10 @@ import com.digitalasset.canton.platform.{
   Value,
   PackageId as LfPackageId,
 }
+import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.tracing.SerializableTraceContext
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, IdentifierConverter, Party}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -96,9 +98,10 @@ private[events] object TransactionLogUpdatesConversions {
     case u: TransactionLogUpdate.ReassignmentAccepted =>
       internalUpdateFormat.includeReassignments.flatMap { reassignmentFormat =>
         val filteredReassignments = u.reassignments.iterator.filter { r =>
-          reassignmentFormat.templatePartiesFilter(
+          reassignmentFormat.eventFilter(
             r.templateId.toFullIdentifier(r.packageName).toNameTypeConRef,
             r.stakeholders.map(_.toString),
+            r.contractId,
           )
         }
         NonEmpty
@@ -129,9 +132,10 @@ private[events] object TransactionLogUpdatesConversions {
       if (u.update.category.renderAsReassignment) {
         internalUpdateFormat.includeReassignments.flatMap { reassignmentFormat =>
           val filteredEvents = u.update.events.filter(event =>
-            reassignmentFormat.templatePartiesFilter(
+            reassignmentFormat.eventFilter(
               event.templateId.toFullIdentifier(event.packageName).toNameTypeConRef,
               event.stakeholders.map(_.toString),
+              event.contractId,
             )
           )
           val filtered = u.copy(update = u.update.withEvents(filteredEvents))
@@ -141,9 +145,10 @@ private[events] object TransactionLogUpdatesConversions {
       } else {
         val filteredEvents = u.update.events.filter(event =>
           internalUpdateFormat.includeTransactions.exists(
-            _.internalEventFormat.templatePartiesFilter(
+            _.internalEventFormat.eventFilter(
               event.templateId.toFullIdentifier(event.packageName).toNameTypeConRef,
               event.stakeholders.map(_.toString),
+              event.contractId,
             )
           )
         )
@@ -202,7 +207,7 @@ private[events] object TransactionLogUpdatesConversions {
         )
       toReassignment(
         reassignmentAccepted,
-        reassignmentInternalEventFormat.templatePartiesFilter.allFilterParties,
+        reassignmentInternalEventFormat.eventFilter.allFilterParties,
         reassignmentInternalEventFormat.eventProjectionProperties,
         lfValueTranslation,
       )
@@ -316,7 +321,7 @@ private[events] object TransactionLogUpdatesConversions {
       executionContext: ExecutionContext,
   ): Future[FlatTransaction] = {
     val requestingParties: Option[Set[Party]] =
-      internalTransactionFormat.internalEventFormat.templatePartiesFilter.allFilterParties
+      internalTransactionFormat.internalEventFormat.eventFilter.allFilterParties
     val commandId = getCommandId(transactionAccepted.events, requestingParties)
     Future.delegate {
       MonadUtil
@@ -349,9 +354,10 @@ private[events] object TransactionLogUpdatesConversions {
   private def transactionPredicate(
       transactionFormat: InternalTransactionFormat
   )(event: TransactionLogUpdate.Event): Boolean =
-    transactionFormat.internalEventFormat.templatePartiesFilter(
+    transactionFormat.internalEventFormat.eventFilter(
       event.templateId.toFullIdentifier(event.packageName).toNameTypeConRef,
       event.witnesses(transactionFormat.transactionShape).map(_.toString),
+      event.contractId,
     )
 
   private def topologyEventPredicate(
@@ -368,7 +374,7 @@ private[events] object TransactionLogUpdatesConversions {
       executionContext: ExecutionContext,
   ): Future[apiEvent.Event] = {
     val requestingParties =
-      internalTransactionFormat.internalEventFormat.templatePartiesFilter.allFilterParties
+      internalTransactionFormat.internalEventFormat.eventFilter.allFilterParties
 
     event match {
       case createdEvent: TransactionLogUpdate.CreatedEvent =>
@@ -433,6 +439,7 @@ private[events] object TransactionLogUpdatesConversions {
                   exercisedEvent.templateId.toFullIdentifier(
                     exercisedEvent.packageName
                   ),
+                  exercisedEvent.contractId,
                 ),
               )
             )
@@ -514,6 +521,7 @@ private[events] object TransactionLogUpdatesConversions {
                     exercisedEvent.templateId.toFullIdentifier(
                       exercisedEvent.packageName
                     ),
+                    exercisedEvent.contractId,
                   )
                 else Nil,
               acsDelta = flatEventWitnesses.nonEmpty,
@@ -701,7 +709,13 @@ private[events] object TransactionLogUpdatesConversions {
       loggingContext: LoggingContextWithTrace,
       executionContext: ExecutionContext,
   ): Future[ApiReassignment] = {
-    val requestingParties = internalEventFormat.templatePartiesFilter.allFilterParties
+    val requestingParties = internalEventFormat.eventFilter.allFilterParties
+    val reassignmentId = ReassignmentId(
+      source = Source(participantEventUpdate.update.synchronizerId),
+      target = Target(participantEventUpdate.update.synchronizerId),
+      unassignmentTs = participantEventUpdate.update.recordTime,
+      contractIdCounters = Map(),
+    ).toProtoPrimitive
     MonadUtil
       .sequentialTraverse(participantEventUpdate.update.events) {
         case added: ParticipantEvent.Added =>
@@ -724,7 +738,7 @@ private[events] object TransactionLogUpdatesConversions {
                 ApiAssignedEvent(
                   source = participantEventUpdate.update.synchronizerId.toProtoPrimitive,
                   target = participantEventUpdate.update.synchronizerId.toProtoPrimitive,
-                  reassignmentId = "",
+                  reassignmentId = reassignmentId,
                   submitter = "",
                   reassignmentCounter = added.reassignmentCounter,
                   createdEvent = Some(createdEvent),
@@ -740,7 +754,7 @@ private[events] object TransactionLogUpdatesConversions {
                 ApiUnassignedEvent(
                   offset = participantEventUpdate.offset.unwrap,
                   nodeId = removed.nodeId,
-                  reassignmentId = "",
+                  reassignmentId = reassignmentId,
                   contractId = removed.contractId.coid,
                   templateId = Some(LfEngineToApi.toApiIdentifier(removed.templateId)),
                   packageName = removed.packageName,
@@ -797,7 +811,7 @@ private[events] object TransactionLogUpdatesConversions {
           nodeId = added.nodeId,
           eventSequentialId = 0L,
           contractId = contractInstance.contractId,
-          ledgerEffectiveTime = recordTime,
+          ledgerEffectiveTime = contractInstance.createdAt.time,
           templateId = added.templateId,
           representativePackageId = added.representativePackageId match {
             case SameAsContractPackageId => contractInstance.templateId.packageId
@@ -846,7 +860,11 @@ private[events] object TransactionLogUpdatesConversions {
       updateId = updateId,
       commandId = "",
       workflowId = workflowId,
-      effectiveAt = recordTime,
+      effectiveAt = events
+        .collectFirst { case c: TransactionLogUpdate.CreatedEvent =>
+          c.ledgerEffectiveTime
+        }
+        .getOrElse(recordTime),
       offset = participantEventUpdate.offset,
       events = events,
       completionStreamResponseO = None,

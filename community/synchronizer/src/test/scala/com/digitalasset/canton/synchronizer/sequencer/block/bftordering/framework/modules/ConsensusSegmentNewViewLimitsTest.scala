@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.{BftOrdererLimits, BftOrdererLimitsView}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.SegmentStateTest.*
@@ -36,11 +36,13 @@ class ConsensusSegmentNewViewLimitsTest extends AnyWordSpec with BftSequencerBas
   // 3 sequencers and segment length 1, so every derived limit is 3. The bound must allow the
   // 3 prepares of the certificates built by the SegmentStateTest helpers (4 nodes).
   private val bound = 3
-  private val limits = BftOrdererLimits(
-    maxSequencersInSynchronizer = PositiveInt.three,
-    maxSegmentLength = PositiveInt.one,
-    maxOrderingRequests = PositiveInt.three,
-    maxProofs = PositiveInt.three,
+  private val limits = BftOrdererLimitsView(
+    BftOrdererLimits(
+      maxSegmentLength = PositiveInt.one,
+      maxOrderingRequests = PositiveInt.three,
+      maxProofs = PositiveInt.three,
+    ),
+    maxSequencersPerSynchronizer = PositiveInt.three,
   )
   private val context = ConsensusSegmentDeserializationContext(myId, Some(myId), limits)
 

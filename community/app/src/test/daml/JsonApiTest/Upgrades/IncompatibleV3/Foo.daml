@@ -12,6 +12,7 @@ template Foo with
     extra : Optional Int -- new optional field
   where
     signatory owner
+    observer otherParty
 
     interface instance IFoo for Foo where
       view = FooView with owner = owner

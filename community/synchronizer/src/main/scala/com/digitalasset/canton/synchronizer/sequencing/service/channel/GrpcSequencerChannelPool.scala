@@ -140,7 +140,11 @@ private[channel] final class GrpcSequencerChannelPool(
         lock.exclusive {
           val (pendingConnectionExpiresAt, channelExpiresAt) = {
             val now = clock.now
-            (now.add(maxMetadataWaitingTime.duration), now.add(channelTtl.duration))
+            val metadataExpiresAt = now.add(maxMetadataWaitingTime.duration)
+            val pendingExpiresAt =
+              authTokenExpiresAtO.fold(metadataExpiresAt)(metadataExpiresAt.min)
+
+            (pendingExpiresAt, now.add(channelTtl.duration))
           }
           val pendingTtlHandle = new AtomicReference[ClockHandle[Unit]](ClockHandle.Dummy)
           val channel = new UninitializedGrpcSequencerChannel(
@@ -367,7 +371,7 @@ private[channel] final class GrpcSequencerChannelPool(
   ): Unit = {
     val (channels, pending) = lock.exclusive {
       val channels = initializedChannels.toList.filter { case (_, ch) =>
-        memberO.forall(_ == ch.firstMember)
+        memberO.forall(m => m == ch.firstMember || m == ch.secondMember)
       }
       channels.foreach { case (_, ch) => removeChannel(ch) } // remove + release slots
       val pending =

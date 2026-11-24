@@ -17,6 +17,8 @@ class TemplatePartiesFilterSpec extends AnyFlatSpec with Matchers {
       case Right(templateId) => templateId
     }
 
+  private val contractId: ContractId = ContractId.assertFromString("00" + "01" * 32)
+
   private val testData =
     Seq(
       (templateId("test"), Set.empty[String]),
@@ -31,7 +33,7 @@ class TemplatePartiesFilterSpec extends AnyFlatSpec with Matchers {
       None,
     )
     val results = testData.map { case (templateId, parties) =>
-      testFilter(templateId = templateId, parties = parties)
+      testFilter(templateId = templateId, parties = parties, contractId = contractId)
     }
     results should contain theSameElementsInOrderAs Seq(false, true, true, true)
   }
@@ -42,7 +44,7 @@ class TemplatePartiesFilterSpec extends AnyFlatSpec with Matchers {
       Some(Set()),
     )
     val results = testData.map { case (templateId, parties) =>
-      testFilter(templateId = templateId, parties = parties)
+      testFilter(templateId = templateId, parties = parties, contractId = contractId)
     }
     results should contain theSameElementsInOrderAs Seq(false, false, false, false)
   }
@@ -53,7 +55,7 @@ class TemplatePartiesFilterSpec extends AnyFlatSpec with Matchers {
       Some(Set(Party.assertFromString("alice"))),
     )
     val results = testData.map { case (templateId, parties) =>
-      testFilter(templateId = templateId, parties = parties)
+      testFilter(templateId = templateId, parties = parties, contractId = contractId)
     }
     results should contain theSameElementsInOrderAs Seq(false, true, false, true)
   }
@@ -68,7 +70,7 @@ class TemplatePartiesFilterSpec extends AnyFlatSpec with Matchers {
       Some(Set(Party.assertFromString("cecil"))),
     )
     val results = testData.map { case (templateId, parties) =>
-      testFilter(templateId = templateId, parties = parties)
+      testFilter(templateId = templateId, parties = parties, contractId = contractId)
     }
     results should contain theSameElementsInOrderAs Seq(false, true, true, false)
   }
@@ -83,7 +85,7 @@ class TemplatePartiesFilterSpec extends AnyFlatSpec with Matchers {
       Some(Set()),
     )
     val results = testData.map { case (templateId, parties) =>
-      testFilter(templateId = templateId, parties = parties)
+      testFilter(templateId = templateId, parties = parties, contractId = contractId)
     }
     results should contain theSameElementsInOrderAs Seq(false, false, false, true)
   }

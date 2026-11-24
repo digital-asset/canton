@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -139,7 +139,7 @@ object Consensus {
     object RetransmissionRequest {
       def fromProto(
           pvv: ProtocolVersionValidation,
-          limits: BftOrdererLimits,
+          limits: BftOrdererLimitsView,
           sentBy: BftNodeId,
           request: v30.SignedMessage,
       ): ParsingResult[RetransmissionRequest] = {
@@ -167,7 +167,7 @@ object Consensus {
     object RetransmissionResponse {
       def fromProto(
           pvv: ProtocolVersionValidation,
-          limits: BftOrdererLimits,
+          limits: BftOrdererLimitsView,
           sentBy: BftNodeId,
           protoRetransmissionResponse: v30.RetransmissionResponse,
       ): ParsingResult[RetransmissionResponse] =
@@ -325,7 +325,7 @@ object Consensus {
     /** Deserialization context for BFT orderer consensus structures */
     final case class ConsensusDeserializationContext(
         from: BftNodeId,
-        limits: BftOrdererLimits,
+        limits: BftOrdererLimitsView,
     )
 
     object BlockTransferResponse30

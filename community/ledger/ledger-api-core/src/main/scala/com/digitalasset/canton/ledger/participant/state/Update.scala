@@ -349,43 +349,6 @@ object Update {
       )
   }
 
-  // TODO(#37949) remove
-  final case class RepairTransactionAccepted(
-      transactionMeta: TransactionMeta,
-      transactionInfo: TransactionAccepted.TransactionInfo,
-      updateId: UpdateId,
-      synchronizerId: SynchronizerId,
-      repairCounter: RepairCounter,
-      recordTime: CantonTimestamp,
-      contractInfos: Map[Value.ContractId, ContractInfo],
-      traceContext: TraceContext,
-  ) extends TransactionAccepted
-      with RepairUpdate {
-
-    override def transactionHash: Option[Hash] = None
-    override def completionInfoO: Option[CompletionInfo] = None
-
-    // Repair transactions have only contracts which affect the ACS.
-    override def isAcsDelta(contractId: Value.ContractId): Boolean = true
-
-    override protected def pretty: Pretty[RepairTransactionAccepted] =
-      RepairTransactionAccepted.pretty
-  }
-
-  object RepairTransactionAccepted extends PrettyUtil {
-    val pretty: Pretty[RepairTransactionAccepted] =
-      prettyOfClass(
-        param("recordTime", _.recordTime),
-        param("repairCounter", _.repairCounter),
-        param("updateId", _.updateId.tryAsLedgerTransactionId),
-        param("transactionMeta", _.transactionMeta),
-        paramIfDefined("completion", _.completionInfoO),
-        param("nodes", _.transactionInfo.noOfNodes),
-        param("roots", _.transactionInfo.noOfRootNodes),
-        indicateOmittedFields,
-      )
-  }
-
   sealed trait ReassignmentAccepted extends SynchronizerUpdate {
 
     /** The information provided by the submitter of the command that created this reassignment. It
@@ -450,7 +413,6 @@ object Update {
       )
   }
 
-  // TODO(#37949) remove
   final case class RepairReassignmentAccepted(
       workflowId: Option[Ref.WorkflowId],
       updateId: UpdateId,
@@ -473,42 +435,6 @@ object Update {
       prettyOfClass(
         param("recordTime", _.recordTime),
         param("repairCounter", _.repairCounter),
-        param("updateId", _.updateId.tryAsLedgerTransactionId),
-        paramIfDefined("completion", _.optCompletionInfo),
-        param("source", _.reassignmentInfo.sourceSynchronizer),
-        param("target", _.reassignmentInfo.targetSynchronizer),
-        param("kind", _.kind.unquoted),
-        indicateOmittedFields,
-      )
-  }
-
-  // TODO(#37949) remove
-  final case class OnPRReassignmentAccepted(
-      workflowId: Option[Ref.WorkflowId],
-      updateId: UpdateId,
-      reassignmentInfo: ReassignmentInfo,
-      reassignment: Reassignment.Batch,
-      recordTime: CantonTimestamp,
-      watermark: IndexingWatermark,
-      override val synchronizerId: SynchronizerId,
-      acsChangeFactory: AcsChangeFactory,
-      traceContext: TraceContext,
-  ) extends ReassignmentAccepted
-      with AcsChangeSequencedUpdate {
-    override def optCompletionInfo: Option[CompletionInfo] = None
-
-    override def synchronizerIndex: SynchronizerIndex =
-      SynchronizerIndex.forFloatingUpdate(recordTime)
-
-    override protected def pretty: Pretty[OnPRReassignmentAccepted] =
-      OnPRReassignmentAccepted.pretty
-  }
-
-  object OnPRReassignmentAccepted extends PrettyUtil with ShowUtil {
-    val pretty: Pretty[OnPRReassignmentAccepted] =
-      prettyOfClass(
-        param("recordTime", _.recordTime),
-        param("watermark", _.watermark),
         param("updateId", _.updateId.tryAsLedgerTransactionId),
         paramIfDefined("completion", _.optCompletionInfo),
         param("source", _.reassignmentInfo.sourceSynchronizer),

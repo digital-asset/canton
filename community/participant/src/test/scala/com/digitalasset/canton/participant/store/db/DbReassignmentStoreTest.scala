@@ -83,7 +83,6 @@ trait DbReassignmentStoreTest extends AsyncWordSpec with BaseTest with Reassignm
         for {
           _ <- MonadUtil
             .sequentialTraverse_(reassignments)(store.addUnassignmentData)
-            .valueOrFail("add unassignment data")
           _ <- store
             .addReassignmentsOffsets(
               reassignments.map(_.reassignmentId -> UnassignmentGlobalOffset(offset)).toMap

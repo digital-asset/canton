@@ -42,13 +42,16 @@ _Write summary of release_
 
 ### Protocol version 38
 
+#### Free ACS commitment messages
+
+ACS commitment messages are no longer charged to the traffic account.
+
 #### New limits
 NOTE: These limits are provisional on protocol version 38 and may still change before it is released.
 
 The following topology limits are static synchronizer parameters (`synchronizerLimits.topologyLimits`) and are enforced from protocol version 38.
 - `TopologyLimits.maxVettedPackagesPerParticipant` (default 10000) bounds the number of packages a participant can vet in a `VettedPackages` topology mapping.
   It applies to the `packages` field and to the deprecated `package_ids` field individually.
-- `TopologyLimits.maxSequencersPerSynchronizer` (default 100) bounds the number of active and observer sequencers combined in a `SequencerSynchronizerState` topology mapping.
 - `TopologyLimits.maxMediatorsPerGroup` (default 100) bounds the number of active and observer mediators combined in a `MediatorSynchronizerState` topology mapping, i.e. per mediator group.
 - `TopologyLimits.maxSignaturesPerTransaction` (default 1000) bounds the number of signatures on a signed topology transaction, single and multi transaction signatures combined.
 - `TopologyLimits.maxTransactionHashesPerMultiSignature` (default 1000) bounds the number of transaction hashes a multi transaction signature covers.
@@ -57,10 +60,79 @@ The following topology limits are static synchronizer parameters (`synchronizerL
 - `TopologyLimits.maxEndpointsPerSequencerConnection` (default 10) bounds the number of endpoints in the sequencer connection of an `LsuSequencerConnectionSuccessor` topology mapping.
 - `EncryptedMultipleViewsMessage.session_key_lookup` is now bounded by `TransactionProtocolLimits.maxRecipientsPerEnvelope` (default 10000).
 
+The following limit is a static synchronizer parameter of `synchronizerLimits` and is enforced from protocol version 38.
+- `SynchronizerLimits.maxSequencersPerSynchronizer` (default 1000) is the maximum number of sequencers in a synchronizer.
+  It bounds the number of active and observer sequencers combined in a `SequencerSynchronizerState` topology mapping.
+  It is shared by the topology and the BFT ordering service limits.
+
 The following existing transaction protocol limit now also bounds another field.
 - `ExternalAuthorization.authentications` of a submission is bounded by `TransactionProtocolLimits.maxActAs` (default 1000) from the dev protocol version (`nextValidationBoundPV`); stable versions are unchanged.
+-
+- New transaction protocol limit `TransactionProtocolLimits.maxViewsPerMessage` (default 100 000) bounds the number of view trees
+  (`EncryptedMultipleViewsMessage.view_trees`) and of view hashes (`EncryptedMultipleViewsMessage.view_hashes`) in an
+  encrypted views message. It applies from the dev protocol version and is carried on `v33` of the proto; stable versions
+  are unchanged and must keep the default. It may later be merged with `maxTransactionRootViews` and `maxTransactionSubViews`.
+- New transaction protocol limit `TransactionProtocolLimits.maxContractsPerView` (default 100000) bounds each of the collections
+  `ViewParticipantData.core_inputs`, `created_core`, `created_in_subview_archived_in_core` and `resolved_keys` (contracts and keys
+  of a view), separately per collection.
+- New transaction protocol limit `TransactionProtocolLimits.maxExternalCallResultsPerView` (default 10000) bounds `ViewParticipantData.external_call_results`, counting raw entries.
+- `ViewExternalCallResult.checking_parties` is bounded by `TransactionProtocolLimits.maxQuorumSize`, default (100000000).
+  The count is the number of confirmers of the exercise node.
+
+### Rate limiting of gRPC requests
+
+Canton now ships a gRPC server interceptor for rate limiting requests per gRPC method and per client IP, built on the
+rate limiter ported from Splice in an earlier change. No server installs it and there is no configuration to turn it on,
+so nothing is rate limited yet. Making it configurable on the sequencer public API follows in a later change.
+
+#### Restricted synchronizers
+
+The onboarding restriction for a synchronizer applies only to onboarding new participants:
+- Already successfully onboarded participants retain access to the synchronizer and continue to host their parties, independent of whether they have an active participant synchronizer permission.
+- Onboarded participants can update their synchronizer trust certificates also on restricted or locked synchronizers.
+- In order to offboard a participant permanently, the synchronizer owners can revoke the participant's synchronizer trust certificate. For blocking the participant temporarily, the synchronizer owners can set `loginAfter` appropriately in the participant's synchronizer permission.
 
 ### For application developers
+
+#### JWT Tokens Scoped to API areas
+
+The Ledger API now restricts access to API areas based on the `scope` field in JWTs.
+
+The `scope` field should be a space-separated list of restrictions.
+The available API area restrictions are currently:
+
+| Area       | Available restrictions                                              |
+| :--------- | :------------------------------------------------------------------ |
+| `base`     | `base:read`                                                         |
+| `ledger`   | `ledger:read`, `ledger:act`, `ledger:execute`                       |
+| `packages` | `packages:write`                                                    |
+| `vetting`  | `vetting:write`                                                     |
+| `parties`  | `parties:allocate`, `parties:self`, `parties:read`, `parties:write` |
+| `users`    | `users:self`, `users:read`, `users:write`                           |
+| `idps`     | `idps:read`, `idps:write`                                           |
+| `time`     | `time:write`                                                        |
+| `traffic`  | `traffic:self`, `traffic:read`, `traffic:write`                     |
+
+Unrecognized restrictions are ignored.
+If there are no recognized restrictions in the `scope` field, the token remains unrestricted,
+which is backwards-compatible with previous releases.
+
+Individual endpoints document what permissions are required to access them.
+Many endpoints will still require additional party-level permissions, e.g. `CanExecuteAs(p)`.
+
+These restrictions are set up so Participant admins, IDP admins and regular
+users are still able to access the same endpoints of the API as in previous
+releases in a backwards-compatible way.
+
+When trying to access an unauthorized area of the API, a more precise error
+message will be logged, indicating which restriction is missing.  For example,
+for non-admins who try to upload a package, rather than the previous message:
+
+> Claims do not authorize the use of administrative services.
+
+The following message is now logged:
+
+> Claims do not authorize packages:write methods of the Ledger API.
 
 #### `UpdateFormat.includeTransactionsAndReassignments`
 
@@ -97,6 +169,22 @@ for example `["https://app.example.com"]`. Entries must match the browser's `Ori
 A cookie-authenticated handshake whose `Origin` header is missing, `null`, or not in the list is refused with
 `403 Forbidden` and the new error code `JSON_API_COOKIE_AUTH_ORIGIN_NOT_ALLOWED`. This protects against
 cross-site websocket hijacking.
+
+#### Ledger API: hosted parties snapshot
+
+The Ledger API adds `GetHostedParties` (streaming) and `GetHostedPartiesPage` (paged) to query which participants
+host parties on which synchronizers, with their permissions and hosting states. Applications can use this snapshot
+to discover party hostings or initialize their topology view without replaying the full history of topology updates.
+
+The snapshot is taken at `hosted_at_offset`, defaulting to the current ledger end for the initial request.
+Continuation and page tokens preserve that offset. To keep the view up to date, stream topology updates with
+`GetUpdates` starting from the snapshot's `hosted_at_offset`.
+
+Omitting `filter` selects the caller's readable parties hosted on any synchronizer on the local participant.
+`party_filter` and `synchronizer_id_filter` can be used to limit the results to specified parties and/or synchronizers.
+Only local participant hostings are returned unless `all_participants` is true. Hosting information for other
+participants may be incomplete. Hosting information is public, so the results are not restricted by the caller's
+party read rights.
 
 ### All node operators
 
@@ -158,6 +246,57 @@ The new ACS commitment processor is now enabled always.
 The config option `canton.participants.<participant>.parameters.acs-commitments.enable-new-acs-commitment-processor` is deprecated and ignored.
 The old ACS commitment processor can only be enabled for protocol versions up to 37 inclusive;
 for protocol versions 38 and above, the config option `canton.participants.<participant>.parameters.acs-commitments.disable-old-acs-commitment-processor` is ignored.
+
+### Traffic enforcement
+
+These changes apply to participants with traffic accounting enabled. The options named below are in `canton.participants.<participant>.traffic-accounting`.
+
+#### Choosing the traffic account
+
+- Command submissions, interactive submissions, and reassignment commands have a new optional `account_id` field that selects the traffic account to charge instead of the acting party.
+  The console commands take a matching `accountId` parameter, and the Java bindings a `withAccountId` method.
+- Setting `account_id` requires the new user right `CanDebitTrafficFrom(account_id)` or `CanDebitTrafficFromAnyAccount`, or an act-as or execute-as right for the party with that id.
+  Only participant admins can grant the new rights.
+- Account ids now have a fixed format (segments separated by `/`, at most 255 characters), which every party id meets. Requests for other ids are rejected.
+
+#### Charging submissions
+
+- The participant now registers every transaction and reassignment with the traffic enforcement app before sending it, and charges its completion to the registered account.
+  If the app can't be reached, the submission is rejected unless `allow-submissions-on-degradation` is on.
+- Without an `account_id`, a submission is charged to its acting party, as before. Transactions with several acting parties aren't charged (or are rejected with `reject-multi-party-submissions`), and automatic assignments are charged to the participant's admin party.
+- New option `debit-rejected-completions` (default `true`) controls whether rejected completions are charged.
+
+#### Balance checks against cost estimates
+
+- With `enforce-cost-on-submissions` on, interactive preparation and transactions that need reassignments are checked against the estimated total cost, including reassignments, scaled by the new option `estimate-multiplier` (default `1.0`).
+  The balance can become negative if the actual cost is higher.
+
+#### Ledger API request size limits
+The participant now bounds the size of the fields of Ledger API requests by:
+- the number of elements of repeated fields (e.g. the commands of a submission)
+- the number of entries of map fields (e.g. the `filters_by_party` of an event format)
+- the size of bytes fields (e.g. the `dar_file` of an upload)
+- the serialized size of selected fields (e.g. the Daml values of the commands).
+
+A request that exceeds a limit is rejected with:
+- `FIELD_CARDINALITY_LIMIT_EXCEEDED` for the number of elements of a repeated or map field
+- `FIELD_SIZE_LIMIT_EXCEEDED` for the size of a bytes field or the serialized size of a field
+- `EVENT_FORMAT_FILTERS_LIMIT_EXCEEDED` for the total number of filters of the event formats (see below).
+
+The limits are configured under `canton.participants.<participant>.ledger-api.size-limits`, in four groups:
+- `shared-size-config`: limits that apply to the same kind of field in several requests. For example,
+  `dar-file-bytes-size-limit` applies to both `UploadDarFileRequest` and `ValidateDarFileRequest`.
+- `public-lapi-size-config`, `admin-lapi-size-config` and `interactive-lapi-size-config`: the request-specific limits of
+  the public services, the admin services and the interactive submission service. For example, `upload-dar-file-request`
+  contains the configuration for the fields of `UploadDarFileRequest`.
+  A request-specific limit that is set takes precedence over the shared limit it would otherwise inherit.
+- Custom limits that are not tied to a single field are also under the limits configuration. For example,
+  `event-format-total-filters-size-limit` bounds the filters of the event formats of a request after
+  they are expanded across the requested parties. A template or wildcard filter counts as one and an interface filter as five.
+
+All limits are still bounded by the gRPC maximum inbound message size of the Ledger API (`max-inbound-message-size`, default 10 MiB).
+
+The exhaustive list of limits with their default values can be found in the documentation (TBD).
 
 ### Synchronizer operators
 
@@ -253,6 +392,46 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 - Sequencer drivers (such as CometBFT) are no longer supported.
 - Reference sequencer is also no longer supported.
 
+#### Named sequencer throughput cap settings
+
+Sequencer operators should migrate throughput cap configuration to named settings and must update Admin API clients. Settings are now configured under
+`canton.sequencers.<sequencer>.sequencer.block.throughput-cap.messages.<name>`.
+Each setting must specify its `request-type` (for example, `"confirmation request"`) and can set
+`observation-period-seconds` (default: 60), alongside its throughput limits.
+An explicitly configured `messages` map replaces the default set of settings.
+Multiple settings can apply to the same message type, and all must allow a submission.
+
+To migrate, add `request-type` to every configured setting and move any global
+`observation-period-seconds` or per-setting `observation-period-seconds-override` value to
+`observation-period-seconds` within each affected setting.
+
+Remove `delayed-activation`: caps are now enforced immediately, without an initial grace period.
+Legacy fixed message-type configurations remain supported and log a deprecation warning.
+Their caps inherit the parent `observation-period-seconds` (default: 60), and omitted legacy caps
+retain their previous defaults. The new commitment and time-proof defaults are also included.
+The legacy `delayed-activation` field is accepted but ignored.
+
+The sequencer Admin API and console get/set/update/unset commands now identify settings by name
+instead of message type. Update callers to pass the setting name and include the message type and
+observation period in each setting value. `traffic_control.list_throughput_caps()` lists all settings.
+Declarative cap configuration likewise uses setting names as keys and includes the message type and
+observation period in each value.
+Throughput-cap metric names now use the setting name rather than the message type, so update monitoring
+queries when using different setting names.
+
+When throughput caps are enabled, the default settings now also cap time proofs and commitments.
+Operators configuring their own `messages` map must include this setting to apply the time-proof
+and commitments cap.
+
+### Removal of deprecated features
+
+<!-- Features deprecated in an earlier release that this release removes: the feature, the release that deprecated
+it, and its replacement. -->
+
+### Removal of protocol versions
+
+<!-- Protocol versions no longer supported: the versions, and how to upgrade synchronizers still on them. -->
+
 ## Deprecations
 
 <!-- The deprecated item, its replacement, and when it will be removed. -->
@@ -262,14 +441,18 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
   Setting `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-37 = true` re-enables them until their removal in 3.9.
 
 ## Minor Improvements
+- The representative package id set by `repair.rollback_unassignment` will be the source validation package used in the unassign.
 
 - The `Request-Timeout` header of JSON Ledger API requests now also accepts a time unit, for example `15s`. Values without a time unit are still interpreted as milliseconds.
+- JSON Ledger API list (non-websocket) endpoints now enforce a maximum stream duration, cancelling the backing stream and returning `408 Request Timeout` instead of running unbounded. If a `Request-Timeout` header is not provided, the stream is bounded by the server's `canton.participants.<participant>.http-ledger-api.request-timeout` (default 20s); when the header is set, its value applies instead. A new `websocket-config` parameter `http-list-max-wait-time` (default 5s) caps the client-supplied idle wait.
 - Indexer pipeline now breaks up heavy transaction to evenly sized batches, where the 'size' is determined by the number of database operations.
 - The interactive submission endpoints `ExecuteSubmissionAndWait` and `ExecuteSubmissionAndWaitForTransaction` (gRPC and JSON Ledger API) now enforce `maximum-number-of-signatures-per-party`, rejecting requests with too many signatures per party, as `ExecuteSubmission` already did.
 - Reads and writes from the active contract journal now use a batch aggregator for efficiency.
 - The restart delay for a sequencer connection now only resets back to `min_restart_delay` if it stayed validated for at least the new `min_stable_duration` (default 10 seconds).
   This prevents a restarted connection that keeps failing shortly after validation from being restarted again too quickly.
-
+- Gracefully handle an error on configuring multiple aliases for the same logical synchronizer with different physical synchronizer ids
+- Upgrade to bouncy castle 1.87 to address security vulnerabilities in 1.86 (e.g. BDSA-2026-40175)
+- The default sychronizer transaction parse tree depth limit has been set to 64. This applies to newly bootstrapped synchronizers on all supported Protocol Versions, including successor synchronizers of an LSU.
 
 ### Ledger API
 
@@ -279,6 +462,8 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 - When reassigning if no validation package override is provided pick the highest commonly vetted package version.
 - `PartyManagementService.ListKnownParties`: subsequent pages return the topology state seen when the first page was
   requested. Page tokens issued by another participant are rejected.
+- JSON API endpoints now consistently return HTTP 401 (Unauthorized) rather than 403 (Forbidden) when a valid JWT token is not present.
+- The repair service operations are now stored as dedicated event types in the indexer DB. This change has no impact neither on the repair service API nor the Ledger API update/ACS serving.
 
 ### Multi-Sync
 - When contracts are automatically reassigned to allow command execution on a target synchronizer:
@@ -313,11 +498,15 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
   Such requests that are ordered anyway are discarded as invalid ledger events from protocol version 38 on.
   On earlier protocol versions, only the last signature is kept after ordering, which is the one that was verified before.
 
-## Security and Bug Fixes
+## Security Fixes
+
+### JDK Base Image Critical Fixes
+- JDK base image has been upgraded to 21.0.13.1_2, incorporating several key security patches
 
 <!--
-Advisories first, then the other fixes as a bullet list, including dependency updates for security vulnerabilities
-(e.g. "Dependency updates to address security vulnerabilities: jackson 2.22.4, gRPC 1.85").
+Advisories first, then the other security fixes as a bullet list, including dependency updates for security
+vulnerabilities (e.g. "Dependency updates to address security vulnerabilities: jackson 2.22.4, gRPC 1.85").
+Remove this section if there are no security fixes.
 -->
 
 <!--
@@ -343,9 +532,18 @@ fix is deployed on MainNet:
 #### Recommendation
 -->
 
+## Bug Fixes
+
+<!-- The other bug fixes as a bullet list, not split by audience. -->
+
 - The JSON Ledger API HTTPS server now uses the `PKIX` trust manager and key manager instead of the legacy `SunX509` ones.
   `PKIX` performs full RFC 5280 certification path validation, so certificate chains that were previously accepted
   but violate constraints such as the name constraints of an intermediate CA are now rejected.
+- The JSON Ledger API now bounds the size of each inbound websocket message by its `max-inbound-message-size`
+  (default 10 MiB), as it already did for HTTP request bodies. A message above the limit, including one split into
+  many fragments, is rejected with the new error code `JSON_API_WEBSOCKET_MESSAGE_TOO_LARGE` before it is assembled
+  in memory, and the connection is closed. Binary websocket messages, which no JSON Ledger API endpoint accepts,
+  are rejected with the new error code `JSON_API_WEBSOCKET_BINARY_MESSAGE_NOT_SUPPORTED` without being read.
 - Minor bugfix to synchronization of `participants.parties.enable` which always timed out on a network
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
@@ -371,6 +569,16 @@ fix is deployed on MainNet:
   Previously, a participant returned the identity transactions of its authorized store instead whenever they had the
   requested protocol version, which ignored a delegation to an intermediate key provided in the temporary store when the
   root namespace key is offline.
+- Added missing synchronization between ACS import and synchronizer disconnect/connect.
+- Fixed a bug where a submission that explicitly requests a mediator group (as interactive submissions do, always
+  requesting group `0`) interpreted the group index as a position in the list of active mediator groups. When group `0`
+  was not active and only a higher-numbered group was, the submission was routed to the wrong group, and requesting that
+  higher group failed with a `NoMediatorError`. The group is now looked up by its index, and the submission fails with
+  a `NoMediatorError` if that group is not active.
+- Early reassignment rejections now report the request's submission id in their completion instead of an empty one.
+- Java bindings: `User.Right` now reads `CanActAsAnyParty`, which used to throw. `CommandsSubmission.toProto` now
+  includes the prefetch contract keys, which it used to drop. `UpdateSubmission.withSynchronizerId` now sets the
+  synchronizer id, which it used to ignore.
 
 ### CantonBFT
 

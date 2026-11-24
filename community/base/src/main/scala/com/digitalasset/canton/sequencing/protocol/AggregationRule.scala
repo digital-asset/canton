@@ -470,7 +470,7 @@ object AggregationRule
   )
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.AggregationRule)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(v30.AggregationRule)(
       supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )

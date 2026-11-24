@@ -167,7 +167,7 @@ final class SequencerChannelClientFactory(
     channelBuilder
       .create(
         connection.endpoints.head1,
-        connection.transportSecurity,
+        useTls = connection.transportSecurity,
         executionContext,
         connection.customTrustCertificates,
         config.clientChannelParams(traceContextPropagation),

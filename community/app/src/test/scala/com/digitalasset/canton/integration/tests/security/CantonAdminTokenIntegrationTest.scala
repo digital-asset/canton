@@ -10,6 +10,7 @@ import com.daml.test.evidence.tag.Security.SecurityTest.Property.*
 import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmptyString}
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
@@ -285,7 +286,7 @@ class CantonAdminTokenFewPermissionsIntegrationTest extends CantonAdminTokenInte
         loggerFactory.assertThrowsAndLogs[CommandFailure](
           admin.ledger_api.parties.list(),
           _.warningMessage should include regex
-            """PERMISSION_DENIED\(7,.{8}\): Claims do not authorize the use of administrative services""".r,
+            """PERMISSION_DENIED\(7,.{8}\): Claims do not authorize parties:read methods of the Ledger API""".r,
           _.commandFailureMessage should include("PERMISSION_DENIED"),
         )
       }

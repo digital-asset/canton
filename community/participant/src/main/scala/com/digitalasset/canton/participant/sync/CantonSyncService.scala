@@ -360,19 +360,13 @@ class CantonSyncService(
     val topologyClientO = connectedSynchronizersLookup.get(lsid).map(_.topologyClient)
     val vettingF = topologyClientO match {
       case Some(topologyClient) =>
-        val acsReplicationPackagesIfShouldVet =
-          if (
-            AdminWorkflowServices.isAcsReplicationWorkflowLoaded(
-              parameters.alphaAcsReplicationSupport
-            )
-          ) {
-            AdminWorkflowServices.AcsReplicationPackages.keySet
-          } else Set.empty
         val trafficCreditPackagesIfShouldVet =
           if (parameters.damlTopUpEnabled) AdminWorkflowServices.TrafficCreditPackages.keySet
           else Set.empty
-        val packagesToVet = AdminWorkflowServices.PingPackages.keySet ++
-          acsReplicationPackagesIfShouldVet ++ trafficCreditPackagesIfShouldVet
+        val packagesToVet =
+          AdminWorkflowServices.PingPackages.keySet ++
+            AdminWorkflowServices.AcsReplicationPackages.keySet ++
+            trafficCreditPackagesIfShouldVet
         logger.debug("Checking whether admin workflows need to be vetted still.")
 
         topologyClient.headSnapshot
@@ -445,6 +439,10 @@ class CantonSyncService(
   private[canton] def connectedSynchronizerForAlias(
       alias: SynchronizerAlias
   ): Option[ConnectedSynchronizer] = connectionsManager.connectedSynchronizerForAlias(alias)
+
+  private[canton] def connectedSynchronizerFor(
+      psid: PhysicalSynchronizerId
+  ): Option[ConnectedSynchronizer] = connectionsManager.connectedSynchronizers.get(psid)
 
   private val admissibleSynchronizers =
     new AdmissibleSynchronizersComputation(participantId, loggerFactory)
@@ -1374,7 +1372,7 @@ class CantonSyncService(
             .leftMap[SyncServiceError](
               SyncServiceError.SyncServiceMigrationError(source, target.map(_.synchronizerAlias), _)
             ),
-          "migrate synchronizer",
+          s"migrate-synchronizer-$source-$target",
         )
 
       _ <- purgeDeactivatedSynchronizer(source.unwrap)

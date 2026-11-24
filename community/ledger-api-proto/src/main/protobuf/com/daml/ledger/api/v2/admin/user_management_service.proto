@@ -43,32 +43,50 @@ option java_package = "com.daml.ledger.api.v2.admin";
 // In order to grant or revoke user rights use ``GrantRights' and ``RevokeRights`` RPCs.
 service UserManagementService {
   // Create a new user.
+  //
+  // Required permissions: ``users:write``
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
 
   // Get the user data of a specific user or the authenticated user.
+  //
+  // Required permissions: ``users:self`` to retrieve the authenticating user, or ``users:read`` to retrieve other users.
   rpc GetUser(GetUserRequest) returns (GetUserResponse);
 
   // Update selected modifiable attribute of a user resource described by the ``User`` message.
+  //
+  // Required permissions: ``users:write``
   rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
 
   // Delete an existing user and all its rights.
+  //
+  // Required permissions: ``users:write``
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
 
   // List all existing users.
+  //
+  // Required permissions: ``users:read``
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
 
   // Grant rights to a user.
   // Granting rights does not affect the resource version of the corresponding user.
+  //
+  // Required permissions: ``users:write``
   rpc GrantUserRights(GrantUserRightsRequest) returns (GrantUserRightsResponse);
 
   // Revoke rights from a user.
   // Revoking rights does not affect the resource version of the corresponding user.
+  //
+  // Required permissions: ``users:write``
   rpc RevokeUserRights(RevokeUserRightsRequest) returns (RevokeUserRightsResponse);
 
   // List the set of all rights granted to a user.
+  //
+  // Required permissions: ``users:self`` to retrieve the rights for the authenticating user, or ``users:read`` to retrieve the rights for other users.
   rpc ListUserRights(ListUserRightsRequest) returns (ListUserRightsResponse);
 
   // Update the assignment of a user from one IDP to another.
+  //
+  // Required permissions: ``users:write`` and ``idps:write``
   rpc UpdateUserIdentityProviderId(UpdateUserIdentityProviderIdRequest) returns (UpdateUserIdentityProviderIdResponse);
 }
 

@@ -731,7 +731,14 @@ final class TransactionViewTest
         ).value
 
         ViewParticipantData
-          .fromByteString(testedProtocolVersion, (hashOps, testedProtocolVersion))(
+          .fromByteString(
+            testedProtocolVersion,
+            ViewParticipantDataDeserializationContext(
+              hashOps,
+              testedProtocolVersion,
+              testedTransactionLimits,
+            ),
+          )(
             vpd.getCryptographicEvidence
           )
           .map(_.unwrap) shouldBe Right(Right(vpd))
@@ -763,7 +770,14 @@ final class TransactionViewTest
         ).value
 
         ViewParticipantData
-          .fromByteString(testedProtocolVersion, (hashOps, testedProtocolVersion))(
+          .fromByteString(
+            testedProtocolVersion,
+            ViewParticipantDataDeserializationContext(
+              hashOps,
+              testedProtocolVersion,
+              testedTransactionLimits,
+            ),
+          )(
             vpd.getCryptographicEvidence
           )
           .map(_.unwrap) shouldBe Right(Right(vpd))
@@ -783,7 +797,14 @@ final class TransactionViewTest
         ).value
 
         ViewParticipantData
-          .fromByteString(testedProtocolVersion, (hashOps, testedProtocolVersion))(
+          .fromByteString(
+            testedProtocolVersion,
+            ViewParticipantDataDeserializationContext(
+              hashOps,
+              testedProtocolVersion,
+              testedTransactionLimits,
+            ),
+          )(
             vpd.getCryptographicEvidence
           )
           .map(_.unwrap) shouldBe Right(Right(vpd))
@@ -822,7 +843,14 @@ final class TransactionViewTest
         ).value
 
         ViewParticipantData
-          .fromByteString(testedProtocolVersion, (hashOps, testedProtocolVersion))(
+          .fromByteString(
+            testedProtocolVersion,
+            ViewParticipantDataDeserializationContext(
+              hashOps,
+              testedProtocolVersion,
+              testedTransactionLimits,
+            ),
+          )(
             vpd.getCryptographicEvidence
           )
           .map(_.unwrap) shouldBe Right(Right(vpd))
@@ -864,6 +892,7 @@ final class TransactionViewTest
         ViewParticipantData.ViewExternalCallResult
           .fromProtoV32(
             testedProtocolVersionValidation,
+            testedTransactionLimits,
             externalCallResultProto(exerciseIndex = -1),
           )
           .left
@@ -874,12 +903,19 @@ final class TransactionViewTest
 
       "reject an external call result with negative call_index" in {
         ViewParticipantData.ViewExternalCallResult
-          .fromProtoV32(testedProtocolVersionValidation, externalCallResultProto(callIndex = -1))
+          .fromProtoV32(
+            testedProtocolVersionValidation,
+            testedTransactionLimits,
+            externalCallResultProto(callIndex = -1),
+          )
           .left
           .value should matchPattern {
           case ProtoDeserializationError.InvariantViolation(Some("call_index"), _) =>
         }
       }
+
+      def viewParseDepth(view: TransactionView): Int =
+        view.subviews.subviews.parseDepth(_.subviews.subviews)
 
       // Need to work with v30 structures to avoid stack overflow during serialization
       "return parsing failure when nesting is over limit" in {
@@ -902,7 +938,7 @@ final class TransactionViewTest
             ),
           )(bytes)
           .value
-        deserialized.parseDepth shouldBe actualDepth
+        viewParseDepth(deserialized) shouldBe actualDepth
 
         val expected = actualDepth - 1
 
@@ -939,7 +975,7 @@ final class TransactionViewTest
           )(bytes)
           .value
 
-        deserialized.parseDepth shouldBe actualDepth
+        viewParseDepth(deserialized) shouldBe actualDepth
 
         val expected = actualDepth - 1
 

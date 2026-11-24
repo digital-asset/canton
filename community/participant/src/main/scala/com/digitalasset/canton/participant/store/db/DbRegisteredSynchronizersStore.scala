@@ -15,6 +15,7 @@ import com.digitalasset.canton.participant.store.RegisteredSynchronizersStore
 import com.digitalasset.canton.participant.store.SynchronizerAliasAndIdStore.{
   Error,
   InconsistentLogicalSynchronizerIds,
+  LogicalSynchronizerIdAlreadyAdded,
   SynchronizerIdAlreadyAdded,
 }
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
@@ -90,6 +91,7 @@ class DbRegisteredSynchronizersStore(
     val queries = for {
       _ <- checkAliasConsistent(alias, psid)
       _ <- checkLogicalIdConsistent(alias, psid)
+      _ <- checkLogicalIdNotRegisteredWithOtherAlias(alias, psid)
       nrRows <- dbEitherT[Error](insert)
       _ <- checkInsertion(nrRows)
     } yield ()
@@ -140,6 +142,27 @@ class DbRegisteredSynchronizersStore(
             existingPsid = existing,
           )
         )
+        .toLeft(())
+        .leftWiden[Error]
+    )
+  } yield ()
+
+  // Ensure the logical synchronizer id is not already registered with another alias.
+  private def checkLogicalIdNotRegisteredWithOtherAlias(
+      alias: SynchronizerAlias,
+      psid: PhysicalSynchronizerId,
+  ): EitherT[dbio.DBIO, Error, Unit] = for {
+    otherRows <- dbEitherT[Error](
+      sql"select synchronizer_alias, physical_synchronizer_id from par_registered_synchronizers where synchronizer_alias <> $alias"
+        .as[(SynchronizerAlias, PhysicalSynchronizerId)]
+    )
+
+    _ <- EitherT.fromEither[DBIO](
+      otherRows
+        .collectFirst {
+          case (existingAlias, existingPsid) if existingPsid.logical == psid.logical =>
+            LogicalSynchronizerIdAlreadyAdded(psid, alias, existingAlias)
+        }
         .toLeft(())
         .leftWiden[Error]
     )

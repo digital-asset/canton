@@ -152,6 +152,41 @@ class SelfAdminAuthIT
       }
     }
 
+    "deny user querying about its own parties when token is restricted" taggedAs adminSecurityAsset
+      .setAttack(
+        attackUnknownResource(threat = "User querying status of parties without parties:self")
+      ) in { implicit env =>
+      import env.*
+      loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
+        expectPermissionDenied {
+          val suffix = UUID.randomUUID().toString
+          for {
+            read <- allocateParty(asAdmin, s"read-$suffix")
+            (_, userContext) <- createUserByAdmin(
+              "user-" + suffix,
+              rights = Vector(
+                uproto.Right(uproto.Right.Kind.CanReadAs(uproto.Right.CanReadAs(read)))
+              ),
+              tokenModifier = token =>
+                token.copy(
+                  // No parties:self
+                  scope = Some(token.scope.fold("ledger:read")(_ + " ledger:read"))
+                ),
+            )
+
+            returnedParties <- stub(
+              pproto.PartyManagementServiceGrpc.stub(channel),
+              userContext.token,
+            )
+              .getParties(
+                GetPartiesRequest(parties = Seq(read), identityProviderId = "")
+              )
+
+          } yield ()
+        }
+      }
+    }
+
     "allow user querying own records" taggedAs adminSecurityAsset
       .setHappyCase(
         "User can query own records"
@@ -195,6 +230,31 @@ class SelfAdminAuthIT
                 ListUserRightsRequest(anotherUser.id, "")
               )
               .map(_.rights)
+          } yield ()
+        }
+      }
+    }
+
+    "deny user querying their own records with a restricted token" taggedAs adminSecurityAsset
+      .setAttack(
+        attackUnknownResource(threat = "User querying using a token without users:self")
+      ) in { implicit env =>
+      import env.*
+      loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
+        expectPermissionDenied {
+          val suffix = UUID.randomUUID().toString
+          for {
+            (user, userContext) <- createUserByAdmin(
+              userId = "user-1-" + suffix,
+              tokenModifier = token =>
+                // No users:self
+                token.copy(
+                  scope = Some(token.scope.fold("ledger:read")(_ + " ledger:read"))
+                ),
+            )
+            _ <- stub(uproto.UserManagementServiceGrpc.stub(channel), userContext.token).getUser(
+              GetUserRequest(user.id, "")
+            )
           } yield ()
         }
       }
@@ -345,6 +405,28 @@ class SelfAdminAuthIT
               _ <- allocateFun(s"party-3-$suffix", userContext, user.id)(env)
             } yield ()
           }
+        }
+      }
+
+      s"deny user allocating $partyType party with a scope-restricted token" taggedAs adminSecurityAsset
+        .setAttack(
+          attackUnknownResource(threat =
+            s"User allocating $partyType party with a scope-restricted token"
+          )
+        ) in { implicit env =>
+        import env.*
+        expectPermissionDenied {
+          val suffix = UUID.randomUUID().toString
+          for {
+            (user, userContext) <- createUserByAdmin(
+              userId = "user-1-" + suffix,
+              tokenModifier = token =>
+                token.copy(
+                  scope = Some(token.scope.fold("ledger:read")(_ + " ledger:read"))
+                ),
+            )
+            _ <- allocateFun(s"party-1-$suffix", userContext, user.id)(env)
+          } yield ()
         }
       }
     }

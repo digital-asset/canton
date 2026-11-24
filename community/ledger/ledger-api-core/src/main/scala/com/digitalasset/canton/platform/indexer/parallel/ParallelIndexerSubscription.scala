@@ -649,10 +649,6 @@ object ParallelIndexerSubscription {
         u.copy(
           contractInfos = fixContractInfos(overrides)(u.contractInfos)
         )
-      case u: Update.RepairTransactionAccepted =>
-        u.copy(
-          contractInfos = fixContractInfos(overrides)(u.contractInfos)
-        )
       case u: Update.SequencedReassignmentAccepted =>
         u.copy(
           reassignment = fixReassignments(overrides)(u.reassignment)
@@ -661,11 +657,6 @@ object ParallelIndexerSubscription {
         u.copy(
           reassignment = fixReassignments(overrides)(u.reassignment)
         )
-      case u: Update.OnPRReassignmentAccepted =>
-        u.copy(
-          reassignment = fixReassignments(overrides)(u.reassignment)
-        )
-
       case u: Update.CommandRejected => u
       case u: Update.CommitRepair => u
       case u: Update.EmptyAcsPublicationRequired => u

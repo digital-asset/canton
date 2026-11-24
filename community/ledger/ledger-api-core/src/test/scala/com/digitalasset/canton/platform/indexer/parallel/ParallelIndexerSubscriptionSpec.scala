@@ -11,12 +11,12 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
 import com.digitalasset.canton.ledger.participant.state.Update.{
   ContractInfo,
-  RepairTransactionAccepted,
+  RepairParticipantEventUpdate,
   TopologyTransactionEffective,
-  TransactionAccepted,
 }
 import com.digitalasset.canton.ledger.participant.state.{
   IndexingWatermark,
+  ParticipantEvent,
   Reassignment,
   ReassignmentInfo,
   RepairIndex,
@@ -51,6 +51,7 @@ import com.digitalasset.canton.platform.store.backend.{
   DbDto,
   LedgerEnd,
   PersistentEventType,
+  PersistentParticipantEventUpdateCategory,
   ScalatestEqualityHelpers,
 }
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
@@ -72,12 +73,8 @@ import com.digitalasset.canton.{HasExecutionContext, RepairCounter}
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{Ref, Time}
-import com.digitalasset.daml.lf.transaction.test.{
-  NodeIdTransactionBuilder,
-  TestNodeBuilder,
-  TransactionBuilder,
-}
-import com.digitalasset.daml.lf.transaction.{CommittedTransaction, GlobalKey}
+import com.digitalasset.daml.lf.transaction.GlobalKey
+import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.nonempty.NonEmpty
@@ -2804,27 +2801,15 @@ class ParallelIndexerSubscriptionSpec
     )
 
   def repairUpdate(recordTime: CantonTimestamp, repairCounter: RepairCounter): Update =
-    RepairTransactionAccepted(
-      transactionMeta = TransactionMeta(
-        ledgerEffectiveTime = Time.Timestamp.assertFromLong(2),
-        workflowId = None,
-        preparationTime = Time.Timestamp.assertFromLong(3),
-        submissionSeed = crypto.Hash.assertFromString(
-          "01cf85cfeb36d628ca2e6f583fa2331be029b6b28e877e1008fb3f862306c086"
-        ),
-        timeBoundaries = LedgerTimeBoundaries.unconstrained,
-        optUsedPackages = None,
-        optNodeSeeds = None,
-        optByKeyNodes = None,
-      ),
-      transactionInfo =
-        TransactionAccepted.TransactionInfo(CommittedTransaction(TransactionBuilder.Empty)),
+    RepairParticipantEventUpdate(
       updateId = TestUpdateId("15000"),
+      workflowId = None,
       synchronizerId = someSynchronizerId,
-      repairCounter = repairCounter,
       recordTime = recordTime,
-      contractInfos = Map.empty,
+      events = Seq(),
+      category = PersistentParticipantEventUpdateCategory.AcsImportTxStyle,
       traceContext = TraceContext.empty,
+      repairCounter = repairCounter,
     )
 
   def floatingUpdate(recordTime: CantonTimestamp): Update =
@@ -2886,7 +2871,7 @@ class ParallelIndexerSubscriptionSpec
             5L -> c5,
           )
         ),
-        offset(5) -> onPrReassignment(
+        offset(5) -> onlinePartyReplication(
           Map(
             5L -> c5,
             1L -> c1,
@@ -2938,7 +2923,7 @@ class ParallelIndexerSubscriptionSpec
         offset(2) -> repairTransaction(Map(1L -> c1, 2L -> c2)),
         offset(3) -> sequencedReassignment(Map(1L -> c1, 2L -> c2)),
         offset(4) -> repairReassignment(Map(1L -> c1, 2L -> c2)),
-        offset(5) -> onPrReassignment(Map(1L -> c1, 2L -> c2)),
+        offset(5) -> onlinePartyReplication(Map(1L -> c1, 2L -> c2)),
       )
     }
     updatesFixture.map(_._2.traceContext) shouldBe List.fill(5)(updateTraceContext)
@@ -3020,7 +3005,7 @@ class ParallelIndexerSubscriptionSpec
               6L -> c6,
             )
           ),
-          offset(5) -> onPrReassignment(
+          offset(5) -> onlinePartyReplication(
             Map(
               5L -> c5,
               1L -> c1,
@@ -3058,7 +3043,7 @@ class ParallelIndexerSubscriptionSpec
           16L -> c6,
         )
       ),
-      offset(5) -> onPrReassignment(
+      offset(5) -> onlinePartyReplication(
         Map(
           5L -> c5,
           1L -> c1,
@@ -3128,7 +3113,7 @@ class ParallelIndexerSubscriptionSpec
               6L -> c6,
             )
           ),
-          offset(5) -> onPrReassignment(
+          offset(5) -> onlinePartyReplication(
             Map(
               5L -> c5,
               1L -> c1,
@@ -3166,7 +3151,7 @@ class ParallelIndexerSubscriptionSpec
           10L -> c6,
         )
       ),
-      offset(5) -> onPrReassignment(
+      offset(5) -> onlinePartyReplication(
         Map(
           5L -> c5,
           1L -> c1,
@@ -3259,7 +3244,7 @@ class ParallelIndexerSubscriptionSpec
               9L -> c9,
             )
           ),
-          offset(5) -> onPrReassignment(
+          offset(5) -> onlinePartyReplication(
             Map(
               5L -> c5,
               1L -> c1,
@@ -3304,7 +3289,7 @@ class ParallelIndexerSubscriptionSpec
           19L -> c9,
         )
       ),
-      offset(5) -> onPrReassignment(
+      offset(5) -> onlinePartyReplication(
         Map(
           5L -> c5,
           1L -> c1,
@@ -3368,16 +3353,26 @@ class ParallelIndexerSubscriptionSpec
 
   def repairTransaction(contracts: Map[Long, ContractInstance])(implicit
       traceContext: TraceContext
-  ): Update.TransactionAccepted =
-    state.Update.RepairTransactionAccepted(
-      transactionMeta = someTransactionMeta,
-      transactionInfo = transactionInfo,
+  ): Update.RepairParticipantEventUpdate =
+    RepairParticipantEventUpdate(
       updateId = updateId,
+      workflowId = None,
       synchronizerId = someSynchronizerId,
       recordTime = someRecordTime1,
-      contractInfos = contractInfos(contracts),
-      repairCounter = RepairCounter.Genesis,
+      events = contracts.zipWithIndex.map { case ((internalContractId, contract), index) =>
+        ParticipantEvent.Added(
+          nodeId = index,
+          contractInstance = PersistedContractInstance(
+            internalContractId = internalContractId,
+            inst = contract.inst,
+          ),
+          representativePackageId = SameAsContractPackageId,
+          reassignmentCounter = 0L,
+        )
+      }.toSeq,
+      category = PersistentParticipantEventUpdateCategory.AcsImportTxStyle,
       traceContext = implicitly,
+      repairCounter = RepairCounter.Genesis,
     )
 
   def reassignmentBatch(contracts: Map[Long, ContractInstance]): Reassignment.Batch =
@@ -3424,28 +3419,50 @@ class ParallelIndexerSubscriptionSpec
 
   def repairReassignment(contracts: Map[Long, ContractInstance])(implicit
       traceContext: TraceContext
-  ): Update.ReassignmentAccepted =
-    Update.RepairReassignmentAccepted(
+  ): Update.RepairParticipantEventUpdate =
+    Update.RepairParticipantEventUpdate(
       workflowId = None,
       updateId = updateId,
-      reassignmentInfo = reassignmentInfo,
-      reassignment = reassignmentBatch(contracts),
+      events = reassignmentBatch(contracts).reassignments.forgetNE.flatMap {
+        case reassignment: Reassignment.Assign =>
+          Some(
+            ParticipantEvent.Added(
+              nodeId = reassignment.nodeId,
+              contractInstance = reassignment.persistedContractInstance,
+              representativePackageId = SameAsContractPackageId,
+              reassignmentCounter = reassignment.reassignmentCounter,
+            )
+          )
+        case _ => None
+      },
       recordTime = someRecordTime1,
-      synchronizerId = someSynchronizerId,
+      synchronizerId = reassignmentInfo.targetSynchronizer.value,
+      category = PersistentParticipantEventUpdateCategory.AcsImport,
       repairCounter = RepairCounter.Genesis,
       traceContext = implicitly,
     )
 
-  def onPrReassignment(contracts: Map[Long, ContractInstance])(implicit
+  def onlinePartyReplication(contracts: Map[Long, ContractInstance])(implicit
       traceContext: TraceContext
-  ): Update.ReassignmentAccepted =
-    Update.OnPRReassignmentAccepted(
+  ): Update.OnlinePartyReplicationParticipantEventUpdate =
+    Update.OnlinePartyReplicationParticipantEventUpdate(
       workflowId = None,
       updateId = updateId,
-      reassignmentInfo = reassignmentInfo,
-      reassignment = reassignmentBatch(contracts),
       recordTime = someRecordTime1,
       synchronizerId = someSynchronizerId,
+      events = reassignmentBatch(contracts).reassignments.forgetNE.flatMap {
+        case reassignment: Reassignment.Assign =>
+          Some(
+            ParticipantEvent.Added(
+              nodeId = reassignment.nodeId,
+              contractInstance = reassignment.persistedContractInstance,
+              representativePackageId = SameAsContractPackageId,
+              reassignmentCounter = reassignment.reassignmentCounter,
+            )
+          )
+        case _ => None
+      },
+      category = PersistentParticipantEventUpdateCategory.OnlinePartyReplication,
       watermark = IndexingWatermark.fromTimestamp(someRecordTime1),
       acsChangeFactory = TestAcsChangeFactory(),
       traceContext = implicitly,

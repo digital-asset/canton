@@ -9,7 +9,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
@@ -1989,7 +1989,7 @@ object AvailabilityModule {
 
   private def parseAvailabilityNetworkMessage(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       claimedOriginator: BftNodeId,
       message: v30.AvailabilityMessage,
       originalMessage: ByteString,
@@ -2031,7 +2031,7 @@ object AvailabilityModule {
 
   def parseNetworkMessage(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       protoSignedMessage: v30.SignedMessage,
   ): ParsingResult[Availability.UnverifiedProtocolMessage] =
     SignedMessage

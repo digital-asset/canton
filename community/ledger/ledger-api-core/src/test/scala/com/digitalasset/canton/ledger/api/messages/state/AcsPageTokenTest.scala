@@ -29,6 +29,7 @@ class AcsPageTokenTest extends AnyWordSpec with SizeLimitTestUtils {
     filtersByParty = Map("party" -> Filters(Nil)),
     filtersForAnyParty = None,
     verbose = false,
+    filtersByContractId = Seq.empty,
   )
   private val originalActiveAt = 100L
   private val originalRequest =
@@ -41,7 +42,7 @@ class AcsPageTokenTest extends AnyWordSpec with SizeLimitTestUtils {
     )
   private val participantId = Ref.ParticipantId.assertFromString("Ledger")
   private val originalContinuationToken =
-    AcsContinuationToken.activeContracts(42, AcsContinuationToken.emptyChecksum)
+    AcsContinuationToken.activeContracts(42, PageTokenUtils.emptyChecksum)
   private val originalToken = AcsPageToken.encode(
     originalRequest,
     originalContinuationToken,
@@ -217,7 +218,7 @@ class AcsPageTokenTest extends AnyWordSpec with SizeLimitTestUtils {
 
     "calculate the same checksum all the time" in {
       originalRequestChecksum should equal(
-        ByteString.copyFrom(Array[Byte](75, -45, -74, -123))
+        ByteString.copyFrom(Array[Byte](83, -40, -42, 16))
       )
     }
   }

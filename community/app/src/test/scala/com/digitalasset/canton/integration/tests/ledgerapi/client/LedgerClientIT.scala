@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.client
 
 import cats.data.OneAnd
-import com.daml.jwt.JwksUrl
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
@@ -13,7 +12,13 @@ import com.digitalasset.canton.ledger.client.configuration.{
   CommandClientConfiguration,
   LedgerClientConfiguration,
 }
-import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId}
+import com.digitalasset.canton.user.{
+  Audience,
+  IdentityProviderConfig,
+  IdentityProviderId,
+  Issuer,
+  JwksUrlLengthLimited,
+}
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.field_mask.FieldMask
 import io.grpc.ManagedChannel
@@ -78,16 +83,16 @@ final class LedgerClientIT extends CantonFixture {
       val config = IdentityProviderConfig(
         IdentityProviderId.Id(Ref.LedgerString.assertFromString("abcd")),
         isDeactivated = false,
-        JwksUrl.assertFromString("http://jwks.some.domain:9999/jwks"),
-        "SomeUser",
-        Some("SomeAudience"),
+        JwksUrlLengthLimited.tryCreate("http://jwks.some.domain:9999/jwks"),
+        Issuer.tryCreate("SomeUser"),
+        Some(Audience.tryCreate("SomeAudience")),
       )
 
       val updatedConfig = config.copy(
         isDeactivated = true,
-        jwksUrl = JwksUrl("http://someotherurl"),
-        issuer = "ANewIssuer",
-        audience = Some("UpdatedAudience"),
+        jwksUrl = JwksUrlLengthLimited.tryCreate("http://someotherurl"),
+        issuer = Issuer.tryCreate("ANewIssuer"),
+        audience = Some(Audience.tryCreate("UpdatedAudience")),
       ) // updating audience value does not appear to work
 
       "create an identity provider" in { implicit env =>

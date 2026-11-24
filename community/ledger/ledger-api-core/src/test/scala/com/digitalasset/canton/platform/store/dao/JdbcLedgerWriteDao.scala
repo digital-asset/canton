@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.platform.store.dao
 
+import com.daml.ledger.api.v2.state_service.GetHostedPartiesResponse
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.health.{HealthStatus, ReportsHealth}
 import com.digitalasset.canton.ledger.api.ParticipantId
+import com.digitalasset.canton.ledger.api.util.PageTokenUtils
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.TestAcsChangeFactory
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
@@ -16,6 +18,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
   TopologyTransactionEffective,
 }
 import com.digitalasset.canton.ledger.participant.state.index.{
+  IndexerHostedPartyFilter,
   IndexerKnownPartiesPage,
   IndexerPartyDetails,
 }
@@ -28,6 +31,7 @@ import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.config.{
   ActiveContractsServiceStreamsConfig,
+  HostedPartiesStreamsConfig,
   IndexServiceConfig,
   UpdatesStreamsConfig,
 }
@@ -40,6 +44,7 @@ import com.digitalasset.canton.platform.store.backend.{
 }
 import com.digitalasset.canton.platform.store.cache.{AchsStateCache, LedgerEndCache}
 import com.digitalasset.canton.platform.store.dao.events.*
+import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.{ContractInstance, TestUpdateId, UpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -48,7 +53,9 @@ import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.transaction.CreationTime.CreatedAt
 import com.digitalasset.daml.lf.transaction.{CommittedTransaction, Node}
 import io.opentelemetry.api.trace.Tracer
+import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.Scheduler
+import org.apache.pekko.stream.scaladsl.Source
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
@@ -60,12 +67,14 @@ private class JdbcLedgerWriteDao(
     metrics: LedgerApiServerMetrics,
     sequentialIndexer: SequentialWriteDao,
     participantId: Ref.ParticipantId,
+    stringInterning: StringInterning,
     readStorageBackend: ReadStorageBackend,
     parameterStorageBackend: ParameterStorageBackend,
     ledgerEndCache: LedgerEndCache,
     completionsPageSize: Int,
     activeContractsServiceStreamsConfig: ActiveContractsServiceStreamsConfig,
     updatesStreamsConfig: UpdatesStreamsConfig,
+    hostedPartiesStreamsConfig: HostedPartiesStreamsConfig,
     globalMaxEventIdQueries: Int,
     globalMaxEventPayloadQueries: Int,
     tracer: Tracer,
@@ -96,6 +105,9 @@ private class JdbcLedgerWriteDao(
     completionsPageSize = completionsPageSize,
     activeContractsServiceStreamsConfig = activeContractsServiceStreamsConfig,
     updatesStreamsConfig = updatesStreamsConfig,
+    hostedPartiesStreamsConfig = hostedPartiesStreamsConfig,
+    stringInterning = stringInterning,
+    participantId = participantId,
     globalMaxEventIdQueries = globalMaxEventIdQueries,
     globalMaxEventPayloadQueries = globalMaxEventPayloadQueries,
     tracer = tracer,
@@ -221,6 +233,17 @@ private class JdbcLedgerWriteDao(
       loggingContext: LoggingContextWithTrace
   ): Future[IndexerKnownPartiesPage] =
     readDao.listKnownParties(fromExcl, filterParty, maxResults, validAtEventSeqId)
+
+  override def hostedParties(
+      filter: IndexerHostedPartyFilter,
+      validAt: Offset,
+      fromExcl: Option[Party],
+      limit: Option[Int],
+      continuationChecksum: PageTokenUtils.Checksum,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[GetHostedPartiesResponse, NotUsed] =
+    readDao.hostedParties(filter, validAt, fromExcl, limit, continuationChecksum)
 
   /** Prunes the events and command completions tables.
     *

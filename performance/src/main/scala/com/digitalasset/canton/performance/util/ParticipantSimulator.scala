@@ -414,7 +414,7 @@ class ParticipantSimulator(
         managingNode.name,
         command,
         managingNode.config.clientAdminApi,
-        managingNode.config.adminApi.adminTokenConfig.fixedAdminToken,
+        managingNode.config.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
       )
       ._2
       .mapK(FutureUnlessShutdown.outcomeK)

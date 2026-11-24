@@ -454,7 +454,11 @@ abstract class SequencerWithTrafficControlApiTestBase
       sequencer: Sequencer,
   ): EitherT[FutureUnlessShutdown, TrafficControlError, Option[TrafficState]] =
     sequencer
-      .trafficStatus(Seq(member), TimestampSelector.LastUpdatePerMember)
+      .trafficStatus(
+        Seq(member),
+        TimestampSelector.LastUpdatePerMember,
+        includeOnboardingMembers = false,
+      )
       .map(_.trafficStates.get(member))
 
   "rate limiting sequencer" should {
@@ -479,11 +483,19 @@ abstract class SequencerWithTrafficControlApiTestBase
             _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFail("Send async")
             _ <- readForMembers(List(sender), sequencer)
             allMemberStates <- sequencer
-              .trafficStatus(Seq.empty, TimestampSelector.LastUpdatePerMember)
+              .trafficStatus(
+                Seq.empty,
+                TimestampSelector.LastUpdatePerMember,
+                includeOnboardingMembers = false,
+              )
               .valueOrFail("trafficStatus failure")
 
             filteredMemberStates <- sequencer
-              .trafficStatus(Seq(p11), TimestampSelector.LastUpdatePerMember)
+              .trafficStatus(
+                Seq(p11),
+                TimestampSelector.LastUpdatePerMember,
+                includeOnboardingMembers = false,
+              )
               .valueOrFail("trafficStatus failure")
 
           } yield {

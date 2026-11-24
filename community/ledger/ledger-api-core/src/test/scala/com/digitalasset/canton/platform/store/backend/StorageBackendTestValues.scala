@@ -23,6 +23,7 @@ import com.digitalasset.canton.protocol.{ReassignmentId, TestUpdateId, UpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{
@@ -116,7 +117,12 @@ private[store] object StorageBackendTestValues extends OptionValues {
   val someExternalTransactionHashBinary: Array[Byte] =
     someExternalTransactionHashBinaryByteString.toByteArray
   val reassignmentId: Array[Byte] =
-    ReassignmentId.create("0012345678").toOption.get.toBytes.toByteArray
+    ReassignmentId
+      .fromProtoPrimitive(str = "0012345678", pvv = ProtocolVersionValidation.AlwaysValidation)
+      .toOption
+      .get
+      .toBytes
+      .toByteArray
 
   def dtosCreate(
       // update related columns

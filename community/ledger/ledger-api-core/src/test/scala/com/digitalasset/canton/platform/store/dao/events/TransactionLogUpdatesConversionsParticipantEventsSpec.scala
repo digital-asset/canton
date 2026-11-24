@@ -30,10 +30,11 @@ import com.digitalasset.canton.platform.{
   InternalUpdateFormat,
   TemplatePartiesFilter,
 }
-import com.digitalasset.canton.protocol.{LfContractId, TestUpdateId}
+import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId, TestUpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfValue}
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
@@ -43,13 +44,13 @@ import com.digitalasset.daml.lf.transaction.{
   Node,
   SerializationVersion,
 }
-import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.Future
 
 class TransactionLogUpdatesConversionsParticipantEventsSpec
-    extends AnyFlatSpec
+    extends AsyncFlatSpec
     with Matchers
     with BaseTest
     with HasExecutionContext {
@@ -242,7 +243,7 @@ object TransactionLogUpdatesConversionsParticipantEventsSpec {
     )
 
   private def eventFormat(parties: Option[Set[Ref.Party]]) = InternalEventFormat(
-    templatePartiesFilter = TemplatePartiesFilter(
+    eventFilter = TemplatePartiesFilter(
       relation = Map.empty,
       templateWildcardParties = parties,
     ),
@@ -382,7 +383,12 @@ object TransactionLogUpdatesConversionsParticipantEventsSpec {
             packageName = packageName,
             source = synchronizerId.toProtoPrimitive,
             target = synchronizerId.toProtoPrimitive,
-            reassignmentId = "",
+            reassignmentId = ReassignmentId(
+              source = Source(synchronizerId),
+              target = Target(synchronizerId),
+              unassignmentTs = CantonTimestamp(recordTime),
+              contractIdCounters = Map(),
+            ).toProtoPrimitive,
             reassignmentCounter = 0L,
             witnessParties = Seq(alice.toString),
             assignmentExclusivity = None,

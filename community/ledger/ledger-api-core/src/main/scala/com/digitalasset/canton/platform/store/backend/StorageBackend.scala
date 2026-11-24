@@ -725,6 +725,7 @@ object EventStorageBackend {
 
     def templateId: FullIdentifier
     def witnessParties: Set[String]
+    def contractId: ContractId
   }
 
   sealed trait RawAcsDeltaEvent extends RawEvent
@@ -863,6 +864,8 @@ object EventStorageBackend {
           }
         )
         .toSet
+
+    override def contractId: ContractId = fatCreatedEventProperties.fatContract.contractId
   }
 
   final case class FatCreatedEventProperties(

@@ -154,6 +154,10 @@ import com.daml.ledger.api.v2.state_service.{
   GetActiveContractsResponse,
   GetConnectedSynchronizersRequest,
   GetConnectedSynchronizersResponse,
+  GetHostedPartiesPageRequest,
+  GetHostedPartiesPageResponse,
+  GetHostedPartiesRequest,
+  GetHostedPartiesResponse,
   GetLatestPrunedOffsetsRequest,
   GetLatestPrunedOffsetsResponse,
   GetLedgerEndRequest,
@@ -647,6 +651,21 @@ private final class LedgerServicesJson(
           Some(request.synchronizerId),
         ),
       )
+
+    override def getHostedParties(
+        request: GetHostedPartiesRequest,
+        responseObserver: StreamObserver[GetHostedPartiesResponse],
+    ): Unit = wsCall(
+      JsStateService.hostedPartiesEndpoint,
+      request,
+      responseObserver,
+      Future.successful(_: GetHostedPartiesResponse),
+    )
+
+    override def getHostedPartiesPage(
+        request: GetHostedPartiesPageRequest
+    ): Future[GetHostedPartiesPageResponse] =
+      clientCall(JsStateService.hostedPartiesPageEndpoint, request)
   }
 
   def partyManagement: PartyManagementService = new PartyManagementService {

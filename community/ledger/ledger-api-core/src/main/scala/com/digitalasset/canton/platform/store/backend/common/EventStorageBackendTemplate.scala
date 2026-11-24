@@ -23,6 +23,7 @@ import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.Ac
 import com.digitalasset.canton.platform.store.backend.PersistentParticipantEventUpdateCategory.{
   AcsImport,
   AcsImportTxStyle,
+  OnlinePartyReplication,
   Purge,
   PurgeTxStyle,
 }
@@ -46,7 +47,10 @@ import com.digitalasset.canton.platform.store.backend.{
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.dao.LedgerDaoUpdateReader.DeactivatedContractInfo
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPageQuery
-import com.digitalasset.canton.platform.store.dao.events.OffsetRange
+import com.digitalasset.canton.platform.store.dao.events.{
+  DecomposedTemplatePartyFilter,
+  OffsetRange,
+}
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{ContractId, Party}
 import com.digitalasset.canton.protocol.ReassignmentId
@@ -170,7 +174,7 @@ object EventStorageBackendTemplate {
     val reassignmentId: RowDef[String] =
       column(
         "reassignment_id",
-        byteArray(_).map(ReassignmentId.assertFromBytes(_).toProtoPrimitive),
+        byteArray(_).map(ReassignmentId.fromBytes(_).toProtoPrimitive),
       )
 
     def submitter(stringInterning: StringInterning): RowDef[Option[String]] =
@@ -1715,8 +1719,7 @@ abstract class EventStorageBackendTemplate(
   ): IdPageQuery =
     UpdateStreamingQueries.fetchEventIds(
       tableName = "lapi_events_party_to_participant",
-      witnessO = party,
-      templateIdO = None,
+      decomposedFilter = DecomposedTemplatePartyFilter(party = party, templateId = None),
       stringInterning = stringInterning,
       hasFirstPerSequentialId = false,
     )
@@ -1737,8 +1740,7 @@ abstract class EventStorageBackendTemplate(
   override def fetchDynamicSynchronizerParametersEventIds: IdPageQuery =
     UpdateStreamingQueries.fetchEventIds(
       tableName = "lapi_events_generic_topology_events",
-      witnessO = None,
-      templateIdO = None,
+      decomposedFilter = DecomposedTemplatePartyFilter(party = None, templateId = None),
       stringInterning = stringInterning,
       hasFirstPerSequentialId = false,
     )
@@ -1841,6 +1843,11 @@ abstract class EventStorageBackendTemplate(
               stringInterning = stringInterning,
               allQueryingPartiesO = requestingPartiesForReassignment,
             ),
+            (PersistentEventType.Add, Some(OnlinePartyReplication)) -> RowDefs
+              .rawThinAddEventParser(
+                stringInterning = stringInterning,
+                allQueryingPartiesO = requestingPartiesForReassignment,
+              ),
           )
           .queryMultipleRows(
             fetchByEventSequentialIds(
@@ -1868,6 +1875,11 @@ abstract class EventStorageBackendTemplate(
               stringInterning = stringInterning,
               allQueryingPartiesO = requestingPartiesForReassignment,
             ),
+            (PersistentEventType.Remove, Some(OnlinePartyReplication)) -> RowDefs
+              .rawRemoveEventParser(
+                stringInterning = stringInterning,
+                allQueryingPartiesO = requestingPartiesForReassignment,
+              ),
           )
           .queryMultipleRows(
             fetchByEventSequentialIds(
@@ -1904,6 +1916,11 @@ abstract class EventStorageBackendTemplate(
               stringInterning = stringInterning,
               allQueryingPartiesO = requestingPartiesForReassignment,
             ),
+            (PersistentEventType.Add, Some(OnlinePartyReplication)) -> RowDefs
+              .rawThinAddEventParser(
+                stringInterning = stringInterning,
+                allQueryingPartiesO = requestingPartiesForReassignment,
+              ),
           )
           .queryMultipleRows(
             fetchByEventSequentialIds(
@@ -1931,6 +1948,11 @@ abstract class EventStorageBackendTemplate(
               stringInterning = stringInterning,
               allQueryingPartiesO = requestingPartiesForReassignment,
             ),
+            (PersistentEventType.Remove, Some(OnlinePartyReplication)) -> RowDefs
+              .rawRemoveEventParser(
+                stringInterning = stringInterning,
+                allQueryingPartiesO = requestingPartiesForReassignment,
+              ),
           )
           .queryMultipleRows(
             fetchByEventSequentialIds(

@@ -127,6 +127,9 @@ object HashPurpose {
   val _LfLedgerApiReassignmentChangeId =
     HashPurpose(73, "Daml-LF Hash.Purpose.LedgerApiReassignmentChangeId")
   val _LfAssignmentReassignmentId = HashPurpose(74, "Daml-LF Hash.Purpose.AssignmentReassignmentId")
+  val SequencerChannelSessionKey = HashPurpose(75, "SequencerChannelSessionKey")
+  val SequencerChannelSessionKeyContext = HashPurpose(76, "SequencerChannelSessionKeyContext")
+  val HostedPartiesToken = HashPurpose(77, "HostedPartiesToken")
 
   // Do not use for anything other than testing or "mock" hashes
   // Is not in a testing-only module because it used in traffic cost estimation that requires mock hashes

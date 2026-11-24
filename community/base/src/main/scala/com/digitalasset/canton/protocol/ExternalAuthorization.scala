@@ -69,9 +69,10 @@ object ExternalAuthorization
   override def name: String = "ExternalAuthorization"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(protoCompanion =
-      v32.ExternalAuthorization
-    )(supportedProtoVersionPVV(_)(fromProtoV32), _.toProtoV32)
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(v32.ExternalAuthorization)(
+      supportedProtoVersionPVV(_)(fromProtoV32),
+      _.toProtoV32,
+    )
   )
 
   private def fromProtoV30(

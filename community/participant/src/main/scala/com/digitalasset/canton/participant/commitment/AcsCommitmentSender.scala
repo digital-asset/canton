@@ -544,7 +544,6 @@ class AcsCommitmentSenderImpl(
     for {
       activeCounterparticipants <- EitherT.right(
         cryptoApi.ips.currentSnapshotApproximation.flatMap(
-          // A retained trust certificate alone does not authorize receiving commitments.
           _.activeParticipants(counterparticipants).map(_.toSet)
         )
       )

@@ -49,6 +49,7 @@ class V2_2(override val testDars: TestDars) extends AvailableTests {
       new PartyManagementServiceObjectMetaIT,
       new PartyManagementServiceUpdateRpcIT,
       new SemanticTests(testDars),
+      new StateServiceHostedPartiesIT,
       new StateServiceIT,
       new TimeServiceIT,
       new TransactionServiceArgumentsIT(testDars),

@@ -8,7 +8,7 @@ import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters}
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
-import com.digitalasset.canton.ledger.api.messages.state.AcsContinuationToken.Checksum
+import com.digitalasset.canton.ledger.api.util.PageTokenUtils.Checksum
 import com.digitalasset.canton.ledger.api.util.{PageTokenUtils, UpdateFormatHashUtils}
 import com.digitalasset.canton.ledger.api.validation.{LedgerApiSizeLimitsConfig, SizeLimitTestUtils}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
@@ -25,6 +25,7 @@ class AcsContinuationTokenTest extends AnyWordSpec with SizeLimitTestUtils {
     filtersByParty = Map("party" -> Filters(Nil)),
     filtersForAnyParty = None,
     verbose = false,
+    filtersByContractId = Seq.empty,
   )
   private val originalRequest =
     GetActiveContractsRequest(125, Some(eventFormat), None, includeIncompleteReassignments = false)
@@ -137,12 +138,14 @@ class AcsContinuationTokenTest extends AnyWordSpec with SizeLimitTestUtils {
           HashMap("party1" -> Filters(Nil), "party2" -> Filters(Nil), "party3" -> Filters(Nil)),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
       val eventFormatTreeMap = EventFormat(
         filtersByParty =
           TreeMap("party1" -> Filters(Nil), "party2" -> Filters(Nil), "party3" -> Filters(Nil)),
         filtersForAnyParty = None,
         verbose = false,
+        filtersByContractId = Seq.empty,
       )
       val originalRequest = GetActiveContractsRequest(
         125,
@@ -180,7 +183,7 @@ class AcsContinuationTokenTest extends AnyWordSpec with SizeLimitTestUtils {
 
     "calculate the same checksum all the time" in {
       originalRequestChecksum should equal(
-        Checksum(ByteString.copyFrom(Array[Byte](111, -68, -89, 79)))
+        Checksum(ByteString.copyFrom(Array[Byte](-124, 115, 61, 63)))
       )
     }
   }

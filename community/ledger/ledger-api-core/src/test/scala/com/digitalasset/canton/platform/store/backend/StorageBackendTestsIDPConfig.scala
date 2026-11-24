@@ -4,7 +4,13 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.daml.jwt.JwksUrl
-import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId}
+import com.digitalasset.canton.user.{
+  Audience,
+  IdentityProviderConfig,
+  IdentityProviderId,
+  Issuer,
+  JwksUrlLengthLimited,
+}
 import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -60,7 +66,7 @@ private[backend] trait StorageBackendTestsIDPConfig
     executeSql(tested.updateJwksUrl(cfg.identityProviderId, newJwksUrl)) shouldBe true
     executeSql(
       tested.getIdentityProviderConfig(cfg.identityProviderId)
-    ).value.jwksUrl shouldBe newJwksUrl
+    ).value.jwksUrl.toJwksUrl shouldBe newJwksUrl
   }
 
   it should "update existing identity provider config's issuer attribute" in {
@@ -76,12 +82,14 @@ private[backend] trait StorageBackendTestsIDPConfig
   it should "check if identity provider config's issuer exists" in {
     val cfg = config()
     executeSql(
-      tested.identityProviderConfigByIssuerExists(cfg.identityProviderId, cfg.issuer)
+      tested.identityProviderConfigByIssuerExists(cfg.identityProviderId, cfg.issuer.unwrap)
     ) shouldBe false
     executeSql(tested.createIdentityProviderConfig(cfg))
-    executeSql(tested.identityProviderConfigByIssuerExists(randomId(), cfg.issuer)) shouldBe true
     executeSql(
-      tested.identityProviderConfigByIssuerExists(cfg.identityProviderId, cfg.issuer)
+      tested.identityProviderConfigByIssuerExists(randomId(), cfg.issuer.unwrap)
+    ) shouldBe true
+    executeSql(
+      tested.identityProviderConfigByIssuerExists(cfg.identityProviderId, cfg.issuer.unwrap)
     ) shouldBe false
   }
 
@@ -95,7 +103,7 @@ private[backend] trait StorageBackendTestsIDPConfig
   it should "return success for no-op issuer update" in {
     val cfg = config()
     executeSql(tested.createIdentityProviderConfig(cfg))
-    executeSql(tested.updateIssuer(cfg.identityProviderId, cfg.issuer)) shouldBe true
+    executeSql(tested.updateIssuer(cfg.identityProviderId, cfg.issuer.unwrap)) shouldBe true
   }
 
   it should "fail to update issuer for non existing identity provider config" in {
@@ -120,7 +128,7 @@ private[backend] trait StorageBackendTestsIDPConfig
   it should "return success for no-op JwksUrl update" in {
     val cfg = config()
     executeSql(tested.createIdentityProviderConfig(cfg))
-    executeSql(tested.updateJwksUrl(cfg.identityProviderId, cfg.jwksUrl)) shouldBe true
+    executeSql(tested.updateJwksUrl(cfg.identityProviderId, cfg.jwksUrl.toJwksUrl)) shouldBe true
   }
 
   it should "return success for no-op isDeactivated update" in {
@@ -135,7 +143,7 @@ private[backend] trait StorageBackendTestsIDPConfig
     executeSql(tested.createIdentityProviderConfig(cfg1))
     executeSql(tested.createIdentityProviderConfig(cfg2))
     assertThrows[SQLException] {
-      executeSql(tested.updateIssuer(cfg1.identityProviderId, cfg2.issuer))
+      executeSql(tested.updateIssuer(cfg1.identityProviderId, cfg2.issuer.unwrap))
     }
   }
 
@@ -176,9 +184,9 @@ private[backend] trait StorageBackendTestsIDPConfig
     IdentityProviderConfig(
       identityProviderId = randomId(),
       isDeactivated = false,
-      jwksUrl = JwksUrl.assertFromString("http://example.com/jwks.json"),
-      issuer = UUID.randomUUID().toString,
-      audience = Some(UUID.randomUUID().toString),
+      jwksUrl = JwksUrlLengthLimited.tryCreate("http://example.com/jwks.json"),
+      issuer = Issuer.tryCreate(UUID.randomUUID().toString),
+      audience = Some(Audience.tryCreate(UUID.randomUUID().toString)),
     )
 
   private def randomId() =

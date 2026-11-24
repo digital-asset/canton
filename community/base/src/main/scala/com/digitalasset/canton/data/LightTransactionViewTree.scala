@@ -158,7 +158,7 @@ object LightTransactionViewTree
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.LightTransactionViewTree)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(v30.LightTransactionViewTree)(
       supportedProtoVersionPVV(_)((pvv, context, proto) => fromProtoV30(pvv, context)(proto)),
       _.toProtoV30,
     ),

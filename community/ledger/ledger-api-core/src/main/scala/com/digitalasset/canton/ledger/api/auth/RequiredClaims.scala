@@ -4,7 +4,7 @@
 package com.digitalasset.canton.ledger.api.auth
 
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, TransactionFormat, UpdateFormat}
-import com.digitalasset.canton.auth.RequiredClaim
+import com.digitalasset.canton.auth.{ClaimApiArea, RequiredClaim}
 import scalapb.lenses.Lens
 
 object RequiredClaims {
@@ -16,10 +16,12 @@ object RequiredClaims {
       readAs: Set[String],
       userIdL: Lens[Req, String],
   ): List[RequiredClaim[Req]] =
-    RequiredClaim.MatchUserId(userIdL)
+    RequiredClaim.ApiArea[Req](ClaimApiArea.ledgerAct.area)
+      :: RequiredClaim.MatchUserId(userIdL)
       :: actAs.view.map(RequiredClaim.ActAs[Req]).toList
       ::: readAs.view.map(RequiredClaim.ReadAs[Req]).toList
 
+  /** Does not include any ApiArea claims, since those differ in between call sites. */
   def executionClaims[Req](
       executeAs: Set[String],
       readAs: Set[String],
@@ -54,16 +56,23 @@ object RequiredClaims {
       updateFormat.includeTransactionsAndReassignments.toList
         .flatMap(transactionFormatClaims[Req]),
     ).flatten.distinct match {
-      case Nil => List(RequiredClaim.Public[Req]())
+      case Nil => List()
       case claims => claims
     }
 
-  def idpAdminClaimsAndMatchingRequestIdpId[Req](
+  def usersWriteAndMatchingRequestIdpId[Req](
       identityProviderIdL: Lens[Req, String],
       mustBeParticipantAdmin: Boolean = false,
   ): List[RequiredClaim[Req]] = RequiredClaims(
     if (mustBeParticipantAdmin) RequiredClaim.Admin[Req]()
-    else RequiredClaim.AdminOrIdpAdmin[Req](),
+    else RequiredClaim.ApiArea[Req](ClaimApiArea.usersWrite.area),
+    RequiredClaim.MatchIdentityProviderId(identityProviderIdL),
+  )
+
+  def usersReadAndMatchingRequestIdpId[Req](
+      identityProviderIdL: Lens[Req, String]
+  ): List[RequiredClaim[Req]] = RequiredClaims(
+    RequiredClaim.ApiArea[Req](ClaimApiArea.usersRead.area),
     RequiredClaim.MatchIdentityProviderId(identityProviderIdL),
   )
 }

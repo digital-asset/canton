@@ -11,18 +11,25 @@ import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
-import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.{
+  SynchronizerNodes,
+  UpgradeDataFiles,
+}
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
-import com.digitalasset.canton.topology.store.TimeQuery
 import com.digitalasset.canton.topology.store.db.DbTopologyStore
+import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TimeQuery}
 import com.digitalasset.canton.topology.transaction.{LsuAnnouncement, TopologyMapping}
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, TopologyManagerError}
+import com.digitalasset.canton.util.GrpcStreamingUtils
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
+import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
+
+import scala.util.Using
 
 /*
  * This test is used to test topology related aspects of LSU.
@@ -47,7 +54,14 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
 
   override def configTransforms: Seq[ConfigTransform] =
     super.configTransforms ++ List(
-      ConfigTransforms.disableAutoInit(Set("sequencer3", "mediator3"))
+      ConfigTransforms.disableAutoInit(Set("sequencer3", "mediator3")),
+      // Import the deliberately inconsistent snapshot without replay rejecting it first.
+      ConfigTransforms.updateSequencerConfig("sequencer3")(
+        _.focus(_.topology.validateInitialTopologySnapshot)
+          .replace(false)
+          .focus(_.topology.checkInitialTopologySnapshotConsistency)
+          .replace(true)
+      ),
     )
 
   override lazy val environmentDefinition: EnvironmentDefinition =
@@ -221,7 +235,7 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
       val currentPsid =
         env.daId.copy(protocolVersion = ProtocolVersion.dev, serial = NonNegativeInt.one)
 
-      val badFixture = Fixture(
+      val fixture = Fixture(
         currentPsid = currentPsid,
         upgradeTime = upgradeTime.plusSeconds(3600),
         oldSynchronizerNodes = SynchronizerNodes(Seq(sequencer2), Seq(mediator2)),
@@ -230,15 +244,66 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
         oldSynchronizerOwners = Set[InstanceReference](sequencer2, mediator2),
         newPV = ProtocolVersion.dev,
         newSerial = currentPsid.serial.increment.value.toNonNegative,
-        overridePsid = Some(currentPsid.copy(serial = NonNegativeInt.tryCreate(3))),
       )
 
-      // Attempt an LSU upgrade with a wrong psid (::dev-2), which is not the one announced (::dev-3).
+      // Announce the actual successor so mandatory LSU validation passes and does not mask
+      //  the snapshot consistency error.
+      fixture.oldSynchronizerOwners.foreach(
+        _.topology.lsu.announcement.propose(fixture.newPsid, fixture.upgradeTime)
+      )
+      eventually() {
+        sequencer2.topology.lsu.announcement
+          .list()
+          .map(_.item.successorSynchronizerId)
+          .toSet shouldBe
+          Set(fixture.newPsid.opaque)
+      }
+
+      // Export a normal migration package, then corrupt only its topology snapshot.
+      //  The identity and keys remain valid for initializing sequencer3 as sequencer2's successor.
+      val exportDirectory = exportNodesData(fixture.oldSynchronizerNodes, fixture.newPsid)
+      val genesisStateFile =
+        UpgradeDataFiles.from(sequencer2.name, exportDirectory).genesisStateFile
+      val snapshot = Using.resource(genesisStateFile.newInputStream)(input =>
+        GrpcStreamingUtils
+          .parseDelimitedFromTrusted(input, StoredTopologyTransaction)
+          .valueOrFail("deserialize successor topology snapshot")
+      )
+      // Preserve the matching announcement, but add an effective proposal with the same serial
+      //  as its fully authorized transaction to violate snapshot consistency.
+      val announcement = snapshot
+        .flatMap(_.selectMapping[LsuAnnouncement])
+        .find(_.validUntil.isEmpty)
+        .value
+      announcement.mapping.successorSynchronizerId shouldBe fixture.newPsid.opaque
+      // Insert beside the original to preserve snapshot timestamp ordering. A proposal must have
+      //  a higher serial than the fully authorized mapping, so this copy is intentionally invalid.
+      val inconsistentSnapshot = snapshot.flatMap { tx =>
+        if (tx == announcement)
+          Seq(tx, tx.focus(_.transaction.isProposal).replace(true))
+        else Seq(tx)
+      }
+      // Replace the exported file that migrateSequencer will import.
+      Using.resource(genesisStateFile.newOutputStream) { output =>
+        inconsistentSnapshot.foreach(
+          _.writeDelimitedTo(fixture.newPV, output).valueOrFail("serialize inconsistent snapshot")
+        )
+      }
+
+      // Check the specific consistency violation, not just any initialization failure.
       loggerFactory.assertThrowsAndLogs[CommandFailure](
-        performSynchronizerNodesLsu(badFixture),
+        migrateSequencer(
+          sequencer3,
+          fixture.newStaticSynchronizerParameters,
+          exportDirectory,
+          oldNodeName = sequencer2.name,
+          synchronizerId = currentPsid.logical,
+        ),
         log => {
           log.shouldBeCantonErrorCode(TopologyManagerError.InconsistentTopologySnapshot)
-          log.message should include("not matching the announced upgrade successor")
+          log.message should include(
+            "effective proposals with serial less than or equal to the highest fully authorized transaction"
+          )
         },
       )
     }

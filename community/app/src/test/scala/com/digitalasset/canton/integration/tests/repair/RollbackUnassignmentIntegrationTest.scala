@@ -3,12 +3,15 @@
 
 package com.digitalasset.canton.integration.tests.repair
 
+import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.{
   AssignedWrapper,
   UnassignedWrapper,
 }
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.console.{CommandFailure, FeatureFlag}
+import com.digitalasset.canton.http.json.tests.upgrades.v1.java.foo.Foo as FooV1
+import com.digitalasset.canton.http.json.tests.upgrades.v2.java.foo.Foo as FooV2
 import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.EntitySyntax
@@ -21,6 +24,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.participant.store.ReassignmentStore.ReassignmentCompleted
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
 import com.digitalasset.canton.protocol.ReassignmentId
+import com.digitalasset.canton.version.ProtocolVersion
 
 sealed trait RollbackUnassignmentIntegrationTest
     extends CommunityIntegrationTest
@@ -39,8 +43,10 @@ sealed trait RollbackUnassignmentIntegrationTest
         Seq(participant1, participant2).foreach { p =>
           p.synchronizers.connect_local(sequencer1, alias = daName)
           p.synchronizers.connect_local(sequencer2, alias = acmeName)
-          p.dars.upload(CantonExamplesPath, synchronizerId = daId)
-          p.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
+          Seq(CantonExamplesPath, FooV1Path, FooV2Path).foreach { path =>
+            p.dars.upload(path, synchronizerId = daId)
+            p.dars.upload(path, synchronizerId = acmeId)
+          }
         }
 
         Seq(daName, acmeName).foreach { alias =>
@@ -93,6 +99,7 @@ sealed trait RollbackUnassignmentIntegrationTest
 
     participant1.synchronizers.disconnect_all()
     participant2.synchronizers.disconnect_all()
+
     participant1.repair.rollback_unassignment(reassignmentId, acmeId, daId)
     participant2.repair.rollback_unassignment(reassignmentId, acmeId, daId)
 
@@ -156,6 +163,84 @@ sealed trait RollbackUnassignmentIntegrationTest
 
     lookup.isLeft shouldBe true
     lookup.left.value shouldBe a[ReassignmentCompleted]
+  }
+
+  "Can restore representative package" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+    implicit env =>
+      import env.*
+
+      val alice = aliceS.toPartyId(participant1)
+      val bob = bobS.toPartyId(participant2)
+
+      val cid = createFooV1Contract(participant1, alice, bob, synchronizerId = Some(acmeId)).toLf
+
+      def rollback(sourceValidationPackageId: LfPackageId): (AssignedWrapper, AssignedWrapper) = {
+
+        val ledgerEnd = participant1.ledger_api.state.end()
+
+        val reassignmentId1 = participant1.ledger_api.commands
+          .submit_unassign(
+            alice,
+            Seq(cid),
+            source = acmeId,
+            target = daId,
+            overrideSourceValidationPackageIds = Map(cid -> sourceValidationPackageId),
+          )
+          .reassignmentId
+
+        participant1.synchronizers.disconnect_all()
+        participant2.synchronizers.disconnect_all()
+
+        participant1.repair.rollback_unassignment(reassignmentId1, acmeId, daId)
+        participant2.repair.rollback_unassignment(reassignmentId1, acmeId, daId)
+
+        participant1.synchronizers.reconnect_all()
+        participant2.synchronizers.reconnect_all()
+
+        val updates = participant1.ledger_api.updates.reassignments(
+          partyIds = Set(alice),
+          completeAfter = 4,
+          beginOffsetExclusive = ledgerEnd,
+        )
+
+        val (acmeAssigned, daAssigned) = updates.collect { case assigned: AssignedWrapper =>
+          assigned
+        } match {
+          case Seq(a1, a2) => (a1, a2)
+          case other => fail(s"Expected 2 assigned events but got: $other")
+        }
+
+        (acmeAssigned, daAssigned)
+      }
+
+      def lookupRepresentativePackage(): String =
+        participant1.ledger_api.state.acs
+          .find_generic(alice, _.contractId == cid.coid)
+          .event
+          .representativePackageId
+
+      def test(expectedPackageId: String, clue: String): Unit =
+        withClue(clue) {
+
+          val (acmeAssigned, daAssigned) = rollback(expectedPackageId)
+
+          // The assigned target package will always be V2 as that is the highest common version
+          acmeAssigned.events.loneElement.getCreatedEvent.representativePackageId shouldBe FooV2.PACKAGE_ID
+
+          daAssigned.events.loneElement.getCreatedEvent.representativePackageId shouldBe expectedPackageId
+
+          lookupRepresentativePackage() shouldBe expectedPackageId
+        }
+
+      // Initially the representative package is V1
+      lookupRepresentativePackage() shouldBe FooV1.PACKAGE_ID
+
+      // The representative package should remain as V1 after the rollback
+      test(FooV1.PACKAGE_ID, "Source package V1")
+
+      // The representative package should be V2 after the rollback
+      test(FooV2.PACKAGE_ID, "Source package V2")
+
   }
 
   "cannot rollback an unknown reassignment" in { implicit env =>

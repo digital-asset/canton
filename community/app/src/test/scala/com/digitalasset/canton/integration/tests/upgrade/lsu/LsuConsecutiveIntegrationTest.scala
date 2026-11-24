@@ -143,6 +143,8 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
           environment.clock.now,
           logger,
         )
+        // The second LSU has to transfer this purchase, which is made on the first successor
+        purchaseTrafficForUnregisteredMember(fixture.newSynchronizerNodes.sequencers.loneElement)
 
         IouSyntax.createIou(participant2)(bank, alice).discard
       }

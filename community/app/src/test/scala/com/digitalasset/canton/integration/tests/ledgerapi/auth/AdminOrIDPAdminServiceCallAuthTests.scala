@@ -128,7 +128,7 @@ trait AdminOrIDPAdminServiceCallAuthTests
       implicit env =>
         import env.*
         loggerFactory.suppress(AuthInterceptorSuppressionRule) {
-          expectPermissionDenied {
+          expectUnauthenticated {
             for {
               idpConfig <- createConfig(canBeAnAdmin)
               (_, context) <- createUserByAdmin(

@@ -1,0 +1,38 @@
+name: Test Scala 3
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  test_scala3:
+    name: Test Scala 3
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      EXECUTOR_JVM_HEAP_SIZE: 4500M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Restore Precompiled Classes and sbt caches
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+
+      - name: Run Scala 3 tests
+        uses: ./.github/actions/sbt/execute_sbt_command
+        with:
+          cmd: '++3.3 wartremover-extension/test'
+          execution_context_size: '4'
+          timeout: 25m

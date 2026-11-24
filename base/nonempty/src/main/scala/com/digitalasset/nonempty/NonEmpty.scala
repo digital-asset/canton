@@ -263,6 +263,8 @@ object NonEmptyCollInstances {
 
     def minBy1[B](f: A => B)(implicit ev: Ordering[B]): A = (self: ESelf).minBy(f)
     def maxBy1[B](f: A => B)(implicit ev: Ordering[B]): A = (self: ESelf).maxBy(f)
+    def unzip[A1, A2](implicit asPair: A => (A1, A2)) =
+      NonEmptyColl.Instance.subst[Lambda[`f[_]` => (f[CC[A1]], f[CC[A2]])]]((self: ESelf).unzip)
   }
 }
 

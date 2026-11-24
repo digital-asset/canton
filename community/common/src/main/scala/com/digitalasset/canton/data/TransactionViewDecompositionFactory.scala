@@ -40,16 +40,6 @@ case object TransactionViewDecompositionFactory {
     val message: String = s"Number of subviews for a transaction exceeded $limit"
   }
 
-  /** @param depth
-    *   the actual parse depth of the transaction view
-    * @param limit
-    *   the maximum allowed parse depth for a transaction view
-    */
-  final case class TransactionTreeDepthLimitExceeded(depth: Int, limit: Int)
-      extends TransactionViewLimitExceeded {
-    val message: String = s"The parse depth of the transaction view exceeded $limit"
-  }
-
   object RollbackState {
     val empty: RollbackState = RollbackState(0)
   }

@@ -519,6 +519,7 @@ final class ContractKeysIT(testDars: TestDars) extends LedgerTestSuite {
                 ),
                 filtersForAnyParty = None,
                 verbose = false,
+                filtersByContractId = Seq.empty,
               )
             ),
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

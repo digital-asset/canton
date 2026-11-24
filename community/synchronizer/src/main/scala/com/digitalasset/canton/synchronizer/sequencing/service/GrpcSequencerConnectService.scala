@@ -314,7 +314,7 @@ class GrpcSequencerConnectService(
             SignedTopologyTransaction.fromProtoV30(
               pvv,
               TopologyTransactionDeserializationContext(
-                staticSynchronizerParameters.synchronizerLimits.topologyLimits
+                staticSynchronizerParameters.synchronizerLimits.topologyLimitsView
               ),
               tx,
             )

@@ -6,7 +6,7 @@ package com.digitalasset.canton.version
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.CryptoConfig
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{CryptoSchemes, RequiredEncryptionSpecs, RequiredSigningSpecs}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters.InvalidStaticSynchronizerParameters
 import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, SynchronizerLimits}
@@ -81,6 +81,42 @@ final class StaticSynchronizerParametersTest extends AnyWordSpec with BaseTest {
       parse(ProtocolVersion.v34, 30)
       parse(ProtocolVersion.v36, 31)
       parse(ProtocolVersion.v37, 32)
+    }
+
+    "only allow a non-default maxContractsPerView from ProtocolVersion.nextValidationBoundPV" in {
+      val default = SynchronizerLimits.default
+      val nonDefault = default.copy(transactionProtocolLimits =
+        default.transactionProtocolLimits
+          .copy(maxContractsPerView = PositiveInt.tryCreate(100_001))
+      )
+
+      val stablePv =
+        ProtocolVersion.supported.forgetNE.filter(_ < ProtocolVersion.nextValidationBoundPV).max
+
+      createSsp(stablePv, nonDefault).left.value.toString should include("maxContractsPerView")
+      createSsp(
+        ProtocolVersion.nextValidationBoundPV,
+        nonDefault,
+      ).value.synchronizerLimits shouldBe nonDefault
+    }
+
+    "only allow a non-default maxExternalCallResultsPerView from ProtocolVersion.nextValidationBoundPV" in {
+      val default = SynchronizerLimits.default
+      val nonDefault = default.copy(transactionProtocolLimits =
+        default.transactionProtocolLimits
+          .copy(maxExternalCallResultsPerView = PositiveInt.tryCreate(10_001))
+      )
+
+      val stablePv =
+        ProtocolVersion.supported.forgetNE.filter(_ < ProtocolVersion.nextValidationBoundPV).max
+
+      createSsp(stablePv, nonDefault).left.value.toString should include(
+        "maxExternalCallResultsPerView"
+      )
+      createSsp(
+        ProtocolVersion.nextValidationBoundPV,
+        nonDefault,
+      ).value.synchronizerLimits shouldBe nonDefault
     }
 
     "not be deserializable from protoV32 if PV=dev" in {

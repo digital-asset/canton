@@ -27,6 +27,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertion
 
 import scala.concurrent.duration.DurationInt
@@ -87,7 +88,7 @@ final class ParticipantOffboardingIntegrationTest
         )
       }
 
-      // Make the synchronizer permissionned
+      // Make the synchronizer permissioned
       synchronizerOwners.foreach(
         _.topology.synchronizer_parameters
           .propose_update(
@@ -120,64 +121,124 @@ final class ParticipantOffboardingIntegrationTest
       }
     }
 
-    "successfully off-board a participant" in { implicit env =>
-      import env.*
+    "successfully off-board a participant up to PV 37" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+      implicit env =>
+        import env.*
 
-      // revoking the participant synchronizer permission results in the sequencer denying the participant's
-      // subscriptions. The participant keeps retrying, in case it is allowed back on the synchronizer.
-      // this produces a bunch of warnings
-      loggerFactory.assertLogsUnorderedOptional(
-        {
-          forAll(synchronizerOwners ++ participants.all) { member =>
-            member.topology.participant_synchronizer_permissions
-              .list(synchronizerId, filterUid = participant2.filterString) should not be empty
-          }
-
-          // user-manual-entry-begin: OffboardParticipant
-          synchronizerOwners.foreach { synchronizerOwner =>
-            synchronizerOwner.topology.participant_synchronizer_permissions
-              .revoke(synchronizerId, participant2.id)
-          }
-          // user-manual-entry-end: OffboardParticipant
-
-          // participant2 stores the revocation, but the sequencer cuts it off before any later event, so its
-          // topology client never reaches the effective time of the revocation and still lists the permission.
-          // So we skip participant2 in the check below.
-          eventually() {
-            forAll(synchronizerOwners ++ Seq(participant1, participant3)) { member =>
+        // revoking the participant synchronizer permission results in the sequencer denying the participant's
+        // subscriptions up to PV 37. The participant keeps retrying, in case it is allowed back on the synchronizer.
+        // this produces a bunch of warnings
+        loggerFactory.assertLogsUnorderedOptional(
+          {
+            forAll(synchronizerOwners ++ participants.all) { member =>
               member.topology.participant_synchronizer_permissions
-                .list(synchronizerId, filterUid = participant2.filterString) shouldBe empty
+                .list(synchronizerId, filterUid = participant2.filterString) should not be empty
             }
-          }
 
-          clue("participant2 is denied by the sequencer") {
+            // user-manual-entry-begin: OffboardParticipant
+            synchronizerOwners.foreach { synchronizerOwner =>
+              synchronizerOwner.topology.participant_synchronizer_permissions
+                .revoke(synchronizerId, participant2.id)
+            }
+            // user-manual-entry-end: OffboardParticipant
+
+            // participant2 stores the revocation, but the sequencer cuts it off before any later event, so its
+            // topology client never reaches the effective time of the revocation and still lists the permission.
+            // So we skip participant2 in the check below.
             eventually() {
-              sequencerPenalty(participant2, synchronizerId, sequencer1.id) should be > 0.0
+              forAll(synchronizerOwners ++ Seq(participant1, participant3)) { member =>
+                member.topology.participant_synchronizer_permissions
+                  .list(synchronizerId, filterUid = participant2.filterString) shouldBe empty
+              }
             }
-          }
 
-          // Disable the participant on all the sequencers to remove any sequencer data associated with it
-          //  and allow sequencer pruning
-          // user-manual-entry-begin: DisableParticipant
-          sequencers.all.foreach(_.repair.disable_member(participant2))
-          // user-manual-entry-end: DisableParticipant
+            clue("participant2 is denied by the sequencer") {
+              eventually() {
+                sequencerPenalty(participant2, synchronizerId, sequencer1.id) should be > 0.0
+              }
+            }
 
-          clue("check that pings that don't involve the off-boarded participant still work") {
-            participant1.health.ping(participant3, timeout = 30.seconds)
-          }
+            // Disable the participant on all the sequencers to remove any sequencer data associated with it
+            //  and allow sequencer pruning
+            // user-manual-entry-begin: DisableParticipant
+            sequencers.all.foreach(_.repair.disable_member(participant2))
+            // user-manual-entry-end: DisableParticipant
 
-          clue("check that pings that involve the off-boarded participant don't work") {
-            a[CommandFailure] should be thrownBy participant1.health.ping(
-              participant2,
-              timeout = 3.seconds,
-            )
-          }
+            clue("check that pings that don't involve the off-boarded participant still work") {
+              participant1.health.ping(participant3, timeout = 30.seconds)
+            }
 
-          // participant2 keeps retrying until its operator disconnects it
-          participant2.synchronizers.disconnect_all()
-        },
-        logAssertions(participant2, daName, synchronizerId.logical)*
-      )
+            clue("check that pings that involve the off-boarded participant don't work") {
+              a[CommandFailure] should be thrownBy participant1.health.ping(
+                participant2,
+                timeout = 3.seconds,
+              )
+            }
+
+            // participant2 keeps retrying until its operator disconnects it
+            participant2.synchronizers.disconnect_all()
+          },
+          logAssertions(participant2, daName, synchronizerId.logical)*
+        )
+    }
+    "successfully off-board a participant since PV 38" onlyRunWithOrGreaterThan ProtocolVersion.v38 in {
+      implicit env =>
+        import env.*
+
+        // revoking the participant's synchronizer trust certificate results in the sequencer denying the participant's
+        // subscriptions. The participant keeps retrying. This produces a bunch of warnings
+        loggerFactory.assertLogsUnorderedOptional(
+          {
+            forAll(synchronizerOwners ++ participants.all) { member =>
+              member.topology.synchronizer_trust_certificates
+                .list(synchronizerId, filterUid = participant2.filterString) should not be empty
+            }
+
+            // user-manual-entry-begin: OffboardParticipant
+            synchronizerOwners.foreach { synchronizerOwner =>
+              synchronizerOwner.topology.synchronizer_trust_certificates
+                .revoke(synchronizerId, participant2.id)
+            }
+            // user-manual-entry-end: OffboardParticipant
+
+            // participant2 stores the revocation, but the sequencer cuts it off before any later event, so its
+            // topology client never reaches the effective time of the revocation and still lists the permission.
+            // So we skip participant2 in the check below.
+            eventually() {
+              forAll(synchronizerOwners ++ Seq(participant1, participant3)) { member =>
+                member.topology.synchronizer_trust_certificates
+                  .list(synchronizerId, filterUid = participant2.filterString) shouldBe empty
+              }
+            }
+
+            clue("participant2 is denied by the sequencer") {
+              eventually() {
+                sequencerPenalty(participant2, synchronizerId, sequencer1.id) should be > 0.0
+              }
+            }
+
+            // Disable the participant on all the sequencers to remove any sequencer data associated with it
+            //  and allow sequencer pruning
+            // user-manual-entry-begin: DisableParticipant
+            sequencers.all.foreach(_.repair.disable_member(participant2))
+            // user-manual-entry-end: DisableParticipant
+
+            clue("check that pings that don't involve the off-boarded participant still work") {
+              participant1.health.ping(participant3, timeout = 30.seconds)
+            }
+
+            clue("check that pings that involve the off-boarded participant don't work") {
+              a[CommandFailure] should be thrownBy participant1.health.ping(
+                participant2,
+                timeout = 3.seconds,
+              )
+            }
+
+            // participant2 keeps retrying until its operator disconnects it
+            participant2.synchronizers.disconnect_all()
+          },
+          logAssertions(participant2, daName, synchronizerId.logical)*
+        )
     }
   }
 }

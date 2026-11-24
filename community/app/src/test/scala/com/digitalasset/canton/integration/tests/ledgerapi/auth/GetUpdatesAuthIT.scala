@@ -10,6 +10,7 @@ import com.daml.ledger.api.v2.update_service.{
   GetUpdatesResponse,
   UpdateServiceGrpc,
 }
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.services.SubmitAndWaitDummyCommand
@@ -21,11 +22,18 @@ final class GetUpdatesAuthIT
     extends ExpiringStreamServiceCallAuthTests[GetUpdatesResponse]
     with ReadOnlyServiceCallAuthTests
     with SubmitAndWaitDummyCommand
-    with UpdateFormatAuthTestCases {
+    with UpdateFormatAuthTestCases
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "UpdateService#GetUpdates"
+
+  override def apiAreaScopeBaseToken = standardToken(mainActorReadUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerRead.area) -> true,
+    List(ClaimApiArea.partiesAllocate.area) -> false,
+  )
 
   private def request(updateFormat: Option[UpdateFormat]) =
     new GetUpdatesRequest(

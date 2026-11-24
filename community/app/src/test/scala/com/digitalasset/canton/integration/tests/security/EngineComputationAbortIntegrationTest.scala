@@ -25,7 +25,8 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
   TestConsoleEnvironment,
 }
-import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.LocalRejectError.ConsistencyRejections.InactiveContracts
 import com.digitalasset.canton.protocol.LocalRejectError.TimeRejects.LocalTimeout
 import com.digitalasset.canton.synchronizer.sequencer.ProgrammableSequencerPolicies.isMediatorResult
@@ -38,6 +39,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 import com.digitalasset.canton.topology.PartyId
 import io.grpc.Status.Code
 import monocle.macros.syntax.lens.*
+import org.slf4j.event.Level
 
 import java.util.Optional
 import java.util.concurrent.atomic.AtomicReference
@@ -197,7 +199,9 @@ sealed trait EngineComputationAbortIntegrationTest
 
       val ledgerEnd = participant2.ledger_api.state.end()
 
-      val commandCompletion = loggerFactory.assertLoggedWarningsAndErrorsSeq(
+      val commandCompletion = loggerFactory.assertLogsSeq(
+        SuppressionRule.forLogger[DAMLe] && SuppressionRule.Level(Level.INFO)
+      )(
         {
           participant2.ledger_api.javaapi.commands.submit_async(
             actAs = Seq(bob),
@@ -213,7 +217,7 @@ sealed trait EngineComputationAbortIntegrationTest
           mustContainWithClue = Seq(
             (
               { logEntry =>
-                logEntry.warningMessage should (include("Aborting engine computation") and include(
+                logEntry.infoMessage should (include("Aborting engine computation") and include(
                   s"received negative mediator verdict ParticipantReject"
                 ) and include(InactiveContracts.id))
                 logEntry.loggerName should include("/participant=participant2/")
@@ -259,7 +263,9 @@ sealed trait EngineComputationAbortIntegrationTest
 
       val ledgerEnd = participant1.ledger_api.state.end()
 
-      val commandCompletion = loggerFactory.assertLoggedWarningsAndErrorsSeq(
+      val commandCompletion = loggerFactory.assertLogsSeq(
+        SuppressionRule.forLogger[DAMLe] && SuppressionRule.Level(Level.INFO)
+      )(
         {
           createIOU(sender = participant1, payer = alice, owner = bob)
 
@@ -280,7 +286,7 @@ sealed trait EngineComputationAbortIntegrationTest
           mustContainWithClue = Seq(
             (
               { logEntry =>
-                logEntry.warningMessage should (include("Aborting engine computation") and include(
+                logEntry.infoMessage should (include("Aborting engine computation") and include(
                   s"has timed out"
                 ))
                 logEntry.loggerName should include("/participant=participant1/")

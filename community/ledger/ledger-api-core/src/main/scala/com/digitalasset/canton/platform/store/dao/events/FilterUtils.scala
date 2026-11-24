@@ -3,25 +3,46 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.digitalasset.canton.platform.{Party, TemplatePartiesFilter}
+import com.digitalasset.canton.platform.{
+  ContractIdEventFilter,
+  EventFilter,
+  Party,
+  TemplatePartiesFilter,
+}
 import com.digitalasset.daml.lf.data.Ref.NameTypeConRef
 
-final case class DecomposedFilter(party: Option[Party], templateId: Option[NameTypeConRef])
+sealed trait DecomposedFilter
+
+final case class DecomposedTemplatePartyFilter(
+    party: Option[Party],
+    templateId: Option[NameTypeConRef],
+) extends DecomposedFilter
+
+final case class DecomposedContractIdFilter(
+    internalContractId: Long
+) extends DecomposedFilter
 
 object FilterUtils {
-  def decomposeFilters(filter: TemplatePartiesFilter): Seq[DecomposedFilter] = {
-    val wildcardFilters =
-      filter.templateWildcardParties match {
-        case Some(parties) =>
-          parties.map(party => DecomposedFilter(Some(party), None))
-        case None => Seq(DecomposedFilter(None, None))
+  def decomposeFilters(filter: EventFilter): Seq[DecomposedFilter] =
+    filter match {
+      case TemplatePartiesFilter(relation, templateWildcardParties) => {
+        val wildcardFilters =
+          templateWildcardParties match {
+            case Some(parties) =>
+              parties.map(party => DecomposedTemplatePartyFilter(Some(party), None))
+            case None => Seq(DecomposedTemplatePartyFilter(None, None))
+          }
+        val filters = relation.iterator.flatMap {
+          case (templateId, Some(parties)) =>
+            parties.iterator.map(party =>
+              DecomposedTemplatePartyFilter(Some(party), Some(templateId))
+            )
+          case (templateId, None) =>
+            Iterator(DecomposedTemplatePartyFilter(None, Some(templateId)))
+        }.toVector ++ wildcardFilters
+        filters
       }
-    val filters = filter.relation.iterator.flatMap {
-      case (templateId, Some(parties)) =>
-        parties.iterator.map(party => DecomposedFilter(Some(party), Some(templateId)))
-      case (templateId, None) =>
-        Iterator(DecomposedFilter(None, Some(templateId)))
-    }.toVector ++ wildcardFilters
-    filters
-  }
+      case ContractIdEventFilter(contractIds, _) =>
+        contractIds.values.map(DecomposedContractIdFilter(_)).toSeq
+    }
 }

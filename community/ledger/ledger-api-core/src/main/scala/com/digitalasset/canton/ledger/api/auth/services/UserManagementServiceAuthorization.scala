@@ -4,7 +4,7 @@
 package com.digitalasset.canton.ledger.api.auth.services
 
 import com.daml.ledger.api.v2.admin.user_management_service.*
-import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
+import com.digitalasset.canton.auth.{Authorizer, ClaimApiArea, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.RequiredClaims
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
@@ -51,7 +51,7 @@ final class UserManagementServiceAuthorization(
 
   override def createUser(request: CreateUserRequest): Future[CreateUserResponse] =
     authorizer.rpc(service.createUser)(
-      RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId(
+      RequiredClaims.usersWriteAndMatchingRequestIdpId(
         identityProviderIdL = Lens.unit[CreateUserRequest].user.identityProviderId,
         mustBeParticipantAdmin = needsParticipantAdmin(request.rights),
       )*
@@ -67,21 +67,21 @@ final class UserManagementServiceAuthorization(
 
   override def deleteUser(request: DeleteUserRequest): Future[DeleteUserResponse] =
     authorizer.rpc(service.deleteUser)(
-      RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId(
+      RequiredClaims.usersWriteAndMatchingRequestIdpId(
         Lens.unit[DeleteUserRequest].identityProviderId
       )*
     )(request)
 
   override def listUsers(request: ListUsersRequest): Future[ListUsersResponse] =
     authorizer.rpc(service.listUsers)(
-      RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId(
+      RequiredClaims.usersReadAndMatchingRequestIdpId(
         Lens.unit[ListUsersRequest].identityProviderId
       )*
     )(request)
 
   override def grantUserRights(request: GrantUserRightsRequest): Future[GrantUserRightsResponse] =
     authorizer.rpc(service.grantUserRights)(
-      RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId(
+      RequiredClaims.usersWriteAndMatchingRequestIdpId(
         identityProviderIdL = Lens.unit[GrantUserRightsRequest].identityProviderId,
         mustBeParticipantAdmin = needsParticipantAdmin(request.rights),
       )*
@@ -91,7 +91,7 @@ final class UserManagementServiceAuthorization(
       request: RevokeUserRightsRequest
   ): Future[RevokeUserRightsResponse] =
     authorizer.rpc(service.revokeUserRights)(
-      RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId(
+      RequiredClaims.usersWriteAndMatchingRequestIdpId(
         identityProviderIdL = Lens.unit[RevokeUserRightsRequest].identityProviderId,
         mustBeParticipantAdmin = needsParticipantAdmin(request.rights),
       )*
@@ -109,18 +109,23 @@ final class UserManagementServiceAuthorization(
     request.user match {
       case Some(_) =>
         authorizer.rpc(service.updateUser)(
-          RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId(
+          RequiredClaims.usersWriteAndMatchingRequestIdpId(
             Lens.unit[UpdateUserRequest].user.identityProviderId
           )*
         )(request)
       case None =>
-        authorizer.rpc(service.updateUser)(RequiredClaim.AdminOrIdpAdmin())(request)
+        authorizer.rpc(service.updateUser)(
+          RequiredClaim.ApiArea(ClaimApiArea.usersWrite.area)
+        )(request)
     }
 
   override def updateUserIdentityProviderId(
       request: UpdateUserIdentityProviderIdRequest
   ): Future[UpdateUserIdentityProviderIdResponse] =
-    authorizer.rpc(service.updateUserIdentityProviderId)(RequiredClaim.Admin())(request)
+    authorizer.rpc(service.updateUserIdentityProviderId)(
+      RequiredClaim.ApiArea(ClaimApiArea.usersWrite.area),
+      RequiredClaim.ApiArea(ClaimApiArea.idpsWrite.area),
+    )(request)
 
   override def bindService(): ServerServiceDefinition =
     UserManagementServiceGrpc.bindService(this, executionContext)
@@ -133,7 +138,7 @@ object UserManagementServiceAuthorization {
       userIdL: Lens[Req, String],
       identityProviderIdL: Lens[Req, String],
   ): List[RequiredClaim[Req]] = List(
-    RequiredClaim.MatchUserIdForUserManagement(userIdL),
+    RequiredClaim.MatchUserIdForUserRead(userIdL),
     RequiredClaim.MatchIdentityProviderId(identityProviderIdL),
   )
 

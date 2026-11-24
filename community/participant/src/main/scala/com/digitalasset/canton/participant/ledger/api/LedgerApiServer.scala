@@ -62,7 +62,6 @@ import com.digitalasset.canton.platform.apiserver.{
   InProcessGrpcName,
   LedgerFeatures,
 }
-import com.digitalasset.canton.platform.config.IdentityProviderManagementConfig
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.platform.{
   PackagePreferenceBackend,
@@ -162,7 +161,7 @@ object LedgerApiServer {
       metrics = metrics,
       cacheExpiryAfterWrite =
         serverConfig.identityProviderManagement.cacheExpiryAfterWrite.underlying,
-      maxIdentityProviders = IdentityProviderManagementConfig.MaxIdentityProviders,
+      maxIdentityProviders = serverConfig.identityProviderManagement.maxIdentityProviderConfigs,
       loggerFactory = loggerFactory,
     )
 

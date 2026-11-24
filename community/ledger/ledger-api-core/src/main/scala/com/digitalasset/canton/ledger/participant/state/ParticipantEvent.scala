@@ -14,6 +14,7 @@ sealed trait ParticipantEvent extends Product with Serializable {
   def packageName: Ref.PackageName
   def stakeholders: Set[Ref.Party]
   def reassignmentCounter: Long
+  def contractId: Value.ContractId
 }
 
 object ParticipantEvent {
@@ -26,6 +27,7 @@ object ParticipantEvent {
     override def templateId: Ref.Identifier = contractInstance.inst.templateId
     override def packageName: Ref.PackageName = contractInstance.inst.packageName
     override def stakeholders: Set[Ref.Party] = contractInstance.inst.stakeholders
+    override def contractId: Value.ContractId = contractInstance.inst.contractId
   }
 
   final case class Removed(

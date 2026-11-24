@@ -13,6 +13,14 @@ import com.digitalasset.nonempty.NonEmpty
 import com.github.blemale.scaffeine.Cache
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
+import org.bouncycastle.asn1.x9.{
+  ECNamedCurveTable,
+  X962Parameters,
+  X9ECParameters,
+  X9ObjectIdentifiers,
+}
 import org.bouncycastle.jcajce.interfaces.{MLDSAPrivateKey, MLDSAPublicKey}
 import org.bouncycastle.jcajce.provider.asymmetric.edec.{BCEdDSAPrivateKey, BCEdDSAPublicKey}
 import org.bouncycastle.jcajce.spec.MLDSAParameterSpec
@@ -270,6 +278,73 @@ object CryptoKeyValidation {
         ),
       )
     } yield ()
+
+  /** Whether an EC public key in DER-encoded SPKI format uses the curve of its key spec:
+    *   - ECDSA and ECIES keys use `id-ecPublicKey` with the OID of the named curve (RFC 5480) or,
+    *     if allowed, explicit parameters equal to the named curve's: field, coefficients, base
+    *     point, order and cofactor.
+    *   - Ed25519 keys use `id-Ed25519` without parameters (RFC 8410).
+    *   - Not checked, so always accepted: RSA and ML-DSA keys, which have no curve, and symbolic
+    *     test keys, which are not in SPKI format.
+    *
+    * @param publicKey
+    *   the key to check
+    * @param allowExplicitParameters
+    *   whether explicit parameters equal to the named curve's are accepted
+    */
+  private[crypto] def matchesCurveOfKeySpec(
+      publicKey: PublicKey,
+      allowExplicitParameters: Boolean,
+  ): Boolean = {
+    val ecKeySpecO: Option[EcKeySpec] = publicKey match {
+      case signKey: SigningPublicKey =>
+        signKey.keySpec match {
+          case ks: EcKeySpec => Some(ks)
+          case _ => None
+        }
+      case encKey: EncryptionPublicKey =>
+        encKey.keySpec match {
+          case ks: EcKeySpec => Some(ks)
+          case _ => None
+        }
+      case _ => None
+    }
+    ecKeySpecO.forall { ecKeySpec =>
+      publicKey.format != CryptoKeyFormat.DerX509Spki ||
+      Either
+        .catchNonFatal(SubjectPublicKeyInfo.getInstance(publicKey.key.toByteArray).getAlgorithm)
+        .exists { algorithm =>
+          ecKeySpec match {
+            case SigningKeySpec.EcCurve25519 =>
+              algorithm.getAlgorithm == EdECObjectIdentifiers.id_Ed25519 &&
+              Option(algorithm.getParameters).isEmpty
+            case _ =>
+              algorithm.getAlgorithm == X9ObjectIdentifiers.id_ecPublicKey &&
+              Either
+                .catchNonFatal(X962Parameters.getInstance(algorithm.getParameters))
+                .exists { parameters =>
+                  if (parameters.isNamedCurve)
+                    parameters.getParameters == ECNamedCurveTable.getOID(ecKeySpec.jcaCurveName)
+                  else
+                    // NOTE: a key with explicit parameters is only accepted if all of them equal
+                    // the named curve's; a different base point would let a forged key verify.
+                    allowExplicitParameters && !parameters.isImplicitlyCA &&
+                    // The base point is decoded lazily and throws on an invalid encoding.
+                    Either
+                      .catchNonFatal {
+                        val explicit = X9ECParameters.getInstance(parameters.getParameters)
+                        val named = ECNamedCurveTable.getByName(ecKeySpec.jcaCurveName)
+                        explicit.getCurve.equals(named.getCurve) &&
+                        explicit.getG.equals(named.getG) &&
+                        explicit.getN == named.getN &&
+                        explicit.getH == named.getH
+                      }
+                      .getOrElse(false)
+                }
+          }
+        }
+    }
+  }
 
   private def checkRsaModulus(modulus: BigInteger) =
     EitherUtil.condUnit(

@@ -111,19 +111,20 @@ class HttpService(
       ledgerClient: DamlLedgerClient,
       healthService: HealthService,
   )(implicit context: ResourceContext): Future[ServerBinding] = {
+    // Bounds both HTTP request bodies and every single inbound websocket message
+    val maxInboundMessageSize: Long = startSettings.maxInboundMessageSize
+      .getOrElse(ServerConfig.defaultMaxInboundMessageSize)
+      .unwrap
+      .toLong
     val settings: ServerSettings = ServerSettings(asys)
       .withTransparentHeadRequests(true)
       .mapTimeouts(_.withRequestTimeout(startSettings.requestTimeout))
-      .mapParserSettings(
-        _.withMaxContentLength(
-          startSettings.maxInboundMessageSize
-            .getOrElse(ServerConfig.defaultMaxInboundMessageSize)
-            .unwrap
-            .toLong
-        )
-      )
+      .mapParserSettings(_.withMaxContentLength(maxInboundMessageSize))
 
     implicit val wsConfig = startSettings.websocketConfig.getOrElse(WebsocketConfig())
+    implicit val serverRequestTimeout: ServerRequestTimeout = ServerRequestTimeout(
+      startSettings.requestTimeout
+    )
 
     val bindingEt: EitherT[Future, HttpService.Error, ServerBinding] =
       for {
@@ -159,7 +160,7 @@ class HttpService(
           .getOrElse(allEndpoints)
 
         timeoutAwareEndpoints = RequestTimeoutDirective(
-          prefixedEndpoints,
+          WebSocketMessageSizeLimit(maxInboundMessageSize)(prefixedEndpoints),
           startSettings.clientRequestTimeout.lowerBound,
           startSettings.clientRequestTimeout.upperBound,
         )

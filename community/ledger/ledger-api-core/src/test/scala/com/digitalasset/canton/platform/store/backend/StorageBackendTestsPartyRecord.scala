@@ -3,9 +3,14 @@
 
 package com.digitalasset.canton.platform.store.backend
 
-import com.daml.jwt.JwksUrl
 import com.digitalasset.canton.platform.store.backend.localstore.PartyRecordStorageBackend
-import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId}
+import com.digitalasset.canton.user.{
+  Audience,
+  IdentityProviderConfig,
+  IdentityProviderId,
+  Issuer,
+  JwksUrlLengthLimited,
+}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.LedgerString
 import org.scalatest.flatspec.AnyFlatSpec
@@ -31,9 +36,9 @@ private[backend] trait StorageBackendTestsPartyRecord
   private val idpConfig = IdentityProviderConfig(
     identityProviderId = idpId,
     isDeactivated = false,
-    jwksUrl = JwksUrl("http//identityprovider.org/"),
-    issuer = "issuer",
-    audience = Some("audience"),
+    jwksUrl = JwksUrlLengthLimited.tryCreate("http//identityprovider.org/"),
+    issuer = Issuer.tryCreate("issuer"),
+    audience = Some(Audience.tryCreate("audience")),
   )
 
   private def tested = backend.participantPartyStorageBackend
@@ -88,8 +93,8 @@ private[backend] trait StorageBackendTestsPartyRecord
       backend.identityProviderStorageBackend.createIdentityProviderConfig(
         IdentityProviderConfig(
           identityProviderId = idpId,
-          issuer = "issuer",
-          jwksUrl = JwksUrl("http://daml.com/jwks.json"),
+          issuer = Issuer.tryCreate("issuer"),
+          jwksUrl = JwksUrlLengthLimited.tryCreate("http://daml.com/jwks.json"),
           audience = None,
         )
       )

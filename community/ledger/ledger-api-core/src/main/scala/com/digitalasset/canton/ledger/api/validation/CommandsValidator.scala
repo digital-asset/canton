@@ -18,6 +18,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   PrepareSubmissionRequest,
 }
 import com.daml.ledger.api.v2.reassignment_commands.{ReassignmentCommand, ReassignmentCommands}
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.ledger.api.messages.command.submission
@@ -30,9 +31,11 @@ import com.digitalasset.canton.ledger.api.validation.CommandsValidator.{
 import com.digitalasset.canton.ledger.api.{CommandId, Commands}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.platform.config.CommandServiceConfig
 import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.daml.lf.command.*
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.value.Value as Lf
@@ -49,6 +52,8 @@ final class CommandsValidator(
     validateUpgradingPackageResolutions: ValidateUpgradingPackageResolutions,
     validateDisclosedContracts: ValidateDisclosedContracts = ValidateDisclosedContracts,
     topologyAwarePackageSelectionEnabled: Boolean = false,
+    minLedgerTimeMaxDelay: NonNegativeFiniteDuration =
+      CommandServiceConfig.DefaultMinLedgerTimeMaxDelay,
 )(implicit
     sizeLimitsConfig: LedgerApiSizeLimitsConfig
 ) {
@@ -143,6 +148,7 @@ final class CommandsValidator(
         currentLedgerTime,
         commands.minLedgerTimeAbs,
         commands.minLedgerTimeRel,
+        maxDelay = Some(minLedgerTimeMaxDelay),
       )
       deduplicationPeriod <- validateDeduplicationPeriod(
         commands.deduplicationPeriod,
@@ -211,7 +217,10 @@ final class CommandsValidator(
               sourceSynchronizerId <- requireSynchronizerId(assignCommand.value.source, "source")
               targetSynchronizerId <- requireSynchronizerId(assignCommand.value.target, "target")
               reassignmentId <- ReassignmentId
-                .fromProtoPrimitive(assignCommand.value.reassignmentId)
+                .fromProtoPrimitive(
+                  assignCommand.value.reassignmentId,
+                  ProtocolVersionValidation.AlwaysValidation,
+                )
                 .left
                 .map(_ =>
                   ValidationErrors.invalidField("reassignment_id", "Invalid reassignment ID")
@@ -261,15 +270,27 @@ final class CommandsValidator(
       currentTime: Instant,
       minLedgerTimeAbs: Option[Timestamp],
       minLedgerTimeRel: Option[DurationP],
+      maxDelay: Option[NonNegativeFiniteDuration] = None,
   )(implicit
       errorLoggingContext: ErrorLoggingContext
-  ): Either[StatusRuntimeException, Time.Timestamp] =
+  ): Either[StatusRuntimeException, Time.Timestamp] = {
+    def bounded(fieldName: String, ledgerTime: Instant) = maxDelay match {
+      case Some(delay) if ledgerTime > currentTime.plus(delay.asJava) =>
+        Left(
+          invalidField(
+            fieldName,
+            s"must not be more than ${delay.underlying} ahead of the current ledger time",
+          )
+        )
+      case _ => Right(ledgerTime)
+    }
     for {
       ledgerEffectiveTime <- (minLedgerTimeAbs, minLedgerTimeRel) match {
         case (None, None) => Right(currentTime)
         case (Some(minAbs), None) =>
-          Right(currentTime.max(TimestampConversion.toInstant(minAbs)))
-        case (None, Some(minRel)) => Right(currentTime.plus(DurationConversion.fromProto(minRel)))
+          bounded("min_ledger_time_abs", TimestampConversion.toInstant(minAbs)).map(currentTime.max)
+        case (None, Some(minRel)) =>
+          bounded("min_ledger_time_rel", currentTime.plus(DurationConversion.fromProto(minRel)))
         case (Some(_), Some(_)) =>
           Left(
             invalidArgument(
@@ -287,6 +308,7 @@ final class CommandsValidator(
         )
 
     } yield ledgerEffectiveTimestamp
+  }
 
   // Public because it is used by Canton.
   def validateInnerCommands(

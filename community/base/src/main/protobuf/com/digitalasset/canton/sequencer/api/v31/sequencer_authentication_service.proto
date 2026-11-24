@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.sequencer.api.v31;
+
+import "com/digitalasset/canton/crypto/v30/crypto.proto";
+import "com/digitalasset/canton/sequencer/api/v30/sequencer_authentication_service.proto";
+import "google/protobuf/timestamp.proto";
+
+// Verifier-bound sequencer authentication, required from protocol version 38.
+// Participant and mediator authentication continues to use the v30 service.
+service SequencerAuthenticationService {
+  rpc SequencerChallenge(SequencerChallengeRequest) returns (SequencerChallengeResponse);
+  rpc SequencerAuthenticate(SequencerAuthenticateRequest) returns (SequencerAuthenticateResponse);
+}
+
+message SequencerChallengeRequest {
+  string member = 1;
+  repeated int32 member_protocol_versions = 2;
+  string client_version = 3;
+}
+
+message SequencerChallengeResponse {
+  com.digitalasset.canton.sequencer.api.v30.SequencerAuthentication.ChallengeResponse challenge = 1;
+  // The signer includes this identity and the endpoint it dialed in its signature.
+  // The verifier checks the signature against its own identity and configured external endpoint.
+  string verifier = 2;
+}
+
+message SequencerAuthenticateRequest {
+  string member = 1;
+  com.digitalasset.canton.crypto.v30.Signature signature = 2;
+  bytes nonce = 3;
+}
+
+message SequencerAuthenticateResponse {
+  bytes token = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}

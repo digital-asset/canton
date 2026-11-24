@@ -21,11 +21,14 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   TracedLogger,
 }
+import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.resource.{Storage, StorageSingleSetup}
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.sequencer.api.v30.SequencerAuthenticationServiceGrpc
+import com.digitalasset.canton.sequencer.api.v31.SequencerAuthenticationServiceGrpc as VerifierBoundAuthenticationServiceGrpc
+import com.digitalasset.canton.sequencing.authentication.MemberAuthentication
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.block.BlockFormat.{AcknowledgeTag, SendTag}
@@ -712,6 +715,28 @@ final class BftBlockOrderer(
             )
           )
           .discard
+        getServerToClientAuthenticationEndpoint(config)
+          // Do not even bind the new auth service if PV <= 37
+          //  (although, even if bound, the service would still reject requests in that case)
+          .filter(_ => MemberAuthentication.requiresVerifier(sequencerId, protocolVersion))
+          .foreach { configuredExternalServerEndpoint =>
+            activeServerBuilder
+              .addService(
+                VerifierBoundAuthenticationServiceGrpc.bindService(
+                  authenticationServices.sequencerAuthenticationService.forVerifier(
+                    MemberAuthentication.Verifier(
+                      sequencerId,
+                      Endpoint(
+                        configuredExternalServerEndpoint.address,
+                        configuredExternalServerEndpoint.port,
+                      ),
+                    )
+                  ),
+                  executionContext,
+                )
+              )
+              .discard
+          }
       }
       logger
         .info(s"successfully bound P2P endpoint ${serverConfig.address}:${serverConfig.port}")

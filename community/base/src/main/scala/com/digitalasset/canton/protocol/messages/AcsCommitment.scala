@@ -89,7 +89,7 @@ object AcsCommitment
     )
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(
       v32.AcsCommitment
     )(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV32),

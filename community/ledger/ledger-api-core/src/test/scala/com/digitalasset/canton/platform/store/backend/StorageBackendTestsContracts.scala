@@ -10,6 +10,7 @@ import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.{
 }
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream
+import com.digitalasset.canton.platform.store.dao.events.DecomposedTemplatePartyFilter
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.Identifier
@@ -892,8 +893,8 @@ private[backend] trait StorageBackendTestsContracts
     val activeIds = executeSql(
       backend.event.updateStreamingQueries
         .fetchActiveIds(
-          stakeholderO = Some(signatory),
-          templateIdO = None,
+          templatePartyFilter =
+            DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
           activeAtEventSeqId = 1000,
         )
         .fetchPage(_)(
@@ -1010,8 +1011,8 @@ private[backend] trait StorageBackendTestsContracts
     val activeIds2 = executeSql(
       backend.event.updateStreamingQueries
         .fetchActiveIds(
-          stakeholderO = Some(signatory),
-          templateIdO = None,
+          templatePartyFilter =
+            DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
           activeAtEventSeqId = 2L,
         )
         .fetchPage(_)(
@@ -1026,8 +1027,8 @@ private[backend] trait StorageBackendTestsContracts
     val activeIds4 = executeSql(
       backend.event.updateStreamingQueries
         .fetchActiveIds(
-          stakeholderO = Some(signatory),
-          templateIdO = None,
+          templatePartyFilter =
+            DecomposedTemplatePartyFilter(party = Some(signatory), templateId = None),
           activeAtEventSeqId = 4,
         )
         .fetchPage(_)(

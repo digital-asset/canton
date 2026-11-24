@@ -211,7 +211,7 @@ object SignedProtocolMessage
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(
-      ProtocolVersion.v36
+      ProtocolVersion.minimum
     )(v30.SignedProtocolMessage)(
       supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,

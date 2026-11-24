@@ -31,11 +31,12 @@ class JsHealthService(
 ) extends Endpoints {
 
   def endpoints() = List(
-    withServerLogic(
+    // health checks are probed without a token
+    withPublicServerLogic(
       JsHealthService.livez,
       livez,
     ),
-    withServerLogic(
+    withPublicServerLogic(
       JsHealthService.readyz,
       readyz,
     ),

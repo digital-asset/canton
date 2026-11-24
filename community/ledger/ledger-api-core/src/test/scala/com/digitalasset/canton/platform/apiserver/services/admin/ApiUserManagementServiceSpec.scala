@@ -57,6 +57,22 @@ class ApiUserManagementServiceSpec
     ApiUserManagementService.decodeUserIdFromPageToken(actualNextPageToken) shouldBe Right(None)
   }
 
+  it should "decode the longest users page token the participant issues" in {
+    val longestUserId = Ref.UserId.assertFromString("u" * 128)
+    val token = ApiUserManagementService.encodeNextPageToken(Some(longestUserId))
+    token.length shouldBe 176
+    ApiUserManagementService.decodeUserIdFromPageToken(token) shouldBe Right(Some(longestUserId))
+  }
+
+  it should "return invalid argument error when token is longer than 255 characters" in {
+    assertError(
+      actual = ApiUserManagementService.decodeUserIdFromPageToken("A" * 256).left.value,
+      expected = RequestValidationErrors.InvalidArgument
+        .Reject("Invalid page token")
+        .asGrpcError,
+    )
+  }
+
   it should "return invalid argument error when token is not a base64" in {
     val actualNextPageToken =
       ApiUserManagementService.decodeUserIdFromPageToken("not-a-base64-string!!")

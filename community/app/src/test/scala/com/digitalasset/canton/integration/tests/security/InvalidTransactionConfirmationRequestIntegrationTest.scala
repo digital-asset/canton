@@ -753,6 +753,7 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
               )(
                 deserialize,
                 MaxBytesToDecompress(synchronizerParameters.maxRequestSize),
+                com.digitalasset.canton.protocol.TransactionProtocolLimits.default,
               )
               .value
 

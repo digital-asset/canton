@@ -4,13 +4,15 @@
 package com.digitalasset.canton.ledger.localstore
 
 import cats.syntax.either.*
-import com.daml.jwt.JwksUrl
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.user.store.UserManagementStore
 import com.digitalasset.canton.user.store.UserManagementStore.*
 import com.digitalasset.canton.user.{
+  Audience,
   IdentityProviderConfig,
   IdentityProviderId,
+  Issuer,
+  JwksUrlLengthLimited,
   ObjectMeta,
   ObjectMetaUpdate,
   User,
@@ -45,16 +47,16 @@ trait UserStoreTests extends UserStoreSpecBase { self: AsyncFreeSpec =>
   private val idp1 = IdentityProviderConfig(
     identityProviderId = idpId1,
     isDeactivated = false,
-    jwksUrl = JwksUrl("http://identityprovider.com/"),
-    issuer = "issuer",
-    audience = Some("audience"),
+    jwksUrl = JwksUrlLengthLimited.tryCreate("http://identityprovider.com/"),
+    issuer = Issuer.tryCreate("issuer"),
+    audience = Some(Audience.tryCreate("audience")),
   )
   private val idp2 = IdentityProviderConfig(
     identityProviderId = idpId2,
     isDeactivated = false,
-    jwksUrl = JwksUrl("http://identityprovider2.com/"),
-    issuer = "issuer2",
-    audience = Some("audience"),
+    jwksUrl = JwksUrlLengthLimited.tryCreate("http://identityprovider2.com/"),
+    issuer = Issuer.tryCreate("issuer2"),
+    audience = Some(Audience.tryCreate("audience")),
   )
 
   def newUser(

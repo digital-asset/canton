@@ -67,13 +67,13 @@ class CachedIdentityProviderConfigStoreSpec
     val cfg = config()
     for {
       _ <- tested.createIdentityProviderConfig(cfg)
-      res1 <- tested.getIdentityProviderConfig(cfg.issuer)
-      res2 <- tested.getIdentityProviderConfig(cfg.issuer)
-      res3 <- tested.getIdentityProviderConfig(cfg.issuer)
+      res1 <- tested.getIdentityProviderConfig(cfg.issuer.unwrap)
+      res2 <- tested.getIdentityProviderConfig(cfg.issuer.unwrap)
+      res3 <- tested.getIdentityProviderConfig(cfg.issuer.unwrap)
       res4 <- tested.listIdentityProviderConfigs()
       res5 <- tested.listIdentityProviderConfigs()
     } yield {
-      verify(delegate, times(1)).getIdentityProviderConfig(cfg.issuer)
+      verify(delegate, times(1)).getIdentityProviderConfig(cfg.issuer.unwrap)
       verify(delegate, times(2)).listIdentityProviderConfigs()
       res1.value shouldBe cfg
       res2.value shouldBe cfg
@@ -90,7 +90,7 @@ class CachedIdentityProviderConfigStoreSpec
     for {
       _ <- tested.createIdentityProviderConfig(cfg)
       res1 <- tested.getIdentityProviderConfig(cfg.identityProviderId)
-      res2 <- tested.getIdentityProviderConfig(cfg.issuer)
+      res2 <- tested.getIdentityProviderConfig(cfg.issuer.unwrap)
       res3 <- tested.updateIdentityProviderConfig(
         IdentityProviderConfigUpdate(
           cfg.identityProviderId,
@@ -98,15 +98,15 @@ class CachedIdentityProviderConfigStoreSpec
         )
       )
       res4 <- tested.getIdentityProviderConfig(cfg.identityProviderId)
-      res5 <- tested.getIdentityProviderConfig(cfg.issuer)
+      res5 <- tested.getIdentityProviderConfig(cfg.issuer.unwrap)
       res6 <- tested.deleteIdentityProviderConfig(cfg.identityProviderId)
       res7 <- tested.getIdentityProviderConfig(cfg.identityProviderId)
-      res8 <- tested.getIdentityProviderConfig(cfg.issuer)
+      res8 <- tested.getIdentityProviderConfig(cfg.issuer.unwrap)
     } yield {
       val order = inOrder(delegate)
       order.verify(delegate, times(1)).createIdentityProviderConfig(cfg)
       order.verify(delegate, times(1)).getIdentityProviderConfig(cfg.identityProviderId)
-      order.verify(delegate, times(1)).getIdentityProviderConfig(cfg.issuer)
+      order.verify(delegate, times(1)).getIdentityProviderConfig(cfg.issuer.unwrap)
       order
         .verify(delegate, times(1))
         .updateIdentityProviderConfig(
@@ -116,10 +116,10 @@ class CachedIdentityProviderConfigStoreSpec
           )
         )
       order.verify(delegate, times(1)).getIdentityProviderConfig(cfg.identityProviderId)
-      order.verify(delegate, times(1)).getIdentityProviderConfig(cfg.issuer)
+      order.verify(delegate, times(1)).getIdentityProviderConfig(cfg.issuer.unwrap)
       order.verify(delegate, times(1)).deleteIdentityProviderConfig(cfg.identityProviderId)
       order.verify(delegate, times(1)).getIdentityProviderConfig(cfg.identityProviderId)
-      order.verify(delegate, times(1)).getIdentityProviderConfig(cfg.issuer)
+      order.verify(delegate, times(1)).getIdentityProviderConfig(cfg.issuer.unwrap)
       order.verifyNoMoreInteractions()
       res1.value shouldBe cfg
       res2.value shouldBe cfg
@@ -128,7 +128,7 @@ class CachedIdentityProviderConfigStoreSpec
       res5.value shouldBe cfg.copy(isDeactivated = true)
       res6.value shouldBe ()
       res7 shouldBe Left(IdentityProviderConfigNotFound(cfg.identityProviderId))
-      res8 shouldBe Left(IdentityProviderConfigByIssuerNotFound(cfg.issuer))
+      res8 shouldBe Left(IdentityProviderConfigByIssuerNotFound(cfg.issuer.unwrap))
     }
   }
 
@@ -158,18 +158,18 @@ class CachedIdentityProviderConfigStoreSpec
     for {
       _ <- tested.createIdentityProviderConfig(cfg)
       res1 <- tested.getIdentityProviderConfig(cfg.identityProviderId)
-      res1iss <- tested.getIdentityProviderConfig(cfg.issuer)
+      res1iss <- tested.getIdentityProviderConfig(cfg.issuer.unwrap)
       res2 <- tested.listIdentityProviderConfigs()
 
       res3 <- {
         Threading.sleep(2000)
         tested.getIdentityProviderConfig(cfg.identityProviderId)
       }
-      res3iss <- tested.getIdentityProviderConfig(cfg.issuer)
+      res3iss <- tested.getIdentityProviderConfig(cfg.issuer.unwrap)
       res4 <- tested.listIdentityProviderConfigs()
     } yield {
       verify(delegate, times(2)).getIdentityProviderConfig(cfg.identityProviderId)
-      verify(delegate, times(2)).getIdentityProviderConfig(cfg.issuer)
+      verify(delegate, times(2)).getIdentityProviderConfig(cfg.issuer.unwrap)
       verify(delegate, times(2)).listIdentityProviderConfigs()
       res1.value shouldBe cfg
       res1iss.value shouldBe cfg

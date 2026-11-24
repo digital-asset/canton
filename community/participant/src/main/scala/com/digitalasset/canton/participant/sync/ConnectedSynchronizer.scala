@@ -15,6 +15,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.error.TransactionRoutingError
 import com.digitalasset.canton.health.{
   AtomicHealthComponent,
   CloseableHealthComponent,
@@ -1143,7 +1144,9 @@ class ConnectedSynchronizer(
   ): EitherT[Future, ERROR, FutureUnlessShutdown[RESULT]] =
     synchronizeWithClosing(name)(Nested(f)).value.onShutdown(Left(onClosing))
 
-  /** @return
+  /** @param reassignContracts
+    *   Reassigns the input contracts of the transaction to this synchronizer.
+    * @return
     *   The outer future completes after the submission has been registered as in-flight. The inner
     *   future completes after the submission has been sequenced or if it will never be sequenced.
     */
@@ -1154,6 +1157,7 @@ class ConnectedSynchronizer(
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
       topologySnapshot: TopologySnapshot,
+      reassignContracts: () => EitherT[FutureUnlessShutdown, TransactionRoutingError, Unit],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionSubmissionError, FutureUnlessShutdown[
@@ -1172,6 +1176,7 @@ class ConnectedSynchronizer(
           transaction,
           disclosedContracts,
           topologySnapshot,
+          reassignContracts,
         )
     }
 

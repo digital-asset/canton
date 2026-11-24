@@ -21,9 +21,10 @@ trait RegisteredSynchronizersStore extends SynchronizerAliasAndIdStore
 
 /** Keeps track of synchronizerIds of all synchronizers the participant has previously connected to.
   *
-  * Store invariant:
+  * Store invariants:
   *   - For a given synchronizer alias, all the physical synchronizer IDs have the same logical
   *     synchronizer ID
+  *   - A logical synchronizer ID is registered under at most one synchronizer alias
   */
 trait SynchronizerAliasAndIdStore extends AutoCloseable {
 
@@ -50,6 +51,15 @@ object SynchronizerAliasAndIdStore {
   ) extends Error {
     val message =
       s"Synchronizer with id $synchronizerId is already registered with alias $existingAlias"
+  }
+
+  final case class LogicalSynchronizerIdAlreadyAdded(
+      psid: PhysicalSynchronizerId,
+      alias: SynchronizerAlias,
+      existingAlias: SynchronizerAlias,
+  ) extends Error {
+    val message =
+      s"Synchronizer with id $psid cannot be registered with alias $alias because logical synchronizer ${psid.logical} is already registered with alias $existingAlias"
   }
 
   final case class InconsistentLogicalSynchronizerIds(

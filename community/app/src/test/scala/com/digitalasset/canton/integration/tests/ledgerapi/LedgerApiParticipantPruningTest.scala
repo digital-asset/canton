@@ -84,6 +84,7 @@ trait LedgerApiParticipantPruningTest
             filtersByParty = Map(participant.id.adminParty.toLf -> Filters(Nil)),
             filtersForAnyParty = None,
             verbose = false,
+            filtersByContractId = Seq.empty,
           )
         ),
         transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

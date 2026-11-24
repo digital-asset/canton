@@ -36,7 +36,7 @@ import com.digitalasset.canton.synchronizer.sequencing.traffic.store.memory.{
 import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.topology.DefaultTestIdentities.*
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member, TestingTopology}
-import com.digitalasset.canton.version.HasTestCloseContext
+import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.google.protobuf.ByteString
 import org.scalatest.FutureOutcome
@@ -205,7 +205,7 @@ final class SequencerRateLimitManagerImplTest
   private def mkEnvelope(content: String): ClosedEnvelope =
     ClosedUncompressedEnvelope.create(
       ByteString.copyFromUtf8(content),
-      Recipients.cc(DefaultTestIdentities.participant1),
+      Recipients.cc(DefaultTestIdentities.participant1, DefaultTestIdentities.mediatorId),
       Seq.empty,
       testedProtocolVersion,
     )
@@ -220,6 +220,17 @@ final class SequencerRateLimitManagerImplTest
       content: String = "hello",
   )(implicit f: Env) = {
     val batch = mkBatch(content)
+    consumeBatch(cost, submissionTimestamp, sequencingTimestamp, correctCost, batch)
+  }
+
+  private def consumeBatch(
+      cost: Option[NonNegativeLong],
+      submissionTimestamp: Option[CantonTimestamp],
+      sequencingTimestamp: CantonTimestamp,
+      correctCost: NonNegativeLong,
+      batch: Batch[ClosedEnvelope],
+  )(implicit f: Env) = {
+
     val eventCostDetails = EventCostDetails(
       trafficConfig.readVsWriteScalingFactor,
       groupToMembersSize = Map.empty, // Unused in this test
@@ -548,7 +559,6 @@ final class SequencerRateLimitManagerImplTest
 
     "consume traffic" in { implicit f =>
       returnCorrectCost
-
       for {
         _ <- purchaseTraffic
         res <- consume()
@@ -565,6 +575,53 @@ final class SequencerRateLimitManagerImplTest
             )
           )
         )
+      }
+    }
+
+    "dont consume traffic for commitment messages" in { implicit f =>
+      returnCorrectCost
+      for {
+        _ <- purchaseTraffic
+        res <- consumeBatch(
+          cost = Some(eventCostNonNegative),
+          submissionTimestamp = Some(senderTs),
+          sequencingTimestamp = sequencingTs,
+          correctCost = eventCostNonNegative,
+          batch = Batch(
+            List(
+              ClosedUncompressedEnvelope.create(
+                ByteString.copyFromUtf8("commitment"),
+                Recipients.cc(DefaultTestIdentities.participant1),
+                Seq.empty,
+                testedProtocolVersion,
+              )
+            ),
+            testedProtocolVersion,
+          ),
+        )
+        _ <-
+          if (testedProtocolVersion > ProtocolVersion.v37)
+            assertTrafficConsumed(
+              expectedTrafficConsumed = NonNegativeLong.zero,
+              expectedLastConsumedCost = NonNegativeLong.zero,
+              expectedBaseTrafficRemainder = maxBaseTrafficRemainder,
+            )
+          else assertTrafficConsumed()
+      } yield {
+        res match {
+          case Left(value) => fail(s"Expected Right, got Left($value)")
+          case Right(None) if testedProtocolVersion > ProtocolVersion.v37 => succeed // no charge
+          case Right(None) => fail("only free with pv 38+")
+          case Right(Some(receipt)) =>
+            receipt shouldBe
+              TrafficReceipt(
+                consumedCost = eventCostNonNegative,
+                extraTrafficConsumed = NonNegativeLong.tryCreate(
+                  eventCostNonNegative.value - maxBaseTrafficRemainder.value
+                ),
+                baseTrafficRemainder = NonNegativeLong.zero,
+              )
+        }
       }
     }
 

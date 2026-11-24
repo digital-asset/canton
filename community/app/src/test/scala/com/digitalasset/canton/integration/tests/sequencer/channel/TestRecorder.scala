@@ -11,11 +11,12 @@ import com.digitalasset.canton.crypto.{Encrypted, SymmetricKey, SynchronizerCryp
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.protocol.{ProtocolSymmetricKey, StaticSynchronizerParameters}
+import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencing.channel.ConnectToSequencerChannelRequest
 import com.digitalasset.canton.sequencing.protocol.channel.{
   SequencerChannelSessionKey,
   SequencerChannelSessionKeyAck,
+  SequencerChannelSessionKeyContent,
 }
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -83,12 +84,12 @@ private[channel] final class TestRecorder(
       recentSnapshot <- EitherT.right(crypto.snapshot(timestamp))
       key <- recentSnapshot
         .decrypt(sessionKeyMessage.encryptedSessionKey)(bytes =>
-          ProtocolSymmetricKey
+          SequencerChannelSessionKeyContent
             .fromTrustedByteString(bytes)
             .leftMap(error => DefaultDeserializationError(error.message))
         )
         .leftMap(_.toString)
-    } yield key.unwrap
+    } yield key.sessionKey
 
   private[channel] def convertPayloadMessagesToString(key: SymmetricKey): Seq[String] =
     messages

@@ -333,7 +333,7 @@ object Signature
   @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v36,
+      ProtocolVersion.minimum,
       supportedProtoVersion(v30.Signature)(fromProtoV30(ProtocolVersionValidation.NoValidation, _)),
       _.toProtoV30,
     )
@@ -359,7 +359,7 @@ object Signature
         signatureP.signingAlgorithmSpec,
       )
       signatureDelegationO <- signatureP.signatureDelegation.traverse(signatureDelegationP =>
-        SignatureDelegation.fromProtoV30(signatureDelegationP, longTermKeyId)
+        SignatureDelegation.fromProtoV30(pvv, signatureDelegationP, longTermKeyId)
       )
       // If a signature delegation is present, the `signedBy` field in the protobuf message does not contain
       // the key that signed the message. Instead, it holds the long-term key that was used to sign
@@ -598,6 +598,7 @@ object SignatureDelegation extends PrettyPrintingCompanion[SignatureDelegation] 
   }
 
   def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       signatureP: v30.SignatureDelegation,
       longTermKeyId: Fingerprint,
   ): ParsingResult[SignatureDelegation] =
@@ -615,6 +616,7 @@ object SignatureDelegation extends PrettyPrintingCompanion[SignatureDelegation] 
             CryptoParseAndValidationError(err.show)
           )
         )
+      _ <- PublicKey.validateNamedCurve(pvv, sessionKey)
       fromInclusive <-
         CantonTimestamp.fromProtoPrimitive(
           signatureP.validityPeriodFromInclusive
@@ -1521,7 +1523,7 @@ object SigningPublicKey
   @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v36,
+      ProtocolVersion.minimum,
       supportedProtoVersion(v30.SigningPublicKey)(
         fromProtoV30(ProtocolVersionValidation.NoValidation, _)
       ),
@@ -1618,6 +1620,7 @@ object SigningPublicKey
             CryptoParseAndValidationError(err.toString)
           )
         )
+      _ <- PublicKey.validateCurve(pvv, signingPublicKey)
     } yield signingPublicKey
 
   def collect(initialKeys: Map[Member, Seq[PublicKey]]): Map[Member, Seq[SigningPublicKey]] =
@@ -1762,7 +1765,7 @@ final case class SigningPrivateKey private (
 object SigningPrivateKey extends HasVersionedMessageCompanionE[SigningPrivateKey] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v36,
+      ProtocolVersion.minimum,
       supportedProtoVersion(v30.SigningPrivateKey)(fromProtoV30),
       _.toProtoV30,
     )

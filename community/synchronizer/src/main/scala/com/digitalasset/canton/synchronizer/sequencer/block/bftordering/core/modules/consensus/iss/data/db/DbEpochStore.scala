@@ -11,7 +11,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Postgres}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -110,7 +110,7 @@ class DbEpochStore(
         // Without validation, the limits are not read.
         IssConsensusModule.parseConsensusNetworkMessage(
           ProtocolVersionValidation.NoValidation,
-          BftOrdererLimits.default,
+          BftOrdererLimitsView.default,
           from,
           actualSender = None,
           _,
@@ -128,7 +128,7 @@ class DbEpochStore(
           PrePrepare.fromProtoConsensusMessage(
             ProtocolVersionValidation.NoValidation,
             // actual sender is not needed when reading from the store
-            ConsensusSegmentDeserializationContext(originator, None, BftOrdererLimits.default),
+            ConsensusSegmentDeserializationContext(originator, None, BftOrdererLimitsView.default),
             _,
           )
         )(r)

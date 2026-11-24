@@ -6,9 +6,13 @@ package com.digitalasset.canton.platform.store.dao
 import cats.syntax.option.*
 import com.digitalasset.canton.ledger.api.{CumulativeFilter, EventFormat}
 import com.digitalasset.canton.platform.index.IndexServiceImpl.InterfaceViewPackageUpgrade
-import com.digitalasset.canton.platform.store.dao.EventProjectionProperties.Projection
+import com.digitalasset.canton.platform.store.dao.EventProjectionProperties.{
+  ContractIdProjections,
+  Projection,
+}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.View
@@ -22,6 +26,9 @@ import scala.concurrent.Future
   *   enriching in verbose mode
   * @param witnessTemplateProjections
   *   per witness party, per template projections
+  * @param contractIdProjections
+  *   per contract id projections requested by the contract id filters, together with the
+  *   implementors of the interfaces referenced in them
   * @param interfaceViewPackageUpgrade
   *   computes which interface instance version should be used for rendering an interface view for a
   *   given interface instance
@@ -31,6 +38,7 @@ final case class EventProjectionProperties(
     // Map((witness or wildcard) -> Map(template -> projection)), where a None key denotes a party wildcard
     witnessTemplateProjections: Map[Option[String], Map[Option[Ref.NameTypeConRef], Projection]] =
       Map.empty,
+    contractIdProjections: ContractIdProjections = ContractIdProjections.empty,
 )(
     // Note: including this field in a separate argument list to the case class to not affect the deep equality check of the
     //       regular argument list
@@ -46,6 +54,19 @@ final case class EventProjectionProperties(
         Projection()
       )(_ append _)
   }
+
+  def render(
+      witnesses: Set[String],
+      templateId: NameTypeConRef,
+      contractId: ContractId,
+  ): Projection = {
+    val projectionByPartyFilters = render(witnesses, templateId)
+    contractIdProjections
+      .render(templateId, contractId)
+      .fold(projectionByPartyFilters)(
+        projectionByPartyFilters.append
+      ) // With current validation it should never happen that we append, because we allow either contract id filters or the other filters. May be useful in the future
+  }
 }
 
 object EventProjectionProperties {
@@ -58,6 +79,38 @@ object EventProjectionProperties {
       Projection(
         interfaces = interfaces ++ other.interfaces,
         createdEventBlob = createdEventBlob || other.createdEventBlob,
+      )
+  }
+
+  final case class ContractIdProjections(
+      projections: Map[ContractId, Projection],
+      interfaceImplementors: Map[FullIdentifier, Set[NameTypeConRef]],
+  ) {
+    def render(templateId: NameTypeConRef, contractId: ContractId): Option[Projection] =
+      projections
+        .get(contractId)
+        .map(projection =>
+          projection.copy(interfaces =
+            projection.interfaces.filter(interfaceId =>
+              interfaceImplementors.get(interfaceId).exists(_.contains(templateId))
+            )
+          )
+        )
+  }
+
+  object ContractIdProjections {
+    val empty: ContractIdProjections = ContractIdProjections(Map.empty, Map.empty)
+
+    def withImplementors(
+        projections: Map[ContractId, Projection],
+        interfaceImplementedBy: FullIdentifier => Set[FullIdentifier],
+    ): ContractIdProjections =
+      ContractIdProjections(
+        projections = projections,
+        interfaceImplementors = projections.values
+          .flatMap(_.interfaces)
+          .map(iface => iface -> interfaceImplementedBy(iface).map(_.toNameTypeConRef))
+          .toMap,
       )
   }
 

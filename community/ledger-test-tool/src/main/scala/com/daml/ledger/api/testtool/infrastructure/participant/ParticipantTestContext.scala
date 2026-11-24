@@ -67,6 +67,10 @@ import com.daml.ledger.api.v2.state_service.{
   GetActiveContractsPageResponse,
   GetActiveContractsRequest,
   GetActiveContractsResponse,
+  GetHostedPartiesPageRequest,
+  GetHostedPartiesPageResponse,
+  GetHostedPartiesRequest,
+  GetHostedPartiesResponse,
   GetLedgerEndResponse,
 }
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
@@ -729,6 +733,14 @@ trait ParticipantTestContext extends UserManagementTestContext {
       synchronizerId: SynchronizerId,
       recordTime: Timestamp,
   ): Future[Offset]
+
+  def getHostedParties(
+      request: GetHostedPartiesRequest
+  ): Future[Vector[GetHostedPartiesResponse]]
+
+  def getHostedPartiesPage(
+      request: GetHostedPartiesPageRequest
+  ): Future[GetHostedPartiesPageResponse]
 }
 
 object ParticipantTestContext {

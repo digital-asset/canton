@@ -6,11 +6,12 @@ package com.digitalasset.canton.platform.config
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 
 final case class IdentityProviderManagementConfig(
+    maxIdentityProviderConfigs: Int = IdentityProviderManagementConfig.DefaultMaxIdentityProviders,
     cacheExpiryAfterWrite: NonNegativeFiniteDuration =
-      IdentityProviderManagementConfig.DefaultCacheExpiryAfterWriteInSeconds
+      IdentityProviderManagementConfig.DefaultCacheExpiryAfterWriteInSeconds,
 )
 object IdentityProviderManagementConfig {
-  val MaxIdentityProviders: Int = 16
+  val DefaultMaxIdentityProviders: Int = 16
   val DefaultCacheExpiryAfterWriteInSeconds: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofMinutes(5)
 }
