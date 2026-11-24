@@ -164,6 +164,8 @@ fix is deployed on MainNet:
   every thread of the JSON API and make it unresponsive.
 - A DAR upload to the JSON Ledger API that is larger than `max-inbound-message-size` is rejected with HTTP status 413
   and the new error code `JSON_API_REQUEST_BODY_TOO_LARGE` instead of an internal error.
+- The sequencer client traffic metrics `event-delivered` and `event-rejected` were swapped: rejected events incremented
+  `event-delivered` and delivered events incremented `event-rejected`. Each counter now counts the right events.
 
 ## Compatibility
 

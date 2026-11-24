@@ -152,12 +152,12 @@ class TrafficStateController(
           metrics.trafficCostOfNotDeliveredSequencedEvent.mark(trafficReceipt.consumedCost.value)(
             mergedEventSpecificMetricsContext.withExtraLabels("reason" -> reason)
           )
-          metrics.deliveredEventCounter.inc()(mergedEventSpecificMetricsContext)
+          metrics.rejectedEventCounter.inc()(mergedEventSpecificMetricsContext)
         case None =>
           metrics.trafficCostOfDeliveredSequencedEvent.mark(trafficReceipt.consumedCost.value)(
             mergedEventSpecificMetricsContext
           )
-          metrics.rejectedEventCounter.inc()(mergedEventSpecificMetricsContext)
+          metrics.deliveredEventCounter.inc()(mergedEventSpecificMetricsContext)
       }
     }
 
