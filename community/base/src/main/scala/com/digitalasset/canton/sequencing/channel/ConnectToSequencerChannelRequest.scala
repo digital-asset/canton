@@ -4,8 +4,6 @@
 package com.digitalasset.canton.sequencing.channel
 
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.crypto.AsymmetricEncrypted
-import com.digitalasset.canton.protocol.ProtocolSymmetricKey
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencer.api.v30.ConnectToSequencerChannelRequest.Request as v30_ChannelRequest
 import com.digitalasset.canton.sequencing.protocol.channel.{
@@ -132,11 +130,11 @@ object ConnectToSequencerChannelRequest
       ConnectToSequencerChannelRequest.protocolVersionRepresentativeFor(protocolVersion)
     )
 
-  def sessionKey(key: AsymmetricEncrypted[ProtocolSymmetricKey], protocolVersion: ProtocolVersion)(
-      implicit traceContext: TraceContext
+  def sessionKey(sessionKey: SequencerChannelSessionKey, protocolVersion: ProtocolVersion)(implicit
+      traceContext: TraceContext
   ): ConnectToSequencerChannelRequest =
     ConnectToSequencerChannelRequest(
-      SessionKey(SequencerChannelSessionKey(key, protocolVersion)),
+      SessionKey(sessionKey),
       traceContext,
     )(ConnectToSequencerChannelRequest.protocolVersionRepresentativeFor(protocolVersion))
 

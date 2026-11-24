@@ -118,6 +118,9 @@ object HashPurpose {
   val AcsCommitmentSummary = HashPurpose(67, "AcsCommitmentSummary")
   val AcsReplicationDigest = HashPurpose(68, "AcsReplicationDigest")
   val Transparency = HashPurpose(69, "ViewEncryptionTransparency")
+  // 70-74 are taken on the main branch: an id must identify the same purpose on every branch.
+  val SequencerChannelSessionKey = HashPurpose(75, "SequencerChannelSessionKey")
+  val SequencerChannelSessionKeyContext = HashPurpose(76, "SequencerChannelSessionKeyContext")
 
   // Do not use for anything other than testing or "mock" hashes
   // Is not in a testing-only module because it used in traffic cost estimation that requires mock hashes

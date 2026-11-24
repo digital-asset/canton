@@ -255,6 +255,9 @@ trait Sequencer
 
   /** Get the traffic state for LSU.
     *
+    * The state contains the registered members that are known in the topology, as well as the
+    * members that are not registered yet but for which traffic has already been purchased.
+    *
     * @param trafficTsOverride
     *   MUST be empty for regular LSUs. For regular LSUs, traffic should be taken at upgrade time
     *   and an error should be returned if no LSU is announced. However, in the context of roll
