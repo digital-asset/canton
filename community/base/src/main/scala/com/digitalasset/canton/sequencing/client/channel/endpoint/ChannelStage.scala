@@ -5,22 +5,23 @@ package com.digitalasset.canton.sequencing.client.channel.endpoint
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.digitalasset.canton.crypto.{AsymmetricEncrypted, Encrypted}
+import com.digitalasset.canton.crypto.Encrypted
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.ProtocolSymmetricKey
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencer.api.v30.ConnectToSequencerChannelResponse.Response
 import com.digitalasset.canton.sequencing.channel.ConnectToSequencerChannelRequest
+import com.digitalasset.canton.sequencing.channel.errors.SequencerChannelErrors
 import com.digitalasset.canton.sequencing.client.channel.SequencerChannelProtocolProcessor
 import com.digitalasset.canton.sequencing.client.channel.endpoint.ChannelStage.{
   InternalData,
   StageTransition,
 }
+import com.digitalasset.canton.sequencing.client.channel.endpoint.SequencerChannelSecurity.SessionKeyRejection
 import com.digitalasset.canton.sequencing.protocol.channel.SequencerChannelSessionKey
 import com.digitalasset.canton.serialization.DeserializationError
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ByteStringUtil, MaxBytesToDecompress}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -85,13 +86,11 @@ private[endpoint] object ChannelStage {
 
 private[endpoint] class ChannelStageBootstrap(
     sessionKeyOwner: Boolean,
-    connectTo: Member,
     data: InternalData,
 )(implicit executionContext: ExecutionContext)
     extends ChannelStage(data, "Bootstrap")(
       executionContext: ExecutionContext
     ) {
-  private def newStage = new ChannelStageConnected(data)
 
   override def initialization()(implicit
       traceContext: TraceContext
@@ -109,25 +108,20 @@ private[endpoint] class ChannelStageBootstrap(
   ): EitherT[FutureUnlessShutdown, String, StageTransition] =
     if (sessionKeyOwner) {
       for {
-        encryptedKey <- createSessionKey
-        m = ConnectToSequencerChannelRequest.sessionKey(
-          encryptedKey,
-          data.protocolVersion,
-        )
-      } yield (List(("session key", m)), newStage)
+        sessionKey <- data.security.generateSessionKey()
+        m = ConnectToSequencerChannelRequest.sessionKey(sessionKey, data.protocolVersion)
+      } yield (List(("session key", m)), new ChannelStageAwaitingSessionKeyAck(data))
     } else {
-      EitherT.rightT[FutureUnlessShutdown, String]((Nil, newStage))
+      EitherT.rightT[FutureUnlessShutdown, String]((Nil, new ChannelStageAwaitingSessionKey(data)))
     }
-
-  private def createSessionKey(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, AsymmetricEncrypted[ProtocolSymmetricKey]] =
-    data.security.generateSessionKey(connectTo)
 }
 
-private[endpoint] class ChannelStageConnected(data: InternalData)(implicit
+/** Stage of the endpoint that does not own the session key. It accepts only the session key, so
+  * that it cannot become securely connected without one.
+  */
+private[endpoint] class ChannelStageAwaitingSessionKey(data: InternalData)(implicit
     executionContext: ExecutionContext
-) extends ChannelStage(data, "Connected")(
+) extends ChannelStage(data, "AwaitingSessionKey")(
       executionContext
     ) {
   private def newStage = new ChannelStageSecurelyConnected(data)
@@ -140,35 +134,63 @@ private[endpoint] class ChannelStageConnected(data: InternalData)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, StageTransition] = response match {
     case sessionKey: Response.SessionKey => handleSessionKey(sessionKey)
-    case _: Response.SessionKeyAcknowledgement => handleSessionKeyAcknowledgement()
     case other => wrongMessageError(other)
   }
 
   private def handleSessionKey(message: Response.SessionKey)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, StageTransition] = {
-    val encryptedSessionKeyP = message.sessionKey.flatMap(_.encryptedSessionKey)
-
-    for {
-      encryptedSymmetricKey <- EitherT.fromEither[FutureUnlessShutdown](
+  ): EitherT[FutureUnlessShutdown, String, StageTransition] =
+    (for {
+      sessionKey <- EitherT.fromEither[FutureUnlessShutdown](
         SequencerChannelSessionKey
-          .parseEncryptedSessionKey(encryptedSessionKeyP)
-          .leftMap(_.message)
+          .fromProtoV30(message.value)
+          .leftMap(error => SessionKeyRejection.Incompatible(error.message): SessionKeyRejection)
       )
-      _ <- data.security.registerSessionKey(encryptedSymmetricKey)
+      _ <- data.security.registerSessionKey(sessionKey)
     } yield {
-
       val messages = List(
         ("session key ack", ConnectToSequencerChannelRequest.sessionKeyAck(data.protocolVersion))
       )
-
-      (messages, newStage)
+      (messages, newStage): StageTransition
+    }).leftMap { rejection =>
+      report(rejection)
+      s"Rejected session key: ${rejection.reason}"
     }
-  }
 
-  private def handleSessionKeyAcknowledgement()
-      : EitherT[FutureUnlessShutdown, String, StageTransition] =
-    EitherT.rightT((Nil, newStage))
+  /** Raises the alarm only for tampering, and warns only if an operator can act. */
+  private def report(rejection: SessionKeyRejection)(implicit traceContext: TraceContext): Unit =
+    rejection match {
+      case SessionKeyRejection.Tampered(reason) =>
+        SequencerChannelErrors.SessionKeyRejected.Warn(reason).report()
+      case SessionKeyRejection.Incompatible(reason) =>
+        SequencerChannelErrors.SessionKeyNotAccepted.Warn(reason).discard
+      case SessionKeyRejection.MaybeTransient(reason) =>
+        // TODO(#38123) Closing the endpoint after this rejection still logs a WARN.
+        logger.info(s"Rejected session key: $reason")
+    }
+}
+
+/** Stage of the endpoint that owns the session key. It accepts only the acknowledgement, so that it
+  * never takes a session key from the other member.
+  */
+private[endpoint] class ChannelStageAwaitingSessionKeyAck(data: InternalData)(implicit
+    executionContext: ExecutionContext
+) extends ChannelStage(data, "AwaitingSessionKeyAck")(
+      executionContext
+    ) {
+  private def newStage = new ChannelStageSecurelyConnected(data)
+
+  override def initialization()(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] = EitherT.rightT(())
+
+  override def handleMessage(response: Response)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, StageTransition] = response match {
+    case _: Response.SessionKeyAcknowledgement =>
+      EitherT.rightT[FutureUnlessShutdown, String]((Nil, newStage))
+    case other => wrongMessageError(other)
+  }
 }
 
 private[endpoint] class ChannelStageSecurelyConnected(data: InternalData)(implicit

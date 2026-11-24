@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer
 import cats.syntax.option.*
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.DefaultTestIdentities
+import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
 
 class SequencerPruningStatusTest extends BaseTestWordSpec {
   def ts(epochSeconds: Int): CantonTimestamp =
@@ -96,6 +96,30 @@ class SequencerPruningStatusTest extends BaseTestWordSpec {
 
       // as although the sequencer hasn't read up until this point, it is disabled
       status.safePruningTimestamp shouldBe ts(12)
+    }
+  }
+
+  "members" should {
+    "be split by whether they have a registration timestamp" in {
+      val status = SequencerPruningStatus(
+        lowerBound = ts(0),
+        now = ts(12),
+        members = Set(
+          SequencerMemberStatus.Active(DefaultTestIdentities.daMediator, ts(2), None),
+          SequencerMemberStatus.Disabled(DefaultTestIdentities.daSequencerId, ts(3).some, None),
+          SequencerMemberStatus.Onboarding(DefaultTestIdentities.participant1),
+          SequencerMemberStatus.Disabled(DefaultTestIdentities.participant2, None, None),
+        ),
+      )
+
+      status.registeredMembers shouldBe Set[Member](
+        DefaultTestIdentities.daMediator,
+        DefaultTestIdentities.daSequencerId,
+      )
+      status.unregisteredMembers shouldBe Set[Member](
+        DefaultTestIdentities.participant1,
+        DefaultTestIdentities.participant2,
+      )
     }
   }
 

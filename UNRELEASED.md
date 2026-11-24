@@ -30,6 +30,11 @@ _Write summary of release_
 
 ### Participant node operators
 
+#### ACS replication via `get_remote_acs`
+
+- Sequencer channel members need to be on this version of 3.7 to be able to establish a
+  secure sequencer channel with each other for ACS replication via `get_remote_acs` .
+
 ### Synchronizer operators
 
 ## Breaking changes
@@ -47,6 +52,7 @@ _Write summary of release_
 <!-- The deprecated item, its replacement, and when it will be removed. -->
 
 ## Minor Improvements
+- Upgraded bouncy castle to 1.87 to cover off security advisory BDSA-2026-40175
 
 ### Ledger API
 
@@ -57,6 +63,9 @@ _Write summary of release_
 ### Synchronizer operators
 
 ## Security and Bug Fixes
+
+### JDK Base Image Critical Fixes
+- JDK base image has been upgraded to 21.0.13.1_2, incorporating several key security patches
 
 <!--
 Advisories first, then the other fixes as a bullet list, including dependency updates for security vulnerabilities
@@ -85,6 +94,11 @@ fix is deployed on MainNet:
 
 #### Recommendation
 -->
+
+- Fixed a logical synchronizer upgrade (LSU) losing the traffic purchased for a member that was not yet registered
+  with the sequencer: `traffic_control.get_lsu_state` now includes these members, and `traffic_control.set_lsu_state`
+  restores their traffic on the new sequencers. Both the old and the new sequencers must run this version when the
+  traffic state is transferred.
 
 ## Compatibility
 

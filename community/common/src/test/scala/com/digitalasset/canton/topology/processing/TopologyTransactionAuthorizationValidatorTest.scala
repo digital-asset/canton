@@ -1739,6 +1739,81 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
         succeed
       }
     }
+
+    "not crash when a DND owner has no root certificate" in {
+      // 1. store a decentralized namespace with two owners and remove the root certificate of one of the owners
+      // 2. validate a transaction that requires the authorization of the decentralized namespace
+      // 3. validator should not crash
+
+      import Factory.*
+      import SigningKeys.{ec as _, *}
+
+      val store =
+        new InMemoryTopologyStore(
+          TopologyStoreId.AuthorizedStore,
+          predecessor = None,
+          testedProtocolVersion,
+          loggerFactory,
+          timeouts,
+        )
+      val validator = mk(store)
+
+      val dns_id = DecentralizedNamespaceDefinition.computeNamespace(Set(ns1, ns8))
+      val dnsTwoOwners = mkAddMultiKey(
+        DecentralizedNamespaceDefinition
+          .create(dns_id, PositiveInt.two, NonEmpty(Set, ns1, ns8))
+          .value,
+        NonEmpty(Set, key1, key8),
+        serial = PositiveInt.one,
+      )
+      val decentralizedNamespaceWithTwoOwners = List(ns1k1_k1, ns8k8_k8, dnsTwoOwners)
+
+      val ns1k1_k1_remove = mkRemoveTx(ns1k1_k1)
+
+      val participantPermission = mkAddMultiKey(
+        ParticipantSynchronizerPermission(
+          SynchronizerId(UniqueIdentifier.tryCreate("sync1", dns_id)),
+          participant6,
+          ParticipantPermission.Observation,
+          None,
+          None,
+        ),
+        signingKeys = NonEmpty(Set, key1, key8),
+      )
+
+      for {
+        // store decentralized namespace and owner root certs
+        _ <- store.update(
+          SequencedTime(ts(0)),
+          EffectiveTime(ts(0)),
+          removals = Map.empty,
+          additions = decentralizedNamespaceWithTwoOwners.map(
+            ValidatedTopologyTransaction(_)
+          ),
+        )
+        // store the removal of ns1's root cert
+        _ <- store.update(
+          SequencedTime(ts(1)),
+          EffectiveTime(ts(1)),
+          removals = Map(ns1k1_k1.mapping.uniqueKey -> (Some(PositiveInt.one), Set(ns1k1_k1.hash))),
+          additions = Seq(ValidatedTopologyTransaction(ns1k1_k1_remove)),
+        )
+
+        // validating the participant synchronizer permission should not crash
+        result <- validate(
+          validator,
+          timestamp = ts(2),
+          Seq(participantPermission),
+          Map.empty,
+          expectFullAuthorization = true,
+        )
+      } yield {
+        val rejection = result.loneElement.rejectionReason.value
+        rejection shouldBe TopologyTransactionRejection.Authorization.NotFullyAuthorized(
+          ReferencedAuthorizations(Set(dns_id))
+        )
+      }
+    }
   }
 
 }

@@ -30,10 +30,10 @@ class TransactionServiceValidationIT(testDars: TestDars) extends LedgerTestSuite
         .transactions(requestWithEmptyFilter)
         .mustFail("subscribing with empty filtersByParty and filtersForAnyParty")
     } yield {
-      assertGrpcError(
+      assertGrpcErrorRegex(
         failure,
         RequestValidationErrors.InvalidArgument,
-        Some("filtersByParty and filtersForAnyParty cannot be empty simultaneously"),
+        Some(emptyEventFormatErrorMessagePattern),
       )
     }
   })

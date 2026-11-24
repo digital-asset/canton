@@ -9,6 +9,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeLong,
   NonNegativeNumeric,
+  PositiveInt,
   PositiveLong,
 }
 import com.digitalasset.canton.console.{
@@ -23,13 +24,16 @@ import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality.Optional
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
-import com.digitalasset.canton.sequencing.protocol.SequencerErrors
+import com.digitalasset.canton.sequencing.protocol.{SequencerErrors, TrafficState}
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
+import com.digitalasset.canton.synchronizer.sequencing.traffic.TrafficPurchasedManager
+import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 
 import java.time.Duration
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.FiniteDuration
 
 /** This trait provides helpers for the traffic management in the context of LSU tests. The main
@@ -64,6 +68,95 @@ private[lsu] trait LsuTrafficManagement {
       baseEventCost = NonNegativeLong.tryCreate(1L),
       freeConfirmationResponses = true,
     )
+
+  /** A member that is never registered with a sequencer. Traffic is purchased for it before the
+    * LSU, so that each test also covers the traffic purchased for a member that is not registered
+    * yet.
+    */
+  protected lazy val prePurchaseMember: Member = ParticipantId("lsu-pre-purchase")
+
+  /** The amount and the serial of the latest purchase made for [[prePurchaseMember]], if any */
+  private val prePurchase = new AtomicReference[Option[(NonNegativeLong, PositiveInt)]](None)
+
+  /** The traffic state as seen by the sequencer. The admin API cannot be used here, as it only
+    * returns the members that are known in the topology.
+    */
+  private def prePurchaseMemberTraffic(
+      sequencer: LocalSequencerReference,
+      timestamp: CantonTimestamp,
+  ): TrafficState =
+    sequencer.underlying.value.sequencer.sequencer
+      .getTrafficStateAt(prePurchaseMember, timestamp)
+      .futureValueUS
+      .value
+      .value
+
+  private def assertPrePurchase(
+      trafficState: TrafficState,
+      purchase: (NonNegativeLong, PositiveInt),
+  ): Assertion = {
+    val (amount, serial) = purchase
+    trafficState.extraTrafficPurchased shouldBe amount
+    trafficState.serial shouldBe Some(serial)
+    trafficState.extraTrafficConsumed shouldBe NonNegativeLong.zero
+  }
+
+  /** Purchase traffic for [[prePurchaseMember]], on top of its latest purchase if any. Use it after
+    * an LSU to check that the new sequencers still accept purchases for that member, and to have
+    * the next LSU transfer a purchase made on a successor.
+    *
+    * Does nothing unless purchasing traffic for a member that is not registered is supported by
+    * both the protocol version of the synchronizer and the tested protocol version. The latter is
+    * needed because a test may move to a successor running the tested protocol version, even from a
+    * synchronizer running a higher one, and such a successor drops the purchase.
+    */
+  protected def purchaseTrafficForUnregisteredMember(
+      sequencer: LocalSequencerReference
+  )(implicit env: TestConsoleEnvironment): Unit =
+    if (
+      Seq(testedProtocolVersion, sequencer.physical_synchronizer_id.protocolVersion)
+        .forall(TrafficPurchasedManager.isPrePurchaseSupported)
+    ) {
+      val purchase = prePurchase
+        .get()
+        .fold(NonNegativeLong.tryCreate(100_000L) -> PositiveInt.one) { case (amount, serial) =>
+          (amount + amount, serial.increment.value)
+        }
+      val (amount, serial) = purchase
+      sendTopUp(prePurchaseMember, amount, sequencer, Some(serial))
+
+      eventually() {
+        // A timestamp in the future gives the latest purchase processed by the sequencer
+        val timestamp = env.environment.clock.now.plusSeconds(60)
+        assertPrePurchase(prePurchaseMemberTraffic(sequencer, timestamp), purchase)
+      }
+      prePurchase.set(Some(purchase))
+    }
+
+  /** Check that the latest purchase made for [[prePurchaseMember]] is part of the traffic state
+    * exported by the old sequencers, and that the new sequencers have it once it is imported.
+    */
+  private def assertPrePurchaseTransferred(
+      traffic: ByteString,
+      newSequencers: Seq[LocalSequencerReference],
+  ): Unit =
+    prePurchase.get().foreach { purchase =>
+      val exported = LsuTrafficState
+        .fromTrustedByteString(traffic)
+        .value
+        .membersTraffic
+        .get(prePurchaseMember)
+        .value
+      assertPrePurchase(exported, purchase)
+
+      // The new sequencers serve the traffic state from the upgrade time
+      forAll(newSequencers) { sequencer =>
+        assertPrePurchase(
+          prePurchaseMemberTraffic(sequencer, CantonTimestamp.MinValue),
+          purchase,
+        )
+      }
+    }
 
   protected def initialTrafficPurchase(
       traffic: Map[InstanceReference, PositiveLong],
@@ -167,5 +260,6 @@ private[lsu] trait LsuTrafficManagement {
 
     val traffic: ByteString = trafficStates.head._2
     newSequencers.foreach(_.traffic_control.set_lsu_state(traffic))
+    assertPrePurchaseTransferred(traffic, newSequencers)
   }
 }

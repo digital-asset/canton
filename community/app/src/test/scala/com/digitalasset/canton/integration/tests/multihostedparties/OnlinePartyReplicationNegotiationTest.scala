@@ -476,10 +476,14 @@ sealed trait OnlinePartyReplicationNegotiationTest
 
       import scala.concurrent.duration.*
 
-      def enableFreshParty(label: String): PartyId =
+      def enableFreshParty(
+          label: String,
+          additionalSynchronizedParticipants: Seq[ParticipantReference] = Seq(),
+      ): PartyId =
         participant1.parties.enable(
           s"party-$label",
-          synchronizeParticipants = Seq(participant2, participant4),
+          synchronizeParticipants =
+            Seq(participant2, participant4) ++ additionalSynchronizedParticipants,
         )
 
       /** Creates an ACS replication proposal contract directly via the Ledger API of the target
@@ -556,10 +560,13 @@ sealed trait OnlinePartyReplicationNegotiationTest
           sequencerStringUids: Seq[String] = Seq(sequencer2.id.uid.toProtoPrimitive),
           timestamp: CantonTimestamp = dummyTimestamp,
           partyReplicationIdS: Option[String] = None,
+          partyIdO: Option[String] = None,
       ): Unit =
         clue(log) {
           val requestId = partyReplicationIdS.getOrElse(validOnPRId(log))
-          val partyId = enableFreshParty(log).toProtoPrimitive
+          val partyId = partyIdO.getOrElse(
+            enableFreshParty(log, Seq(sourceParticipant, targetParticipant)).toProtoPrimitive
+          )
           loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
             createProposalDirectly(
               requestId,
@@ -683,9 +690,23 @@ sealed trait OnlinePartyReplicationNegotiationTest
 
       testProposalExceptionOnEmptySequencerUids("empty-sequencer-uids")
 
+      val partyIdNotOnSp =
+        enableFreshParty("source-participant-does-not-host-party", Seq(participantWithoutParty))
       testAgreementError(
         "source-participant-does-not-host-party",
         "PartyToParticipant mapping for party .* doesn't exist for either source or target participant",
+        sourceParticipant = participantWithoutParty,
+        targetParticipant = participantWithParty,
+        timestamp = participantWithoutParty.testing.fetch_synchronizer_time(
+          participantWithoutParty.synchronizers.list_connected().head.synchronizerId
+        ),
+        partyIdO = Some(partyIdNotOnSp.toProtoPrimitive),
+      )
+
+      testAgreementError(
+        "replication-timestamp-in-the-future",
+        "Synchronizer .* topology is known until .* but the ACS replication of party " +
+          "party-replication-timestamp-in-the-future.* from SP .* to .* has a higher timestamp",
         sourceParticipant = participantWithoutParty,
         targetParticipant = participantWithParty,
         // timestamp after which the party is known to the synchronizer:

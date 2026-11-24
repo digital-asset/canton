@@ -32,6 +32,7 @@ import com.daml.ledger.api.v2.admin.{
 import com.daml.ledger.api.v2.crypto as lapicrypto
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.UseJWKSServer
+import com.digitalasset.canton.topology.SynchronizerId
 import com.google.protobuf.ByteString
 
 import java.security.{KeyPairGenerator, Signature}
@@ -196,6 +197,7 @@ trait IdentityProviderConfigAuth extends KeyPairs {
       party: String,
       userId: String = "",
       identityProviderIdOverride: Option[String] = None,
+      synchronizerId: Option[SynchronizerId] = None,
   ): Future[AllocatePartyResponse] =
     stub(pproto.PartyManagementServiceGrpc.stub(channel), serviceCallContext.token)
       .allocateParty(
@@ -204,7 +206,7 @@ trait IdentityProviderConfigAuth extends KeyPairs {
           localMetadata = None,
           identityProviderId =
             identityProviderIdOverride.getOrElse(serviceCallContext.identityProviderId),
-          synchronizerId = "",
+          synchronizerId = synchronizerId.fold("")(_.toProtoPrimitive),
           userId = userId,
         )
       )

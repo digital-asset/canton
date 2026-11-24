@@ -37,6 +37,7 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.TryUtil.*
 import com.digitalasset.canton.util.{
   EitherTUtil,
   ErrorUtil,
@@ -46,8 +47,10 @@ import com.digitalasset.canton.util.{
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
 import scala.jdk.CollectionConverters.*
+import scala.util.Try
 import scala.util.chaining.scalaUtilChainingOps
 
 /** Daml admin workflow reacting to party management proposals and agreements among participants.
@@ -67,6 +70,16 @@ class AcsReplicationAdminWorkflow(
     with NamedLogging {
 
   private val acsReplicationTransactionHandler = new SingleUseCell[AcsReplicationTransactionHandler]
+
+  // ACS entries found upon participant start whose synchronizer has not yet connected.
+  private val pendingContractsPerSynchronizer
+      : TrieMap[SynchronizerId, Vector[(ScalaCreatedEvent, String)]] =
+    TrieMap.empty
+
+  // Registered before any processAcs call so that no connection notification is missed.
+  private val connectionListenerHandle = syncService.subscribeToConnections(_.withTraceContext {
+    implicit traceContext => synchronizerId => processPendingAcs(synchronizerId)
+  })
 
   def registerAcsReplicationTransactionHandler(handler: AcsReplicationTransactionHandler): Unit =
     acsReplicationTransactionHandler
@@ -402,24 +415,74 @@ class AcsReplicationAdminWorkflow(
             .map(_._1.contractId)} upon participant start"
       )
       createdEvents.foreach { case (createdEvent, synchronizerIdS) =>
-        createEventHandler(
-          processProposal(synchronizerIdS, _),
-          {
-            case (agreedAt, onPRAgreement)
-                if onPRAgreement.data.sourceParticipant == participantId.adminParty.toProtoPrimitive =>
-              processAgreementAtSourceOrTargetParticipant(
-                synchronizerIdS,
-                onPRAgreement,
-                agreedAt,
-                // maybe unknown due to the participant restart and lack of SP-side persistence:
-                mightNotRememberAgreement = true,
+        SynchronizerId.fromProtoPrimitive(synchronizerIdS, "synchronizer_id") match {
+          case Right(synchronizerId)
+              if syncService.readyConnectedSynchronizerById(synchronizerId).isEmpty =>
+            // Processing requires a connected synchronizer, which upon participant start is
+            // typically not yet the case. Defer until the synchronizer connects.
+            logger.info(
+              s"Deferring processing of ACS replication contract ${createdEvent.contractId} until synchronizer $synchronizerId is connected"
+            )
+            pendingContractsPerSynchronizer
+              .updateWith(synchronizerId)(prev =>
+                Some(prev.getOrElse(Vector.empty) :+ (createdEvent -> synchronizerIdS))
               )
-            case _ => ()
-          },
-        )(createdEvent)
+              .discard
+            // Guard against the synchronizer having connected between the check and the deferral.
+            if (syncService.readyConnectedSynchronizerById(synchronizerId).isDefined)
+              processPendingAcs(synchronizerId)
+          case _ =>
+            processAcsEntry(createdEvent, synchronizerIdS)
+        }
       }
     }
   }
+
+  private def processAcsEntry(createdEvent: ScalaCreatedEvent, synchronizerIdS: String)(implicit
+      traceContext: TraceContext
+  ): Unit =
+    createEventHandler(
+      processProposal(synchronizerIdS, _),
+      {
+        case (agreedAt, onPRAgreement)
+            if onPRAgreement.data.sourceParticipant == participantId.adminParty.toProtoPrimitive =>
+          processAgreementAtSourceOrTargetParticipant(
+            synchronizerIdS,
+            onPRAgreement,
+            agreedAt,
+            // maybe unknown due to the participant restart and lack of SP-side persistence:
+            mightNotRememberAgreement = true,
+          )
+        case _ => ()
+      },
+    )(createdEvent)
+
+  /** Process pending ACS replication contracts for the given synchronizer that were deferred until
+    * the synchronizer connected.
+    *
+    * Doesn't throw exceptions because that would prevent the following
+    *   - processing of the remaining pending contracts for the same synchronizer
+    *   - running of other connection listeners for the same synchronizer
+    *   - marking the synchronizer as connected
+    */
+  private def processPendingAcs(synchronizerId: SynchronizerId)(implicit
+      traceContext: TraceContext
+  ): Unit =
+    pendingContractsPerSynchronizer.remove(synchronizerId).foreach { entries =>
+      logger.info(
+        s"Processing ${entries.size} deferred ACS replication contracts after " +
+          s"the synchronizer $synchronizerId has connected"
+      )
+      entries.foreach { case (createdEvent, synchronizerIdS) =>
+        Try(processAcsEntry(createdEvent, synchronizerIdS)).forFailed { e =>
+          logger.warn(
+            s"Failed to process deferred party replication " +
+              s"contract ${createdEvent.contractId} on synchronizer $synchronizerId",
+            e,
+          )
+        }
+      }
+    }
 
   // Event handler sharable outside create event handling, e.g. for acs handling
   private def createEventHandler(
@@ -555,7 +618,12 @@ class AcsReplicationAdminWorkflow(
     // Note that we can not time out requests nicely here on shutdown as the admin
     // server is closed first, which means that our requests will never
     // return properly on shutdown abort.
-    LifeCycle.close(retrySubmitter, ledgerClient)(logger)
+    LifeCycle.close(
+      connectionListenerHandle,
+      () => pendingContractsPerSynchronizer.clear(),
+      retrySubmitter,
+      ledgerClient,
+    )(logger)
 
   private val retrySubmitter = new CommandSubmitterWithRetry(
     ledgerClient.commandService,

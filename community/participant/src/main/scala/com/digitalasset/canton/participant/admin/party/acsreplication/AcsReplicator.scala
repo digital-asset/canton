@@ -191,6 +191,13 @@ final class AcsReplicator(
                 .readyConnectedSynchronizerById(synchronizerId)
                 .toRight(s"Unknown synchronizer $synchronizerId")
             )
+          _ <- verifyTopologySnapshotAvailableAtReplicationTime(
+            connectedSynchronizer,
+            timestamp,
+            partyId,
+            sourceParticipantId,
+            participantId,
+          )
           syncPersistentState = connectedSynchronizer.synchronizerHandle.syncPersistentState
           restartNeededStatusO = acsReplicationStateManager
             .get(requestId)
@@ -1591,6 +1598,13 @@ final class AcsReplicator(
             None,
           )
         )
+        _ <- verifyTopologySnapshotAvailableAtReplicationTime(
+          connectedSynchronizer,
+          timestamp,
+          partyId,
+          participantId,
+          targetParticipantId,
+        )
         topologySnapshot =
           connectedSynchronizer.synchronizerHandle.topologyClient.headSnapshot
         sequencerIdsInTopology <- EitherT
@@ -1728,6 +1742,19 @@ final class AcsReplicator(
         )
         val synchronizerId = agreementParams.synchronizerId
         (for {
+          connectedSynchronizer <-
+            EitherT.fromEither[FutureUnlessShutdown](
+              syncService
+                .readyConnectedSynchronizerById(synchronizerId)
+                .toRight(s"Unknown synchronizer $synchronizerId")
+            )
+          _ <- verifyTopologySnapshotAvailableAtReplicationTime(
+            connectedSynchronizer,
+            paramsReceived.timestamp,
+            paramsReceived.partyId,
+            paramsReceived.sourceParticipantId,
+            paramsReceived.targetParticipantId,
+          )
           latestSynchronizerConnectionConfig <- EitherT.fromEither[FutureUnlessShutdown](
             syncService.synchronizerConnectionConfigStore
               .getActive(synchronizerId)
@@ -1777,6 +1804,30 @@ final class AcsReplicator(
       if (mightNotRememberProposal && statusO.isEmpty)
         processUntrackedAgreement()
       else processExpectedAgreement(statusO)
+    }
+
+  /** Checks whether a topology snapshot is available at the replication timestamp.
+    *
+    * Topology snapshot is required to obtain synchronizer configuration by the
+    * [[SequencerChannelClient]] later.
+    */
+  private def verifyTopologySnapshotAvailableAtReplicationTime(
+      connectedSynchronizer: ConnectedSynchronizer,
+      replicationTimestamp: CantonTimestamp,
+      partyId: PartyId,
+      sourceParticipantId: ParticipantId,
+      targetParticipantId: ParticipantId,
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    EitherT.fromEither[FutureUnlessShutdown] {
+      val topologyKnownUntilTimestamp =
+        connectedSynchronizer.synchronizerCrypto.topologyKnownUntilTimestamp
+      Either.cond(
+        replicationTimestamp <= topologyKnownUntilTimestamp,
+        (),
+        s"Synchronizer ${connectedSynchronizer.psid.logical} topology is known until $topologyKnownUntilTimestamp " +
+          s"but the ACS replication of party $partyId from SP $sourceParticipantId to " +
+          s"$targetParticipantId has a higher timestamp $replicationTimestamp",
+      )
     }
 
   private[admin] def getAcsReplicationStatus(
