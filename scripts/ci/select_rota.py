@@ -95,8 +95,8 @@ JOB_ROTATION: dict[str, str] = {
 # test_docker_images and test_ping_*. A new test job family needs a new prefix here.
 # The GHA red-main action calls this too, with the failed infra job name, and the prefixes
 # also cover the GHA test job names (the flaky pipeline pings Flaky Canton for those anyway).
-# The GHA per-commit crash_recovery_test_37* jobs are infra jobs on purpose, they are tests, so
-# they ping Flaky Canton like the CircleCI nightly job of the same name.
+# The GHA per-commit crash_recovery_test_37* jobs are tests, so they ping Flaky Canton like
+# the CircleCI nightly job of the same name.
 TEST_JOB_PREFIXES: tuple[str, ...] = (
     "test_3",
     "test_dev",
@@ -585,7 +585,8 @@ def self_test() -> None:
     assert rotations_for_jobs("blackduck") == ["release-blackduck"]
     assert rotation_for_job("test_docker_images") == "ci"  # infra job despite the test_ name
     assert rotation_for_job("test_ping_arm") == "ci"
-    assert rotation_for_job("crash_recovery_test_37") == "flaky-canton"  # GHA infra job, a test
+    assert rotation_for_job("crash_recovery_test_37") == "flaky-canton"
+    assert rotation_for_job("crash_recovery_test_37_requires_external_kms") == "flaky-canton"
     assert rotation_for_job("stability_test") == "flaky-canton"
     assert rotation_for_job("ledger_api_compatibility_tests_37") == "flaky-canton"
     assert rotation_for_job("test_data_continuity_dumps") == "flaky-canton"

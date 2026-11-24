@@ -54,7 +54,7 @@ class SynchronizerOutboxQueue(
   def enqueue(
       txs: Seq[GenericSignedTopologyTransaction]
   )(implicit traceContext: TraceContext): AsyncResult[Unit] = {
-    logger.debug(s"enqueuing: ${txs.map(_.hash)}")
+    logger.trace(s"enqueuing: ${txs.map(_.hash)}")
     unlessClosing {
       (lock.exclusive {
         val p = PromiseUnlessShutdown.unsupervised[Unit]()
@@ -91,7 +91,7 @@ class SynchronizerOutboxQueue(
         (txHashes, ret)
       })
       // using the show interpolator to force the pretty instance for Traced instead of the normal toString
-      logger.debug(show"dequeuing: $txHashes")
+      logger.trace(show"dequeuing: $txHashes")
       Outcome(ret)
     }
 
@@ -107,7 +107,7 @@ class SynchronizerOutboxQueue(
         inProcessQueue.clear()
         tmpHashes
       })
-      logger.debug(show"Requeued $tmpHashes")
+      logger.trace(show"Requeued $tmpHashes")
     } else {
       logger.info("Not requeuing topology transactions due to an ongoing shutdown.")
     }
@@ -127,7 +127,7 @@ class SynchronizerOutboxQueue(
           txHashes
         }
       )
-      logger.debug(show"completeCycle $txHashes")
+      logger.trace(show"completeCycle $txHashes")
       UnlessShutdown.unit
     }
 

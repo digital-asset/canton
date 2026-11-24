@@ -94,10 +94,9 @@ final case class TrafficConsumed(
       .catchOnly[ArithmeticException](
         math.addExact(trafficAllowedSinceLastTimestamp.value, baseTrafficRemainder.value)
       )
-      .leftMap { overflow =>
+      .leftMap { _ =>
         logger.debug(
-          s"Base traffic remainder calculation for $member overflowed a Long, truncating to Long.Max.",
-          overflow,
+          s"Base traffic remainder calculation for $member overflowed a Long, truncating to Long.Max."
         )
         NonNegativeLong.maxValue
       }

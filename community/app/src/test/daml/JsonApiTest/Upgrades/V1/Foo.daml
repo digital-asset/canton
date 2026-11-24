@@ -11,6 +11,7 @@ template Foo with
     otherParty: Party
   where
     signatory owner
+    observer otherParty
 
     interface instance IFoo for Foo where
       view = FooView with owner = owner

@@ -26,7 +26,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingFromCompanion,
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, TopologyLimits}
+import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, TopologyLimitsView}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -245,7 +245,7 @@ object StoredTopologyTransaction
       // Trusted bytes from the node's own store, so the validators pass the content through and
       // the limits in the context are never read.
       signedTx <- SignedTopologyTransaction.fromTrustedByteString(
-        TopologyTransactionDeserializationContext(TopologyLimits.default)
+        TopologyTransactionDeserializationContext(TopologyLimitsView.default)
       )(proto.transaction)
     } yield StoredTopologyTransaction(sequenced, validFrom, validUntil, signedTx, rejectionReason)
 
@@ -349,6 +349,30 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       synchronizerParameters: StaticSynchronizerParameters,
       ignoreLsuPsidCheck: Boolean,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit]
+
+  /** Require an effective, fully authorized LSU announcement for the initialized successor. */
+  def requireLsuAnnouncement(successor: PhysicalSynchronizerId)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
+    EitherT(
+      findPositiveTransactions(
+        asOf = CantonTimestamp.MaxValue,
+        asOfInclusive = true,
+        isProposal = false,
+        types = Seq(LsuAnnouncement.code),
+        filterUid = Some(NonEmpty(Seq, successor.uid)),
+        filterNamespace = Some(NonEmpty(Seq, successor.uid.namespace)),
+      ).map { transactions =>
+        Either.cond[TopologyManagerError, Unit](
+          transactions
+            .collectOfMapping[LsuAnnouncement]
+            .result
+            .exists(_.mapping.successorSynchronizerId == successor.opaque),
+          (),
+          TopologyManagerError.MissingTopologyMapping.MissingLsuAnnouncement(successor),
+        )
+      }
+    )
 
   /** returns the current dispatching watermark
     *

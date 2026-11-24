@@ -321,6 +321,13 @@ trait HostedPartiesComponentTest extends AnyWordSpec with IndexComponentTest {
         expected = Seq(sync2),
       )
       scenario.check(
+        filterFor(localParty, party("hp-filter-never-seen")).copy(
+          synchronizerIds =
+            Some(NonEmpty(Set, synchronizer2, SynchronizerId.tryFromString("x::neverseen")))
+        ),
+        expected = Seq(sync2),
+      )
+      scenario.check(
         filterFor(localParty).copy(
           synchronizerIds = Some(NonEmpty(Set, SynchronizerId.tryFromString("x::neverseen")))
         ),
@@ -576,7 +583,9 @@ final class HostedPartiesComponentTestDefaultPostgres
 /** Forces every hosting triplet onto its own id page and payload batch, so that the pagination, the
   * parallel id filtering and the party grouping across page boundaries are exercised.
   */
-trait HostedPartiesComponentTestTinyPages extends HostedPartiesComponentTest {
+final class HostedPartiesComponentTestTinyPagesPostgres
+    extends HostedPartiesComponentTest
+    with IndexComponentTest.WithPostgres {
   override protected def serviceParams: ServiceParams =
     super.serviceParams.copy(indexServiceConfig =
       IndexServiceConfig(hostedPartiesStreams =
@@ -591,17 +600,13 @@ trait HostedPartiesComponentTestTinyPages extends HostedPartiesComponentTest {
     )
 }
 
-final class HostedPartiesComponentTestTinyPagesH2 extends HostedPartiesComponentTestTinyPages
-
-final class HostedPartiesComponentTestTinyPagesPostgres
-    extends HostedPartiesComponentTestTinyPages
-    with IndexComponentTest.WithPostgres
-
 /** Spreads the candidate triplets over multi-triplet id pages that do not line up with the payload
   * batches and uses non-power-of-two parallelism, so that uneven page boundaries and the input
   * buffer rounding are exercised.
   */
-trait HostedPartiesComponentTestUnevenPages extends HostedPartiesComponentTest {
+final class HostedPartiesComponentTestUnevenPagesPostgres
+    extends HostedPartiesComponentTest
+    with IndexComponentTest.WithPostgres {
   override protected def serviceParams: ServiceParams =
     super.serviceParams.copy(indexServiceConfig =
       IndexServiceConfig(hostedPartiesStreams =
@@ -615,9 +620,3 @@ trait HostedPartiesComponentTestUnevenPages extends HostedPartiesComponentTest {
       )
     )
 }
-
-final class HostedPartiesComponentTestUnevenPagesH2 extends HostedPartiesComponentTestUnevenPages
-
-final class HostedPartiesComponentTestUnevenPagesPostgres
-    extends HostedPartiesComponentTestUnevenPages
-    with IndexComponentTest.WithPostgres

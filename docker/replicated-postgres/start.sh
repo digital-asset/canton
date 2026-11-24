@@ -30,9 +30,8 @@ create_dir "$WALARCHIVE_MOUNTPOINT"
 docker-compose -f "$SRCDIR/docker-compose.yml" --project-directory . --project-name "$PROJECT_NAME" \
 up -d
 
-docker-compose -f "$SRCDIR/docker-compose.yml" --project-directory . --project-name "$PROJECT_NAME" \
-exec -T toxiproxy /scripts/setup-toxiproxy/setup-toxiproxy.sh
-# The -T switch is required to run in from cron.
+# Configure Toxiproxy from the host through its HTTP API: the multi-arch image has no shell to run a script in.
+"$SRCDIR/scripts/setup-toxiproxy/setup-toxiproxy-via-api.sh"
 
 await-db.sh "$POSTGRES_PRIMARY_DIRECT_PORT" "${PROJECT_NAME}_primary"
 await-db.sh "$POSTGRES_PRIMARY_APPLICATION_PORT" "${PROJECT_NAME}_toxiproxy"

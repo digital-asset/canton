@@ -419,7 +419,7 @@ class TopologyStateWriteThroughCache(
       if (evictionLock.get().isCompleted) {
         val size = lock.exclusive(cachedKeys.size) + fresh.get()._1
         if (size > maxCacheSize.value + cacheEvictionThreshold.value) {
-          logger.debug(s"Topology cache size is $size, starting eviction run")
+          logger.trace(s"Topology cache size is $size, starting eviction run")
           val (currentLock, promise) = acquireEvictionLock()
           FutureUtil.doNotAwait(
             currentLock
@@ -495,11 +495,11 @@ class TopologyStateWriteThroughCache(
       if (numToRemove > 0) {
         val (excess, kept) = go(todo = numToRemove, index = 0, kept = 0, maxIdx = oldSize)
         metrics.evictionCount.inc((numToRemove - excess).toLong)
-        logger.debug(
+        logger.trace(
           s"Completed topology cache eviction: now=${cachedKeys.size + newItemsSize}, fresh=${newItems.size}, cached=$oldSize, kept=$kept, excess=$excess"
         )
       } else {
-        logger.debug(
+        logger.trace(
           s"No cache eviction necessary: now=${cachedKeys.size + newItemsSize}, fresh=${newItems.size}, cached=$oldSize"
         )
       }
@@ -600,11 +600,10 @@ class TopologyStateWriteThroughCache(
         stateData.validUntilInclusive.value <= effective.value,
         s"Current state is too recent for $effective $stateData",
       )
-      val loggerDebug = TopologyMapping.loggerDebug(tx.transaction.mapping.code)(_)
-      loggerDebug(s"Adding $toStore")
+      logger.trace(s"Adding $toStore")
       def expire(toExpire: MaybeUpdatedTx): Unit = {
         val before = toExpire.expireAt(effective)
-        loggerDebug("Marking transaction as expired:" + toExpire)
+        logger.trace("Marking transaction as expired:" + toExpire)
         ErrorUtil.requireState(
           before.isEmpty,
           s"Trying to expire an already expired transaction $toExpire because of\n   $tx",
@@ -651,7 +650,7 @@ class TopologyStateWriteThroughCache(
           case None =>
             // This case might happen if somebody added an authorized transaction with serial > 1
             // It is odd but supported
-            loggerDebug("No existing transaction to expire for " + tx.transaction)
+            logger.trace("No existing transaction to expire for " + tx.transaction)
           case Some(toExpire) =>
             ErrorUtil.requireState(
               toExpire.stored.serial.value <= tx.serial.value,
@@ -763,13 +762,13 @@ class TopologyStateWriteThroughCache(
                 stateCache.put(key, loaded).discard
                 completePromise(promise, loaded)
               }
-              if (logger.underlying.isDebugEnabled && prepared.nonEmpty) {
+              if (logger.underlying.isTraceEnabled && prepared.nonEmpty) {
                 val uncached = toLoad.zip(res)
                 val hits = (keys -- prepared.map(_._1)).map(s => s"hit:  $s").view
                 val misses = uncached.map { case ((key, _), res) =>
                   s"miss: $key, #${res.size}"
                 }.view
-                logger.debug(
+                logger.trace(
                   s"Prefetching into topology cache (${java.util.concurrent.TimeUnit.NANOSECONDS
                       .toMillis(System.nanoTime() - started)} ms):\n  " +
                     (hits ++ misses).mkString("\n  ")
@@ -1238,8 +1237,6 @@ object TopologyStateWriteThroughCache {
             val nextOld = old.serial.increment.getOrElse(
               ErrorUtil.invalidState("Reached max serial")
             )
-            if (!(cur.serial == old.serial || cur.serial == nextOld))
-              errorLoggingContext.debug("GOING TO BOUNCE\n  " + tail.mkString("\n  "))
             ErrorUtil.requireState(
               // may be equal if late signature was added, otherwise must be an increment
               cur.serial == old.serial || cur.serial == nextOld,
@@ -1453,7 +1450,7 @@ object TopologyStateWriteThroughCache {
         if (cur.validUntilInclusive.value <= asOf.value) {
           FutureUnlessShutdown.pure(cur)
         } else {
-          elc.debug(s"Extending history of $key to $asOf, as current is ${cur.validUntilInclusive}")
+          elc.trace(s"Extending history of $key to $asOf, as current is ${cur.validUntilInclusive}")
           // check if we can serve the data from the current history set
           fetchHistory(asOf).map { loaded =>
             // historical fetches might race, we'll just keep the longest history around

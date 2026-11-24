@@ -119,6 +119,11 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion, forbidTrailingNones:
       (TBool, ValueTrue, SValue.True),
       (TInt64, ValueInt64(42), SInt64(42)),
       (
+        Ast.TBuiltin(Ast.BTUint256),
+        ValueUint256(data.Uint256.assertFromLong(42L)),
+        SUint256(data.Uint256.assertFromLong(42L)),
+      ),
+      (
         TTimestamp,
         ValueTimestamp(Time.Timestamp.assertFromString("1969-07-20T20:17:00Z")),
         STimestamp(Time.Timestamp.assertFromString("1969-07-20T20:17:00Z")),

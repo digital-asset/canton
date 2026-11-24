@@ -7,7 +7,11 @@ import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.sequencer.v30
 import com.digitalasset.canton.crypto.ValidatedPemCertificate
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.networking.grpc.{
   ClientChannelBuilder,
   ClientChannelParams,
@@ -28,7 +32,7 @@ import java.util.concurrent.Executor
   * of these connections is more dynamic. The structures below are used to represent the dynamic
   * configuration of how a participant connects to a sequencer.
   */
-sealed trait SequencerConnection extends PrettyPrinting {
+sealed trait SequencerConnection extends PrettyPrintingFromCompanion {
   def withAlias(alias: SequencerAlias): SequencerConnection
 
   def toProtoV30: v30.SequencerConnection
@@ -92,14 +96,8 @@ final case class GrpcSequencerConnection(
       sequencerId = sequencerId.map(_.toProtoPrimitive),
     )
 
-  override protected def pretty: Pretty[GrpcSequencerConnection] =
-    prettyOfClass(
-      param("sequencerAlias", _.sequencerAlias),
-      paramIfDefined("sequencerId", _.sequencerId),
-      param("endpoints", _.endpoints.map(_.toURI(transportSecurity)).toList),
-      paramIfTrue("transportSecurity", _.transportSecurity),
-      paramIfTrue("customTrustCertificates", _.customTrustCertificates.nonEmpty),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[GrpcSequencerConnection] =
+    GrpcSequencerConnection
 
   override def addEndpoints(
       connection: URI,
@@ -118,7 +116,16 @@ final case class GrpcSequencerConnection(
     copy(sequencerId = Some(sequencerId))
 }
 
-object GrpcSequencerConnection {
+object GrpcSequencerConnection extends PrettyPrintingCompanion[GrpcSequencerConnection] {
+
+  override protected val pretty: Pretty[GrpcSequencerConnection] = prettyOfClass(
+    param("sequencerAlias", _.sequencerAlias),
+    paramIfDefined("sequencerId", _.sequencerId),
+    param("endpoints", x => x.endpoints.map(_.toURI(x.transportSecurity)).toList),
+    paramIfTrue("transportSecurity", _.transportSecurity),
+    paramIfTrue("customTrustCertificates", _.customTrustCertificates.nonEmpty),
+  )
+
   def create(
       connection: String,
       customTrustCertificates: Option[ValidatedPemCertificate] = None,

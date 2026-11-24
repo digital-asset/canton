@@ -10,7 +10,7 @@ import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFai
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
-import com.digitalasset.canton.protocol.TopologyLimits
+import com.digitalasset.canton.protocol.TopologyLimitsView
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.topology.admin.v30 as adminProto
@@ -80,7 +80,7 @@ class GrpcIdentityInitializationService(
               SignedTopologyTransaction
                 .fromProtoV30(
                   ProtocolVersionValidation.AlwaysValidation,
-                  TopologyTransactionDeserializationContext(TopologyLimits.default),
+                  TopologyTransactionDeserializationContext(TopologyLimitsView.default),
                   _,
                 )
                 .flatMap { tx =>

@@ -8,7 +8,7 @@ import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.*
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
-import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, TestConstraints}
+import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party, TestConstraints}
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
 import com.daml.ledger.api.v2.transaction_filter.{TransactionFormat, UpdateFormat}
 import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesPageRequest}
@@ -21,6 +21,7 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.util.MonadUtil
 import com.google.protobuf.ByteString
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
@@ -170,10 +171,11 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
     "TXServeTailingStreamAcsDeltaPartyWildcard",
     "Items should be served if party and transaction were added during subscription",
     allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     val transactionsToSubmit = 14
     val transactionsToRead = 15
+    // party2 is allocated after subscribing, so it joins the filter once it is known
+    val party2 = new AtomicReference(Option.empty[Party])
     for {
       endOffsetAtTestStart <- ledger.currentEnd()
       dummies <- Future.sequence(
@@ -185,12 +187,16 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
           begin = endOffsetAtTestStart,
           end = None,
         )
-      flats = ledger.transactions(
-        transactionsToRead,
-        txReq,
-      )
-      party2 <- ledger.allocateParty()
-      _ <- ledger.create(party2, new Dummy(party2))
+      flats = ledger
+        .updates(
+          transactionsToRead,
+          txReq,
+          _.update.transaction.exists(tx => concerns((party +: party2.get().toList)*)(tx)),
+        )
+        .map(_.flatMap(_.transaction))
+      p <- ledger.allocateParty()
+      _ = party2.set(Some(p))
+      _ <- ledger.create(p, new Dummy(p))
       transactions <- flats
     } yield {
       assert(
@@ -213,10 +219,11 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
     "TXServeTailingStreamLedgerEffectsPartyWildcard",
     "Transaction with ledger effects should be served if party and transaction added during subscription",
     allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     val transactionsToSubmit = 14
     val transactionsToRead = 15
+    // party2 is allocated after subscribing, so it joins the filter once it is known
+    val party2 = new AtomicReference(Option.empty[Party])
     for {
       endOffsetAtTestStart <- ledger.currentEnd()
       dummies <- Future.sequence(
@@ -229,12 +236,16 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
           begin = endOffsetAtTestStart,
           end = None,
         )
-      trees = ledger.transactions(
-        transactionsToRead,
-        txReq,
-      )
-      party2 <- ledger.allocateParty()
-      _ <- ledger.create(party2, new Dummy(party2))
+      trees = ledger
+        .updates(
+          transactionsToRead,
+          txReq,
+          _.update.transaction.exists(tx => concerns((party +: party2.get().toList)*)(tx)),
+        )
+        .map(_.flatMap(_.transaction))
+      p <- ledger.allocateParty()
+      _ = party2.set(Some(p))
+      _ <- ledger.create(p, new Dummy(p))
       transactions <- trees
     } yield {
       assert(
@@ -366,7 +377,6 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
     "TXFilterByTemplate",
     "The transaction service should correctly filter by template identifier",
     allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     val create = ledger.submitAndWaitRequest(
       party,
@@ -383,6 +393,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
       )
       transactionsPartyWildcard <- ledger
         .transactionsByTemplateIdWithVariants(Dummy.TEMPLATE_ID, None, Some("wildcard party"))
+        .map(_.filter(concerns(party)))
     } yield {
       val contract = assertSingleton("FilterByTemplate", transactions.flatMap(createdEvents))
       assertEquals(
@@ -402,7 +413,6 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
     "TXFilterByInterface",
     "The transaction service should correctly filter by interface identifier",
     allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     import com.daml.ledger.test.java.model.iou.{Iou, IIou}
 
@@ -436,7 +446,6 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
     "TXTransactionFormat",
     "The transactions should be served when the transaction format is set",
     allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     val transactionsToRead = 1
     for {
@@ -619,7 +628,6 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
     "TXStreamDummyFilterDummyIouDummy",
     "Updates stream with Dummy transaction filter should return empty stream if asking for a range containing sole Iou transaction surrounded by dummy transaction outside of the requested range",
     allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
       _ <- ledger.create(party, new Dummy(party))
@@ -994,11 +1002,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
       )
 
       firstPage <- ledger.getUpdatesPageRaw(request)
-      _ <- ledger.pruneCantonSafe(
-        pruningOffset,
-        party,
-        p => new Dummy(p).create.commands,
-      )
+      _ <- ledger.pruneCantonSafe(pruningOffset, party)
       secondPage <- ledger.getUpdatesPageRaw(
         request.update(_.pageToken := firstPage.nextPageToken.value)
       )
@@ -1051,11 +1055,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
       )
 
       firstPage <- ledger.getUpdatesPageRaw(request)
-      _ <- ledger.pruneCantonSafe(
-        pruningOffset,
-        party,
-        p => new Dummy(p).create.commands,
-      )
+      _ <- ledger.pruneCantonSafe(pruningOffset, party)
       secondPage <- ledger.getUpdatesPageRaw(
         request.update(_.pageToken := firstPage.nextPageToken.value)
       )
@@ -1114,11 +1114,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
       )
 
       firstPage <- ledger.getUpdatesPageRaw(request)
-      _ <- ledger.pruneCantonSafe(
-        pruningOffset,
-        party,
-        p => new Dummy(p).create.commands,
-      )
+      _ <- ledger.pruneCantonSafe(pruningOffset, party)
       secondPage <- ledger.getUpdatesPageRaw(
         request.update(_.pageToken := firstPage.nextPageToken.value)
       )
@@ -1174,11 +1170,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
         descendingOrder = false,
         pageToken = None,
       )
-      _ <- ledger.pruneCantonSafe(
-        pruningOffset,
-        party,
-        p => new Dummy(p).create.commands,
-      )
+      _ <- ledger.pruneCantonSafe(pruningOffset, party)
       firstPage <- ledger.getUpdatesPageRaw(request)
     } yield {
       compareContractIds("First page contains two elements", firstPage.updates, Seq(dummy2, dummy3))
@@ -1229,11 +1221,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
         pageToken = None,
       )
       firstPage <- ledger.getUpdatesPageRaw(request)
-      _ <- ledger.pruneCantonSafe(
-        pruningOffset,
-        party,
-        p => new Dummy(p).create.commands,
-      )
+      _ <- ledger.pruneCantonSafe(pruningOffset, party)
       err <- ledger
         .getUpdatesPageRaw(request.update(_.pageToken := firstPage.getNextPageToken))
         .mustFail(
@@ -1285,11 +1273,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
         descendingOrder = false,
         pageToken = None,
       )
-      _ <- ledger.pruneCantonSafe(
-        pruningOffset,
-        party,
-        p => new Dummy(p).create.commands,
-      )
+      _ <- ledger.pruneCantonSafe(pruningOffset, party)
       err <- ledger
         .getUpdatesPageRaw(request)
         .mustFail(

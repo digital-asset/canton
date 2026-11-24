@@ -10,8 +10,8 @@ import com.daml.test.evidence.tag.Reliability.{
   ReliabilityTest,
   Remediation,
 }
-import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.NonNegativeDuration
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration.ConfigTransforms
 import com.digitalasset.canton.integration.plugins.{UseConfigTransforms, UsePostgres}
 import com.digitalasset.canton.integration.tests.ReplicatedNodeHelper
@@ -27,6 +27,8 @@ class RestartParticipantPerformanceIntegrationTest
     extends ReliabilityPerformanceIntegrationTest
     with BasePerformanceIntegrationTest
     with ReplicatedNodeHelper {
+
+  override protected def numPermits: PositiveInt = PositiveInt.two
 
   "restart the participants while the runners are running".taggedAs(
     ReliabilityTest(
@@ -44,13 +46,13 @@ class RestartParticipantPerformanceIntegrationTest
     )
   ) in { implicit env =>
     import env.*
-
     runWithFault(
       participant1.name,
       participant1.config.ledgerApi.port,
       withPartyGrowth = 1, // use party growth to add topology mgmt crash
-    ) { hasCompleted =>
-      def restart(done: Boolean): Unit =
+    ) { callback =>
+      def restart(): Unit = {
+        val (done, _) = callback()
         if (!done) {
           clue("stopping participant") {
             // As the participant is loaded, this can fail with an exception.
@@ -63,6 +65,7 @@ class RestartParticipantPerformanceIntegrationTest
           clue("waiting for participant to be running again") {
             participant1.health.wait_for_running()
           }
+          val (_, observed) = callback()
           clue("waiting for participant to be active") {
             waitActive(participant1)
           }
@@ -72,13 +75,26 @@ class RestartParticipantPerformanceIntegrationTest
             // TODO(#9367) smarter topology synchronisation
             participant1.synchronizers.reconnect_all(synchronize = None)
           }
-          // sleeping to give the system time to catch up (else we often run into timeout issues due to, e.g.,
-          // still being busy with the replay/crashrecovery of previous messages when the new shutdown already starts)
-          Threading.sleep(120000)
+          // wait until all runners have progressed again
+          eventually(timeUntilSuccess = 200.seconds) {
+            val (done, observedNew) = callback()
+            if (done) succeed
+            else {
+              if (observed.lengthIs != observedNew.length) {
+                logger.error(
+                  "Observed length changed after restart. This is unexpected and may indicate a problem with the test."
+                )
+              }
+              forAll(observedNew.zip(observed)) { case (newValue, oldValue) =>
+                newValue should be > oldValue + 6 withClue s"Observed value did not progress after restart: $observedNew vs $observed"
+              }
+            }
+          }
         }
+      }
 
-      // restart this beast 5 times
-      (1 to 5).foreach(_ => restart(hasCompleted()))
+      // restart this beast 3 times
+      (1 to 3).foreach(_ => restart())
     }
 
   }

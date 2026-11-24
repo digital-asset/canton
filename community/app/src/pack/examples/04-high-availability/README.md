@@ -13,11 +13,8 @@ A Canton synchronizer is made of two primary components: the Sequencer, and the 
 
  * **Sequencer**
    * Responsible for sending events around the synchronizer.
-   * Canton supports a number of Sequencer implementations.
-     The version presented here is the relational database backed version that supports Postgres, and is intended for when a synchronizer is operated by a single organization.
-     Alternative implementations use distributed ledger platforms such as Ethereum or Fabric to allow many organizations to operate a single decentralized synchronizer.
-   * The database backed Sequencer implementation supports elastic horizontal scaling to run on many machines.
-   * It coordinates many active instances by use of a shared single database.
+   * Multiple Sequencer nodes can be deployed, each running its own BFT orderer and database.
+   * The Sequencer nodes coordinate with each other using the BFT ordering protocol.
  * **Mediator**
    * The synchronizer transaction coordinator.
    * Many Mediator replicas can be deployed within a single logical synchronizer and coordinate between themselves which instance

@@ -5,11 +5,16 @@ package com.digitalasset.canton.config
 
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext
-import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
+import com.typesafe.config.{Config, ConfigFactory, ConfigObject, ConfigValueFactory}
 
+import java.util.Locale
 import scala.jdk.CollectionConverters.*
 
 /** Various database related settings
@@ -73,32 +78,8 @@ final case class DbParametersConfig(
     // Make the default settings a part of repeatable migrations
     repeatableMigrationsPaths: Seq[String] = Seq.empty,
     partitions: PartitionConfig = PartitionConfig(),
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[DbParametersConfig] =
-    prettyOfClass(
-      paramIfDefined(
-        "migrationsPaths",
-        x =>
-          if (x.migrationsPaths.nonEmpty)
-            Some(x.migrationsPaths.map(_.doubleQuoted))
-          else None,
-      ),
-      paramIfDefined(
-        "repeatableMigrationsPaths",
-        x =>
-          if (x.repeatableMigrationsPaths.nonEmpty)
-            Some(x.repeatableMigrationsPaths.map(_.doubleQuoted))
-          else None,
-      ),
-      paramIfDefined("maxConnections", _.maxConnections),
-      param("connectionAllocation", _.connectionAllocation),
-      param("failFast", _.failFastOnStartup),
-      paramIfNonEmpty("migrationPaths", _.migrationsPaths.map(_.unquoted)),
-      param("connectionTimeout", _.connectionTimeout),
-      param("failedToFatalDelay", _.failedToFatalDelay),
-      paramIfDefined("warnOnSlowQuery", _.warnOnSlowQuery),
-      param("migrateAndStart", _.migrateAndStart),
-    )
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[DbParametersConfig] = DbParametersConfig
 }
 
 /** Various settings to control batching behaviour related to db queries
@@ -144,13 +125,16 @@ final case class ConnectionAllocation(
     numReads: Option[PositiveInt] = None,
     numWrites: Option[PositiveInt] = None,
     numLedgerApi: Option[PositiveInt] = None,
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[ConnectionAllocation] =
-    prettyOfClass(
-      paramIfDefined("numReads", _.numReads),
-      paramIfDefined("numWrites", _.numWrites),
-      paramIfDefined("numLedgerApi", _.numLedgerApi),
-    )
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[ConnectionAllocation] = ConnectionAllocation
+}
+
+object ConnectionAllocation extends PrettyPrintingCompanion[ConnectionAllocation] {
+  override protected val pretty: Pretty[ConnectionAllocation] = prettyOfClass(
+    paramIfDefined("numReads", _.numReads),
+    paramIfDefined("numWrites", _.numWrites),
+    paramIfDefined("numLedgerApi", _.numLedgerApi),
+  )
 }
 
 /** @param initialBftOrdererTablesPartitionSize
@@ -160,7 +144,31 @@ final case class ConnectionAllocation(
   */
 final case class PartitionConfig(initialBftOrdererTablesPartitionSize: Int = 1500)
 
-object DbParametersConfig {
+object DbParametersConfig extends PrettyPrintingCompanion[DbParametersConfig] {
+  override protected val pretty: Pretty[DbParametersConfig] = prettyOfClass(
+    paramIfDefined(
+      "migrationsPaths",
+      x =>
+        if (x.migrationsPaths.nonEmpty)
+          Some(x.migrationsPaths.map(_.doubleQuoted))
+        else None,
+    ),
+    paramIfDefined(
+      "repeatableMigrationsPaths",
+      x =>
+        if (x.repeatableMigrationsPaths.nonEmpty)
+          Some(x.repeatableMigrationsPaths.map(_.doubleQuoted))
+        else None,
+    ),
+    paramIfDefined("maxConnections", _.maxConnections),
+    param("connectionAllocation", _.connectionAllocation),
+    param("failFast", _.failFastOnStartup),
+    paramIfNonEmpty("migrationPaths", _.migrationsPaths.map(_.unquoted)),
+    param("connectionTimeout", _.connectionTimeout),
+    param("failedToFatalDelay", _.failedToFatalDelay),
+    paramIfDefined("warnOnSlowQuery", _.warnOnSlowQuery),
+    param("migrateAndStart", _.migrateAndStart),
+  )
 
   private val defaultWarnOnSlowQueryInterval: PositiveFiniteDuration =
     PositiveFiniteDuration.ofSeconds(5)
@@ -316,7 +324,7 @@ object StorageConfig {
 
 /** Dictates that persistent data is stored in a database.
   */
-sealed trait DbConfig extends StorageConfig with PrettyPrinting {
+sealed trait DbConfig extends StorageConfig with PrettyPrintingFromCompanion {
 
   /** Function to combine the defined migration path together with dev version changes
     *
@@ -343,14 +351,7 @@ sealed trait DbConfig extends StorageConfig with PrettyPrinting {
   protected def stableMigrationPath: String
   protected def defaultTableSettingsPath: String
 
-  override protected def pretty: Pretty[DbConfig] =
-    prettyOfClass(
-      param(
-        "config",
-        _.config.toString.replaceAll("\"password\":\".*?\"", "\"password\":\"???\"").unquoted,
-      ),
-      param("parameters", _.parameters),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[DbConfig] = DbConfig
 }
 
 sealed trait ModifiableDbConfig[A <: ModifiableDbConfig[A]] extends DbConfig {
@@ -362,7 +363,13 @@ sealed trait ModifiableDbConfig[A <: ModifiableDbConfig[A]] extends DbConfig {
   ): Self
 }
 
-object DbConfig {
+object DbConfig extends PrettyPrintingCompanion[DbConfig] {
+
+  override protected val pretty: Pretty[DbConfig] = prettyOfClass(
+    param("config", c => hideConfidential(c.config).toString.unquoted),
+    param("parameters", _.parameters),
+  )
+
   final case class H2(
       override val config: Config,
       override val parameters: DbParametersConfig = DbParametersConfig(),
@@ -468,7 +475,7 @@ object DbConfig {
             assertOnString(c, "url", _.contains(":mem:"))
           if (isInMemory && !containsOption(c, "DB_CLOSE_DELAY", "-1")) {
             logger.warn(
-              s"Given H2 config is in-memory and does not contain DB_CLOSE_DELAY=-1. Automatically added this to avoid accidentally losing all data. $c"
+              "Given H2 config is in-memory and does not contain DB_CLOSE_DELAY=-1. Automatically added this to avoid accidentally losing all data."
             )
             c.withValue("properties.DB_CLOSE_DELAY", ConfigValueFactory.fromAnyRef("-1"))
           } else c
@@ -504,15 +511,33 @@ object DbConfig {
       c
   }
 
-  /** strip the password and the url out of the config object */
+  /** Masks every value whose key contains "password" or "url" (ignoring case), at the root and in
+    * `properties`. This covers the keys that Slick, HikariCP and the JDBC drivers accept, such as
+    * `jdbcUrl`, `properties.URL` and `properties.sslpassword`. URLs are masked in full because they
+    * can embed credentials.
+    */
   def hideConfidential(config: Config): Config = {
-    val hidden = ConfigValueFactory.fromAnyRef("****")
-    val replace = Seq("password", "properties.password", "url", "properties.url")
-    replace.foldLeft(config) { case (acc, path) =>
-      if (acc.hasPath(path))
-        acc.withValue(path, hidden)
-      else acc
-    }
+    val root = maskConfidentialKeys(config.root())
+    Option(root.get("properties"))
+      .collect { case properties: ConfigObject =>
+        root.withValue("properties", maskConfidentialKeys(properties))
+      }
+      .getOrElse(root)
+      .toConfig
+  }
+
+  private def maskConfidentialKeys(obj: ConfigObject): ConfigObject =
+    obj
+      .keySet()
+      .asScala
+      .filter(isConfidentialKey)
+      .foldLeft(obj)((acc, key) =>
+        acc.withValue(key, ConfigValueFactory.fromAnyRef(Confidential.Mask))
+      )
+
+  private def isConfidentialKey(key: String): Boolean = {
+    val lowerCaseKey = key.toLowerCase(Locale.ROOT)
+    lowerCaseKey.contains("password") || lowerCaseKey.contains("url")
   }
 
 }

@@ -30,7 +30,7 @@ import com.digitalasset.canton.topology.TopologyManagerError.TopologyStoreUnknow
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.util.BinaryFileUtil
-import com.digitalasset.daml.lf.archive.{DarParser, DarReader}
+import com.digitalasset.daml.lf.archive.{DarPackageIdReader, DarParser}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.google.protobuf.ByteString
@@ -353,7 +353,7 @@ trait PackageUploadIntegrationTest
           Future.delegate {
             val darPath = File.newTemporaryFile(darName, ".dar")
             val file = darPath.appendByteArray(dar.toByteArray)
-            val mainPackageId = DarReader.assertReadArchiveFromFile(darPath.toJava).main.pkgId
+            val mainPackageId = DarPackageIdReader.assertReadArchiveFromFile(darPath.toJava).main
 
             Future {
               participant1.dars
@@ -463,7 +463,7 @@ trait PackageUploadIntegrationTest
       val (darFiles, mainPackages) = variousDars.map { case (darName, bytes) =>
         val darPath = File.newTemporaryFile(darName, ".dar")
         val file = darPath.appendByteArray(bytes.toByteArray)
-        val mainPackageId = DarReader.assertReadArchiveFromFile(darPath.toJava).main.pkgId
+        val mainPackageId = DarPackageIdReader.assertReadArchiveFromFile(darPath.toJava).main
         (file.pathAsString, mainPackageId)
       }.unzip
 

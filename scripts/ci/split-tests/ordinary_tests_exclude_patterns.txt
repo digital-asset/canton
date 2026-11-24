@@ -1,0 +1,12 @@
+com\.digitalasset\.canton\.integration\.tests\.manual
+com\.digitalasset\.canton\.integration\.tests\.crashrecovery
+com\.digitalasset\.canton\.nightly
+com\.digitalasset\.canton\.integration\.tests\.nightly
+com\.digitalasset\.canton\.integration\.tests\.toxiproxy
+com\.digitalasset\.canton\.integration\.tests\.release
+com\.digitalasset\.canton\.integration\.tests\.benchmarks
+com\.digitalasset\.canton\.integration\.tests\.continuity
+com\.digitalasset\.canton\.integration\.tests\.variations
+com\.digitalasset\.canton\.integration\.tests\.modelbased
+com\.digitalasset\.canton\.integration\.tests\.docs\.snippet
+com\.digitalasset\.canton\.integration\.tests\.UpgradesMatrixIntegration

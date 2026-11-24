@@ -45,7 +45,7 @@ class KmsDriverConfigTest extends BaseTestWordSpec {
           Some(DefaultPorts.create()),
         )
         .valueOrFail("loading test KMS driver config")
-      val confString = CantonConfig.makeConfidentialString(config)
+      val confString = config.dumpString
 
       confString should include(username)
       confString should not include password

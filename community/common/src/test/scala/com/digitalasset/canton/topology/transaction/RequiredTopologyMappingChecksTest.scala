@@ -1558,7 +1558,7 @@ class RequiredTopologyMappingChecksTest
     "validating the key count of key mappings" should {
       import factory.SigningKeys.{key1, key2, key3}
 
-      val limits = testedTopologyLimits.copy(maxSigningKeysPerEntity = PositiveInt.two)
+      val limits = testedTopologyLimits.limits.copy(maxSigningKeysPerEntity = PositiveInt.two)
       // Only from ProtocolVersion.newBoundsOnPV37 can the topology limits differ from the default
       lazy val parameters = BaseTest.defaultStaticSynchronizerParametersWith(
         protocolVersion = ProtocolVersion.newBoundsOnPV37,

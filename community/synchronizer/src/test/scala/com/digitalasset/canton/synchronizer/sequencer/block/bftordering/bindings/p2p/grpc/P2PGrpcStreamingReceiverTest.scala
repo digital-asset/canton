@@ -3,19 +3,22 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc
 
-import com.daml.metrics.api.MetricsContext
+import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
+import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.concurrent.DirectExecutionContext.directExecutionContext
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.lifecycle.PromiseUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.metrics.{SequencerHistograms, SequencerMetrics}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleRef
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
 import com.digitalasset.canton.topology.{Namespace, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.google.protobuf.timestamp.Timestamp
+import io.opentelemetry.api.OpenTelemetry
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
@@ -59,6 +62,33 @@ class P2PGrpcStreamingReceiverTest extends AnyWordSpec with BftSequencerBaseTest
       verify(inputModule, times(1)).asyncSend(eqTo(message))(any[TraceContext], any[MetricsContext])
     }
 
+    "forward messages whose send instants or latencies are out of range" in {
+      val sequencerId =
+        SequencerId.tryCreate("node1", Namespace(Fingerprint.tryFromString("namespace")))
+      val inputModule = mock[ModuleRef[BftOrderingMessage]]
+      val sequencerIdPromiseUS = PromiseUnlessShutdown.unsupervised[SequencerId]()
+      sequencerIdPromiseUS.outcome(sequencerId)
+      val receiver = createStreamingReceiver(inputModule, sequencerIdPromiseUS)
+
+      Seq(
+        Timestamp(seconds = Long.MaxValue, nanos = 0),
+        Timestamp(seconds = -62135596800L, nanos = 0),
+      ).foreach { sentAt =>
+        val message =
+          BftOrderingMessage(
+            traceContext = "",
+            body = None,
+            sentBy = SequencerNodeId.toBftNodeId(sequencerId),
+            sentAt = Some(sentAt),
+          )
+
+        receiver.onNext(message)
+
+        verify(inputModule, times(1))
+          .asyncSend(eqTo(message))(any[TraceContext], any[MetricsContext])
+      }
+    }
+
     "not forward a message when node ID validation was not successful" in {
       val message =
         BftOrderingMessage(traceContext = "", body = None, sentBy = "wrong", sentAt = None)
@@ -91,7 +121,16 @@ class P2PGrpcStreamingReceiverTest extends AnyWordSpec with BftSequencerBaseTest
       inputModule: ModuleRef[BftOrderingMessage],
       sequencerIdPromiseUS: PromiseUnlessShutdown[SequencerId],
   ): P2PGrpcStreamingReceiver = {
-    val metrics = SequencerMetrics.noop(getClass.getSimpleName).bftOrdering
+    val inventory = new HistogramInventory
+    val histograms = new SequencerHistograms(MetricName(getClass.getSimpleName))(inventory)
+    val metrics = new SequencerMetrics(
+      histograms,
+      new OpenTelemetryMetricsFactory(
+        OpenTelemetry.noop().getMeter(getClass.getSimpleName),
+        inventory.registered().map(_.name.toString).toSet,
+        onlyLogMissingHistograms = None,
+      ),
+    ).bftOrdering
     new P2PGrpcStreamingReceiver(
       maybeP2PEndpointId = None,
       inputModule,

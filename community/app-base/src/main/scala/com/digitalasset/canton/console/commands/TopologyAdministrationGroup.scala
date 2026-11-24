@@ -43,7 +43,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.grpc.{ByteStringStreamObserver, OutputFileStreamObserver}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.TopologyLimits
+import com.digitalasset.canton.protocol.TopologyLimitsView
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, BaseWriteRequest, TopologyStoreId}
 import com.digitalasset.canton.topology.admin.v30.{
@@ -84,7 +84,6 @@ import scala.collection.immutable.SeqMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.math.Ordering.Implicits.infixOrderingOps
 import scala.reflect.ClassTag
-import scala.util.control.NoStackTrace
 
 class TopologyAdministrationGroup(
     protected val instance: InstanceReference,
@@ -197,7 +196,7 @@ class TopologyAdministrationGroup(
           SignedTopologyTransaction
             .fromByteString(
               ProtocolVersionValidation.AlwaysValidation,
-              TopologyTransactionDeserializationContext(TopologyLimits.default),
+              TopologyTransactionDeserializationContext(TopologyLimitsView.default),
               bytes,
             )
             .leftMap(_.message)
@@ -534,7 +533,7 @@ class TopologyAdministrationGroup(
         ),
         password: Option[String] = None,
     ): Unit = {
-      val context = TopologyTransactionDeserializationContext(TopologyLimits.default)
+      val context = TopologyTransactionDeserializationContext(TopologyLimitsView.default)
       val transactionE = password match {
         case Some(password) =>
           for {
@@ -612,7 +611,7 @@ class TopologyAdministrationGroup(
       val transactions = files.map { file =>
         SignedTopologyTransaction
           .readFromTrustedFile(
-            TopologyTransactionDeserializationContext(TopologyLimits.default),
+            TopologyTransactionDeserializationContext(TopologyLimitsView.default),
             file,
           )
           .valueOr { err =>
@@ -642,7 +641,7 @@ class TopologyAdministrationGroup(
     ): Unit = {
       val transactions = SignedTopologyTransactions
         .readFromTrustedFile(
-          TopologyTransactionDeserializationContext(TopologyLimits.default),
+          TopologyTransactionDeserializationContext(TopologyLimitsView.default),
           file,
         )
         .valueOr { err =>
@@ -2939,6 +2938,64 @@ class TopologyAdministrationGroup(
       runAdminCommand(cmd)
     }
 
+    @Help.Summary("Revokes the synchronizer trust certificate of a participant")
+    @Help.Description(
+      """Synchronizer operators and the participant operator may use this command to revoke a
+        |participant's permissions on a synchronizer.
+        |
+        |Parameters:
+        |- synchronizerId: The target synchronizer.
+        |- participantId: The participant whose synchronizer trust certificate should be revoked.
+        |- mustFullyAuthorize: When set to true, the proposal's previously received signatures and
+        |  the signature of this node must be sufficient to fully authorize the topology
+        |  transaction. If this is not the case, the request fails.
+        |  When set to false, the proposal retains the proposal status until enough signatures are
+        |  accumulated to satisfy the mapping's authorization requirements.
+        |- store:
+        |  - "Authorized": The topology transaction will be stored in the node's authorized store
+        |  and automatically propagated to connected synchronizers, if applicable.
+        |  - "<synchronizer id>": The topology transaction will be directly submitted to the
+        |  specified synchronizer without storing it locally first. This also means it will _not_
+        |  be synchronized to other synchronizers automatically.
+        """
+    )
+    def revoke(
+        synchronizerId: SynchronizerId,
+        participantId: ParticipantId,
+        synchronize: Option[NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+        mustFullyAuthorize: Boolean = false,
+        store: Option[TopologyStoreId] = None,
+    ): SignedTopologyTransaction[TopologyChangeOp, SynchronizerTrustCertificate] =
+      list(
+        store = store,
+        filterUid = participantId.filterString,
+      ) match {
+        case Seq() =>
+          consoleEnvironment.raiseError(
+            s"No SynchronizerTrustCertificate found for participant $participantId."
+          )
+        case Seq(result) =>
+          val item = result.item
+          propose(
+            item.participantId,
+            item.synchronizerId,
+            synchronize,
+            store = store,
+            serial = Some(
+              result.context.serial.increment.getOrElse(
+                consoleEnvironment.raiseError("SynchronizerTrustCertificate max serial reached")
+              )
+            ),
+            mustFullyAuthorize = mustFullyAuthorize,
+            change = TopologyChangeOp.Remove,
+          )
+        case _ =>
+          consoleEnvironment.raiseError(
+            s"Found more than one SynchronizerTrustCertificate for participant $participantId on synchronizer $synchronizerId"
+          )
+      }
   }
 
   @Help.Summary("Inspect participant synchronizer permissions")
@@ -3047,9 +3104,9 @@ class TopologyAdministrationGroup(
         filterUid = participantId.filterString,
       ) match {
         case Seq() =>
-          throw new IllegalStateException(
+          consoleEnvironment.raiseError(
             s"No ParticipantSynchronizerPermission found for participant $participantId."
-          ) with NoStackTrace
+          )
         case Seq(result) =>
           val item = result.item
           propose(
@@ -3071,9 +3128,9 @@ class TopologyAdministrationGroup(
             change = TopologyChangeOp.Remove,
           )
         case _ =>
-          throw new IllegalStateException(
+          consoleEnvironment.raiseError(
             s"Found more than one ParticipantSynchronizerPermission for participant $participantId on synchronizer $synchronizerId"
-          ) with NoStackTrace
+          )
       }
 
     def list(
@@ -3245,9 +3302,9 @@ class TopologyAdministrationGroup(
 
       val duplicatePackageIds = adds.map(_.packageId).intersect(removes)
       if (duplicatePackageIds.nonEmpty) {
-        throw new IllegalArgumentException(
+        consoleEnvironment.raiseError(
           s"Cannot both add and remove a packageId: $duplicatePackageIds"
-        ) with NoStackTrace
+        )
       }
       // compute the diff and then call the propose method
       val current0 = expectAtMostOneResult(
@@ -3260,9 +3317,9 @@ class TopologyAdministrationGroup(
 
       (adds, removes) match {
         case (Nil, Nil) =>
-          throw new IllegalArgumentException(
+          consoleEnvironment.raiseError(
             "Ensure that at least one of the two parameters (adds or removes) is not empty."
-          ) with NoStackTrace
+          )
         case (_, _) =>
           val allChangedPackageIds = (adds.map(_.packageId) ++ removes).toSet
 

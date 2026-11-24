@@ -33,7 +33,6 @@ class TransactionServiceFiltersIT(testDars: TestDars) extends LedgerTestSuite {
     "TSFInterfaceTemplatePlainFilters",
     "Combine plain interface filters with plain template filters",
     allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     val filterT =
       createEventFormat(
@@ -70,7 +69,6 @@ class TransactionServiceFiltersIT(testDars: TestDars) extends LedgerTestSuite {
     "TSFInterfaceTemplateFiltersWithEventBlobs",
     "Combine plain interface filters with template filters with event blobs",
     allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     val filterT =
       createEventFormat(
@@ -107,7 +105,6 @@ class TransactionServiceFiltersIT(testDars: TestDars) extends LedgerTestSuite {
     "TSFInterfaceWithEventBlobsTemplatePlainFilters",
     "Combine interface filters with event blobs with plain template filters",
     allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     val filterT =
       createEventFormat(
@@ -144,7 +141,6 @@ class TransactionServiceFiltersIT(testDars: TestDars) extends LedgerTestSuite {
     "TSFInterfaceWithEventBlobsTemplateFiltersWithEventBlobs",
     "Combine interface filters with event blobs with template filters with event blobs",
     allocate(SingleParty),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     val filterT =
       createEventFormat(
@@ -226,7 +222,6 @@ class TransactionServiceFiltersIT(testDars: TestDars) extends LedgerTestSuite {
     "TSFExercisedTemplateFilters",
     "Filter exercised events with template filters",
     allocate(TwoParties),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party1, party2))) =>
     val formatT =
       createEventFormat(
@@ -429,11 +424,14 @@ class TransactionServiceFiltersIT(testDars: TestDars) extends LedgerTestSuite {
         ),
         begin = endOffsetAtTestStart,
       )
-      txEvents <- transactions(txReq).map(_.flatMap(createdEvents))
-      txEventsLedgerEffects <- transactions(txReqLedgerEffects).map(_.flatMap(createdEvents))
+      txEvents <- transactions(txReq).map(_.flatMap(t => createdFor(party)(createdEvents(t))))
+      txEventsLedgerEffects <- transactions(txReqLedgerEffects).map(
+        _.flatMap(t => createdFor(party)(createdEvents(t)))
+      )
       currentEnd <- ledger.currentEnd()
       acsEvents <- activeContracts(createActiveContractsRequest(format, currentEnd))
-      // archive active contracts to avoid interference with the next tests
+        .map(createdFor(party))
+      // archive active contracts to avoid interference with the next compositions
       _ <- archive(ledger, party)(c1, c2, c3, c4)
     } yield {
       basicAssertions(
@@ -489,7 +487,9 @@ class TransactionServiceFiltersIT(testDars: TestDars) extends LedgerTestSuite {
         ),
         begin = endOffsetAtTestStart,
       )
-      txEvents <- transactions(txReq).map(_.flatMap(exercisedEvents))
+      txEvents <- transactions(txReq).map(
+        _.flatMap(t => exercisedBy(party1, party2)(exercisedEvents(t)))
+      )
     } yield {
       assertionsForExercised(
         txEvents,

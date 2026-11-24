@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.instances.list.*
 import cats.syntax.foldable.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
@@ -141,8 +142,9 @@ object ContractStore {
       storage: Storage,
       processingTimeouts: ProcessingTimeout,
       cacheConfig: CacheConfig,
-      dbQueryBatcherConfig: BatchAggregatorConfig,
-      insertBatchAggregatorConfig: BatchAggregatorConfig,
+      readBatchAggregatorConfig: BatchAggregatorConfig,
+      writeBatchAggregatorConfig: BatchAggregatorConfig,
+      insertMaxBatchSizeBytes: PositiveInt,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ContractStore =
     storage match {
@@ -153,8 +155,9 @@ object ContractStore {
         new DbContractStore(
           dbStorage,
           cacheConfig,
-          dbQueryBatcherConfig,
-          insertBatchAggregatorConfig,
+          readBatchAggregatorConfig,
+          writeBatchAggregatorConfig,
+          insertMaxBatchSizeBytes,
           processingTimeouts,
           loggerFactory,
         )

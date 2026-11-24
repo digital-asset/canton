@@ -448,10 +448,10 @@ trait IndexComponentLoadTestBase
     secs.toString + '.' + milliString
   }
 
-  protected def nextRecordTimeFactory(): () => CantonTimestamp = {
+  private def startRecordTime(): CantonTimestamp = {
     logger.warn(s"looking up base record time")
     val ledgerEnd = index.currentLedgerEnd().map(_.lastOffset)
-    val baseRecordTime: CantonTimestamp = ledgerEnd match {
+    ledgerEnd match {
       case Some(offset) =>
         // try to get the last one
         logger.warn(s"looks like ledger not empty, getting record time from last update")
@@ -484,7 +484,12 @@ trait IndexComponentLoadTestBase
         logger.warn(s"looks like ledger is empty, using now as a baseline record time")
         CantonTimestamp.now()
     }
-    val recordTime = new AtomicReference(baseRecordTime)
+  }
+
+  protected def nextRecordTimeFactory(
+      from: CantonTimestamp = startRecordTime()
+  ): () => CantonTimestamp = {
+    val recordTime = new AtomicReference(from)
     () => recordTime.updateAndGet(_.immediateSuccessor)
   }
 
@@ -499,9 +504,9 @@ trait IndexComponentLoadTestBase
       actionName: String = "ingesting",
       userIdSupplier: Option[() => UserId] = None,
   ): Unit = {
-    val nextRecordTime: () => CantonTimestamp = nextRecordTimeFactory()
     def ingestionIteration(): Unit = {
       logger.warn(s"start preparing updates...")
+      val start = startRecordTime()
       if (!yesIReallyWantToRunIt)
         fail(
           "WARNING! Please check if you really want to do this! The following parameters result in a fixture probably not fitting in the memory. Please verify parameters. Bigger workloads are possible with doing multiple iterations."
@@ -511,19 +516,29 @@ trait IndexComponentLoadTestBase
       val createPayloadLength = 300
       val archiveArgumentPayloadLengthFromTo = (13, 38)
       val archiveResultPayloadLengthFromTo = (13, 58)
-      val allUpdates = (1 to passes).toVector
-        .flatMap(_ =>
-          createsAndArchives(
-            nextRecordTime = nextRecordTime,
-            txSize = txSize,
-            txsCreatedThenArchived = txsCreatedAndArchivedPerPass,
-            txsCreatedNotArchived = activeTxsPerPass,
-            createPayloadLength = createPayloadLength,
-            archiveArgumentPayloadLengthFromTo = archiveArgumentPayloadLengthFromTo,
-            archiveResultPayloadLengthFromTo = archiveResultPayloadLengthFromTo,
-            userIdSupplier = userIdSupplier,
-          )
-        )
+      val allUpdates = Source(1 to passes)
+        .mapAsync(10) { index =>
+          Future {
+            val nextRecordTime: () => CantonTimestamp = nextRecordTimeFactory(
+              // giving 1 000 000 000 immediate successors between passes
+              start.plusSeconds(1000 * index.toLong)
+            )
+            createsAndArchives(
+              nextRecordTime = nextRecordTime,
+              txSize = txSize,
+              txsCreatedThenArchived = txsCreatedAndArchivedPerPass,
+              txsCreatedNotArchived = activeTxsPerPass,
+              createPayloadLength = createPayloadLength,
+              archiveArgumentPayloadLengthFromTo = archiveArgumentPayloadLengthFromTo,
+              archiveResultPayloadLengthFromTo = archiveResultPayloadLengthFromTo,
+              userIdSupplier = userIdSupplier,
+            )
+          }
+        }
+        .runWith(Sink.seq)
+        .futureValue(benchmarkedTaskPatience)
+        .toVector
+        .flatten
       val allUpdateSize = allUpdates.size
       logger.warn(s"prepared $allUpdateSize updates")
       indexUpdates(allUpdates, actionName = actionName)

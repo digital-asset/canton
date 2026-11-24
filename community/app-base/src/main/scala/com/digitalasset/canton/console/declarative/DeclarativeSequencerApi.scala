@@ -4,7 +4,6 @@
 package com.digitalasset.canton.console.declarative
 
 import cats.syntax.either.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, SequencerAdminCommands}
 import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.config
@@ -16,9 +15,8 @@ import com.digitalasset.canton.lifecycle.{CloseContext, LifeCycle, RunOnClosing}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.DeclarativeApiMetrics
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
-import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
 import com.digitalasset.canton.synchronizer.config.DeclarativeSequencerConfig
-import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.ThroughputCapByMessageTypeConfig
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.ExecutionContext
@@ -67,55 +65,27 @@ class DeclarativeSequencerApi(
   } yield Seq(caps).foldLeft(UpdateResult())(_.merge(_))
 
   private def syncCaps(
-      caps: Map[String, IndividualThroughputCapConfig],
+      caps: Map[String, ThroughputCapByMessageTypeConfig],
       removeCaps: Boolean,
       checkSelfConsistent: Boolean,
   )(implicit traceContext: TraceContext): Either[String, UpdateResult] = {
 
-    def toCap(str: String): Either[String, SubmissionRequestType] =
-      SubmissionRequestType
-        .fromStringForCap(str)
-        .toRight(s"Invalid cap type $str in declarative config")
+    def fetchCaps(): Either[String, Seq[(String, ThroughputCapByMessageTypeConfig)]] =
+      queryAdminApi(SequencerAdminCommands.ListThroughputCaps()).map(_.toSeq)
 
-    def fetchCaps(): Either[String, Seq[(String, IndividualThroughputCapConfig)]] =
-      SubmissionRequestType.capAdmissible
-        .traverse { cap =>
-          queryAdminApi(
-            SequencerAdminCommands.GetThroughputCap(cap)
-          ).map(_.map(c => (cap.name, c)))
-        }
-        .map(_.flatten)
+    def getCap(capName: String): Either[String, Option[ThroughputCapByMessageTypeConfig]] =
+      queryAdminApi(SequencerAdminCommands.GetThroughputCap(capName))
 
-    def getCap(capName: String): Either[String, Option[IndividualThroughputCapConfig]] =
-      toCap(capName)
-        .flatMap { cap =>
-          queryAdminApi(
-            SequencerAdminCommands.GetThroughputCap(cap)
-          )
-        }
+    def add(name: String, config: ThroughputCapByMessageTypeConfig): Either[String, Unit] =
+      queryAdminApi(SequencerAdminCommands.SetThroughputCap(name, Some(config)))
 
-    def add(name: String, config: IndividualThroughputCapConfig): Either[String, Unit] =
-      toCap(name).flatMap { cap =>
-        queryAdminApi(
-          SequencerAdminCommands.SetThroughputCap(cap, Some(config))
-        )
-      }
-
-    def update(name: String, config: IndividualThroughputCapConfig): Either[String, Unit] =
-      toCap(name).flatMap { cap =>
-        queryAdminApi(
-          SequencerAdminCommands.SetThroughputCap(cap, Some(config))
-        )
-      }
+    def update(name: String, config: ThroughputCapByMessageTypeConfig): Either[String, Unit] =
+      queryAdminApi(SequencerAdminCommands.SetThroughputCap(name, Some(config)))
 
     def remove(name: String): Either[String, Unit] =
-      toCap(name).flatMap { cap =>
-        queryAdminApi(
-          SequencerAdminCommands.SetThroughputCap(cap, None)
-        )
-      }
+      queryAdminApi(SequencerAdminCommands.SetThroughputCap(name, None))
 
-    run[String, IndividualThroughputCapConfig](
+    run[String, ThroughputCapByMessageTypeConfig](
       "throughput-caps",
       removeExcess = removeCaps,
       checkSelfConsistent = checkSelfConsistent,

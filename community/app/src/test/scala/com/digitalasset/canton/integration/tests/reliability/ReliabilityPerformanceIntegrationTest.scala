@@ -108,14 +108,14 @@ trait ReliabilityPerformanceIntegrationTest extends BasePerformanceIntegrationTe
       totalCycles: Int = 300,
       numAssetsPerIssuer: Int = 100,
   )(
-      introduceFailure: (() => Boolean) => Unit
+      introduceFailure: (() => (Boolean, Seq[Int])) => Unit
   )(implicit env: TestConsoleEnvironment): Unit = {
     import env.*
-
     val settings = new RateSettings(
-      SubmissionRateSettings.TargetLatency(
+      SubmissionRateSettings.TargetLatencyNew(
+        startPending = 2.0,
         // introduce contention by turning off pending tracking
-        duplicateSubmissionRatio = duplicateSubmissionRatio
+        duplicateSubmissionRatio = duplicateSubmissionRatio,
       )
     )
     val config = PerformanceRunnerConfig(
@@ -139,8 +139,8 @@ trait ReliabilityPerformanceIntegrationTest extends BasePerformanceIntegrationTe
         DvpTrader(s"RestartTradie1", settings = settings),
         DvpTrader(s"RestartTradie2", settings = settings),
         DvpTrader(s"RestartTradie3", settings = settings),
-        DvpIssuer(s"RestartIssuator1", settings = RateSettings.defaults),
-        DvpIssuer(s"RestartIssuator2", settings = RateSettings.defaults),
+        DvpIssuer(s"RestartIssuator1", settings = settings),
+        DvpIssuer(s"RestartIssuator2", settings = settings),
       ),
       ledger = Connectivity(name = participantName, port = ledgerApiPort),
       baseSynchronizerId = daId,
@@ -157,22 +157,32 @@ trait ReliabilityPerformanceIntegrationTest extends BasePerformanceIntegrationTe
     val runnerStartup = runner.startup()
 
     logger.info("Starting runner")
+    def observed() =
+      runner.status().flatMap {
+        case ts: DriverStatus.TraderStatus => Seq(ts.proposals.observed)
+        case _ => Seq.empty
+      }
 
     // wait until we progressed a bit
     eventually(timeUntilSuccess = 200.seconds) {
       val runnerStatus = runner.status()
-      runnerStatus.exists {
-        case traderStatus: DriverStatus.TraderStatus => traderStatus.proposals.observed > 10
-        case _ => false
-      } shouldBe true withClue s"Status did not have enough observed proposals: $runnerStatus"
+      val obs = observed()
+      obs should have length (3) withClue s"Should have three traders"
+      obs.forall(
+        _ > 3
+      ) shouldBe true withClue s"Status did not have enough observed proposals: $runnerStatus"
     }
 
     logger.info("Sufficiently many proposals have been created, progressing")
 
     val fut = loggerFactory.assertLoggedWarningsAndErrorsSeq(
       {
-        introduceFailure(() => runnerStartup.isCompleted)
-        runner.updateRateSettings(_.copy(SubmissionRateSettings.TargetLatency(startRate = 3)))
+        introduceFailure(() => (runnerStartup.isCompleted, observed()))
+        runner.updateRateSettings(
+          _.copy(submissionRateSettings =
+            SubmissionRateSettings.TargetLatencyNew(startPending = 2.0)
+          )
+        )
         logger.info("Waiting for runner startup to complete")
         for {
           _ <- runnerStartup

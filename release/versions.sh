@@ -105,6 +105,20 @@ get_latest_release_version() {
   echo "$latest_version"
 }
 
+# The snapshot version counts commits and checks which branches contain the commit, so it needs
+# the full history and the main and release-line heads. CI checks out shallow and deepens here.
+# Blobs are skipped, history is all that is needed.
+ensure_full_history() {
+  [[ "$(git rev-parse --is-shallow-repository)" == "true" ]] || return 0
+  info "Shallow clone, fetching full history"
+  git fetch --unshallow --no-tags --filter=blob:none origin \
+    '+refs/heads/main:refs/remotes/origin/main' \
+    '+refs/heads/release-line-*:refs/remotes/origin/release-line-*' || {
+    err "Failed to fetch full history, refusing to compute a snapshot version from a shallow clone"
+    return 1
+  }
+}
+
 # Gets the snapshot version
 # Follows the Daml naming scheme (2.7.0-snapshot.major.20230522.10367.0.v55e81000)
 # Parameters
@@ -114,6 +128,7 @@ get_latest_release_version() {
 snapshot_version() (
   sha=$1
   prefix=$2
+  ensure_full_history || exit 1
   commit_date=$(git log -n1 --format=%cd --date=format:%Y%m%d $sha)
   number_of_commits=$(git rev-list --count $sha)
   commit_sha_8=$(git log -n1 --format=%h --abbrev=8 $sha)

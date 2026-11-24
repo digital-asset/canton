@@ -1372,9 +1372,10 @@ private[bftordering] final class P2PGrpcConnectionManager(
               s"Failed to send the connection opener message to peer sender $peerSenderId",
               exception,
             )
-            // Close the sender and fail accepting the connection
+            // Reject setup and terminate the response once. Rethrowing after onError would let
+            //  the enclosing authentication interceptor try to close the same server call again.
             failGrpcStreamObserver(peerSender, exception, logger)
-            throw exception
+            None
 
           case Success(()) =>
             val sequencerIdPromiseUS = PromiseUnlessShutdown.unsupervised[SequencerId]()

@@ -152,7 +152,7 @@ final class TransactionTreeDepthIntegrationTest
         .futureValueUS
         .value,
       LogEntry.assertLogSeq(
-        Seq(
+        mustContainWithClue = Seq(
           // Both mallory/p1 and alice/p2 detect deeply nested structures and reject
           // bob/p3 does not detect a deeply nested structure so processes the request
           (
@@ -211,7 +211,20 @@ final class TransactionTreeDepthIntegrationTest
             },
             "L7",
           ),
-        )
+        ),
+        // These are additionally created for PV=dev
+        mayContain = Seq(
+          log => {
+            log.loggerName should include(
+              "com.digitalasset.canton.participant.protocol.TransactionProcessor:TransactionTreeDepthIntegrationTest/participant=participant1/psid=synchronizer1"
+            )
+            log.warningMessage should include regex ("InvalidSubviewReferenceError.*is invalid because a subview is invalid")
+          },
+          log => {
+            log.mdc.get("participant") shouldBe Some("participant1")
+            log.warningMessage should include regex ("Received a request with id RequestId.*where the view at List\\(R\\) is missing")
+          },
+        ),
       ),
     )
 

@@ -18,6 +18,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.graph.{MutableValueGraph, Traverser, ValueGraphBuilder}
 
+import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
@@ -199,35 +200,42 @@ class AuthorizationGraph(
     * certificate and follow outgoing authorizations for all delegations that can sign
     * NamespaceDelegations. As a result, every key that doesn't end up in the cache is not connected
     * to the root certificate and therefore useless.
+    *
+    * The traversal is depth-first and the level stored with a delegation is the depth at which the
+    * traversal first reaches its target key. The delegations still to visit are kept in an explicit
+    * work list instead of on the call stack, so that the length of a delegation chain is not
+    * limited by the stack size.
     */
   protected def recompute()(implicit traceContext: TraceContext): Unit = {
     cache.clear()
-    def go(
-        incoming: AuthorizedNamespaceDelegation,
-        level: Int,
-    ): Unit = {
-      val fingerprint = incoming.mapping.target.fingerprint
-      // only proceed if we haven't seen this fingerprint yet,
-      // so we terminate even if the graph has cycles.
-      if (!cache.contains(fingerprint)) {
-        cache.update(fingerprint, (incoming, level))
-        // only look at outgoing authorizations if item can sign other NamespaceDelegations
-        if (incoming.mapping.canSign(Code.NamespaceDelegation)) {
-          for {
-            // find the keys authorized by item.target
-            authorizedKey <- graph.successors(fingerprint).asScala
-            // look up the authorization via the edge fingerprint -> authorizedKey
-            outgoingAuthorization <- graph.edgeValue(fingerprint, authorizedKey).toScala
-          } {
-            // descend into all outgoing authorizations
-            go(outgoingAuthorization, level + 1)
+    @tailrec
+    def go(pending: List[(AuthorizedNamespaceDelegation, Int)]): Unit =
+      pending match {
+        case Nil => ()
+        case (incoming, level) :: rest =>
+          val fingerprint = incoming.mapping.target.fingerprint
+          // only proceed if we haven't seen this fingerprint yet,
+          // so we terminate even if the graph has cycles.
+          if (cache.contains(fingerprint)) go(rest)
+          else {
+            cache.update(fingerprint, (incoming, level))
+            // only look at outgoing authorizations if item can sign other NamespaceDelegations
+            val outgoing =
+              if (incoming.mapping.canSign(Code.NamespaceDelegation))
+                for {
+                  // find the keys authorized by item.target
+                  authorizedKey <- graph.successors(fingerprint).asScala.toList
+                  // look up the authorization via the edge fingerprint -> authorizedKey
+                  outgoingAuthorization <- graph.edgeValue(fingerprint, authorizedKey).toScala
+                } yield (outgoingAuthorization, level + 1)
+              else Nil
+            // prepend, so that we descend into the outgoing authorizations before visiting siblings
+            go(outgoing ::: rest)
           }
-        }
       }
-    }
 
     // start at the root node, if it exists
-    rootNode.foreach(go(_, level = 1))
+    go(rootNode.map(_ -> 1).toList)
 
     report()
   }

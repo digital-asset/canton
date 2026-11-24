@@ -708,6 +708,103 @@ object Generators {
       builder.build()
     }
 
+  def hostedPartiesFilterGen: Gen[v2.StateServiceOuterClass.HostedPartiesFilter] =
+    for {
+      partyFilter <- Gen.listOf(Arbitrary.arbString.arbitrary)
+      allParticipants <- Arbitrary.arbBool.arbitrary
+      synchronizerIdFilter <- Gen.listOf(Arbitrary.arbString.arbitrary)
+    } yield v2.StateServiceOuterClass.HostedPartiesFilter
+      .newBuilder()
+      .addAllPartyFilter(partyFilter.asJava)
+      .setAllParticipants(allParticipants)
+      .addAllSynchronizerIdFilter(synchronizerIdFilter.asJava)
+      .build()
+
+  def getHostedPartiesRequestGen: Gen[v2.StateServiceOuterClass.GetHostedPartiesRequest] =
+    for {
+      hostedAtOffset <- Gen.option(Arbitrary.arbLong.arbitrary)
+      filter <- Gen.option(hostedPartiesFilterGen)
+      streamContinuationToken <- Gen.option(byteStringGen)
+    } yield {
+      val builder = v2.StateServiceOuterClass.GetHostedPartiesRequest.newBuilder()
+      hostedAtOffset.foreach(builder.setHostedAtOffset)
+      filter.foreach(builder.setFilter)
+      streamContinuationToken.foreach(builder.setStreamContinuationToken)
+      builder.build()
+    }
+
+  def getHostedPartiesPageRequestGen: Gen[v2.StateServiceOuterClass.GetHostedPartiesPageRequest] =
+    for {
+      hostedAtOffset <- Gen.option(Arbitrary.arbLong.arbitrary)
+      filter <- Gen.option(hostedPartiesFilterGen)
+      pageToken <- Gen.option(byteStringGen)
+      maxPageSize <- Gen.option(Arbitrary.arbInt.arbitrary)
+    } yield {
+      val builder = v2.StateServiceOuterClass.GetHostedPartiesPageRequest.newBuilder()
+      hostedAtOffset.foreach(builder.setHostedAtOffset)
+      filter.foreach(builder.setFilter)
+      pageToken.foreach(builder.setPageToken)
+      maxPageSize.foreach(builder.setMaxPageSize)
+      builder.build()
+    }
+
+  def hostingParticipantGen: Gen[v2.StateServiceOuterClass.HostingParticipant] =
+    for {
+      participantId <- Arbitrary.arbString.arbitrary
+      synchronizerId <- Arbitrary.arbString.arbitrary
+      recordTime <- protoTimestampGen
+      offset <- Arbitrary.arbLong.arbitrary
+      participantPermission <- participantPermissionGen
+      hostingState <- Gen.oneOf(
+        v2.StateServiceOuterClass.HostingState.HOSTING_STATE_ONBOARDING,
+        v2.StateServiceOuterClass.HostingState.HOSTING_STATE_ACTIVE,
+      )
+    } yield v2.StateServiceOuterClass.HostingParticipant
+      .newBuilder()
+      .setParticipantId(participantId)
+      .setSynchronizerId(synchronizerId)
+      .setRecordTime(recordTime)
+      .setOffset(offset)
+      .setParticipantPermission(participantPermission)
+      .setHostingState(hostingState)
+      .build()
+
+  def hostedPartyGen: Gen[v2.StateServiceOuterClass.HostedParty] =
+    for {
+      party <- Arbitrary.arbString.arbitrary
+      hostingParticipants <- Gen.listOf(hostingParticipantGen)
+    } yield v2.StateServiceOuterClass.HostedParty
+      .newBuilder()
+      .setParty(party)
+      .addAllHostingParticipants(hostingParticipants.asJava)
+      .build()
+
+  def getHostedPartiesResponseGen: Gen[v2.StateServiceOuterClass.GetHostedPartiesResponse] =
+    for {
+      hostedParty <- hostedPartyGen
+      hostedAtOffset <- Arbitrary.arbLong.arbitrary
+      streamContinuationToken <- byteStringGen
+    } yield v2.StateServiceOuterClass.GetHostedPartiesResponse
+      .newBuilder()
+      .setHostedParty(hostedParty)
+      .setHostedAtOffset(hostedAtOffset)
+      .setStreamContinuationToken(streamContinuationToken)
+      .build()
+
+  def getHostedPartiesPageResponseGen: Gen[v2.StateServiceOuterClass.GetHostedPartiesPageResponse] =
+    for {
+      hostedParties <- Gen.listOf(hostedPartyGen)
+      hostedAtOffset <- Arbitrary.arbLong.arbitrary
+      nextPageToken <- Gen.option(byteStringGen)
+    } yield {
+      val builder = v2.StateServiceOuterClass.GetHostedPartiesPageResponse
+        .newBuilder()
+        .addAllHostedParties(hostedParties.asJava)
+        .setHostedAtOffset(hostedAtOffset)
+      nextPageToken.foreach(builder.setNextPageToken)
+      builder.build()
+    }
+
   def createdGen: Gen[v2.EventQueryServiceOuterClass.Created] =
     for {
       createdEvent <- createdEventGen

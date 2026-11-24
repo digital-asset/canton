@@ -6,7 +6,11 @@ package com.digitalasset.canton.version
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError.ValueDeserializationError
 import com.digitalasset.canton.buildinfo.BuildInfo
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.VersionUtil
 import io.circe.Encoder
@@ -15,7 +19,7 @@ import scala.annotation.tailrec
 import scala.util.Try
 
 /** Trait that represents how a version in Canton is modelled. */
-sealed trait CantonVersion extends Ordered[CantonVersion] with PrettyPrinting {
+sealed trait CantonVersion extends Ordered[CantonVersion] with PrettyPrintingFromCompanion {
 
   def major: Int
   def minor: Int
@@ -26,7 +30,7 @@ sealed trait CantonVersion extends Ordered[CantonVersion] with PrettyPrinting {
   def isStable: Boolean = optSuffix.isEmpty
   def fullVersion: String = s"$major.$minor.$patch${optSuffix.map("-" + _).getOrElse("")}"
 
-  override protected def pretty: Pretty[CantonVersion] = prettyOfString(_ => fullVersion)
+  override def prettyCompanion: PrettyPrintingCompanion[CantonVersion] = CantonVersion
   def toProtoPrimitive: String = fullVersion
 
   def raw: (Int, Int, Int, Option[String]) = (major, minor, patch, optSuffix)
@@ -85,6 +89,10 @@ sealed trait CantonVersion extends Ordered[CantonVersion] with PrettyPrinting {
 
     go(suffixes1.headOption, suffixes2.headOption, suffixes1.drop(1), suffixes2.drop(1))
   }
+}
+
+object CantonVersion extends PrettyPrintingCompanion[CantonVersion] {
+  override protected val pretty: Pretty[CantonVersion] = prettyOfString(_.fullVersion)
 }
 
 /** This class represent a release version. Please refer to the

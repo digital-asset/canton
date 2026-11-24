@@ -5,6 +5,7 @@ package com.digitalasset.canton.protocol
 
 import cats.Order
 import cats.syntax.either.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{
@@ -14,11 +15,12 @@ import com.digitalasset.canton.logging.pretty.{
 }
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DeserializationError, HasCryptographicEvidence}
+import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ByteStringUtil, HexString}
-import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.ProtocolVersionValidation
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{LedgerTransactionId, ProtoDeserializationError, ReassignmentCounter}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -238,47 +240,80 @@ object ReassignmentId extends PrettyPrintingCompanion[ReassignmentId] {
   override protected val pretty: Pretty[ReassignmentId] =
     prettyOfString(rid => s"ReassignmentId(${rid.toProtoPrimitive})")
 
-  def create(hex: String): Either[String, ReassignmentId] =
-    HexString
-      .parseToByteString(hex)
-      .toRight("invalid hex")
-      .flatMap(fromBytes)
-      .leftMap(err => s"invalid ReassignmentId($hex): $err")
+  @VisibleForTesting
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
+  def tryCreate(hex: String): ReassignmentId =
+    fromProtoPrimitive(hex, ProtocolVersionValidation.NoValidation).valueOr(err =>
+      throw new IllegalArgumentException(err.message)
+    )
 
-  def tryCreate(str: String): ReassignmentId =
-    create(str).valueOr(err => throw new IllegalArgumentException(err))
-
-  def fromProtoPrimitive(str: String): ParsingResult[ReassignmentId] =
-    fromProtoPrimitive(str, field = None)
-
-  def fromProtoPrimitive(str: String, field: String): ParsingResult[ReassignmentId] =
-    fromProtoPrimitive(str, Some(field))
+  def fromProtoPrimitive(
+      str: String,
+      pvv: ProtocolVersionValidation,
+  ): ParsingResult[ReassignmentId] =
+    fromProtoPrimitive(str, field = "reassignment_id", pvv)
 
   private def fromProtoPrimitive(
-      str: String,
-      field: Option[String],
+      hex: String,
+      field: String,
+      pvv: ProtocolVersionValidation,
   ): ParsingResult[ReassignmentId] =
-    create(str).leftMap(err => ProtoDeserializationError.StringConversionError(err, field))
+    for {
+      firstByteInChars <- Either
+        .cond(
+          hex.nonEmpty,
+          hex.take(2),
+          ProtoDeserializationError
+            .ValueConversionError(
+              field = field,
+              error = "no ReassignmentId version",
+            ),
+        )
+      versionByte <-
+        HexString
+          .parseToByteString(firstByteInChars)
+          .toRight(
+            ProtoDeserializationError
+              .StringConversionError(error = "invalid hex", field = Some(field))
+          )
+      reassignmentId <- versionByte.byteAt(0) match {
+        case V0.version =>
+          fromProtoPrimitiveV0(hex = hex, field = field, pvv = pvv)
+        case b =>
+          Left(
+            ProtoDeserializationError
+              .ValueConversionError(field = field, error = s"invalid version: ${b.toInt}")
+          )
+      }
+    } yield reassignmentId
+
+  private def fromProtoPrimitiveV0(
+      hex: String,
+      field: String,
+      pvv: ProtocolVersionValidation,
+  ) =
+    ProtoValidation
+      .validateLength(hex.toSeq, field, pvv, V0.maxLengthString)
+      .flatMap(hexString =>
+        HexString
+          .parseToByteString(hexString.toString)
+          .toRight("invalid hex")
+          .leftMap(err => ProtoDeserializationError.StringConversionError(err, Some(field)))
+      )
+      .map(fromBytes)
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
       reassignmentIdP: v30.ReassignmentId,
   ): ParsingResult[ReassignmentId] =
-    ProtoValidation.validateThen(reassignmentIdP.id, "id", pvv)(fromProtoPrimitive)
-
-  def fromBytes(bytes: ByteString): Either[String, ReassignmentId] =
-    if (bytes.isEmpty) Left("no ReassignmentId version")
-    else
-      (bytes.byteAt(0) match {
-        case V0.version => Right(V0(bytes.substring(1)))
-        case b => Left(s"invalid version: ${b.toInt}")
-      }).leftMap(err => s"cannot parse ReassignmentId bytes: $err")
-
-  def assertFromBytes(bytes: Array[Byte]): ReassignmentId =
-    ReassignmentId.fromBytes(ByteString.copyFrom(bytes)) match {
-      case Left(e) => throw new IllegalArgumentException(s"Cannot convert reassignment id: $e")
-      case Right(id) => id
+    ProtoValidation.validateThen(reassignmentIdP.id, "id", pvv) { case (str, field) =>
+      fromProtoPrimitive(str, field, pvv)
     }
+
+  def fromBytes(bytes: ByteString): ReassignmentId = V0(bytes.substring(1))
+
+  def fromBytes(bytes: Array[Byte]): ReassignmentId =
+    fromBytes(ByteString.copyFrom(bytes))
 
   def apply(
       source: Source[SynchronizerId],
@@ -303,6 +338,13 @@ object ReassignmentId extends PrettyPrintingCompanion[ReassignmentId] {
   object V0 {
     private[ReassignmentId] val version: Byte = 0x00
 
+    // (1 version byte + 2 bytes multi hash + 32 bytes sha256 digest) * 2 for hex string encoding
+    private[ReassignmentId] val maxLengthString: ValidationParam[PositiveInt] =
+      ValidationParam(
+        ProtocolVersion.nextValidationBoundPV ->
+          PositiveInt.tryCreate((1 + 2 + HashAlgorithm.Sha256.length.toInt) * 2)
+      )
+
     def apply(
         source: Source[SynchronizerId],
         target: Target[SynchronizerId],
@@ -322,8 +364,16 @@ object ReassignmentId extends PrettyPrintingCompanion[ReassignmentId] {
     }
   }
 
+  // The node's own database: the ids were validated when they were stored.
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   implicit val getResultReassignmentId: GetResult[ReassignmentId] =
-    GetResult(r => tryCreate(r.nextString()))
+    GetResult(r =>
+      fromProtoPrimitive(r.nextString(), ProtocolVersionValidation.NoValidation).valueOr(err =>
+        throw new DbDeserializationException(
+          s"Failed to deserialize reassignment id: ${err.message}"
+        )
+      )
+    )
   implicit val setResultReassignmentId: SetParameter[ReassignmentId] = (v, pp) =>
     pp >> v.toProtoPrimitive
 }

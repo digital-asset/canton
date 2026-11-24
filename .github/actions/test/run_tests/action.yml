@@ -14,7 +14,9 @@ inputs:
     description: |
       SBT command template used to run tests.
       If num_test_buckets>0 (sharding enabled), the command must contain $RUN_SPLITTED_TESTS_CMD,
-      which is replaced with "<test_sub_command> <selected tests>".
+      which is replaced with "<test_sub_command> <selected tests>". When test_sub_command is
+      testOnly, it is replaced with just "testOnly" and the selected tests are passed in the file
+      named by CANTON_TEST_SELECTION_FILE (see project/CiTestSelection.scala).
       If num_test_buckets=0 (no sharding), pass an explicit command without $RUN_SPLITTED_TESTS_CMD.
       Include any test-tag filters inline in the command template (for example: -- -l UnstableTest).
     required: true
@@ -157,6 +159,8 @@ runs:
     - name: Setup GCP KMS
       if: inputs.setup_gcp_kms == 'true'
       uses: ./.github/actions/test/setup_gcp_kms
+      with:
+        service_account_key: ${{ env.GCLOUD_SERVICE_KEY }}
 
     - name: Validate sharding inputs
       id: validate_sharding
@@ -376,7 +380,19 @@ runs:
             echo "No tests selected for shard ${SHARD_INDEX}, skipping test execution."
             echo "skip_tests=true" >> "$GITHUB_OUTPUT"
           fi
-          RUN_CMD="$TEST_SUB_COMMAND $SELECTED"
+          if [[ "$TEST_SUB_COMMAND" =~ (^|[[:space:]/])testOnly$ ]]; then
+            # Hand the classes to sbt in a file (project/CiTestSelection.scala) rather than on the
+            # command line: sbt parses a named testOnly once per aggregated project with tab
+            # completion, which costs about a minute of startup per shard.
+            RUN_CMD="$TEST_SUB_COMMAND"
+            echo "test_selection_file=$SELECTED_TESTS_FILE" >> "$GITHUB_OUTPUT"
+            echo "::group::Selected tests (passed to sbt in $SELECTED_TESTS_FILE)"
+            tr -s '[:space:]' '\n' < "$SELECTED_TESTS_FILE"
+            echo
+            echo "::endgroup::"
+          else
+            RUN_CMD="$TEST_SUB_COMMAND $SELECTED"
+          fi
           RESOLVED="${COMMAND_TEMPLATE//\$RUN_SPLITTED_TESTS_CMD/$RUN_CMD}"
         else
           # Non-sharded mode: use explicit command
@@ -411,6 +427,9 @@ runs:
       uses: ./.github/actions/sbt/execute_sbt_command
       env:
         MAX_SINGLE_TEST_MINUTES: ${{ inputs.max_single_test_minutes }}
+        # Read by project/CiTestSelection.scala; empty when the command names its tests itself.
+        # Not set for the failed-only rerun below, which names its classes on the command line.
+        CANTON_TEST_SELECTION_FILE: ${{ steps.build_cmd.outputs.test_selection_file }}
       continue-on-error: true
       with:
         cmd_file: ${{ steps.build_cmd.outputs.resolved_command_file }}
@@ -421,13 +440,42 @@ runs:
         succeed_on_error: ${{ inputs.succeed_on_error }}
         timeout: ${{ inputs.timeout }}
         report_to_datadog: ${{ inputs.report_to_datadog }}
-        extra_parameters: -J-Xlog:gc=info,safepoint=info:file=track/GC.log:time
+        # TEST_ENVIRONMENT_CONCURRENCY_PARAMETERS is set by _test.yml (empty for other lanes).
+        extra_parameters: -J-Xlog:gc=info,safepoint=info:file=track/GC.log:time ${{ env.TEST_ENVIRONMENT_CONCURRENCY_PARAMETERS }}
 
     - name: Snapshot first-run JUnit reports
       if: always()
       uses: ./.github/actions/test/snapshot_junit_reports
       with:
         output_dir: .ci-test-results/first-run
+
+    - name: Check that only the selected tests ran
+      if: always() && steps.build_cmd.outputs.test_selection_file != '' && steps.run_sbt_tests.outcome != 'skipped'
+      shell: bash
+      env:
+        SELECTION_FILE: ${{ steps.build_cmd.outputs.test_selection_file }}
+        COMMAND_FILE: ${{ steps.build_cmd.outputs.resolved_command_file }}
+      run: |
+        # If project/CiTestSelection.scala's filter is not in effect for a project (a more specific
+        # testOnly / testFilter wins, or CANTON_TEST_SELECTION_FILE does not reach sbt), the bare
+        # testOnly runs every test in that project. This runs after the tests, so it does not save
+        # that run, but it fails the shard instead of letting it pass unnoticed.
+        # Executed classes come from the JUnit testcase classnames, as in prepare_rerun_command.py.
+        # Classes named in the command itself (such as PostgresStatsAnalysisTest) are allowed too.
+        # The echo ends the selection file's last name, which has no trailing newline.
+        allowed="$(tr -s '[:space:]"' '\n' < "$SELECTION_FILE"; echo; grep -oE '[a-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+' "$COMMAND_FILE" || true)"
+        unexpected=()
+        while IFS= read -r class; do
+          grep -qxF "$class" <<< "$allowed" || unexpected+=("$class")
+        done < <(find .ci-test-results/first-run -name 'TEST-*.xml' -exec grep -ho 'classname="[^"]*"' {} + 2>/dev/null \
+                   | sed 's/^classname="//; s/"$//' | sort -u)
+        if (( ${#unexpected[@]} > 0 )); then
+          printf '%s%s\n' \
+            "::error::${#unexpected[@]} test classes ran that are not in this shard's selection file, " \
+            "so testOnly did not use it (see project/CiTestSelection.scala). First few: ${unexpected[*]:0:5}"
+          exit 1
+        fi
+        echo "All test classes that ran are in this shard's selection file."
 
     - name: Resolve ref
       id: resolve_ref
@@ -501,6 +549,8 @@ runs:
         override_java_version_for_tests: ${{ inputs.override_java_version_for_tests }}
         succeed_on_error: ${{ inputs.succeed_on_error }}
         timeout: ${{ inputs.timeout }}
+        # No TEST_ENVIRONMENT_CONCURRENCY_PARAMETERS here on purpose: reruns of failed tests use the harness default
+        # of 2 environments, so a flaky test gets a quieter second attempt.
         extra_parameters: -J-Xlog:gc=info,safepoint=info:file=track/GC_rerun.log:time
         sbt_output_file: sbt_output_rerun
         report_to_datadog: ${{ inputs.report_to_datadog }}

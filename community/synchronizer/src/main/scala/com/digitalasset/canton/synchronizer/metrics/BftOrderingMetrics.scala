@@ -813,6 +813,7 @@ class BftOrderingMetrics private[metrics] (
             case object StateTransferInvalidMessage extends ViolationTypeValue
             case object RetransmissionResponseInvalidMessage extends ViolationTypeValue
             case object WrongGrpcMessageSentByBftNodeId extends ViolationTypeValue
+            case object UnparseableP2PMessage extends ViolationTypeValue
           }
         }
       }
@@ -1892,6 +1893,8 @@ object BftOrderingMetrics {
 
   val Prefix: MetricName = MetricName("bftordering")
 
+  private val MaxTimerDuration = Duration.ofNanos(Long.MaxValue)
+
   def updateTimer(
       timer: Timer,
       duration: Duration,
@@ -1899,7 +1902,8 @@ object BftOrderingMetrics {
     // Java's `Instant` does not have to provide monotonically increasing times
     //  (see the documentation for details: https://docs.oracle.com/javase/8/docs/api/java/time/Instant.html)
     //  and emitting negative durations is generally disallowed by metrics infrastructure, as it can
-    //  result in warnings/errors and/or unexpected behavior.
-    if (!duration.isNegative)
+    //  result in warnings/errors and/or unexpected behavior. Peer-supplied timestamps can also
+    //  produce durations that overflow the nanosecond conversion used by OpenTelemetry timers.
+    if (!duration.isNegative && duration.compareTo(MaxTimerDuration) <= 0)
       timer.update(duration)
 }

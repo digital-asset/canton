@@ -30,7 +30,13 @@ runs:
       id: compute_base_sha
       shell: bash
       run: |
-        echo "base_sha=$(git rev-parse "origin/${BASE_BRANCH}")" >> "$GITHUB_OUTPUT"
+        # ls-remote rather than rev-parse: a shallow checkout has no origin/<base> ref.
+        base_sha=$(git ls-remote origin "refs/heads/${BASE_BRANCH}" | cut -f1)
+        if [[ -z "$base_sha" ]]; then
+          echo "Could not resolve the head of ${BASE_BRANCH} on origin" >&2
+          exit 1
+        fi
+        echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
       env:
         BASE_BRANCH: ${{ steps.resolve_ref.outputs.base_branch }}
 

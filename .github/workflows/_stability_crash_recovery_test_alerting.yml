@@ -1,0 +1,75 @@
+name: Stability Crash Recovery Test Alerting
+on:
+  workflow_call:
+    inputs:
+      stability_crash_recovery_test_name:
+        required: true
+        type: string
+      runner:
+        required: true
+        type: string
+      min_successes:
+        description: Minimum number of successful shards required.
+        required: false
+        type: number
+        default: 8
+    secrets:
+      SLACK_WEBHOOK_TEAM_CANTON_INTERNAL:
+        required: false
+      GCLOUD_SHEETS_SA_KEY:
+        required: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  stability_crash_recovery_test_alerting:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download shard test statuses
+        uses: actions/download-artifact@v7
+        with:
+          pattern: ${{ inputs.stability_crash_recovery_test_name }}-status-*
+          path: shard-status
+          merge-multiple: true
+
+      - name: Check minimum successful shards
+        shell: bash
+        env:
+          MIN_SUCCESSES: ${{ inputs.min_successes }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$MIN_SUCCESSES" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::min_successes must be a positive integer, got '$MIN_SUCCESSES'."
+            exit 1
+          fi
+          shopt -s nullglob
+          successes=0
+          failures=0
+          for status_file in shard-status/*.status; do
+            status="$(cat "$status_file")"
+            echo "$(basename "$status_file"): $status"
+            if [[ "$status" == "0" ]]; then
+              successes=$((successes + 1))
+            else
+              failures=$((failures + 1))
+            fi
+          done
+          echo "Detected $successes successful shards and $failures failed shards."
+          if [[ "$successes" -lt "$MIN_SUCCESSES" ]]; then
+            echo "::error::Expected at least $MIN_SUCCESSES successful crash recovery shards, found $successes."
+            exit 1
+          fi
+
+      - name: Notify Slack on failure
+        if: failure() && github.repository == 'DACH-NY/canton'
+        uses: ./.github/actions/slack/slack_notify_failure_with_volunteer
+        with:
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_TEAM_CANTON_INTERNAL }}
+          failed_job: stability_crash_recovery_test_alerting
+          gcloud_sheets_sa_key: ${{ secrets.GCLOUD_SHEETS_SA_KEY }}

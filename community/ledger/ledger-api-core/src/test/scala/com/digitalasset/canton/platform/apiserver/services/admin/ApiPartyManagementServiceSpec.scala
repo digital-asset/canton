@@ -1534,10 +1534,15 @@ class ApiPartyManagementServiceSpec
       mockIdentityProviderExists.apply(ArgumentMatchers.eq(IdentityProviderId.Default))(
         any[LoggingContextWithTrace]
       )
-    )
-      .thenReturn(Future.successful(true))
+    ).thenReturn(Future.successful(true))
 
     val mockIndexPartyManagementService = mock[IndexPartyManagementService]
+    // By default the indexer doesn't know any party
+    when(
+      mockIndexPartyManagementService.getParties(any[Seq[Ref.Party]])(
+        any[LoggingContextWithTrace]
+      )
+    ).thenReturn(Future.successful(List.empty))
 
     val mockPartyRecordStore = mock[PartyRecordStore]
     when(

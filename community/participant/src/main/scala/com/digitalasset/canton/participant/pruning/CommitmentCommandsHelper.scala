@@ -32,6 +32,7 @@ import com.digitalasset.canton.version.{
   HasVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
 }
 import com.digitalasset.canton.{ProtoDeserializationError, ReassignmentCounter}
 import com.digitalasset.daml.lf.data.Bytes
@@ -74,10 +75,17 @@ object JsonCodecs {
       s => ReassignmentCounter(s.toLong),
     )
 
+  // Reads back the JSON the console writes from its own participant's inspection response.
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   implicit val reassignmentIdRW: ReadWriter[ReassignmentId] =
     readwriter[String].bimap[ReassignmentId](
       reassignmentId => reassignmentId.toProtoPrimitive,
-      ReassignmentId.tryCreate,
+      s =>
+        ReassignmentId
+          .fromProtoPrimitive(s, ProtocolVersionValidation.NoValidation)
+          .valueOr(err =>
+            throw new IllegalArgumentException(s"Invalid ReassignmentId: ${err.message}")
+          ),
     )
 }
 
@@ -659,7 +667,10 @@ object ContractAssigned
     val reassignmentIdE = assigned.reassignmentId match {
       case Some(reassignmentId) =>
         for {
-          reassignmentId <- ReassignmentId.fromProtoPrimitive(reassignmentId.id)
+          reassignmentId <- ReassignmentId.fromProtoPrimitive(
+            reassignmentId.id,
+            ProtocolVersionValidation.AlwaysValidation,
+          )
         } yield Some(reassignmentId)
       case None => Right(None: Option[ReassignmentId])
     }
@@ -727,7 +738,10 @@ object ContractUnassigned
       reassignmentIdE = unassigned.reassignmentId match {
         case Some(reassignmentId) =>
           for {
-            reassignmentId <- ReassignmentId.fromProtoPrimitive(reassignmentId.id)
+            reassignmentId <- ReassignmentId.fromProtoPrimitive(
+              reassignmentId.id,
+              ProtocolVersionValidation.AlwaysValidation,
+            )
           } yield Some(reassignmentId)
         case None => Right(None: Option[ReassignmentId])
       }

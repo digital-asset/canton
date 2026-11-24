@@ -86,7 +86,9 @@ button in CircleCI on your branch
 # Run a Test Many Times
 
 To reproduce a "flake" (i.e., a test failing sometimes, but not always),
-we have the capability to run a specific test many times on CircleCI.
+we have the capability to run a specific test many times on CircleCI or on GitHub Actions.
+
+## On CircleCI
 
 ![image](5_ci-usage_run_test_many_times.png)
 
@@ -100,10 +102,26 @@ we have the capability to run a specific test many times on CircleCI.
 
 > **WARNING**: Do NOT run this with `main` as the `Checkout Source`, as this would cancel a currently running main build.
 
-If you suspect that a flake has a fail rate below 2%, you can consider slightly increasing one of the numbers.
-But in general, avoid using this workflow to save CI costs.
+## On GitHub Actions
 
-The above workflow uses a custom SBT command called `testManyTimes`. It can be used for running tests multiple times
+Start the `Manual Test Many Times` workflow from the Actions tab (`Run workflow`, then pick your branch),
+or from the command line:
+
+```bash
+gh workflow run manual_test_many_times.yml -R DACH-NY/canton --ref <branch> \
+  -f tests=<fully qualified class name> -f protocol_version=dev
+```
+
+`tests` takes one or more whitespace-separated class names or globs, as `testOnly` does. By default the
+tests run 5 times on each of 10 runners (50 times in total), which you can change with `runners` and
+`repetitions`. A runner stops at its first failure, and failed tests are not rerun.
+
+## Cost and running locally
+
+If you suspect that a flake has a fail rate below 2%, you can consider slightly increasing one of the numbers.
+But in general, avoid using these workflows to save CI costs.
+
+Both workflows use a custom SBT command called `testManyTimes`. It can be used for running tests multiple times
 even locally. Note that it runs tests sequentially and can take much time to complete. However, it can be used as
 a background process to run until a test breaks. The command looks as follows:
 

@@ -7,7 +7,11 @@ import cats.syntax.apply.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencing.protocol.Envelope
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
@@ -113,7 +117,7 @@ object ApplicationHandler {
   * [[ApplicationHandler]] where the subscription (= processing of events) starts. The
   * [[ApplicationHandler]] can then initialize itself appropriately.
   */
-sealed trait SubscriptionStart extends Product with Serializable with PrettyPrinting
+sealed trait SubscriptionStart extends Product with Serializable with PrettyPrintingFromCompanion
 
 /** The subscription is a resubscription. The application handler may have previously been called
   * with an event.
@@ -126,7 +130,14 @@ object SubscriptionStart {
     * with an event.
     */
   case object FreshSubscription extends SubscriptionStart {
-    override protected def pretty: Pretty[FreshSubscription] = prettyOfObject[FreshSubscription]
+    override def prettyCompanion: PrettyPrintingCompanion[FreshSubscription.this.type] =
+      FreshSubscriptionPrettyPrintingCompanion
+  }
+
+  private object FreshSubscriptionPrettyPrintingCompanion
+      extends PrettyPrintingCompanion[FreshSubscription.type] {
+    override protected val pretty: Pretty[FreshSubscription.type] =
+      prettyOfObject[FreshSubscription]
   }
   type FreshSubscription = FreshSubscription.type
 
@@ -137,7 +148,13 @@ object SubscriptionStart {
   final case class CleanHeadResubscriptionStart(cleanPrehead: CantonTimestamp)
       extends ResubscriptionStart {
 
-    override protected def pretty: Pretty[CleanHeadResubscriptionStart] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[CleanHeadResubscriptionStart] =
+      CleanHeadResubscriptionStart
+  }
+
+  object CleanHeadResubscriptionStart
+      extends PrettyPrintingCompanion[CleanHeadResubscriptionStart] {
+    override protected val pretty: Pretty[CleanHeadResubscriptionStart] = prettyOfClass(
       param("clean prehead", _.cleanPrehead)
     )
   }
@@ -153,7 +170,12 @@ object SubscriptionStart {
       firstReplayed: CantonTimestamp,
       cleanPreheadO: Option[CantonTimestamp],
   ) extends ResubscriptionStart {
-    override protected def pretty: Pretty[ReplayResubscriptionStart] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ReplayResubscriptionStart] =
+      ReplayResubscriptionStart
+  }
+
+  object ReplayResubscriptionStart extends PrettyPrintingCompanion[ReplayResubscriptionStart] {
+    override protected val pretty: Pretty[ReplayResubscriptionStart] = prettyOfClass(
       param("first replayed", _.firstReplayed),
       paramIfDefined("clean prehead", _.cleanPreheadO),
     )

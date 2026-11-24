@@ -1442,7 +1442,7 @@ class TransactionProcessingSteps(
     } yield commitAndContractsAndEvent
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      resultTs: CantonTimestamp,
       verdict: Verdict,
       pendingRequestData: RequestType#PendingRequestData,
       pendingSubmissionDataO: Option[PendingSubmissionData],
@@ -1454,7 +1454,6 @@ class TransactionProcessingSteps(
     TransactionProcessorError,
     CommitAndStoreContractsAndPublishEvent,
   ] = {
-    val ts = event.event.content.timestamp
     val submitterMetaO = pendingRequestData.transactionValidationResult.submitterMetadataO
     val completionInfoO = submitterMetaO.flatMap(
       completionInfoFromSubmitterMetadataO(
@@ -1582,7 +1581,7 @@ class TransactionProcessingSteps(
         .leftMap(SynchronizerParametersError(psid, _))
 
       _ <-
-        (if (ts <= maxDecisionTime) EitherT.pure[Future, TransactionProcessorError](())
+        (if (resultTs <= maxDecisionTime) EitherT.pure[Future, TransactionProcessorError](())
          else
            EitherT.right[TransactionProcessorError](
              Future.failed(new IllegalArgumentException("Timeout message after decision time"))
@@ -1590,7 +1589,7 @@ class TransactionProcessingSteps(
 
       resultTopologySnapshot <- EitherT
         .right[TransactionProcessorError](
-          crypto.ips.awaitSnapshot(ts)
+          crypto.ips.awaitSnapshot(resultTs)
         )
 
       mediatorActiveAtResultTs <- EitherT

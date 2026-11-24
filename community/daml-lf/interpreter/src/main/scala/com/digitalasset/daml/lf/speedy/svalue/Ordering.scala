@@ -60,6 +60,8 @@ object Ordering extends scala.math.Ordering[SValue] {
           diff = x compareTo y
         case (SContractId(x), SContractId(y)) =>
           diff = compareCid(x, y)
+        case (SUint256(x), SUint256(y)) =>
+          diff = data.Uint256.compareTo(x, y)
         case (SEnum(_, _, xRank), SEnum(_, _, yRank)) =>
           diff = xRank compareTo yRank
         case (SRecord(_, _, xs), SRecord(_, _, ys)) =>

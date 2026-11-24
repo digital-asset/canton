@@ -8,13 +8,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.HandlerResult
-import com.digitalasset.canton.sequencing.protocol.{
-  AggregatedSignedContent,
-  Batch,
-  Deliver,
-  MediatorGroupRecipient,
-  WithOpeningErrors,
-}
+import com.digitalasset.canton.sequencing.protocol.{MediatorGroupRecipient, OpenEnvelope}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 import com.digitalasset.nonempty.NonEmpty
@@ -55,8 +49,10 @@ trait Phase37Processor[RequestBatch, Event] {
   /** Processes a result message, commits the changes or rolls them back and emits events via the
     * `publishUpdate` of the corresponding [[processRequest]] call.
     *
-    * @param event
-    *   The signed result batch to process. The batch must contain exactly one message.
+    * @param resultTs
+    *   The timestamp of the Deliver event containing the confirmation result message
+    * @param resultEnvelope
+    *   The envelope containing the confirmation result message
     * @return
     *   The [[com.digitalasset.canton.sequencing.HandlerResult]] completes when the request has
     *   reached the state
@@ -67,7 +63,8 @@ trait Phase37Processor[RequestBatch, Event] {
     */
   def processResult(
       counter: SequencerCounter,
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      resultTs: CantonTimestamp,
+      resultEnvelope: OpenEnvelope[SignedProtocolMessage[ConfirmationResultMessage]],
   )(implicit
       traceContext: TraceContext
   ): HandlerResult

@@ -23,6 +23,9 @@ _Write summary of release_
 - Ledger API:
   - The JSON Ledger API no longer returns the details of security sensitive errors (internal errors, authentication
     and permission failures), matching the gRPC Ledger API.
+- Configuration:
+  - The database sequencer (`sequencer.type = database`), including its high-availability configuration
+    (`high-availability`), is no longer supported. Use the BFT sequencer instead.
 
 ## What's New
 
@@ -75,9 +78,43 @@ The following message is now logged:
 
 > Claims do not authorize packages:write methods of the Ledger API.
 
+#### Ledger API: hosted parties snapshot
+
+The Ledger API adds `GetHostedParties` (streaming) and `GetHostedPartiesPage` (paged) to query which participants
+host parties on which synchronizers, with their permissions and hosting states. Applications can use this snapshot
+to discover party hostings or initialize their topology view without replaying the full history of topology updates.
+
+The snapshot is taken at `hosted_at_offset`, defaulting to the current ledger end for the initial request.
+Continuation and page tokens preserve that offset. To keep the view up to date, stream topology updates with
+`GetUpdates` starting from the snapshot's `hosted_at_offset`.
+
+Omitting `filter` selects the caller's readable parties hosted on any synchronizer on the local participant.
+`party_filter` and `synchronizer_id_filter` can be used to limit the results to specified parties and/or synchronizers.
+Only local participant hostings are returned unless `all_participants` is true. Hosting information for other
+participants may be incomplete. Hosting information is public, so the results are not restricted by the caller's
+party read rights.
+
+#### Filtering updates by contract id
+
+A new field `filtersByContractId` of type `ContractFilter` has been added to the `EventFormat`. It is supported by the
+`GetUpdates` and `GetUpdatesPage` endpoints of the `UpdateService` and returns the updates related to the given contract
+ids. The filter cannot be combined with `filtersByParty` or `filtersForAnyParty`. Endpoints that do not support it reject
+requests that event format field set with `INVALID_ARGUMENT`.
+
+This replaces the `EventQueryService`, which is now deprecated (see [Deprecations](#deprecations)).
+
 ### All node operators
 
 ### Participant node operators
+
+#### Contract store batch writer
+The contract store batch reader and writer parameters have been cleaned up.
+The read setting moved from `canton.participants.par.parameters.batching.contract-store-aggregator` to
+`canton.participants.par.parameters.batching.contract-store-read-aggregator`. The
+write parameters are now under `contract-store-write-aggregator` instead of
+the default `aggregator` that is used in other places. An additional parameter
+`canton.participants.par.parameters.batching.contract-store-write-max-batch-size-bytes`
+allows to limit the maximum size of a batch in bytes. The default is 4 MiB.
 
 ### Synchronizer operators
 
@@ -104,9 +141,19 @@ it, and its replacement. -->
 
 <!-- The deprecated item, its replacement, and when it will be removed. -->
 
+- Deprecated the `canton.participants.<participant>.parameters.ledger-api-server.indexer.batching-parallelism` configuration setting, which is no longer supported.
+- The traffic enforcement endpoints deprecated in 3.7 (`TrafficService.PruneEvents`, the JSON endpoint `POST /v2/traffic/events/prune` and the console command `ledger_api.traffic.prune_events`) are now disabled by default, and calls fail with `DEPRECATED_API_DISABLED`. Use `TrafficService.Prune` instead.
+  Setting `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-37 = true` re-enables them until their removal in 3.9.
+- The Ledger API `EventQueryService` (`GetEventsByContractId`, and the JSON endpoint `POST /v2/events/events-by-contract-id`)
+  is deprecated and being superseded by `GetUpdates` request in Update service.
+
 ## Minor Improvements
+- The representative package id set by `repair.rollback_unassignment` will be the source validation package used in the unassign.
+- The default sychronizer transaction tree depth limit has been set to 64
 
 ### Ledger API
+
+- The repair service operations are now stored as dedicated event types in the indexer DB. This change has no impact neither on the repair service API nor the Ledger API update/ACS serving.
 
 ### All node operators
 
@@ -115,6 +162,9 @@ it, and its replacement. -->
 ### Synchronizer operators
 
 ## Security Fixes
+
+### JDK Base Image Critical Fixes
+- JDK base image has been upgraded to 21.0.13.1_2, incorporating several key security patches
 
 <!--
 Advisories first, then the other security fixes as a bullet list, including dependency updates for security

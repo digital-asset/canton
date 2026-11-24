@@ -70,7 +70,7 @@ import com.digitalasset.canton.networking.grpc.{
   CantonMutableHandlerRegistry,
   CantonServerBuilder,
 }
-import com.digitalasset.canton.protocol.TopologyLimits
+import com.digitalasset.canton.protocol.TopologyLimitsView
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.DbStorage.RetryConfig
 import com.digitalasset.canton.resource.{DbMigrations, Storage, StorageFactory}
@@ -684,7 +684,7 @@ abstract class CantonNodeBootstrapImpl[
         new CantonAdminTokenDispenser(
           tokenDuration = adminTokenConfig.adminTokenDuration.asJava,
           randomOps = crypto.pureCrypto,
-          fixedToken = adminTokenConfig.fixedAdminToken,
+          fixedToken = adminTokenConfig.fixedAdminToken.map(_.unwrap),
         )
       createAdminServerRegistry(adminTokenDispenser).map { adminServerRegistry =>
         adminServerRegistry.addServiceU(bindNodeStatusService())
@@ -968,7 +968,7 @@ abstract class CantonNodeBootstrapImpl[
                 SignedTopologyTransaction
                   .fromByteString(
                     ProtocolVersionValidation.AlwaysValidation,
-                    TopologyTransactionDeserializationContext(TopologyLimits.default),
+                    TopologyTransactionDeserializationContext(TopologyLimitsView.default),
                     bytes,
                   )
                   .leftMap(_.message)

@@ -6,15 +6,24 @@ package com.digitalasset.canton.error
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.LsuErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-
-sealed trait LsuError extends Product with Serializable with CantonBaseError with PrettyPrinting {
-
-  override protected def pretty: Pretty[LsuError] =
-    adHocPrettyInstanceWithName(_.code.id, showFieldNames = true)
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
 }
 
-object LsuError extends LsuErrorGroup {
+sealed trait LsuError
+    extends Product
+    with Serializable
+    with CantonBaseError
+    with PrettyPrintingFromCompanion {
+
+  override def prettyCompanion: PrettyPrintingCompanion[LsuError] = LsuError
+}
+
+object LsuError extends LsuErrorGroup with PrettyPrintingCompanion[LsuError] {
+  override protected val pretty: Pretty[LsuError] =
+    adHocPrettyInstanceWithName(_.code.id, showFieldNames = true)
 
   @Explanation(
     """An unexpected error in Canton during an LSU. May be caused by concurrent synchronizer connect or disconnect operations during the LSU or by a bug in Canton."""

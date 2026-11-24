@@ -1181,5 +1181,24 @@ trait IntegrityStorageBackend {
 trait StringInterningStorageBackend {
   def loadStringInterningEntries(fromIdExclusive: Int, untilIdInclusive: Int)(
       connection: Connection
-  ): Iterable[(Int, String)]
+  ): Vector[(Int, String)]
+
+  def loadStringInterningEntriesRange(
+      fromExclusive: String,
+      toInclusive: String,
+  )(connection: Connection): Vector[(Int, String)]
+
+  def lastExternalStringInRange(
+      prefix: String,
+      fromExclusive: String,
+      limit: Int,
+  )(connection: Connection): Option[String]
+
+  def batchLookupInternalIds(rawStrings: Iterable[String])(
+      connection: Connection
+  ): Vector[(Int, String)]
+
+  def batchLookupExternalStrings(ids: Iterable[Int])(
+      connection: Connection
+  ): Vector[(Int, String)]
 }

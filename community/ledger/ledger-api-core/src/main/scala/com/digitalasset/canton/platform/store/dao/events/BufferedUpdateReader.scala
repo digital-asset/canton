@@ -27,7 +27,7 @@ import com.digitalasset.canton.platform.store.dao.{
   LedgerDaoUpdateReader,
 }
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
-import com.digitalasset.canton.platform.{InternalUpdateFormat, TemplatePartiesFilter}
+import com.digitalasset.canton.platform.{EventFilter, InternalUpdateFormat}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
@@ -89,7 +89,7 @@ private[events] class BufferedUpdateReader(
 
   override def getActiveContracts(
       activeAt: Option[Offset],
-      filter: TemplatePartiesFilter,
+      filter: EventFilter,
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
       configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],

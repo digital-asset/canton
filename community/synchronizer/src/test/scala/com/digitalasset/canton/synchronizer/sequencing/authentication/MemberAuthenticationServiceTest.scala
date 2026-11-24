@@ -17,6 +17,7 @@ import com.digitalasset.canton.crypto.{
   SynchronizerCryptoClient,
   SynchronizerSnapshotSyncCryptoApi,
 }
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
@@ -421,7 +422,8 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
     // Prepare a valid nonce in the store to satisfy the challenge check
 
     val storedNonce = store.fetchOrGenerateNonce(
-      p1, {
+      p1,
+      clock.now, {
         val rawNonce = Nonce.generate(syncCrypto.pureCrypto)
         StoredNonce(p1, rawNonce, clock.now, JDuration.ofMinutes(1))
       },
@@ -527,7 +529,8 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
 
     // Prepare a valid nonce in the store to satisfy the challenge check
     val storedNonce = store.fetchOrGenerateNonce(
-      p1, {
+      p1,
+      clock.now, {
         val rawNonce = Nonce.generate(syncCrypto.pureCrypto)
         StoredNonce(p1, rawNonce, clock.now, JDuration.ofMinutes(1))
       },
@@ -640,4 +643,139 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
       store.fetchTokens(p1) shouldBe empty
     }
   }
+
+  "generateChallenge" should {
+    "not schedule per-request tasks or leak shutdown hooks under heavy load" in {
+      clock.reset()
+      val sut = service(participantIsActive = true)
+      val numCalls = 500
+
+      // Only the single periodic background cleanup task should be scheduled on startup
+      clock.numberOfScheduledTasks shouldBe 1
+
+      for {
+        _ <- MonadUtil.sequentialTraverse(1 to numCalls)(_ => sut.generateChallenge(p1))
+      } yield {
+        // Queue size remains constant regardless of request volume
+        clock.numberOfScheduledTasks shouldBe 1
+
+        // Closing the service cancels the periodic task cleanly
+        sut.close()
+        clock.numberOfScheduledTasks shouldBe 0
+      }
+    }
+
+    "periodically expire nonces in a single sweep without a thundering herd" in {
+      var expirationCallCount = 0
+      val countingStore = new MemberAuthenticationStore(
+        PositiveInt.tryCreate(10),
+        loggerFactory,
+      ) {
+        override def expireNoncesAndTokens(timestamp: CantonTimestamp): Unit = {
+          expirationCallCount += 1
+          super.expireNoncesAndTokens(timestamp)
+        }
+      }
+
+      clock.reset()
+      val sut = service(participantIsActive = true, store = countingStore)
+      val numCalls = 500
+
+      for {
+        _ <- MonadUtil.sequentialTraverse(1 to numCalls)(_ => sut.generateChallenge(p1))
+      } yield {
+        expirationCallCount shouldBe 0
+        countingStore.fetchNonce(p1) shouldBe defined
+
+        // Advance past the 1-minute expiration window: cleanup runs once (not 500 times) and purges the nonce
+        clock.advance(JDuration.ofMinutes(2))
+        expirationCallCount shouldBe 1
+        countingStore.fetchNonce(p1) shouldBe None
+
+        // Advancing another interval confirms the periodic cleanup reschedules itself
+        clock.advance(JDuration.ofMinutes(1))
+        expirationCallCount shouldBe 2
+        clock.numberOfScheduledTasks shouldBe 1
+
+        sut.close()
+        clock.numberOfScheduledTasks shouldBe 0
+      }
+    }
+
+    "fall back to maxTokenExpirationInterval when nonceExpirationInterval is zero" in {
+      var expirationCallCount = 0
+      val countingStore = new MemberAuthenticationStore(
+        PositiveInt.tryCreate(10),
+        loggerFactory,
+      ) {
+        override def expireNoncesAndTokens(timestamp: CantonTimestamp): Unit = {
+          expirationCallCount += 1
+          super.expireNoncesAndTokens(timestamp)
+        }
+      }
+
+      clock.reset()
+      val sut = service(
+        participantIsActive = true,
+        nonceDuration = JDuration.ZERO,
+        tokenDuration = JDuration.ofHours(1),
+        store = countingStore,
+      )
+
+      // Service initiated, and the expirations are scheduled once
+      clock.numberOfScheduledTasks shouldBe 1
+      expirationCallCount shouldBe 0
+
+      // Advancing 30m (< 1h fallback interval) must not trigger cleanup yet
+      clock.advance(JDuration.ofMinutes(30))
+      clock.numberOfScheduledTasks shouldBe 1
+      expirationCallCount shouldBe 0
+
+      // Advancing past 1h triggers the fallback cleanup once and reschedules
+      clock.advance(JDuration.ofMinutes(31))
+      expirationCallCount shouldBe 1
+      clock.numberOfScheduledTasks shouldBe 1
+
+      sut.close()
+      clock.numberOfScheduledTasks shouldBe 0
+    }
+
+    "replace an expired nonce when generateChallenge is called between cleanup sweeps" in {
+      clock.reset()
+      val sut = service(participantIsActive = true, nonceDuration = JDuration.ofMinutes(1))
+
+      // Offset nonce creation from the t=60s and t=120s cleanup ticks by creating at t=30s
+      clock.advance(JDuration.ofSeconds(30))
+
+      for {
+        firstChallenge <- sut.generateChallenge(p1)
+        (firstNonce, _) = firstChallenge
+        _ = {
+          // Sweep at t=60s runs, keeping firstNonce (expires at t=90s)
+          clock.advance(JDuration.ofSeconds(30))
+          // Advance to t=95s: firstNonce is now expired, before the t=120s sweep
+          clock.advance(JDuration.ofSeconds(35))
+        }
+        secondChallenge <- sut.generateChallenge(p1)
+        (secondNonce, fingerprints) = secondChallenge
+        _ = secondNonce should not be firstNonce
+        signature <- getMemberAuthentication(p1)
+          .signSynchronizerNonce(
+            p1,
+            secondNonce,
+            physicalSynchronizerId,
+            fingerprints,
+            syncCrypto.crypto,
+          )
+        tokenAndExpiry <- sut.validateSignature(p1, signature, secondNonce)
+        _ <- EitherT.fromEither[FutureUnlessShutdown](
+          sut.validateToken(physicalSynchronizerId, p1, tokenAndExpiry.token)
+        )
+      } yield {
+        sut.close()
+        clock.numberOfScheduledTasks shouldBe 0
+      }
+    }
+  }
+
 }

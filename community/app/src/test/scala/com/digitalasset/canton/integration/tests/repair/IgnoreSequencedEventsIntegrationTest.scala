@@ -374,15 +374,18 @@ final class IgnoreSequencedEventsIntegrationTest
           {
             participant1.synchronizers.reconnect(daName)
 
-            // Necessary synchronization because some of the errors are reported asynchronously.
-            // Feel free to adjust if the number of errors has changed.
+            // Necessary synchronization because the errors are reported asynchronously.
             // The participant keeps retrying, and at each attempt there is:
             // * `SequencedEventValidatorImpl` logging an ERROR
             // * `SequencerSubscriptionPoolImpl$SubscriptionManager` logging a WARN, and the first time (the sole
             //   sequencer reaches the trust threshold, and leaves no sequencer to reach it) the
-            //   `SEQUENCER_TRUST_ASSUMPTION_VIOLATED` and `SEQUENCER_CANNOT_REACH_TRUST_THRESHOLD` warnings
+            //   `SEQUENCER_TRUST_ASSUMPTION_VIOLATED` and `SEQUENCER_UNREACHABLE_TRUST_THRESHOLD` warnings
+            // Wait for the last warning of the first attempt, so that none of its warnings is logged after the
+            // suppression ends. `SequencerSubscriptionPoolImpl.handleFaultySequencer` logs them in the order above.
             eventually() {
-              loggerFactory.numberOfRecordedEntries should be >= 2
+              forAtLeast(1, loggerFactory.fetchRecordedLogEntries)(
+                _.message should include(SequencerSubscriptionError.UnreachableTrustThreshold.id)
+              )
             }
 
             // The participant keeps retrying, which cannot succeed: disconnect it, so that the event can be ignored

@@ -1,10 +1,19 @@
 name: Setup GCP credentials for GAR
-description: Authenticate to GCP with workload identity for publishing to da-images, and export the credentials file for sbt
+description: >
+  Authenticate to GCP with workload identity for publishing to da-images, export the credentials
+  file for sbt, and expose the access token required by GAR.
+  This wrapper reuses the shared GCP auth action and adds the GAR-specific token output.
+
+inputs:
+  service_account_key:
+    description: Service-account JSON key for key-based authentication when WIF is unavailable.
+    required: false
+    default: ''
 
 outputs:
   access_token:
     description: Short-lived access token for Google Artifact Registry
-    value: ${{ steps.auth.outputs.access_token }}
+    value: ${{ steps.gcp.outputs.access_token }}
 
 runs:
   using: composite
@@ -16,28 +25,29 @@ runs:
         echo "::error::No workload identity provider for ${GITHUB_REPOSITORY}, add one in setup_gcp_gar"
         exit 1
 
-    # Each repo has its own provider and service account. The calling job needs `id-token: write`.
-    - name: Authenticate to Google Cloud with workload identity
-      id: auth
-      uses: google-github-actions/auth@v3
+    - name: Resolve DA Images WIF configuration
+      id: da_images_wif
+      uses: ./.github/actions/utils/resolve_da_images_wif
+
+    - name: Setup shared GCP credentials
+      id: gcp
+      uses: ./.github/actions/utils/setup_gcp
       with:
+        service_account_key: ${{ inputs.service_account_key }}
+        workload_identity_provider: ${{ steps.da_images_wif.outputs.workload_identity_provider }}
+        service_account: ${{ steps.da_images_wif.outputs.service_account }}
         token_format: access_token
-        workload_identity_provider: >-
-          ${{
-            github.repository == 'DACH-NY/canton' && 'projects/794775982379/locations/global/workloadIdentityPools/github-actions/providers/dny-provider' ||
-            github.repository == 'digital-asset/canton' && 'projects/794775982379/locations/global/workloadIdentityPools/github-actions/providers/da-provider' ||
-            ''
-          }}
-        service_account: >-
-          ${{
-            github.repository == 'DACH-NY/canton' && 'gh-dny-canton@da-images.iam.gserviceaccount.com' ||
-            github.repository == 'digital-asset/canton' && 'gh-da-canton@da-images.iam.gserviceaccount.com' ||
-            ''
-          }}
+
+    - name: Validate GAR credentials
+      if: ${{ steps.gcp.outputs.credentials_file_path == '' || steps.gcp.outputs.access_token == '' }}
+      shell: bash
+      run: |
+        echo "::error::GAR authentication requires a credentials file and access token."
+        exit 1
 
     - name: Export credentials file for sbt
       shell: bash
       env:
-        CREDENTIALS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
+        CREDENTIALS_FILE: ${{ steps.gcp.outputs.credentials_file_path }}
       run: |
         echo "GOOGLE_CREDENTIALS_FILE=$CREDENTIALS_FILE" >> "$GITHUB_ENV"

@@ -4,10 +4,13 @@
 package com.digitalasset.canton.integration
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.util.Mutex
 import com.typesafe.scalalogging.LazyLogging
 
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import java.util.concurrent.{Semaphore, TimeUnit}
+import java.util.{Comparator, PriorityQueue}
+import scala.annotation.tailrec
 
 /** Although our integration tests are designed not to conflict with one another when running
   * concurrently, practically due to how resource heavy their setups are you will start encountering
@@ -49,8 +52,19 @@ object ConcurrentEnvironmentLimiter extends LazyLogging {
 
   private val concurrencyLimit: Int = System.getProperty(IntegrationTestConcurrencyLimit, "2").toInt
 
+  private final class Waiter(val name: String, val permits: Int, val seq: Int)
+
+  /** Higher priority first */
+  private val waiterOrdering: Comparator[Waiter] = (a: Waiter, b: Waiter) => {
+    val ret = Integer.compare(b.permits, a.permits)
+    if (ret == 0) Integer.compare(a.seq, b.seq) else ret
+  }
+
   /** Configured to be fair so earlier started tests will be first to get environments */
   private val semaphore = new Semaphore(concurrencyLimit, true)
+  private val waiters = new PriorityQueue[Waiter](waiterOrdering)
+  private val lock = new Mutex()
+  private val seqCounter = new AtomicInteger(0)
 
   /** contains a map from test name to state (queue, run) */
   private val active = new AtomicReference[Map[String, (State, Long)]](Map.empty)
@@ -74,10 +88,32 @@ object ConcurrentEnvironmentLimiter extends LazyLogging {
 
   /** Block an environment creation until a permit is available. */
   def create[A](name: String, permits: PositiveInt)(block: => A): A = {
+    val waiter = new Waiter(name, permits.value, seqCounter.getAndIncrement())
+    lock.exclusive {
+      waiters.add(waiter)
+    }
     change(name, Queued)
     val numPermits = getNumPermits(permits)
-    scala.concurrent.blocking {
+    @tailrec
+    def acquireUntilHead(): Unit = {
       semaphore.acquire(numPermits)
+      // if this waiter is not at the head of the queue, release the permit again
+      // and retry
+      lock.exclusive(
+        Option.when(!waiters.isEmpty && waiters.peek() == waiter)(waiters.poll())
+      ) match {
+        case Some(head) =>
+          if (head != waiter)
+            logger.error("This should never happen: head of the queue is not the current waiter")
+        case None =>
+          // not at head of the queue, release the permit again and retry
+          semaphore.release(numPermits)
+          Thread.sleep(100)
+          acquireUntilHead()
+      }
+    }
+    scala.concurrent.blocking {
+      acquireUntilHead()
     }
     change(name, Running)
     try block

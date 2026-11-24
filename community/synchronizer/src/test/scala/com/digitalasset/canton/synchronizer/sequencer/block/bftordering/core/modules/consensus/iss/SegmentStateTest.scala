@@ -8,7 +8,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
@@ -147,7 +147,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         IssConsensusModule
           .parseNetworkMessage(
             ProtocolVersionValidation.AlwaysValidation,
-            BftOrdererLimits.default,
+            BftOrdererLimitsView.default,
             legacySignedNewView.toProtoV1,
             sender,
           )
@@ -171,7 +171,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           IssConsensusModule
             .parseNetworkMessage(
               ProtocolVersionValidation.AlwaysValidation,
-              BftOrdererLimits.default,
+              BftOrdererLimitsView.default,
               legacyViewChange.toProtoV1,
               sender,
             )
@@ -207,7 +207,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
               CommitCertificate
                 .fromProto(
                   ProtocolVersionValidation.AlwaysValidation,
-                  BftOrdererLimits.default,
+                  BftOrdererLimitsView.default,
                   certificate.toProto,
                 )
                 .value,
@@ -266,7 +266,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
       val parsedRetransmissionResponse = RetransmissionResponse
         .fromProto(
           ProtocolVersionValidation.AlwaysValidation,
-          BftOrdererLimits.default,
+          BftOrdererLimitsView.default,
           sender,
           legacyRetransmissionResponse.toProto.message.retransmissionResponse.value,
         )

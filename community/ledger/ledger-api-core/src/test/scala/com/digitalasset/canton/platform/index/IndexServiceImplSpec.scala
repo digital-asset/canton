@@ -152,7 +152,7 @@ class IndexServiceImplSpec
     currentPackageMetadata = packageMetadata_iface1_template1 |+| packageMetadata_iface1_template2
 
     val internalEventFormat1 = InternalEventFormat(
-      templatePartiesFilter = TemplatePartiesFilter(
+      eventFilter = TemplatePartiesFilter(
         relation = Map(
           template1 -> Some(Set(party)),
           template2 -> Some(Set(party)),

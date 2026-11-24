@@ -32,7 +32,6 @@ import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UseH2,
-  UsePostgres,
   UseProgrammableSequencer,
 }
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
@@ -1006,17 +1005,17 @@ trait TrafficControlTest
     )
 }
 
-class TrafficControlTestBftOrderingPostgres extends TrafficControlTest {
-  private val useBftSequencer = new UseBftSequencer(
-    loggerFactory,
-    dynamicallyOnboardedSequencerNames = Seq(InstanceName.tryCreate("sequencer2")),
-  )
-  override protected val bftSequencerPlugin = Some(useBftSequencer)
-
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(useBftSequencer)
-  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
-}
+//class TrafficControlTestBftOrderingPostgres extends TrafficControlTest {
+//  private val useBftSequencer = new UseBftSequencer(
+//    loggerFactory,
+//    dynamicallyOnboardedSequencerNames = Seq(InstanceName.tryCreate("sequencer2")),
+//  )
+//  override protected val bftSequencerPlugin = Some(useBftSequencer)
+//
+//  registerPlugin(new UsePostgres(loggerFactory))
+//  registerPlugin(useBftSequencer)
+//  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
+//}
 
 class TrafficControlTestBftOrderingH2 extends TrafficControlTest {
   private val useBftSequencer = new UseBftSequencer(

@@ -6,69 +6,17 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.tls.{TlsClientConfig, TlsServerConfig}
 import com.digitalasset.canton.config
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeInt,
   NonNegativeLong,
   Port,
   PositiveInt,
 }
-import com.digitalasset.canton.config.{
-  ActiveRequestLimitsConfig,
-  AdminTokenConfig,
-  AuthServiceConfig,
-  BasicKeepAliveServerConfig,
-  BatchAggregatorConfig,
-  ClientConfig,
-  JwksCacheConfig,
-  PemFileOrString,
-  PositiveFiniteDuration,
-  ServerConfig,
-  StorageConfig,
-}
 import com.digitalasset.canton.networking.grpc.{CantonServerBuilder, ClientChannelParams}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig.DelayByRecipients
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
-  BftBlockOrderingStandaloneNetworkConfig,
-  DefaultAvailabilityDisseminationPatience,
-  DefaultAvailabilityMaxNonOrderedBatchesPerNode,
-  DefaultAvailabilityMinProposalCreationDelay,
-  DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning,
-  DefaultBlockingDbReadTimeout,
-  DefaultConsensusBlockCompletionTimeout,
-  DefaultConsensusEmptyBlockCreationTimeout,
-  DefaultConsensusExtraAllowedRetransmissionRequestsPerSecond,
-  DefaultConsensusFlushingMinBlocks,
-  DefaultConsensusNewEpochTopologyWarnTimeout,
-  DefaultConsensusQueueMaxSize,
-  DefaultConsensusQueuePerNodeQuota,
-  DefaultConsensusWindowSizeForRetransmissionOfCommitCertificates,
-  DefaultConsensusWindowSizeForStateTransferOfCommitCertificates,
-  DefaultDedicatedExecutionContextDivisor,
-  DefaultDelayedInitQueueMaxSize,
-  DefaultEpochStateTransferHowManyFutureEpochsToDownloadInParallel,
-  DefaultEpochStateTransferTimeout,
-  DefaultEpochStateTransferTimeoutForFutureEpoch,
-  DefaultInitQueryTimeout,
-  DefaultInitTimeout,
-  DefaultMaxBatchCreationInterval,
-  DefaultMaxMempoolQueueSize,
-  DefaultMinRequestsInBatch,
-  DefaultNetworkSendAttempts,
-  DefaultNetworkSendRetryMaximumDelay,
-  DefaultNetworkSendRetryMinimumDelay,
-  DefaultOutputEnqueueMaxRetries,
-  DefaultOutputEnqueueMaxRetryDelay,
-  DefaultOutputFetchHowManyRecipients,
-  DefaultOutputFetchMinimumDelay,
-  DefaultOutputFetchTimeout,
-  DefaultOutputFetchTimeoutCap,
-  DefaultOutputSizeOfChunkOfEpochsToLoadAtStart,
-  DefaultSendBlacklistTtl,
-  DefaultSequencerCoreSubscriptionConfig,
-  P2PNetworkConfig,
-  SequencerCoreSubscriptionConfig,
-}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.{
@@ -85,7 +33,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
   FiniteDurationDistribution,
   Probability,
 }
-import com.digitalasset.canton.util.retry
+import com.digitalasset.canton.util.{BytesUnit, retry}
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
 import java.io.File
@@ -177,6 +125,9 @@ import scala.util.Random
   *   The maximum size of future epoch queue.
   * @param epochStateTransferFutureEpochQueuePerNodeQuota
   *   The maximum number of messages per node stored in future epoch queue
+  * @param epochStateTransferFutureEpochQueueMaxTotalItemSizePerNodeQuota
+  *   The maximum total size of messages per node stored in future epoch queue. This is used to
+  *   limit the memory usage of the future epoch queue.
   * @param epochStateTransferHowManyFutureEpochsToDownloadInParallel
   *   The amount of epochs to speculatively download in parallel during State Transfer. Can be 0 to
   *   turn off speculative downloading
@@ -296,6 +247,8 @@ final case class BftBlockOrdererConfig(
     delayedInitQueueMaxSize: Int = DefaultDelayedInitQueueMaxSize,
     epochStateTransferFutureEpochQueueMaxSize: Int = DefaultConsensusQueueMaxSize,
     epochStateTransferFutureEpochQueuePerNodeQuota: Int = DefaultConsensusQueuePerNodeQuota,
+    epochStateTransferFutureEpochQueueMaxTotalItemSizePerNodeQuota: Option[PositiveInt] =
+      DefaultEpochStateTransferFutureEpochQueueMaxTotalItemSizePerNodeQuota,
     epochStateTransferHowManyFutureEpochsToDownloadInParallel: NonNegativeLong =
       DefaultEpochStateTransferHowManyFutureEpochsToDownloadInParallel,
     epochStateTransferTimeoutForFutureEpoch: FiniteDuration =
@@ -360,6 +313,11 @@ object BftBlockOrdererConfig {
   val DefaultConsensusNewEpochTopologyWarnTimeout: FiniteDuration = 2.seconds
   val DefaultEpochStateTransferHowManyFutureEpochsToDownloadInParallel: NonNegativeLong =
     NonNegativeLong.tryCreate(5L)
+  val DefaultEpochStateTransferFutureEpochQueueMaxTotalItemSizePerNodeQuota = Some(
+    PositiveInt.tryCreate(
+      BytesUnit.MB(512).bytes.toInt
+    )
+  )
   val DefaultEpochStateTransferTimeout: FiniteDuration = 4.seconds
   val DefaultEpochStateTransferTimeoutForFutureEpoch: FiniteDuration = 500.millis
   val DefaultOutputFetchTimeout: FiniteDuration = 200.millis

@@ -137,6 +137,87 @@ class CantonTimestampTest extends AnyWordSpec with BaseTest {
     }
   }
 
+  "safeSubtract" should {
+    "subtract the duration" in {
+      CantonTimestamp.Epoch.safeSubtract(Duration.ofSeconds(1)).value shouldBe
+        CantonTimestamp.ofEpochSecond(-1)
+    }
+
+    "add a negative duration" in {
+      CantonTimestamp.Epoch.safeSubtract(Duration.ofSeconds(-1)).value shouldBe
+        CantonTimestamp.ofEpochSecond(1)
+    }
+
+    "round a sub-microsecond duration towards the past, like minus" in {
+      CantonTimestamp.Epoch.safeSubtract(Duration.ofNanos(1500)).value shouldBe
+        CantonTimestamp.Epoch.minus(Duration.ofNanos(1500))
+    }
+
+    "reach the lower bound" in {
+      CantonTimestamp.MaxValue
+        .safeSubtract(
+          Duration.between(CantonTimestamp.MinValue.toInstant, CantonTimestamp.MaxValue.toInstant)
+        )
+        .value shouldBe CantonTimestamp.MinValue
+    }
+
+    "fail when the result is below the lower bound" in {
+      CantonTimestamp.MinValue.safeSubtract(Duration.ofNanos(1000)).left.value should
+        include("out of bound Timestamp")
+    }
+
+    "fail when the result is above the upper bound" in {
+      CantonTimestamp.MaxValue.safeSubtract(Duration.ofNanos(-1000)).left.value should
+        include("out of bound Timestamp")
+    }
+
+    "fail when the subtraction overflows" in {
+      CantonTimestamp.MinValue
+        .safeSubtract(Duration.ofSeconds(Long.MaxValue / 1_000_000L))
+        .left
+        .value should include("overflows")
+    }
+
+    "fail instead of throwing when the duration cannot be negated" in {
+      CantonTimestamp.Epoch.safeSubtract(Duration.ofSeconds(Long.MinValue)).left.value should
+        include("cannot be negated")
+    }
+
+    "fail when the duration cannot be expressed in microseconds" in {
+      CantonTimestamp.Epoch.safeSubtract(Duration.ofSeconds(Long.MaxValue)).left.value should
+        include("cannot be expressed in microseconds")
+    }
+
+    "accept a refined duration" in {
+      CantonTimestamp.Epoch.safeSubtract(NonNegativeFiniteDuration.tryOfSeconds(1)).value shouldBe
+        CantonTimestamp.ofEpochSecond(-1)
+    }
+  }
+
+  "safeImmediatePredecessor" should {
+    "return the previous microsecond" in {
+      CantonTimestamp.Epoch.safeImmediatePredecessor.value shouldBe
+        CantonTimestamp.Epoch.addMicros(-1)
+    }
+
+    "fail on the lower bound" in {
+      CantonTimestamp.MinValue.safeImmediatePredecessor.left.value should
+        include("out of bound Timestamp")
+    }
+  }
+
+  "safeImmediateSuccessor" should {
+    "return the next microsecond" in {
+      CantonTimestamp.Epoch.safeImmediateSuccessor.value shouldBe
+        CantonTimestamp.Epoch.addMicros(1)
+    }
+
+    "fail on the upper bound" in {
+      CantonTimestamp.MaxValue.safeImmediateSuccessor.left.value should
+        include("out of bound Timestamp")
+    }
+  }
+
   "minus" should {
     "measure the duration" in {
       CantonTimestamp.ofEpochSecond(1) - CantonTimestamp.Epoch shouldBe

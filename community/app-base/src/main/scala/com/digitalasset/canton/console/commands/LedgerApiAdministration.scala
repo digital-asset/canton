@@ -126,7 +126,13 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.NoTracing
-import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId}
+import com.digitalasset.canton.user.{
+  Audience,
+  IdentityProviderConfig,
+  IdentityProviderId,
+  Issuer,
+  JwksUrlLengthLimited,
+}
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPartyId, config}
@@ -2767,9 +2773,9 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               IdentityProviderConfig(
                 IdentityProviderId.Id(Ref.LedgerString.assertFromString(identityProviderId)),
                 isDeactivated,
-                JwksUrl(jwksUrl),
-                issuer,
-                audience,
+                JwksUrlLengthLimited.tryCreate(jwksUrl),
+                Issuer.tryCreate(issuer),
+                audience.map(Audience.tryCreate),
               ),
               updateMask,
             )

@@ -6,7 +6,11 @@ package com.digitalasset.canton.sequencing.client
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerErrorGroup
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencing.protocol.SendAsyncError
 import org.slf4j.event.Level
 
@@ -16,7 +20,7 @@ import org.slf4j.event.Level
   * sequencer client where there is a chance that the send will be sequenced it should not be
   * returned to the caller through this error.
   */
-sealed trait SendAsyncClientError extends Product with Serializable with PrettyPrinting
+sealed trait SendAsyncClientError extends Product with Serializable with PrettyPrintingFromCompanion
 
 object SendAsyncClientError extends SequencerErrorGroup {
 
@@ -40,14 +44,24 @@ object SendAsyncClientError extends SequencerErrorGroup {
     * the sequencer
     */
   final case class RequestInvalid(message: String) extends SendAsyncClientError {
-    override protected def pretty: Pretty[RequestInvalid] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[RequestInvalid] = RequestInvalid
+  }
+
+  object RequestInvalid extends PrettyPrintingCompanion[RequestInvalid] {
+    override protected val pretty: Pretty[RequestInvalid] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
 
   /** A send with the supplied message id is already being tracked */
   case object DuplicateMessageId extends SendAsyncClientError {
-    override protected def pretty: Pretty[DuplicateMessageId.type] =
+    override def prettyCompanion: PrettyPrintingCompanion[DuplicateMessageId.this.type] =
+      DuplicateMessageIdPrettyPrintingCompanion
+  }
+
+  private object DuplicateMessageIdPrettyPrintingCompanion
+      extends PrettyPrintingCompanion[DuplicateMessageId.type] {
+    override protected val pretty: Pretty[DuplicateMessageId.type] =
       prettyOfObject[DuplicateMessageId.type]
   }
 
@@ -56,20 +70,33 @@ object SendAsyncClientError extends SequencerErrorGroup {
 
   /** We were unable to make the request for a technical reason */
   final case class RequestFailed(message: String) extends SendAsyncClientResponseError {
-    override protected def pretty: Pretty[RequestFailed] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[RequestFailed] = RequestFailed
+  }
+
+  object RequestFailed extends PrettyPrintingCompanion[RequestFailed] {
+    override protected val pretty: Pretty[RequestFailed] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
 
   /** The request already exists and was therefore rejected */
   final case class RequestAlreadyExists(message: String) extends SendAsyncClientResponseError {
-    override protected def pretty: Pretty[RequestAlreadyExists] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[RequestAlreadyExists] =
+      RequestAlreadyExists
+  }
+
+  object RequestAlreadyExists extends PrettyPrintingCompanion[RequestAlreadyExists] {
+    override protected val pretty: Pretty[RequestAlreadyExists] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
 
   /** We were able to contact the server but the request was declined */
   final case class RequestRefused(error: SendAsyncError) extends SendAsyncClientResponseError {
-    override protected def pretty: Pretty[RequestRefused] = prettyOfClass(unnamedParam(_.error))
+    override def prettyCompanion: PrettyPrintingCompanion[RequestRefused] = RequestRefused
+  }
+
+  object RequestRefused extends PrettyPrintingCompanion[RequestRefused] {
+    override protected val pretty: Pretty[RequestRefused] = prettyOfClass(unnamedParam(_.error))
   }
 }

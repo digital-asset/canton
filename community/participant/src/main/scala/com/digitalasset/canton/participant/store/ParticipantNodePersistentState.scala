@@ -111,8 +111,9 @@ object ParticipantNodePersistentState extends HasLoggerName {
         storage = storage,
         processingTimeouts = parameters.processingTimeouts,
         cacheConfig = parameters.cachingConfigs.contractStore,
-        dbQueryBatcherConfig = parameters.batchingConfig.contractStoreAggregator,
-        insertBatchAggregatorConfig = parameters.batchingConfig.aggregator,
+        readBatchAggregatorConfig = parameters.batchingConfig.contractStoreReadAggregator,
+        writeBatchAggregatorConfig = parameters.batchingConfig.contractStoreWriteAggregator,
+        insertMaxBatchSizeBytes = parameters.batchingConfig.contractStoreWriteMaxBatchSizeBytes,
         loggerFactory = loggerFactory,
       )
 

@@ -275,7 +275,7 @@ class TopologyTransactionAuthorizationValidator[+PureCrypto <: CryptoPureApi](
       toValidate.signatures.map(_.authorizingLongTermKey) -- allKeysUsedForAuthorization.keys
 
     if (logger.underlying.isDebugEnabled()) {
-      TopologyMapping.loggerDebug(toValidate.mapping.code)(
+      logger.trace(
         s"Authorization details for ${toValidate.mapping.code}=${toValidate.transaction.hash}\n" +
           s"  Required: $requiredAuth\n" +
           s"  Provided for namespaces:" + renderAuthorizations(

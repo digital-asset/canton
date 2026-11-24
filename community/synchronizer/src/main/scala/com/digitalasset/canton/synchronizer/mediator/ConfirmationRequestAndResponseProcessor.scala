@@ -672,21 +672,15 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
         MonadUtil.parTraverseWithLimit_(batchingConfig.parallelism)(
           request.informeesAndConfirmationParamsByViewPosition.toList
         ) { case (viewPosition, viewConfirmationParameters) =>
-          // sorting parties to get deterministic error messages
-          val declaredConfirmingParties =
-            viewConfirmationParameters.confirmers.toSeq.sortBy(pId => pId)
+          val declaredConfirmingParties = viewConfirmationParameters.confirmers
 
           for {
             hostedConfirmingParties <- EitherT.right[MediatorError](
               snapshot.ipsSnapshot
                 .isHostedByAtLeastOneParticipantF(
-                  declaredConfirmingParties.toSet,
+                  declaredConfirmingParties,
                   (_, attr) => attr.canConfirm,
                 )
-            )
-
-            (authorized, unauthorized) = declaredConfirmingParties.partition(
-              hostedConfirmingParties.contains
             )
 
             // TODO(#30923): Remove unnecessary confirmer weight and quorum threshold parameters and simplify/correct check
@@ -694,7 +688,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
               // For the authorized informees that belong to each quorum, verify if their combined weight is enough
               // to meet the quorum's threshold.
               quorum.confirmers
-                .filter { case (partyId, _) => authorized.contains(partyId) }
+                .filter { case (partyId, _) => hostedConfirmingParties.contains(partyId) }
                 .values
                 .map(_.unwrap)
                 .sum >= quorum.threshold.unwrap
@@ -702,6 +696,11 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
 
             _ <- EitherTUtil.condUnitET[FutureUnlessShutdown][MediatorError](
               confirmed, {
+                // sorting parties to get deterministic error messages
+                val (authorized, unauthorized) = declaredConfirmingParties.toSeq
+                  .sortBy(identity)
+                  .partition(hostedConfirmingParties.contains)
+
                 val insufficientPermissionHint =
                   if (unauthorized.nonEmpty)
                     show"\nParties without participant having permission to confirm: $unauthorized"

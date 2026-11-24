@@ -14,6 +14,8 @@ import scala.jdk.CollectionConverters.*
 
 class DarReaderTest extends AnyWordSpec with Matchers with Inside with Inspectors with TryValues {
 
+  private val DarReader = TestReaders.DarReader
+
   private def resource(path: String): ZipInputStream = {
     val stream = getClass.getClassLoader.getResourceAsStream(path)
     new ZipInputStream(stream)
@@ -202,19 +204,18 @@ class DarReaderTest extends AnyWordSpec with Matchers with Inside with Inspector
   )(testCases: DamlLf.Archive => (protobuf.ByteString, protobuf.ByteString)) = {
     val (negativeTestCase, positiveTestCase) = testCases(archive)
 
-    s"ArchiveReader should reject $messageName with unknown fields" in {
-      ArchiveReader.fromByteString(negativeTestCase) shouldBe a[Right[?, ?]]
-      inside(ArchiveReader.fromByteString(positiveTestCase)) { case Left(Error.Parsing(err)) =>
-        err should include(s"$messageName contains unknown field")
+    s"archive reader should reject $messageName with unknown fields" in {
+      TestReaders.readArchivePayloadFromBytes(negativeTestCase, false) shouldBe a[Right[?, ?]]
+      inside(TestReaders.readArchivePayloadFromBytes(positiveTestCase, false)) {
+        case Left(Error.Parsing(err)) =>
+          err should include(s"$messageName contains unknown field")
       }
     }
-
-    s"ArchiveSchemaReader should accept $messageName with unknown fields" in {
-      ArchiveSchemaReader.fromByteString(negativeTestCase) shouldBe a[Right[?, ?]]
-      ArchiveSchemaReader.fromByteString(positiveTestCase) shouldBe a[Right[?, ?]]
+    s"archive reader in schema mode should accept $messageName with unknown fields" in {
+      TestReaders.readArchivePayloadFromBytes(negativeTestCase, true) shouldBe a[Right[?, ?]]
+      TestReaders.readArchivePayloadFromBytes(positiveTestCase, true) shouldBe a[Right[?, ?]]
     }
   }
-
   testRejectUnknownFields("Archive") { archive =>
     val negativeTestCase = archive.toByteString
     val positiveTestCase = addUnknownField(archive, 42, extraData).toByteString

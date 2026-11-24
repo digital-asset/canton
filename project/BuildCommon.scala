@@ -4027,6 +4027,7 @@ object BuildCommon {
         `daml-lf-validation`,
         `daml-lf-parser`,
         `daml-lf-transaction` % "test->test;test->compile",
+        `daml-lf-data-tests` % "test->test",
         `contextualized-logging`,
         crypto,
         nameof,

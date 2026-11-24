@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration
 import cats.data.EitherT
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, SequencerApiClientConfig}
 import com.digitalasset.canton.console.{
   LocalInstanceReference,
@@ -24,11 +24,9 @@ import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.{
   ClientChannelBuilder,
   ClientChannelParams,
-  GrpcClient,
   GrpcManagedChannel,
 }
 import com.digitalasset.canton.sequencer.api.v30
-import com.digitalasset.canton.sequencer.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationServiceStub
 import com.digitalasset.canton.sequencer.api.v30.SequencerServiceGrpc.SequencerServiceStub
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
 import com.digitalasset.canton.sequencing.authentication.{
@@ -85,8 +83,14 @@ object SequencerTestHelper {
       LifeCycle.close(LifeCycle.toCloseableChannel(channel, logger, name))(logger)
     }
 
+  /** The endpoint must be the one actually dialed by the channel: PV38+ sequencer proofs bind it.
+    * Sequencers at PV38+ must use the P2P listener, which binds the v31 authentication service.
+    * Participants, mediators, and sequencers in synchronizers on older protocol versions use the
+    * public listener.
+    */
   def requestToken(
       channel: ManagedChannel,
+      endpoint: Endpoint,
       synchronizerId: PhysicalSynchronizerId,
       memberId: Member,
       crypto: SynchronizerCrypto,
@@ -100,7 +104,7 @@ object SequencerTestHelper {
       NonNegativeInt.zero
     ) // Disable retries to speedup negative tests.
 
-    val tokenProvider = new AuthenticationTokenProvider(
+    val tokenProvider = AuthenticationTokenProvider(
       synchronizerId,
       memberId,
       crypto,
@@ -127,8 +131,8 @@ object SequencerTestHelper {
 
     tokenProvider
       .generateToken(
-        Endpoint("test", Port.tryCreate(1234)),
-        GrpcClient.create(grpcChannel, new SequencerAuthenticationServiceStub(_)),
+        endpoint,
+        grpcChannel,
       )
       .map(_.token)
   }

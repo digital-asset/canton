@@ -58,6 +58,13 @@ trait LedgerApiBackwardsCompatibilityConformanceTest
     super.excludedTests(version, protocolType) ++ ledgerApiCompatiblityExcludedTests
 
   private val ledgerApiCompatiblityExcludedTests: Seq[String] = Seq(
+    // Contract-id filters extended the empty-filter error message. Released test tools
+    // require the old wording; current tests accept both messages.
+    "TransactionServiceValidationIT:TXRejectEmptyFilter",
+    "UpdateServiceQueryIT:TXUpdateByHashRejectEmptyFilter",
+    "ActiveContractsServiceIT:AcsRejectEmptyFilter",
+    "ActiveContractsServiceIT:AcsPageRejectEmptyFilter",
+
     // TODO (i31463) Recheck excluded tests
     // Added in 3.4 line
     "TransactionServiceCorrectnessIT:TXExposesPaidTrafficCost",

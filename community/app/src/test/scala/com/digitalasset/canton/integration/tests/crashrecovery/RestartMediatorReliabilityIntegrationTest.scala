@@ -107,7 +107,13 @@ class RestartMediatorReliabilityIntegrationTest
           checkPerfRunnerCompletion(index)
         }
       (1 to 5).foreach(
-        remoteMediatorOutage(externalPlugin, mediator1Rem, mediator2Rem, hasCompleted, logger)
+        remoteMediatorOutage(
+          externalPlugin,
+          mediator1Rem,
+          mediator2Rem,
+          () => hasCompleted()._1,
+          logger,
+        )
       )
     }
   }

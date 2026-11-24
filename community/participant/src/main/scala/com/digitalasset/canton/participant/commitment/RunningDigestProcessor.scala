@@ -51,7 +51,7 @@ import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConf
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   LfContractId,
-  TopologyLimits,
+  TopologyLimitsView,
 }
 import com.digitalasset.canton.time.RefinedDuration
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
@@ -964,7 +964,7 @@ class RunningDigestProcessorImpl(
   )(implicit traceContext: TraceContext): Option[CheckpointType] =
     // Trusted bytes from the node's own topology store, so the limits in the context are never read.
     TopologyTransaction.fromTrustedByteString(
-      TopologyTransactionDeserializationContext(TopologyLimits.default)
+      TopologyTransactionDeserializationContext(TopologyLimitsView.default)
     )(event.payload) match {
       case Left(error) => ErrorUtil.invalidArgument(error.message)
       case Right(topoTx) =>

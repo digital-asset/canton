@@ -49,54 +49,74 @@ abstract class TraceContextIntegrationTest extends CommunityIntegrationTest with
       }.toSet
       MatchResult(
         allTraceIds.sizeIs == 1,
-        s"Expected the same trace-id for all log, but found multiple distinct trace-ids: ${allTraceIds
-            .mkString(", ")}",
+        s"Expected the same trace-id for all log, but found multiple distinct trace-ids: " +
+          allTraceIds.mkString(", "),
         "All log messages have the same trace-id",
       )
     }
   }
 
-  private def containTraceIdFor(traceId: String, substrings: String*) = new Matcher[Seq[LogEntry]] {
-    override def apply(left: Seq[LogEntry]): MatchResult = {
-      val allTraceIds = substrings.flatMap { substring =>
-        left
-          .filter(_.message.contains(substring))
-          .flatMap(_.mdc.get("trace-id"))
-      }.toSet
-      MatchResult(
-        allTraceIds.contains(traceId),
-        s"Expected trace-id $traceId in the log, but only found other trace-ids: ${allTraceIds
-            .mkString(", ")}",
-        "Log messages contain the expected trace-id",
-      )
+  private def containExactlyTraceIdsFor(traceIds: Set[String], substrings: String*) =
+    new Matcher[Seq[LogEntry]] {
+      override def apply(left: Seq[LogEntry]): MatchResult = {
+        val allTraceIds = substrings.flatMap { substring =>
+          left
+            .filter(_.message.contains(substring))
+            .flatMap(_.mdc.get("trace-id"))
+        }.toSet
+        val notFoundTraceIds = traceIds.diff(allTraceIds)
+        val unexpectedTraceIds = allTraceIds.diff(traceIds)
+        MatchResult(
+          allTraceIds == traceIds,
+          s"Expected only the trace-ids $traceIds in the log, " +
+            s"but the following trace-ids were not found: ${notFoundTraceIds.mkString(", ")}. " +
+            s"And the following unexpected trace-ids were found: ${unexpectedTraceIds.mkString(", ")}",
+          "Log messages contain one of the expected trace-ids",
+        )
+      }
     }
-  }
 
-  "propagate trace-ids set by ping service startup to ledger api" in { implicit env =>
+  "propagate trace-ids set by admin services startup to ledger api" in { implicit env =>
     import env.*
 
     participant1.stop()
 
-    loggerFactory.assertLogsSeq(CaptureAdminServicesStartupTraceIds)(
-      {
-        participant1.start()
-        eventually() {
-          participant1.is_running shouldBe true
-        }
-      },
-      { logs =>
-        logs should haveTheSameTraceIdFor(
-          "Loading admin workflows DAR",
-          "PackageService/GetPackageStatus",
-        )
-        logs should haveTheSameTraceIdFor("Creating admin workflow service admin-ping")
+    clue("Start P1 and observe admin workflow package logging")(
+      loggerFactory.assertLogsSeq(CaptureAdminServicesStartupTraceIds)(
+        {
+          participant1.start()
+          eventually() {
+            participant1.is_running shouldBe true
 
-        val traceId = logs
-          .find(_.message.contains("Creating admin workflow service admin-ping"))
-          .flatMap(_.mdc.get("trace-id"))
-          .getOrElse(fail("No trace-id found for admin-ping creation log message"))
-        logs should containTraceIdFor(traceId, "StateService/GetLedgerEnd")
-      },
+            // Wait until all admin workflow packages have been loaded so that we
+            // don't stop collecting logs until all the DAR creations have been logged.
+            participant1.packages
+              .list("canton-builtin-admin-workflow")
+              .map(_.name)
+              .toSet shouldBe Set(
+              AdminWorkflowServices.PingDarResourceName,
+              AdminWorkflowServices.AcsReplicationDarResourceName,
+            )
+          }
+        },
+        logs =>
+          clue("Inspect logs") {
+            logs should haveTheSameTraceIdFor(
+              "Loading admin workflows DAR",
+              "PackageService/GetPackageStatus",
+            )
+
+            val adminWorkflowServiceCreationTraceIds = logs
+              .filter(_.message.contains("Creating admin workflow service"))
+              .flatMap(_.mdc.get("trace-id"))
+              .toSet
+
+            logs should containExactlyTraceIdsFor(
+              adminWorkflowServiceCreationTraceIds,
+              "StateService/GetLedgerEnd",
+            )
+          },
+      )
     )
   }
 

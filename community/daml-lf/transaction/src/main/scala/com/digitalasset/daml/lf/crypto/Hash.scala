@@ -700,8 +700,6 @@ object Hash {
           addLong(v)
         case Value.ValueNumeric(v) =>
           addNumeric(v)
-        case Value.ValueUint256(_) =>
-          throw HashingError.Unsupported("uint256 not supported by Legacy hashing")
         case Value.ValueTimestamp(v) =>
           addLong(v.micros)
         case Value.ValueDate(v) =>
@@ -735,6 +733,8 @@ object Hash {
           iterateOver(entries.iterator, entries.length)((acc, x) =>
             acc.addTypedValue(x._1).addTypedValue(x._2)
           )
+        case Value.ValueUint256(_) =>
+          throw HashingError.Unsupported("Uint256 is not supported in legacy hashing scheme")
       }
   }
 
@@ -822,8 +822,6 @@ object Hash {
           addLong(v.micros)
         case Value.ValueNumeric(v) =>
           addNumeric(v)
-        case Value.ValueUint256(_) =>
-          throw HashingError.Unsupported("uint256 not supported by UpgradeFriendly hashing")
         case Value.ValueParty(v) =>
           addString(v)
         case Value.ValueText(v) =>
@@ -847,6 +845,10 @@ object Hash {
           addString(v)
         case Value.ValueGenMap(entries) =>
           addGenMap(entries)
+        case Value.ValueUint256(_) =>
+          throw HashingError.Unsupported(
+            "Uint256 is not supported in upgrade-friendly hashing scheme"
+          )
       }
 
     private def addGenMap(entries: ImmArray[(Value, Value)]): this.type =
@@ -899,7 +901,7 @@ object Hash {
               // We never write unit
               case Value.ValueUint256(_) =>
                 throw HashingError.Unsupported(
-                  "uint256 not supported by UpgradeFriendly hashing"
+                  "Uint256 is not supported in upgrade-friendly hashing scheme"
                 )
             }
           case Value.ValueRecord(_, fields) =>

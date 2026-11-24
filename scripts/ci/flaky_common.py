@@ -34,6 +34,8 @@ STREAK_COUNT_LIMIT: Final[int] = 30
 # land on non-adjacent commits, so the per-commit streak check never fires for
 # them; this is the nightly-specific equivalent.
 NIGHTLY_CONSECUTIVE_FAILURES: Final[int] = 3
+# Label applied to every flaky test tracking issue on creation.
+FLAKY_TEST_LABEL: Final[str] = "flaky-test"
 # Label applied to the tracking issue when a nightly streak is detected.
 NIGHTLY_BROKEN_LABEL: Final[str] = "broken-nightly"
 # Nightly cron from .circleci/config/workflows/canton_nightly.yml: "0 22 * * 1-5".
@@ -613,7 +615,10 @@ def test_format_test_name_collapses_shards():
 
 def test_gh_flags():
     checks = [
-        (["issue", "create", "--help"], ["--title", "--body-file", "--milestone", "--repo"]),
+        (
+            ["issue", "create", "--help"],
+            ["--title", "--body-file", "--milestone", "--label", "--repo"],
+        ),
         (["issue", "edit", "--help"], ["--title", "--body-file", "--repo"]),
         (["issue", "reopen", "--help"], ["--repo"]),
     ]

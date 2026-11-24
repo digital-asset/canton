@@ -238,7 +238,7 @@ class LedgerApiStore(
         )(connection)
       } yield LastSynchronizerOffset(
         ledgerEnd = ledgerEnd,
-        syncrhonizerIndex = synchronizerIndex,
+        synchronizerIndex = synchronizerIndex,
         lastSynchronizerOffset = lastSynchronizerOffset,
       )
     )
@@ -381,7 +381,7 @@ object LedgerApiStore {
 
   final case class LastSynchronizerOffset(
       ledgerEnd: LedgerEnd,
-      syncrhonizerIndex: SynchronizerIndex,
+      synchronizerIndex: SynchronizerIndex,
       lastSynchronizerOffset: Option[SynchronizerOffset],
   )
 }

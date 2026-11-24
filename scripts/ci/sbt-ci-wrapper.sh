@@ -292,6 +292,10 @@ if [[ "${CI}" == "true" || "${CI}" == "!" || "$IS_GHA" == "true" ]]; then
   # millisecond resolution. Docker container filesystems might truncate file modification times to
   # second-level resolution, leading to incorrect incremental compilation behavior. This options is fixing that.
   SBT_CMD+=("-Dsbt.io.jdktimestamps=true")
+  SBT_CMD+=("-J-Dcom.digitalasset.daml.lf.archive.Decode.cacheDecodeValidatedArchive=true")
+  # sbt defaults to running its task-progress reporter every 500ms. This has no consumers in CI, and
+  # is expensive. This setting causes it to run once a minute.
+  SBT_CMD+=("-Dsbt.supershell.sleep=60000")
 fi
 
 # Set log level
@@ -342,7 +346,12 @@ if [[ ("${USE_MAVEN_MIRROR,,}" == "true" || "${USE_MAVEN_MIRROR}" == "1") && "$I
 fi
 
 # Setup heap size
-SBT_CMD+=("-J-Xmx$EXECUTOR_JVM_HEAP_SIZE" "-J-Xms$EXECUTOR_JVM_HEAP_SIZE")
+SBT_CMD+=("-J-Xmx$EXECUTOR_JVM_HEAP_SIZE")
+
+# Return unused heap to the OS during the run: a concurrent cycle after 30s without a GC, and shrink the
+# heap at each cycle when more than 30% of it is free after collection. The periodic cycle is G1-only, so
+# select G1 explicitly rather than rely on the JVM's default collector.
+SBT_CMD+=("-J-XX:+UseG1GC" "-J-XX:G1PeriodicGCInterval=30000" "-J-XX:MinHeapFreeRatio=10" "-J-XX:MaxHeapFreeRatio=30")
 
 # GHA Migration: Added more secure conditions for CUSTOM_JAVA_HOME
 # Specify custom java home if supplied

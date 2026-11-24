@@ -4,12 +4,11 @@
 package com.digitalasset.canton.util
 
 import cats.implicits.*
-import com.digitalasset.daml.lf.archive.{DarDecoder, DarReader}
+import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.language.Ast
-import com.google.protobuf.ByteString
 
-import java.io.{ByteArrayInputStream, File, InputStream}
+import java.io.{File, InputStream}
 import java.util.zip.ZipInputStream
 
 /** Wrapper that retrieves parsed packages from a DAR file consumable by the Daml interpreter.
@@ -39,23 +38,5 @@ object DamlPackageLoader {
       .bimap(t => LoadError(t.toString), _.all.toMap)
 
   final case class LoadError(message: String)
-
-  /** Utility to check that the DAR file is valid. This will check useful things such as whether the
-    * DAR file is potentially a zipbomb and that it follows the expected specification. By
-    * specifying unzippedMaxBytes, it will check that the unzipped DAR does not exceed this size.
-    * Defaults to 1GB.
-    */
-  def validateDar(
-      name: String,
-      content: ByteString,
-      unzippedMaxBytes: Int = 1064 * 1064 * 1064,
-  ): Either[String, Unit] =
-    DarReader
-      .readArchive(
-        name,
-        new ZipInputStream(new ByteArrayInputStream(content.toByteArray)),
-        unzippedMaxBytes,
-      )
-      .bimap(t => t.getMessage, _ => ())
 
 }

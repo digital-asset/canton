@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store.db
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
 import com.digitalasset.canton.config.{
   BatchAggregatorConfig,
   CacheConfig,
@@ -374,12 +374,15 @@ object DbContractStoreTest {
   def createDbContractStoreForTesting(
       storage: DbStorageIdempotency,
       loggerFactory: NamedLoggerFactory,
+      writeBatchAggregatorConfig: BatchAggregatorConfig = BatchAggregatorConfig.defaultsForTesting,
+      insertMaxBatchSizeBytes: PositiveInt = PositiveInt.tryCreate(1024 * 1024),
   )(implicit ec: ExecutionContext): DbContractStore =
     new DbContractStore(
       storage = storage,
       cacheConfig = CacheConfig(maximumSize = PositiveNumeric.tryCreate(100)),
-      dbQueryBatcherConfig = BatchAggregatorConfig.defaultsForTesting,
-      insertBatchAggregatorConfig = BatchAggregatorConfig.defaultsForTesting,
+      readBatchAggregatorConfig = BatchAggregatorConfig.defaultsForTesting,
+      writeBatchAggregatorConfig = writeBatchAggregatorConfig,
+      insertMaxBatchSizeBytes = insertMaxBatchSizeBytes,
       timeouts = DefaultProcessingTimeouts.testing,
       loggerFactory = loggerFactory,
     )

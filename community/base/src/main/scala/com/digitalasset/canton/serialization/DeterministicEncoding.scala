@@ -4,7 +4,11 @@
 package com.digitalasset.canton.serialization
 
 import cats.syntax.either.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
@@ -12,13 +16,10 @@ import java.nio.{ByteBuffer, ByteOrder}
 import java.time.Instant
 import scala.annotation.tailrec
 
-sealed trait DeserializationError extends PrettyPrinting {
+sealed trait DeserializationError extends PrettyPrintingFromCompanion {
   val message: String
 
-  override protected def pretty: Pretty[DeserializationError] =
-    prettyOfClass(
-      param("message", _.message.unquoted)
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[DeserializationError] = DeserializationError
   def toProtoDeserializationError: ProtoDeserializationError =
     this match {
       case DefaultDeserializationError(message) =>
@@ -28,6 +29,12 @@ sealed trait DeserializationError extends PrettyPrinting {
       case MaxByteToDecompressExceeded(message) =>
         ProtoDeserializationError.MaxBytesToDecompressExceeded(message)
     }
+}
+
+object DeserializationError extends PrettyPrintingCompanion[DeserializationError] {
+  override protected val pretty: Pretty[DeserializationError] = prettyOfClass(
+    param("message", _.message.unquoted)
+  )
 }
 final case class DefaultDeserializationError(message: String) extends DeserializationError
 final case class MaxByteToDecompressExceeded(message: String) extends DeserializationError

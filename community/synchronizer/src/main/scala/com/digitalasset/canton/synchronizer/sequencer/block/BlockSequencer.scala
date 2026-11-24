@@ -161,7 +161,6 @@ class BlockSequencer(
     materializer: Materializer,
     val tracer: Tracer,
 ) extends DatabaseSequencer(
-      SequencerWriterStoreFactory.singleInstance,
       dbSequencerStore,
       blockSequencerConfig.toDatabaseSequencerConfig,
       new LocalEventSignaller[SequencerMemberId, Unit](
@@ -1453,14 +1452,24 @@ class BlockSequencer(
           latestSequencerEventTimestamp,
         )
       )
+      // Traffic purchased for a member that is not registered yet registers that member when it is
+      // processed, so we also await the processing of the traffic purchased entries.
+      _ <- EitherT.right[LsuSequencerError](
+        latestSequencerEventTimestamp.fold(FutureUnlessShutdown.unit)(
+          blockRateLimitManager.trafficPurchasedManager.awaitUpdatesUntil
+        )
+      )
       // - All checks passed
-      // - Get all members known at the upgrade time
-      allMembers <- EitherT.right[LsuSequencerError](
-        dbSequencerStore.allRegisteredMembers(registeredAtBeforeInclusive = ts)
+      // - Get all members present at the upgrade time, with their status at that time
+      status <- EitherT.right[LsuSequencerError](dbSequencerStore.status(ts))
+      // Registered members are only kept if they are still known in the topology.
+      knownRegisteredMembers <- EitherT.right[LsuSequencerError](
+        snapshot.ipsSnapshot.areMembersKnown(status.registeredMembers)
       )
-      allKnownMembers <- EitherT.right[LsuSequencerError](
-        snapshot.ipsSnapshot.areMembersKnown(allMembers)
-      )
+      // Members for which traffic was purchased before their registration are not part of the
+      // topology yet, so they are all kept. This does not depend on whether the member has been
+      // disabled, as that is local to this sequencer whereas the traffic purchased is not.
+      allKnownMembers = knownRegisteredMembers ++ status.unregisteredMembers
       // - Get traffic states at the upgrade time for all members
       consumedRecordsPerMember <- EitherT.right[LsuSequencerError](
         blockRateLimitManager.trafficConsumedStore
@@ -1560,7 +1569,7 @@ class BlockSequencer(
           missingMembers = allMembers.diff(state.membersTraffic.keySet)
           _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
             // We expect all members mentioned in topology to have a traffic record.
-            // Some may have been offboarded or disabled, so the provided state may contain more members.
+            // The provided state may contain more members: those that are not registered yet.
             missingMembers.isEmpty,
             InvalidTrafficState.Error(
               s"The provided traffic states must contain traffic state for all members known in topology at the upgrade time $upgradeTime, missing members: $missingMembers"
@@ -1577,12 +1586,17 @@ class BlockSequencer(
           membersTraffic = state.membersTraffic.toList.sortBy { case (_, state) => state.timestamp }
           _ <- EitherT.right(
             blockRateLimitManager.trafficConsumedStore.store(
-              membersTraffic.map { case (member, trafficState) =>
-                val trafficConsumed = trafficState.toTrafficConsumed(member)
-                logger.debug(
-                  s"Setting LSU traffic consumed for member $member to $trafficConsumed"
-                )
-                trafficConsumed
+              // Traffic consumed can only be stored for registered members. The other members of the
+              // provided state had traffic purchased for them on the predecessor before their
+              // registration: only their traffic purchased is transferred below, which registers
+              // them as onboarding members.
+              membersTraffic.collect {
+                case (member, trafficState) if allMembers.contains(member) =>
+                  val trafficConsumed = trafficState.toTrafficConsumed(member)
+                  logger.debug(
+                    s"Setting LSU traffic consumed for member $member to $trafficConsumed"
+                  )
+                  trafficConsumed
               }
             )
           )
@@ -1619,14 +1633,18 @@ class BlockSequencer(
   }
 
   override def getThroughputCap(
-      requestType: SubmissionRequestType
-  ): Option[BlockSequencerConfig.IndividualThroughputCapConfig] =
-    throughputCap.getCap(requestType)
+      name: String
+  ): Option[BlockSequencerConfig.ThroughputCapByMessageTypeConfig] =
+    throughputCap.getCap(name)
+
+  override def listThroughputCaps
+      : Map[String, BlockSequencerConfig.ThroughputCapByMessageTypeConfig] =
+    throughputCap.getCaps
 
   override def setThroughputCap(
-      requestType: SubmissionRequestType,
-      config: Option[BlockSequencerConfig.IndividualThroughputCapConfig],
-  )(implicit traceContext: TraceContext): Unit = throughputCap.replaceCap(requestType, config)
+      name: String,
+      config: Option[BlockSequencerConfig.ThroughputCapByMessageTypeConfig],
+  )(implicit traceContext: TraceContext): Unit = throughputCap.replaceCap(name, config)
 
   override def performLsuSequencingTest(mediatorGroupRecipient: MediatorGroupRecipient)(implicit
       traceContext: TraceContext

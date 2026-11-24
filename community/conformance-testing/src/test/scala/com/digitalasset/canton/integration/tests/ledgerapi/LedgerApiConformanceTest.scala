@@ -66,6 +66,7 @@ trait LedgerApiConformanceBase extends CommunityIntegrationTest with IsolatedEnv
   protected def connectedSynchronizersCount: Int
   // ensure ledger api conformance tests have less noisy neighbours
   protected override def numPermits: PositiveInt = PositiveInt.tryCreate(2)
+
   /*
     When running the ProtocolContinuityConformance test, the protocol version can be different
     from the `testedProtocolVersion`.
@@ -148,6 +149,7 @@ class LedgerApiConformanceMultiSynchronizerTest
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,
+      minRequestsInBatch = 1,
       sequencerGroups = MultiSynchronizer(
         Seq(
           Set(InstanceName.tryCreate("sequencer1")),
@@ -251,7 +253,7 @@ abstract class LedgerApiShardedConformanceBase(shard: Int)
   assert(shard < numShards)
 
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
 
   "Ledger Api Test Tool" can {
     s"pass semantic tests block $shard" in { implicit env =>
@@ -330,7 +332,7 @@ trait LedgerApiConformanceSuppressedLogs extends SingleVersionLedgerApiConforman
 
 class LedgerApiConformanceSuppressedLogsPostgres extends LedgerApiConformanceSuppressedLogs {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
 }
 
 trait LedgerApiParticipantPruningConformanceTest extends SingleVersionLedgerApiConformanceBase {
@@ -379,7 +381,7 @@ trait LedgerApiParticipantPruningConformanceTest extends SingleVersionLedgerApiC
 class LedgerApiParticipantPruningConformanceTestPostgres
     extends LedgerApiParticipantPruningConformanceTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
 }
 
 trait LedgerApiOffsetCheckpointsConformanceTest extends SingleVersionLedgerApiConformanceBase {
@@ -415,13 +417,13 @@ trait LedgerApiOffsetCheckpointsConformanceTest extends SingleVersionLedgerApiCo
 class LedgerApiOffsetCheckpointsConformanceTestPostgres
     extends LedgerApiOffsetCheckpointsConformanceTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
 }
 
 // simple class which can be used to test a single test in the Ledger API conformance suite
 class LedgerApiSingleTest extends SingleVersionLedgerApiConformanceBase {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
 
   override def connectedSynchronizersCount = 1
 

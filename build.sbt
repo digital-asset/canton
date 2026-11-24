@@ -12,6 +12,7 @@ import org.apache.commons.compress.archivers.tar.*
 
 BuildCommon.sbtSettings
 Release.releaseChecksSettings
+CiTestSelection.settings
 
 addCommandAlias(
   "packageDocsWithExistingRelease",

@@ -32,7 +32,7 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType.ConfirmationRequest
 import com.digitalasset.canton.synchronizer.config.DeclarativeSequencerConfig
-import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.ThroughputCapByMessageTypeConfig
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
 import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, UniquePortGenerator}
 import monocle.macros.syntax.lens.*
@@ -81,8 +81,15 @@ final class DeclarativeApiIntegrationTest
                     .replace(true)
                     .focus(_.block.throughputCap.enabled)
                     .replace(true)
-                    .focus(_.block.throughputCap.messages.confirmationRequest.globalTpsCap)
-                    .replace(PositiveDouble.tryCreate(5.0))
+                    .focus(_.block.throughputCap.messages)
+                    .modify(messages =>
+                      messages.updated(
+                        "confirmation-request",
+                        messages("confirmation-request").copy(
+                          globalTpsCap = PositiveDouble.tryCreate(5.0)
+                        ),
+                      )
+                    )
                 )
             case _ => fail("unexpected sequencer")
           }
@@ -297,7 +304,7 @@ final class DeclarativeApiIntegrationTest
     // check caps are initially at 5
     def checkCap(seq: SequencerReference, expected: Double) = {
       val currentCap = seq.traffic_control
-        .get_throughput_cap(ConfirmationRequest)
+        .get_throughput_cap("confirmation-request")
         .value
         .globalTpsCap
       assert(
@@ -314,8 +321,11 @@ final class DeclarativeApiIntegrationTest
         .focus(_.throughputCap)
         .replace(
           cfg.throughputCap.updated(
-            "confirmation request",
-            IndividualThroughputCapConfig(globalTpsCap = 10.0),
+            "confirmation-request",
+            ThroughputCapByMessageTypeConfig(
+              requestType = ConfirmationRequest,
+              globalTpsCap = 10.0,
+            ),
           )
         )
     }

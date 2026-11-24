@@ -269,4 +269,5 @@ For example:
 ### Toxiproxy Settings
 
 After starting the service, you can customize Toxiproxy by using `toxiproxy-cli`.
-If you want to change the default toxics, you can modify `scripts/setup-toxiproxy/setup-toxiproxy.sh`.
+If you want to change the default toxics, you can modify both `scripts/setup-toxiproxy/setup-toxiproxy.sh`
+and `scripts/setup-toxiproxy/setup-toxiproxy-via-api.sh`.

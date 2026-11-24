@@ -80,7 +80,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Obtain Release Suffix
         id: release_suffix
@@ -150,5 +150,4 @@ jobs:
     with:
       caller_job: release_test
       shard_job_result: ${{ needs.release_test.result }}
-      runner: ${{ inputs.runner }}
       protocol_version: ""

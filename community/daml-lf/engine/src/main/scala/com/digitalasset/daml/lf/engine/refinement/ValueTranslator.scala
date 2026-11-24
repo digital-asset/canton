@@ -122,6 +122,8 @@ private[lf] final class ValueTranslator(
             if (b) SValue.SValue.True else SValue.SValue.False
           case (Int64F, ValueInt64(i)) =>
             SValue.SInt64(i)
+          case (Uint256F, ValueUint256(u)) =>
+            SValue.SUint256(u)
           case (TimestampF, ValueTimestamp(t)) =>
             SValue.STimestamp(t)
           case (DateF, ValueDate(t)) =>

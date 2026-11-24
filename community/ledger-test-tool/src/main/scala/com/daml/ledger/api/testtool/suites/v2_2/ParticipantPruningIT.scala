@@ -72,22 +72,14 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       _ <- ledger.create(alice, new Dummy(alice))
 
       // Prune the ledger at firstPruningOffset
-      _ <- ledger.pruneCantonSafe(
-        firstPruningOffset,
-        alice,
-        p => new Dummy(p).create.commands,
-      )
+      _ <- ledger.pruneCantonSafe(firstPruningOffset, alice)
       (
         prunedUpToInclusive_afterFirstPruning,
         allDivulgencePrunedUpToInclusive_afterFirstPruning,
       ) <- ledger.latestPrunedOffsets()
 
       // Prune the ledger with divulgence at secondPruningOffset
-      _ <- ledger.pruneCantonSafe(
-        secondPruningOffset,
-        alice,
-        p => new Dummy(p).create.commands,
-      )
+      _ <- ledger.pruneCantonSafe(secondPruningOffset, alice)
       (
         prunedUpToInclusive_afterSecondPruning,
         allDivulgencePrunedUpToInclusive_afterSecondPruning,
@@ -189,7 +181,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       ) // This offset is the largest exclusive offset we can no longer read from after
       offsetOfFirstSurvivingTransaction = offsets(lastItemToPruneIndex + 1)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- participant.pruneCantonSafe(offsetToPruneUpTo, submitter)
 
       txReqAfterPrune <- participant
         .getTransactionsRequest(
@@ -259,7 +251,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       ) // This offset is the largest exclusive offset we can no longer read from after
       offsetOfFirstSurvivingTransaction = offsets(lastItemToPruneIndex + 1)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- participant.pruneCantonSafe(offsetToPruneUpTo, submitter)
       txReqAfterPrune <- participant
         .getTransactionsRequest(
           transactionFormat = participant.transactionFormat(parties = Some(Seq(submitter))),
@@ -329,7 +321,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
         )
         .map(_.headOption.value)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- participant.pruneCantonSafe(offsetToPruneUpTo, submitter)
 
       firstCheckpointsAfterPrune <- participant
         .offsets(
@@ -392,7 +384,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
     for {
       offsets <- populateLedgerAndGetOffsets(participant, submitter)
       offsetToPruneUpTo = offsets(lastItemToPruneIndex)
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- participant.pruneCantonSafe(offsetToPruneUpTo, submitter)
 
     } yield ()
 
@@ -421,7 +413,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       ).toVector
         .map(offsetAndUpdateIdEntries(_)._2)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- participant.pruneCantonSafe(offsetToPruneUpTo, submitter)
 
       prunedTransactions <- Future.sequence(
         prunedUpdateIds.map(
@@ -465,7 +457,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       ).toVector
         .map(offsets(_))
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- participant.pruneCantonSafe(offsetToPruneUpTo, submitter)
 
       prunedFlatTransactions <- Future.sequence(
         prunedTransactionOffsets.map(
@@ -499,7 +491,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       offsets <- populateLedgerAndGetOffsets(participant, submitter)
       offsetToPruneUpTo = offsets(lastItemToPruneIndex)
       offsetOfFirstSurvivingTransaction = offsets(lastItemToPruneIndex + 1)
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- participant.pruneCantonSafe(offsetToPruneUpTo, submitter)
 
       txReqAfterPrune <- participant
         .getTransactionsRequest(participant.transactionFormat(parties = Some(Seq(submitter))))
@@ -512,7 +504,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
 
       offsetAlreadyPruned = offsets(lastItemToPruneIndex / 2)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- participant.pruneCantonSafe(offsetToPruneUpTo, submitter)
 
       txReqAfterRedundantPrune <- participant
         .getTransactionsRequest(participant.transactionFormat(parties = Some(Seq(submitter))))
@@ -529,7 +521,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       // Add more events before second prune too to advance canton's safe pruning offset
       offsetsFollowingSecondRealPrune <- populateLedgerAndGetOffsets(participant, submitter)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpToInSecondRealPrune)
+      _ <- participant.pruneCantonSafe(offsetToPruneUpToInSecondRealPrune, submitter)
 
       txReqAfterSecondPrune <- participant
         .getTransactionsRequest(participant.transactionFormat(parties = Some(Seq(submitter))))
@@ -580,7 +572,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       offsets <- populateLedgerAndGetOffsets(participant, submitter)
       offsetToPruneUpTo = offsets(lastItemToPruneIndex)
 
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- participant.pruneCantonSafe(offsetToPruneUpTo, submitter)
 
       _ <- participant.exercise(submitter, createdBeforePrune.exerciseDummyChoice1())
     } yield ()
@@ -599,7 +591,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       offsets <- populateLedgerAndGetOffsets(participant, submitter)
       offsetInPrunedRange = offsets(lastItemToPruneIndex / 2)
       offsetToPruneUpTo = offsets(lastItemToPruneIndex)
-      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
+      _ <- participant.pruneCantonSafe(offsetToPruneUpTo, submitter)
 
       emptyRangeBeforePruning <- participant
         .getTransactionsRequest(
@@ -669,7 +661,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       )
       _ <- participant.submitAndWait(exerciseCmd)
       events2 <- getEvents(dummyCid)
-      _ <- participant.pruneWithAcsCheck(Some(Seq(party)), end1)
+      _ <- participant.pruneCantonSafe(end1, party)
       events3 <- getEvents(dummyCid)
       _ <- pruneToCurrentEnd(participant, party) // TODO(#16361) - This line causes the problem
       events4 <- getEvents(dummyCid)
@@ -787,7 +779,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
   ): Future[Long] =
     for {
       end <- participant.currentEnd()
-      _ <- participant.pruneCantonSafe(end, party, new Dummy(_).create.commands)
+      _ <- participant.pruneCantonSafe(end, party)
     } yield end
 
 }

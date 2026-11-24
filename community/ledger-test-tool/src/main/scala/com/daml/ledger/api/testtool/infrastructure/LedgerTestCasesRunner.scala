@@ -32,8 +32,9 @@ object LedgerTestCasesRunner {
   /** A failing `Eventually` can use all of its retries before reporting the useful error. The case
     * timeout needs enough headroom to avoid firing first and only reporting `TimedOut`.
     *
-    * Allow for two loops because `waitForPartiesOnOtherParticipants` runs them back to back. Add
-    * the headroom after scaling since the `Eventually` schedule itself is not scaled.
+    * Allow for two loops, matching the deadline of `waitForPartiesOnOtherParticipants` (see
+    * `AwaitPartiesHosted.DefaultTimeout`). Add the headroom after scaling since the `Eventually`
+    * schedule itself is not scaled.
     */
   private[testtool] val EventuallyHeadroom = Eventually.DefaultMaxDeadline * 2
 
@@ -184,8 +185,9 @@ final class LedgerTestCasesRunner(
         allDars
       }
 
-    MonadUtil
-      .sequentialTraverse(sessions) { session =>
+    // participants are independent, so upload to them in parallel
+    Future
+      .traverse(sessions) { session =>
         logger.info(s"Uploading DAR files for session $session")
         for {
           context <- session.createInitContext(
@@ -193,7 +195,7 @@ final class LedgerTestCasesRunner(
             identifierSuffix = identifierSuffix,
             features = session.features,
           )
-          // upload the dars sequentially to avoid conflicts
+          // upload the dars to a single participant sequentially to avoid conflicts
           _ <- MonadUtil.sequentialTraverse_(darsToUpload)(dar => uploadDar(context, dar))
         } yield ()
       }

@@ -1958,6 +1958,84 @@ class ConfirmationRequestAndResponseProcessorTest
       } yield succeed
     }
 
+    // In the default topology, the observer is hosted with observation permission only
+    def requestWithRootViewQuorums(quorums: Quorum*): InformeeMessage =
+      new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(
+        InformeeMessage.protocolVersionRepresentativeFor(testedProtocolVersion)
+      ) {
+        override val informeesAndConfirmationParamsByViewPosition
+            : Map[ViewPosition, ViewConfirmationParameters] =
+          Map(
+            ViewPosition.root -> ViewConfirmationParameters
+              .tryCreate(Set(submitter, signatory, observer), quorums)
+          )
+      }
+
+    "reject request if the authorized confirming parties cannot attain a quorum threshold" in {
+      val sut = new Fixture()
+      val request = requestWithRootViewQuorums(
+        Quorum(
+          Map(submitter -> PositiveInt.one, signatory -> PositiveInt.one),
+          NonNegativeInt.two,
+        ),
+        Quorum(
+          Map(submitter -> PositiveInt.one, observer -> PositiveInt.one),
+          NonNegativeInt.two,
+        ),
+      )
+
+      for {
+        _ <- loggerFactory.assertLogs(
+          sut.processor
+            .processRequest(
+              requestId,
+              notSignificantCounter,
+              participantResponseDeadline,
+              decisionTime,
+              addRecipients(request),
+              rootHashMessages,
+              batchAlsoContainsTopologyTransaction = false,
+            )
+            .discardingFinalization,
+          _.shouldBeCantonError(
+            MediatorError.MalformedMessage,
+            _ shouldBe s"Received a mediator confirmation request with id $requestId with insufficient authorized confirming parties for transaction view at ${ViewPosition.root}. Rejecting request." +
+              show"\nParties without participant having permission to confirm: ${Seq(observer)}" +
+              show"\nAuthorized parties: ${Seq(submitter, signatory).sorted}",
+          ),
+        )
+      } yield inside(sut.verdictSender.sentResults.loneElement.verdict.value) {
+        case MediatorReject(_, isMalformed) => isMalformed shouldBe true
+      }
+    }
+
+    "accept request if the authorized confirming parties attain all quorum thresholds" in {
+      val sut = new Fixture()
+      val request = requestWithRootViewQuorums(
+        Quorum(
+          Map(
+            submitter -> PositiveInt.one,
+            signatory -> PositiveInt.one,
+            observer -> PositiveInt.one,
+          ),
+          NonNegativeInt.two,
+        )
+      )
+
+      sut.processor
+        .processRequest(
+          requestId,
+          notSignificantCounter,
+          participantResponseDeadline,
+          decisionTime,
+          addRecipients(request),
+          rootHashMessages,
+          batchAlsoContainsTopologyTransaction = false,
+        )
+        .discardingFinalization
+        .map(_ => sut.verdictSender.sentResults shouldBe empty)
+    }
+
     "reject request if some informee is frozen" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       // The signatory's mapping lists participant1 as Active, but the Freezing entry of
       // participant2 freezes the signatory, so it has no host

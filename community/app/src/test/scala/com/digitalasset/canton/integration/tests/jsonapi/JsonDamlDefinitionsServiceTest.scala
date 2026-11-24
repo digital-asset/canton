@@ -209,11 +209,8 @@ class JsonDamlDefinitionsServiceTest
     }
   } yield result
 
-  private def read(pkgId: PackageId, bytes: Array[Byte]) = for {
-    lf <- archive.ArchivePayloadParser.fromByteArray(bytes)
-    payload <- archive.Reader.readArchivePayload(pkgId, lf, schemaMode = true)
-    result <- archive.Decode.decodeArchivePayloadSchema(payload)
-  } yield result
+  private def read(pkgId: PackageId, bytes: Array[Byte]) =
+    archive.Decode.decodeArchivePayloadBytesSchema(pkgId, ByteString.copyFrom(bytes))
 
   private def windowsSafeTemplateId(templateId: String): String =
     templateId.replaceAll("\\:", "_")

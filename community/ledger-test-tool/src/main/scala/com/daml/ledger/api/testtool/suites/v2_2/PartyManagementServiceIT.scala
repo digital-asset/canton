@@ -1106,11 +1106,7 @@ final class PartyManagementServiceIT(testDars: TestDars)
       _ <- ledger.create(party, new Dummy(party))
       pruneUpTo <- ledger.currentEnd()
       _ <- ledger.create(party, new Dummy(party))
-      _ <- ledger.pruneCantonSafe(
-        pruneUpTo = pruneUpTo,
-        party = party,
-        p => new Dummy(p).create.commands,
-      )
+      _ <- ledger.pruneCantonSafe(pruneUpTo = pruneUpTo, party = party)
       secondPage <- ledger.listKnownParties(
         continuationRequest.copy(pageToken = firstPage.nextPageToken)
       )

@@ -18,7 +18,11 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{DurationConverter, ParsingResult}
 import com.digitalasset.canton.store.db.DbDeserializationException
@@ -166,10 +170,11 @@ trait RefinedDurationCompanion[RD <: RefinedDuration] {
 
 final case class PositiveFiniteDuration private (duration: Duration)
     extends RefinedDuration
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   require(!duration.isNegative && !duration.isZero, s"Duration $duration must not be non-negative")
 
-  override protected def pretty: Pretty[PositiveFiniteDuration] = prettyOfParam(_.duration)
+  override def prettyCompanion: PrettyPrintingCompanion[PositiveFiniteDuration] =
+    PositiveFiniteDuration
 
   /** Returns the duration in seconds truncated to the size of Int, returns as a maximum
     * Int.MaxValue.
@@ -188,7 +193,12 @@ final case class PositiveFiniteDuration private (duration: Duration)
   )
 }
 
-object PositiveFiniteDuration extends RefinedDurationCompanion[PositiveFiniteDuration] {
+object PositiveFiniteDuration
+    extends RefinedDurationCompanion[PositiveFiniteDuration]
+    with PrettyPrintingCompanion[PositiveFiniteDuration] {
+
+  override protected val pretty: Pretty[PositiveFiniteDuration] = prettyOfParam(_.duration)
+
   implicit val forgetRefinementJDuration: Transformer[PositiveFiniteDuration, Duration] =
     _.duration
   implicit val forgetRefinementFDuration: Transformer[PositiveFiniteDuration, FiniteDuration] =
@@ -208,10 +218,11 @@ object PositiveFiniteDuration extends RefinedDurationCompanion[PositiveFiniteDur
 
 final case class NonNegativeFiniteDuration private (duration: Duration)
     extends RefinedDuration
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   require(!duration.isNegative, s"Duration $duration must not be negative")
 
-  override protected def pretty: Pretty[NonNegativeFiniteDuration] = prettyOfParam(_.duration)
+  override def prettyCompanion: PrettyPrintingCompanion[NonNegativeFiniteDuration] =
+    NonNegativeFiniteDuration
 
   def +(other: NonNegativeFiniteDuration): NonNegativeFiniteDuration = NonNegativeFiniteDuration(
     duration.plus(other.duration)
@@ -254,7 +265,12 @@ final case class NonNegativeFiniteDuration private (duration: Duration)
     checked(NonNegativeNumeric.tryCreate(RefinedDuration.toMillisTruncated(duration, logger)))
 }
 
-object NonNegativeFiniteDuration extends RefinedDurationCompanion[NonNegativeFiniteDuration] {
+object NonNegativeFiniteDuration
+    extends RefinedDurationCompanion[NonNegativeFiniteDuration]
+    with PrettyPrintingCompanion[NonNegativeFiniteDuration] {
+
+  override protected val pretty: Pretty[NonNegativeFiniteDuration] = prettyOfParam(_.duration)
+
   implicit val forgetRefinementJDuration: Transformer[NonNegativeFiniteDuration, Duration] =
     _.duration
   implicit val forgetRefinementFDuration: Transformer[NonNegativeFiniteDuration, FiniteDuration] =
@@ -284,14 +300,19 @@ object NonNegativeFiniteDuration extends RefinedDurationCompanion[NonNegativeFin
 
 final case class NonNegativeSeconds private (duration: Duration)
     extends RefinedDuration
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   require(!duration.isNegative, s"Duration $duration must not be negative")
   require(duration.getNano == 0, s"Duration $duration must be rounded to the second")
 
-  override protected def pretty: Pretty[NonNegativeSeconds.this.type] = prettyOfParam(_.duration)
+  override def prettyCompanion: PrettyPrintingCompanion[NonNegativeSeconds] = NonNegativeSeconds
 }
 
-object NonNegativeSeconds extends RefinedDurationCompanion[NonNegativeSeconds] {
+object NonNegativeSeconds
+    extends RefinedDurationCompanion[NonNegativeSeconds]
+    with PrettyPrintingCompanion[NonNegativeSeconds] {
+
+  override protected val pretty: Pretty[NonNegativeSeconds] = prettyOfParam(_.duration)
+
   val Zero: NonNegativeSeconds = NonNegativeSeconds(Duration.ZERO)
 
   override def create(duration: Duration): Either[String, NonNegativeSeconds] =
@@ -304,11 +325,11 @@ object NonNegativeSeconds extends RefinedDurationCompanion[NonNegativeSeconds] {
 
 final case class PositiveSeconds private (duration: Duration)
     extends RefinedDuration
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   require(!duration.isNegative && !duration.isZero, s"Duration $duration must be positive")
   require(duration.getNano == 0, s"Duration $duration must be rounded to the second")
 
-  override protected def pretty: Pretty[PositiveSeconds.this.type] = prettyOfParam(_.duration)
+  override def prettyCompanion: PrettyPrintingCompanion[PositiveSeconds] = PositiveSeconds
 
   def toConfig: PositiveDurationSecondsConfig = checked(
     PositiveDurationSecondsConfig.tryFromJavaDuration(duration)
@@ -324,7 +345,12 @@ final case class PositiveSeconds private (duration: Duration)
 
 }
 
-object PositiveSeconds extends RefinedDurationCompanion[PositiveSeconds] {
+object PositiveSeconds
+    extends RefinedDurationCompanion[PositiveSeconds]
+    with PrettyPrintingCompanion[PositiveSeconds] {
+
+  override protected val pretty: Pretty[PositiveSeconds] = prettyOfParam(_.duration)
+
   implicit val toPositiveSecondsConfig
       : Transformer[PositiveSeconds, PositiveDurationSecondsConfig] =
     _.toConfig

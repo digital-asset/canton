@@ -11,7 +11,13 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.topology.PartyId
-import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId}
+import com.digitalasset.canton.user.{
+  Audience,
+  IdentityProviderConfig,
+  IdentityProviderId,
+  Issuer,
+  JwksUrlLengthLimited,
+}
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.field_mask.FieldMask
 
@@ -59,9 +65,9 @@ trait IdentityProviderConfigIntegrationTest
       config shouldBe IdentityProviderConfig(
         identityProviderId,
         isDeactivated = false,
-        someJwksUrl,
-        someIssuer,
-        someAudience,
+        jwksUrl = JwksUrlLengthLimited.tryFromJwksUrl(someJwksUrl),
+        issuer = Issuer.tryCreate(someIssuer),
+        audience = someAudience.map(Audience.tryCreate),
       )
     }
 
@@ -86,9 +92,9 @@ trait IdentityProviderConfigIntegrationTest
       originalConfig shouldBe IdentityProviderConfig(
         identityProviderId,
         isDeactivated = false,
-        someJwksUrl,
-        someIssuer,
-        someAudience,
+        jwksUrl = JwksUrlLengthLimited.tryFromJwksUrl(someJwksUrl),
+        issuer = Issuer.tryCreate(someIssuer),
+        audience = someAudience.map(Audience.tryCreate),
       )
 
       val updatedConfig = participant1.ledger_api.identity_provider_config.update(
@@ -103,9 +109,9 @@ trait IdentityProviderConfigIntegrationTest
       updatedConfig shouldBe IdentityProviderConfig(
         identityProviderId,
         updatedDeactivation,
-        JwksUrl(updatedJwksUrl),
-        updatedIssuer,
-        Some(updatedAudience),
+        JwksUrlLengthLimited.tryCreate(updatedJwksUrl),
+        Issuer.tryCreate(updatedIssuer),
+        Some(Audience.tryCreate(updatedAudience)),
       )
     }
 
@@ -134,9 +140,9 @@ trait IdentityProviderConfigIntegrationTest
       ) shouldBe IdentityProviderConfig(
         identityProviderId,
         isDeactivated = false,
-        someJwksUrl,
-        someIssuer,
-        someAudience,
+        jwksUrl = JwksUrlLengthLimited.tryFromJwksUrl(someJwksUrl),
+        issuer = Issuer.tryCreate(someIssuer),
+        audience = someAudience.map(Audience.tryCreate),
       )
 
       /* delete provider */

@@ -9,9 +9,17 @@ on:
       protocol_version:
         required: true
         type: string
+      job_name:
+        description: Name reported to the flaky-test pipeline. Empty falls back to this workflow's own job id.
+        default: ""
+        type: string
     secrets:
       DATADOG_API_KEY:
         required: true
+      SLACK_BOT_QA_NOTIFICATIONS:
+        required: false
+      GCLOUD_SHEETS_SA_KEY:
+        required: false
 
 permissions:
   actions: write
@@ -25,11 +33,17 @@ jobs:
     timeout-minutes: 130
     env:
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
+      SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
+      SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS: ${{ vars.SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS }}
+      # Sheet key the alert's rota mention needs (select_rota.py), same job-level reason.
+      GCLOUD_SHEETS_SA_KEY: ${{ secrets.GCLOUD_SHEETS_SA_KEY }}
       EXECUTOR_JVM_HEAP_SIZE: 14000M
+      CANTON_CI_JOB_NAME: ${{ inputs.job_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
 
       - name: Start Postgres container
         id: start_postgres
@@ -54,9 +68,6 @@ jobs:
           failed_only_rerun: 'false'
           num_parallel_tasks: '1'
           num_test_buckets: '0'
-          # These tests break often, as they do not run on every PR, so failures are kept
-          # out of the flaky test pipeline and alerted by the nightly notify job instead.
-          report_to_datadog: 'false'
           setup_gcp_kms: 'false'
           # Must stay below the job's timeout-minutes so the sbt wrapper reports the timeout
           # and the cleanup steps still run.
@@ -76,5 +87,4 @@ jobs:
     with:
       caller_job: model_based_test
       shard_job_result: ${{ needs.model_based_test.result }}
-      runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}

@@ -99,7 +99,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
 
       - name: Compute physical shard index
         id: shard
@@ -143,6 +143,27 @@ jobs:
           test_file: test-full-class-names.log
           timings_file: ${{ github.job }}/.timings/timings.json
 
+      - name: Record shard test status
+        if: always()
+        shell: bash
+        env:
+          SHARD_INDEX: ${{ matrix.replica }}-${{ matrix.bucket }}
+        run: |
+          mkdir -p shard-status
+          # sbt-ci-wrapper.sh writes the SBT exit code to STATUS via GITHUB_ENV,
+          # even when succeed_on_error keeps the job green.
+          printf '%s\n' "${STATUS:-unknown}" > "shard-status/${SHARD_INDEX}.status"
+
+      - name: Upload shard test status
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.job_name || github.job }}-status-${{ matrix.replica }}-${{ matrix.bucket }}
+          path: shard-status/*.status
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
       - name: Stop Postgres container
         if: always()
         uses: ./.github/actions/utils/postgres/stop_postgres_container
@@ -157,6 +178,5 @@ jobs:
     with:
       caller_job: stability_crash_recovery_test
       shard_job_result: ${{ needs.stability_crash_recovery_test.result }}
-      runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}
     secrets: inherit

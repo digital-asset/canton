@@ -12,12 +12,15 @@ import com.daml.ledger.api.v2.offset_checkpoint.SynchronizerTime
 import com.daml.ledger.api.v2.state_service.*
 import com.daml.logging.entries.LoggingEntries
 import com.digitalasset.canton.LedgerParticipantId
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, StreamingServiceLifecycleManagement}
 import com.digitalasset.canton.ledger.api.messages.state.{
   AcsContinuationToken,
   AcsPageToken,
   AcsRangeInfo,
+  HostedPartiesContinuation,
+  HostedPartiesPageToken,
 }
 import com.digitalasset.canton.ledger.api.util.PageTokenUtils
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.requirePresence
@@ -371,6 +374,11 @@ final class ApiStateService(
       .map(workflowId => LoggingEntries(logging.workflowId(workflowId)))
       .getOrElse(LoggingEntries())
 
+  private def hostedPartiesLoggable(response: GetHostedPartiesResponse): LoggingEntries =
+    response.hostedParty
+      .map(hostedParty => LoggingEntries(logging.partyString(hostedParty.party)))
+      .getOrElse(LoggingEntries())
+
   /** Translate syncrhonizer record time to an offset
     */
   override def convertRecordTimeToOffset(
@@ -408,15 +416,133 @@ final class ApiStateService(
   override def getHostedParties(
       request: GetHostedPartiesRequest,
       responseObserver: StreamObserver[GetHostedPartiesResponse],
-  ): Unit =
-    // TODO(#37978): serve the hosted parties snapshot from the index
-    responseObserver.onError(
-      new UnsupportedOperationException("GetHostedParties is not implemented yet")
-    )
+  ): Unit = {
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
+
+    registerStream(responseObserver) {
+      StateServiceRequestValidator
+        .validateGetHostedPartiesRequest(request, participantId)
+        .map { validated =>
+          val filter = validated.filter
+          val fromExcl = validated.continuation.map(_.partyLowerBoundExcl)
+          val hostedAt = resolveHostedAt(validated.continuation, validated.requestedHostedAt)
+          withEnrichedLoggingContext(
+            logging.partiesOpt(filter.parties),
+            logging.offset(hostedAt.fold(0L)(_.unwrap)),
+          ) { implicit loggingContext =>
+            logger.info(
+              s"Received request for hosted parties: $request, ${loggingContext
+                  .serializeFiltered("parties", "offset")}."
+            )
+            hostedAt.fold(Source.empty[GetHostedPartiesResponse]) { validAt =>
+              stateService
+                .hostedParties(
+                  filter = filter,
+                  validAt = validAt,
+                  fromExcl = fromExcl,
+                  limit = None,
+                  continuationChecksum = validated.continuationChecksum,
+                )
+            }
+          }
+        }
+        .fold(
+          t => Source.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
+          identity,
+        )
+        .via(logger.enrichedDebugStream("Responding with hosted parties.", hostedPartiesLoggable))
+        .via(logger.logErrorsOnStream)
+        .via(StreamMetrics.countElements(metrics.lapi.streams.hostedParties))
+    }
+  }
+
+  /** The offset pinned by the continuation, otherwise the requested offset, otherwise the current
+    * ledger end. None is the participant begin, at which no party is hosted.
+    */
+  private def resolveHostedAt(
+      continuationOpt: Option[HostedPartiesContinuation],
+      requestedHostedAt: Option[Option[Offset]],
+  ): Option[Offset] =
+    (continuationOpt, requestedHostedAt) match {
+      case (Some(continuation), _) => Some(continuation.hostedAt)
+      case (_, Some(requested)) => requested
+      case (_, None) => stateService.currentLedgerEnd().map(_.lastOffset)
+    }
 
   override def getHostedPartiesPage(
       request: GetHostedPartiesPageRequest
-  ): Future[GetHostedPartiesPageResponse] =
-    // TODO(#37978): serve the hosted parties page from the index
-    Future.failed(new UnsupportedOperationException("GetHostedPartiesPage is not implemented yet"))
+  ): Future[GetHostedPartiesPageResponse] = {
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
+    StateServiceRequestValidator
+      .validateGetHostedPartiesPageRequest(
+        request = request,
+        participantId = participantId,
+        maxPageSize = config.maxHostedPartiesPageSize,
+        defaultPageSize = config.defaultHostedPartiesPageSize,
+      )
+      .map { validated =>
+        val filter = validated.filter
+        val pageSize = validated.pageSize
+        val fromExcl = validated.continuation.map(_.partyLowerBoundExcl)
+        val hostedAt = resolveHostedAt(validated.continuation, validated.requestedHostedAt)
+        withEnrichedLoggingContext(
+          logging.partiesOpt(filter.parties),
+          logging.maxPageSize(pageSize),
+          logging.offset(hostedAt.fold(0L)(_.unwrap)),
+        ) { implicit loggingContext =>
+          logger.info(
+            s"Received request for hosted parties page, ${loggingContext
+                .serializeFiltered("parties", "maxPageSize", "offset")}."
+          )
+          hostedAt match {
+            case None =>
+              Future.successful(
+                GetHostedPartiesPageResponse(
+                  hostedParties = Nil,
+                  hostedAtOffset = 0L,
+                  nextPageToken = None,
+                )
+              )
+
+            case Some(validAt) =>
+              stateService
+                .hostedParties(
+                  filter = filter,
+                  validAt = validAt,
+                  fromExcl = fromExcl,
+                  limit = Some(pageSize + 1),
+                  continuationChecksum = PageTokenUtils.emptyChecksum,
+                )
+                .runWith(
+                  Sink.collection[GetHostedPartiesResponse, Vector[GetHostedPartiesResponse]]
+                )
+                .map { responses =>
+                  val page = responses.take(pageSize)
+                  val moreItems = responses.sizeIs > pageSize
+                  val continuationTokenOfTheLastParty =
+                    if (moreItems) {
+                      page.lastOption.map(_.streamContinuationToken)
+                    } else {
+                      None
+                    }
+                  val nextPageToken = continuationTokenOfTheLastParty
+                    .map(token => HostedPartiesPageToken.encode(request, token, participantId))
+
+                  GetHostedPartiesPageResponse(
+                    hostedParties = page.flatMap(_.hostedParty),
+                    hostedAtOffset = validAt.unwrap,
+                    nextPageToken = nextPageToken,
+                  )
+                }
+          }
+        }
+      }
+      .fold(
+        t => Future.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
+        identity,
+      )
+      .thereafter(logger.logErrorsOnCall[GetHostedPartiesPageResponse])
+  }
 }

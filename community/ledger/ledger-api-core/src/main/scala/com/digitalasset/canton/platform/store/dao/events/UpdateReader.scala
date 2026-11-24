@@ -52,14 +52,10 @@ import com.digitalasset.canton.platform.store.dao.{
   EventProjectionProperties,
   LedgerDaoUpdateReader,
 }
-import com.digitalasset.canton.platform.{
-  ContractId,
-  FatContract,
-  InternalUpdateFormat,
-  TemplatePartiesFilter,
-}
+import com.digitalasset.canton.platform.{ContractId, EventFilter, FatContract, InternalUpdateFormat}
+import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.topology.SynchronizerId
-import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.util.{MonadUtil, ReassignmentTag}
 import com.digitalasset.daml.lf.data.Ref.ChoiceName
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.{SerializationVersion, Versioned}
@@ -135,7 +131,7 @@ private[dao] final class UpdateReader(
 
   override def getActiveContracts(
       activeAt: Option[Offset],
-      filter: TemplatePartiesFilter,
+      filter: EventFilter,
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
       configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
@@ -149,7 +145,7 @@ private[dao] final class UpdateReader(
         val futureSource = getMaxAcsEventSeqId(offset)
           .map(maxSeqId =>
             acsReader.streamActiveContracts(
-              filteringConstraints = filter,
+              filter = filter,
               activeAt = offset -> maxSeqId,
               eventProjectionProperties = eventProjectionProperties,
               rangeInfo = rangeInfo,
@@ -626,7 +622,8 @@ private[dao] object UpdateReader {
                   AssignedEvent(
                     source = rawAddEvent.synchronizerId,
                     target = rawAddEvent.synchronizerId,
-                    reassignmentId = "",
+                    reassignmentId =
+                      reassignmentIdFromParticipantEvent(rawAddEvent.participantEventProperties),
                     submitter = "",
                     reassignmentCounter =
                       rawAddEvent.participantEventProperties.reassignmentCounter,
@@ -643,7 +640,8 @@ private[dao] object UpdateReader {
                 UnassignedEvent(
                   offset = rawRemoveEvent.offset,
                   nodeId = rawRemoveEvent.nodeId,
-                  reassignmentId = "",
+                  reassignmentId =
+                    reassignmentIdFromParticipantEvent(rawRemoveEvent.participantEventProperties),
                   contractId = rawRemoveEvent.contractId.coid,
                   templateId =
                     Some(LfEngineToApi.toApiIdentifier(rawRemoveEvent.templateId.toIdentifier)),
@@ -661,6 +659,25 @@ private[dao] object UpdateReader {
           )
       }
       .map(toApiReassignmentEnvelope(rawParticipantEvents))
+
+  private def reassignmentIdFromParticipantEvent(
+      participantEventProperties: EventStorageBackend.ParticipantEventProperties
+  ) =
+    ReassignmentId(
+      source = ReassignmentTag.Source(
+        SynchronizerId.tryFromString(
+          participantEventProperties.commonEventProperties.synchronizerId
+        )
+      ),
+      target = ReassignmentTag.Target(
+        SynchronizerId.tryFromString(
+          participantEventProperties.commonEventProperties.synchronizerId
+        )
+      ),
+      unassignmentTs =
+        CantonTimestamp(participantEventProperties.commonUpdateProperties.recordTime),
+      contractIdCounters = Map(),
+    ).toProtoPrimitive
 
   def toApiTransaction(
       eventProjectionProperties: EventProjectionProperties,
@@ -784,9 +801,11 @@ private[dao] object UpdateReader {
     }
   }
 
-  def eventFilter(templatePartiesFilterO: Option[TemplatePartiesFilter]): RawEvent => Boolean =
+  def eventFilter(eventFilterO: Option[EventFilter]): RawEvent => Boolean =
     (event: RawEvent) =>
-      templatePartiesFilterO.exists(_(event.templateId.toNameTypeConRef, event.witnessParties))
+      eventFilterO.exists(
+        _(event.templateId.toNameTypeConRef, event.witnessParties, event.contractId)
+      )
 
   def filterRawEvents(
       internalUpdateFormat: InternalUpdateFormat
@@ -794,10 +813,10 @@ private[dao] object UpdateReader {
       rawEvents: Seq[RawEvent]
   ): Seq[RawEvent] = {
     val reassignmentFilter = eventFilter(
-      internalUpdateFormat.includeReassignments.map(_.templatePartiesFilter)
+      internalUpdateFormat.includeReassignments.map(_.eventFilter)
     )
     val transactionFilter = eventFilter(
-      internalUpdateFormat.includeTransactions.map(_.internalEventFormat.templatePartiesFilter)
+      internalUpdateFormat.includeTransactions.map(_.internalEventFormat.eventFilter)
     )
     val participantEventFilter = (re: RawParticipantEvent) => {
       if (re.category.renderAsReassignment) {

@@ -47,6 +47,7 @@ from flaky_common import (
     CONSECUTIVE_FAILURES_THRESHOLD,
     CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE,
     STREAK_COUNT_LIMIT,
+    FLAKY_TEST_LABEL,
     NIGHTLY_CONSECUTIVE_FAILURES,
     NIGHTLY_BROKEN_LABEL,
     NIGHTLY_CRON_HOUR_UTC,
@@ -277,6 +278,8 @@ def gh_issue_create_cmd(title: str, body: str):
             "-",
             "--milestone",
             milestone,
+            "--label",
+            FLAKY_TEST_LABEL,
         ],
         stdin=body,
     )
@@ -598,6 +601,11 @@ _NIGHTLY_ROW_DATE_RE = re.compile(
 _nightly_commits_cache: Optional[tuple] = None
 
 
+# On a shallow clone, fetch this many days of `main` history. The streak check needs the commit
+# before each of the last 3 nightly slots. Weekday-only slots can span 5 calendar days, so 14 leaves margin.
+NIGHTLY_HISTORY_DAYS = 14
+
+
 def _git_commit_before(when: datetime.datetime) -> Optional[str]:
     # `when` is a naive UTC datetime; the trailing Z makes git interpret it as
     # UTC instead of the runner's local timezone (which would skew the cutoff).
@@ -643,15 +651,21 @@ def recent_nightly_commits() -> tuple:
         _nightly_commits_cache = tuple()
         return _nightly_commits_cache
 
-    fetch = subprocess.run(
-        ["git", "fetch", "--quiet", "origin", "main"], capture_output=True, text=True
+    now = _utcnow()
+    fetch_cmd = ["git", "fetch", "--quiet"]
+    shallow = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"], capture_output=True, text=True
     )
+    if shallow.stdout.strip() == "true":
+        # A depth-1 checkout has no prior nightly commits. Cover the slots, with margin for weekends.
+        since = (now - datetime.timedelta(days=NIGHTLY_HISTORY_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        fetch_cmd.append(f"--shallow-since={since}")
+    fetch = subprocess.run([*fetch_cmd, "origin", "main"], capture_output=True, text=True)
     if fetch.returncode != 0:
         # Stale origin/main would mis-enumerate the nightly commits; log and carry on.
         print(
             f"recent_nightly_commits: 'git fetch origin main' failed, using local origin/main: {fetch.stderr.strip()}"
         )
-    now = _utcnow()
     # `now` is after the current run's own nightly cron slot, so the most recent
     # cron time enumerated below resolves to `current` again. We therefore request
     # NIGHTLY_CONSECUTIVE_FAILURES slots (not N-1): the newest collapses onto
@@ -1163,6 +1177,7 @@ def self_test():
     test_issue_number_from_url()
     test_package_artifact_only_for_issues_with_a_package()
     test_post_evidence_comment_dedupes_and_never_raises()
+    test_gh_issue_create_cmd_labels_issue_as_flaky_test()
     test_create_issue_posts_evidence()
     test_update_issue_links_evidence_in_new_row()
     test_run_dry_run_writes_comments_without_github()
@@ -1383,6 +1398,16 @@ def test_post_evidence_comment_dedupes_and_never_raises():
         return_value=subprocess.CompletedProcess([], 1, "", "HTTP 500"),
     ):
         assert post_evidence_comment("42", comment) is None  # must not raise
+
+
+def test_gh_issue_create_cmd_labels_issue_as_flaky_test():
+    # The flaky-test label is how issues get routed out of the general GitHub channel.
+    with patch(
+        f"{__name__}.run_gh_with_retries", return_value=subprocess.CompletedProcess([], 0, "", "")
+    ) as run:
+        gh_issue_create_cmd("[main] Flaky FooTest", "body")
+    args = run.call_args[0][0]
+    assert args[args.index("--label") + 1] == FLAKY_TEST_LABEL, args
 
 
 def test_create_issue_posts_evidence():
@@ -1620,6 +1645,46 @@ def test_recent_nightly_commits_counts_current_run_once():
     assert current in result
     for p in priors:
         assert p in result, f"prior commit {p} missing from {result}"
+
+
+def test_recent_nightly_commits_deepens_shallow_clone():
+    """A depth-1 checkout has no earlier nightly commits, so without a deepening fetch
+    the streak check silently never fires. Only shallow clones get --shallow-since."""
+    global _nightly_commits_cache
+    current = format(0xC, '040x')
+    env = {
+        'CIRCLECI': 'true',
+        'GITHUB_ACTIONS': 'false',
+        'CIRCLE_SHA1': current,
+        'CIRCLE_JOB': 'nightly_integration_test',
+        'CIRCLE_NODE_INDEX': '0',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+    }
+
+    def fetch_args(is_shallow):
+        calls = []
+
+        def fake_run(cmd, **_kwargs):
+            calls.append(cmd)
+            out = ('true' if is_shallow else 'false') if 'rev-parse' in cmd else ''
+            return subprocess.CompletedProcess(cmd, 0, out, '')
+
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch(f'{__name__}.subprocess.run', side_effect=fake_run),
+            patch(f'{__name__}._git_commit_before', return_value=None),
+        ):
+            recent_nightly_commits()
+        return next(c for c in calls if 'fetch' in c)
+
+    saved_cache = _nightly_commits_cache
+    try:
+        _nightly_commits_cache = None
+        assert any(a.startswith('--shallow-since=') for a in fetch_args(True))
+        _nightly_commits_cache = None
+        assert not any(a.startswith('--shallow-since=') for a in fetch_args(False))
+    finally:
+        _nightly_commits_cache = saved_cache
 
 
 def test_update_issue_nightly_streak_labels_and_returns():

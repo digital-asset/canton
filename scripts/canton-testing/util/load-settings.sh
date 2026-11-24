@@ -40,7 +40,7 @@ if [ $# -ge 2 ] && [ "$1" == "-sequencer" ];then
   export SEQUENCER_TYPE="$2"
 	shift;shift;
 else
-  export SEQUENCER_TYPE="db-sequencer"
+  export SEQUENCER_TYPE="bft"
 fi
 
 # Load overrides

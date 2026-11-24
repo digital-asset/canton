@@ -420,7 +420,7 @@ object JwksCacheConfig {
   * rotation interval, after which a new admin-token is generated (if needed).
   */
 final case class AdminTokenConfig(
-    fixedAdminToken: Option[String] = None,
+    fixedAdminToken: Option[Confidential[String]] = None,
     adminTokenDuration: PositiveFiniteDuration = AdminTokenConfig.DefaultAdminTokenDuration,
     actAsAnyPartyClaim: Boolean = false,
     adminClaim: Boolean = false,

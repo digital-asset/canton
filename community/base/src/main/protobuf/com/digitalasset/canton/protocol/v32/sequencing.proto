@@ -189,7 +189,6 @@ message TransactionProtocolLimits {
   uint32 max_transaction_sub_views = 10;
 
   // maximum depth of the view tree in a transaction
-  // TODO(i35845): investigate whether to update the semantics of this limit or remove it
   uint32 max_transaction_tree_depth = 11;
 
   // maximum number of signatures on a single envelope

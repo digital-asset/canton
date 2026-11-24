@@ -94,22 +94,11 @@ runs:
     - name: Resolve test selection exclude patterns
       id: resolve-exclude-patterns
       shell: bash
+      # The list lives in a file so that other jobs can select the same set of ordinary tests.
       run: |
         {
           echo "exclude_patterns<<EOF"
-          printf '%s\n' \
-            'com\.digitalasset\.canton\.integration\.tests\.manual' \
-            'com\.digitalasset\.canton\.integration\.tests\.crashrecovery' \
-            'com\.digitalasset\.canton\.nightly' \
-            'com\.digitalasset\.canton\.integration\.tests\.nightly' \
-            'com\.digitalasset\.canton\.integration\.tests\.toxiproxy' \
-            'com\.digitalasset\.canton\.integration\.tests\.release' \
-            'com\.digitalasset\.canton\.integration\.tests\.benchmarks' \
-            'com\.digitalasset\.canton\.integration\.tests\.continuity' \
-            'com\.digitalasset\.canton\.integration\.tests\.variations' \
-            'com\.digitalasset\.canton\.integration\.tests\.modelbased' \
-            'com\.digitalasset\.canton\.integration\.tests\.docs\.snippet' \
-            'com\.digitalasset\.canton\.integration\.tests\.UpgradesMatrixIntegration'
+          cat "$GITHUB_WORKSPACE/scripts/ci/split-tests/ordinary_tests_exclude_patterns.txt"
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
 

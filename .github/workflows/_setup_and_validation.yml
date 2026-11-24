@@ -61,7 +61,8 @@ jobs:
           # from code into docs count as a code deletion; a git error also selects full CI.
           if git diff-tree --quiet -r --no-renames "$base" HEAD -- \
             ':!UNRELEASED.md' ':!CONTRIBUTING.md' ':!release-notes/*.md' \
-            ':!contributing/*.md' ':!contributing/*.png'; then
+            ':!contributing/*.md' ':!contributing/*.png' ':!release/*.md' \
+            ':!.claude/skills/*.md'; then
             docs_only=true
           else
             docs_only=false

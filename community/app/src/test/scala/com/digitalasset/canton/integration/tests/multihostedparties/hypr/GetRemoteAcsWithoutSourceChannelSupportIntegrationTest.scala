@@ -51,9 +51,7 @@ sealed trait GetRemoteAcsWithoutSourceChannelSupportIntegrationTest
   // enabled so that participant1 observes the proposal via its ACS replication admin workflow
   // subscription and can reject the proposal.
 
-  // TODO(#38227): change to "does not support ACS replication via sequencer channels"
-  //   once package vetting is fixed
-  private val expectedRejectReason = "Failed to submit propose"
+  private val expectedRejectReason = "does not support ACS replication via sequencer channels"
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
@@ -136,15 +134,15 @@ sealed trait GetRemoteAcsWithoutSourceChannelSupportIntegrationTest
           getRemoteAcsFilePath = s"canton-remote-acs-${this.getClass.getSimpleName}.gz",
         ),
         LogEntry.assertLogSeq(
-          // TODO(#38227): assert rejection on participant1 once the package vetting is fixed
           mustContainWithClue = Seq(
             (
               entry => {
-                entry.loggerName should include(participant2.name)
-                entry.warningMessage should include regex
-                  s"Failed propose .* to replicate party: Failed to submit propose .* to replicate party"
+                entry.loggerName should include(participant1.name)
+                entry.warningMessage should include(
+                  s"Participant ${participant1.id} $expectedRejectReason"
+                )
               },
-              "target participant can't submit proposal",
+              "source participant rejects proposal",
             ),
             (
               entry => {

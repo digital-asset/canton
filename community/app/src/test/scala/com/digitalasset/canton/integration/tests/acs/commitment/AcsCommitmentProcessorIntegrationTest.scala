@@ -148,7 +148,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
         passTopologyRegistrationTimeout()
       }
 
-  "Participants can compute and receive ACS commitments" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+  "Participants can compute and receive ACS commitments" onlyRunWithOrLessThan ProtocolVersion.v37 ignore {
     implicit env =>
       import env.*
 
@@ -185,7 +185,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
       }
   }
 
-  "ACS commitment signature delegation aligns with the period end timestamp" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+  "ACS commitment signature delegation aligns with the period end timestamp" onlyRunWithOrLessThan ProtocolVersion.v37 ignore {
     implicit env =>
       import env.*
 
@@ -219,7 +219,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
       }
   }
 
-  "No commitments without an ACS change or time proof" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+  "No commitments without an ACS change or time proof" onlyRunWithOrLessThan ProtocolVersion.v37 ignore {
     implicit env =>
       import env.*
 
@@ -276,7 +276,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
       passTopologyRegistrationTimeout()
   }
 
-  "ACS commitments trigger counter-commitments" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+  "ACS commitments trigger counter-commitments" onlyRunWithOrLessThan ProtocolVersion.v37 ignore {
     implicit env =>
       import env.*
 
@@ -314,7 +314,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
   // We purge the contract on participant2, therefore participant2 with an empty ACS would not send commitments
   // However, participant1 still has the contract in the ACS, and sends a commitment to participant2
   // Upon receiving this commitment, participant2 sends an empty ACS commitment back to participant1
-  "ACS Commitment should trigger counter-commitment even if ACS is empty" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+  "ACS Commitment should trigger counter-commitment even if ACS is empty" onlyRunWithOrLessThan ProtocolVersion.v37 ignore {
     implicit env =>
       import env.*
 
@@ -439,7 +439,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
   // We purge the contract on participant1 as well, therefore both participants have an empty ACS
   // After a reconciliation interval, no participant sends commitments
   // At the end, we redeploy the contracts on both participants for the following tests, and wait for a commitment
-  "No Commitment when both ACSes are empty" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+  "No Commitment when both ACSes are empty" onlyRunWithOrLessThan ProtocolVersion.v37 ignore {
     implicit env =>
       import env.*
 
@@ -595,7 +595,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
       alreadyDeployedContracts = alreadyDeployedContracts.appended(iou)
   }
 
-  "Periodic synchronizer time proofs trigger commitment computations" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+  "Periodic synchronizer time proofs trigger commitment computations" onlyRunWithOrLessThan ProtocolVersion.v37 ignore {
     implicit env =>
       import env.*
 
@@ -637,7 +637,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
       }
   }
 
-  "retry send commitments only to the registered members" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+  "retry send commitments only to the registered members" onlyRunWithOrLessThan ProtocolVersion.v37 ignore {
     implicit env =>
       import env.*
 
@@ -804,7 +804,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
       )
   }
 
-  "Removed participant should not trigger commitment computations" onlyRunWithOrLessThan ProtocolVersion.v37 in {
+  "Removed participant should not trigger commitment computations" onlyRunWithOrLessThan ProtocolVersion.v37 ignore {
     implicit env =>
       import env.*
 

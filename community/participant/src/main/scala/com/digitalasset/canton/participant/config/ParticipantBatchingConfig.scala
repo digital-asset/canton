@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.config
 
-import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
 import com.digitalasset.canton.config.{BatchAggregatorConfig, BatchingConfig}
 
 /** Configuration settings for participant batching.
@@ -21,6 +21,13 @@ import com.digitalasset.canton.config.{BatchAggregatorConfig, BatchingConfig}
   *   maximum number of active contracts in a batch to be imported
   * @param maxStakeholderGroupsBatchSize
   *   maximum number of stakeholder groups in a batch when reading commitments from a snapshot
+  * @param contractStoreReadAggregator
+  *   Batching settings for contract store lookups.
+  * @param contractStoreWriteAggregator
+  *   Batching settings for contract store insertions.
+  * @param contractStoreWriteMaxBatchSizeBytes
+  *   Target maximum serialized contract data size per insertion batch, in bytes (default 1 MiB). A
+  *   single contract exceeding this size is inserted on its own.
   */
 final case class ParticipantBatchingConfig(
     maxItemsInBatch: PositiveNumeric[Int] = BatchingConfig.defaultMaxItemsBatch,
@@ -34,8 +41,12 @@ final case class ParticipantBatchingConfig(
       ParticipantBatchingConfig.defaultMaxAcsImportBatchSize,
     parallelism: PositiveNumeric[Int] = BatchingConfig.defaultBatchingParallelism,
     aggregator: BatchAggregatorConfig = BatchingConfig.defaultAggregator,
-    contractStoreAggregator: BatchAggregatorConfig =
-      ParticipantBatchingConfig.defaultContractStoreAggregator,
+    contractStoreReadAggregator: BatchAggregatorConfig =
+      ParticipantBatchingConfig.defaultContractStoreReadAggregator,
+    contractStoreWriteAggregator: BatchAggregatorConfig =
+      ParticipantBatchingConfig.defaultContractStoreWriteAggregator,
+    contractStoreWriteMaxBatchSizeBytes: PositiveInt =
+      ParticipantBatchingConfig.defaultContractStoreWriteMaxBatchSizeBytes,
     contractJournalAggregator: BatchAggregatorConfig =
       ParticipantBatchingConfig.defaultContractJournalAggregator,
     maxPruningBatchSize: PositiveNumeric[Int] =
@@ -53,16 +64,28 @@ object ParticipantBatchingConfig {
     PositiveNumeric.tryCreate(50000)
   private[canton] val defaultMaxAcsImportBatchSize: PositiveNumeric[Int] =
     PositiveNumeric.tryCreate(1000)
+
+  // Note: these defaults are "sane" values for moderately sized participants, finding
+  // a good compromise between batching things together but also not delaying things too much.
+  // In performance tests, it is advisable to look at the load of specific queries
+  // in order to understand if the batching parameters are introducing a limitation.
   private[canton] val defaultContractJournalAggregator: BatchAggregatorConfig.Batching =
     BatchAggregatorConfig.Batching(
       maximumInFlight = PositiveNumeric.tryCreate(2),
       maximumBatchSize = PositiveNumeric.tryCreate(1000),
     )
-  private[canton] val defaultContractStoreAggregator: BatchAggregatorConfig.Batching =
+  private[canton] val defaultContractStoreReadAggregator: BatchAggregatorConfig.Batching =
     BatchAggregatorConfig.Batching(
-      maximumInFlight = PositiveNumeric.tryCreate(5),
-      maximumBatchSize = PositiveNumeric.tryCreate(50),
+      maximumInFlight = PositiveNumeric.tryCreate(2),
+      maximumBatchSize = PositiveNumeric.tryCreate(500),
     )
+  private[canton] val defaultContractStoreWriteAggregator: BatchAggregatorConfig.Batching =
+    BatchAggregatorConfig.Batching(
+      maximumInFlight = PositiveNumeric.tryCreate(2),
+      maximumBatchSize = PositiveNumeric.tryCreate(500),
+    )
+  private[canton] val defaultContractStoreWriteMaxBatchSizeBytes: PositiveInt =
+    PositiveInt.tryCreate(4 * 1024 * 1024)
   private[canton] val defaultMaxStakeholderGroupsBatchSize: PositiveNumeric[Int] =
     PositiveNumeric.tryCreate(1000)
 }

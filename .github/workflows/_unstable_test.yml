@@ -57,7 +57,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
 
       - name: Set up workspace path
         uses: ./.github/actions/utils/setup_tmp_workspace
@@ -127,7 +127,6 @@ jobs:
     with:
       caller_job: unstable_test
       shard_job_result: ${{ needs.unstable_test.result }}
-      runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}
       # The set of tests marked with @UnstableTest can legitimately be empty, in which case no
       # JUnit testcases (and hence no timings) are produced. The timings are not used for

@@ -59,3 +59,25 @@ def test_compute_rerun_gate_blocks_when_blocked_job_cancelled():
     assert should_rerun is False
     assert blocked_failed == ["Static Tests"]
     assert blocked_jobs == ["Compile", "Static Tests"]
+
+
+def test_compute_rerun_gate_matches_jobs_of_reusable_workflows():
+    # The API names a job of a called workflow "<caller job> / <job>".
+    should_rerun, blocked_failed, _ = compute_rerun_gate(
+        failed_job_names=["Compile / Compile", "Static Tests / Check SQL table definitions"],
+        workflow_name="Canton Build Required",
+    )
+
+    assert should_rerun is False
+    assert blocked_failed == ["Compile", "Static Tests"]
+
+
+def test_compute_rerun_gate_ignores_blocked_names_of_called_jobs():
+    # Only the caller job counts: a job named "Compile" inside another caller does not block.
+    should_rerun, blocked_failed, _ = compute_rerun_gate(
+        failed_job_names=["Unit Tests / Compile", "Docs / Static Tests"],
+        workflow_name="Canton Build Required",
+    )
+
+    assert should_rerun is True
+    assert blocked_failed == []

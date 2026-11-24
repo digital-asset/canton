@@ -43,7 +43,7 @@ sealed abstract class LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shar
   protected val numShards: Int = 3
 
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
 
   "A participant with covering in-memory fan-out buffer" can {
     "pass integration tests" in { implicit env =>
@@ -83,7 +83,7 @@ sealed abstract class LedgerApiTinyBuffersConformanceShardedTestPostgres(shard: 
   protected val numShards: Int = 4
 
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
   "A participant with tiny buffers" can {
     "pass integration tests" in { implicit env =>
       runShardedTests(
@@ -114,7 +114,7 @@ abstract class LedgerApiCachesDisabledConformanceTest(shard: Int)
     extends SingleVersionLedgerApiConformanceBase {
 
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
 
   override def connectedSynchronizersCount = 1
   protected val numShards: Int = 4
@@ -229,7 +229,7 @@ trait LedgerApiStaticTimeConformanceTest extends SingleVersionLedgerApiConforman
 
 class LedgerApiStaticTimeConformanceTestPostgres extends LedgerApiStaticTimeConformanceTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
 }
 
 trait LedgerApiTlsConformanceBase extends SingleVersionLedgerApiConformanceBase {
@@ -274,7 +274,7 @@ trait LedgerApiTlsConformanceBase extends SingleVersionLedgerApiConformanceBase 
 // Only defined postgres to conserve resources
 class LedgerApiTls12ConformanceTestPostgres extends LedgerApiTlsConformanceBase {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
   val minTlsVersion = TlsVersion.V1_2
 
   "Ledger Api Test Tool" can {
@@ -291,7 +291,7 @@ class LedgerApiTls12ConformanceTestPostgres extends LedgerApiTlsConformanceBase 
 
 class LedgerApiTls13ConformanceTestPostgres extends LedgerApiTlsConformanceBase {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
   val minTlsVersion = TlsVersion.V1_3
 
   "Ledger Api Test Tool" can {

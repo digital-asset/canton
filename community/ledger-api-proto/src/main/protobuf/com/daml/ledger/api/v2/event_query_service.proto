@@ -29,8 +29,20 @@ message GetEventsByContractIdRequest {
 
 // Query events by contract id.
 //
-// Note that querying by contract key is not (yet) supported, as contract keys
-// are not supported (yet) in multi-synchronizer scenarios.
+// Deprecated: this service will be removed in a future release. It does not support event types
+// appearing in multi-synchronizer scenarios.
+//
+// Use the ``UpdateService`` instead, through either the ``GetUpdates`` or the ``GetUpdatesPage`` endpoint.
+// To retrieve the updates related to specific contract ids, set the ``filters_by_contract_id`` field
+// of ``EventFormat``. Use the fields of each ``ContractFilter`` to choose whether the created event
+// blob is included and which interface views are rendered in the response.
+//
+// Compared to this service, the ``UpdateService`` also:
+//
+// - returns reassignment events in multi-synchronizer environments,
+// - accepts more than one contract id in a single request,
+// - supports tailing streams, which deliver future updates for the requested contract ids.
+//
 service EventQueryService {
   // Get the create and the consuming exercise event for the contract with the provided ID.
   // No events will be returned for contracts that have been pruned because they

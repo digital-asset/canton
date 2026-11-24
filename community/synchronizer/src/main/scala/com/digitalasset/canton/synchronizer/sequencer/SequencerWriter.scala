@@ -14,7 +14,6 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.protocol.{
   SequencerDeliverError,
   SequencerErrors,
@@ -51,35 +50,6 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
 
-/** Create instances for a [[sequencer.store.SequencerWriterStore]] and a predicate to know whether
-  * we can recreate a sequencer writer on failures encountered potentially during storage.
-  * Implements `AutoClosable` so implementations can use [[lifecycle.FlagCloseable]] to short
-  * circuit retry attempts.
-  */
-trait SequencerWriterStoreFactory extends AutoCloseable {
-  def create(storage: Storage, generalStore: SequencerStore)(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, WriterStartupError, SequencerWriterStore]
-
-  /** When the sequencer goes offline Exceptions may be thrown by the
-    * [[sequencer.store.SequencerStore]] and [[sequencer.SequencerWriterSource]]. This allows
-    * callers to check whether the captured exception is expected when offline and indicates that
-    * the [[sequencer.SequencerWriter]] can still be recreated.
-    */
-  def expectedOfflineException(error: Throwable): Boolean = false
-}
-
-object SequencerWriterStoreFactory {
-  def singleInstance(implicit executionContext: ExecutionContext): SequencerWriterStoreFactory =
-    new SequencerWriterStoreFactory {
-      override def create(storage: Storage, generalStore: SequencerStore)(implicit
-          traceContext: TraceContext
-      ): EitherT[FutureUnlessShutdown, WriterStartupError, SequencerWriterStore] =
-        EitherT.pure(SequencerWriterStore.singleInstance(generalStore))
-      override def close(): Unit = ()
-    }
-}
-
 /** The Writer component is in practice a little state machine that will run crash recovery on
   * startup then create a running [[SequencerWriterSource]]. If this materialized Sequencer flow
   * then crashes with an exception that can be recovered by running crash recovery it will then go
@@ -97,9 +67,7 @@ object SequencerWriterStoreFactory {
   *     are kept in sync through NTP or similar, this duration should be very small (<1s).
   */
 class SequencerWriter(
-    writerStoreFactory: SequencerWriterStoreFactory,
     writerFlowFactory: SequencerWriterFlowFactory,
-    storage: Storage,
     val generalStore: SequencerStore,
     rateLimitManagerO: Option[SequencerRateLimitManager],
     clock: Clock,
@@ -156,24 +124,14 @@ class SequencerWriter(
         }
 
     /** Ensures that all resources for the writer flow are halted and cleaned up. The store should
-      * not be used after calling this operation (the HA implementation will close its exclusive
-      * storage instance).
+      * not be used after calling this operation.
       */
     def close()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
       logger.debug(s"Completing writer flow")
       val future = for {
         _ <- FutureUnlessShutdown.outcomeF(flow.complete())
-        // in the HA sequencer there's a chance the writer store may have already lost its writer lock,
-        // in which case this will throw a PassiveInstanceException
         _ = logger.debug(s"Taking store offline")
-        _ <- goOffline(store).recover {
-          case throwable if writerStoreFactory.expectedOfflineException(throwable) =>
-            logger.debug(
-              s"Exception was thrown while setting the sequencer as offline but this is expected if already offline so suppressing",
-              throwable,
-            )
-            UnlessShutdown.unit
-        }
+        _ <- goOffline(store)
       } yield ()
       future.thereafter { _ =>
         logger.debug(s"Closing store")
@@ -220,12 +178,9 @@ class SequencerWriter(
     synchronizeWithClosing(functionFullName) {
       def createStoreAndRunCrashRecovery()
           : EitherT[FutureUnlessShutdown, WriterStartupError, SequencerWriterStore] = {
-        // only retry errors that are flagged as retryable
+        // startup errors are not retried, only exceptions are
         implicit val success: retry.Success[Either[WriterStartupError, SequencerWriterStore]] =
-          retry.Success {
-            case Left(error) => !error.retryable
-            case Right(_) => true
-          }
+          retry.Success.always
 
         // continuously attempt to start the writer as we can't meaningfully proactively shutdown or crash
         // when this fails
@@ -233,8 +188,8 @@ class SequencerWriter(
           Pause(logger, this, retry.Forever, 100.millis, "start-sequencer-writer").unlessShutdown(
             {
               logger.debug("Starting sequencer writer")
+              val writerStore = SequencerWriterStore.singleInstance(generalStore)
               for {
-                writerStore <- writerStoreFactory.create(storage, generalStore)
                 _ <- EitherTUtil
                   .onErrorOrFailureUnlessShutdown[WriterStartupError, Unit](
                     _ => writerStore.close(),
@@ -258,8 +213,6 @@ class SequencerWriter(
                             writerStore.resetWatermark(timestamp).leftMap(_.toString)
                         }).leftMap(WriterStartupError.WatermarkResetError.apply)
                       }
-                      // Time is determined by the underlying ordering service, so we can't
-                      // reliably wait here for the online timestamp.
                       _ <- EitherT.right[WriterStartupError](
                         runRecovery(writerStore, resetWatermarkToValue)
                       )
@@ -371,7 +324,6 @@ class SequencerWriter(
           // determine whether we can run recovery or not
           val shouldRecover = result match {
             case Failure(_writerException: SequencerWriterException) => true
-            case Failure(exception) => writerStoreFactory.expectedOfflineException(exception)
             case _other => false
           }
 
@@ -411,13 +363,12 @@ class SequencerWriter(
       logger.debug("Shutting down sequencer writer")
       val sequencerFlow = runningWriterRef.get()
       Seq(
-        SyncCloseable("sequencerWriterStoreFactory", writerStoreFactory.close()),
         AsyncCloseable(
           "sequencingFlow",
           sequencerFlow.map(_.close()).getOrElse(FutureUnlessShutdown.unit).unwrap,
           // Use timeouts.closing.duration (as opposed to `shutdownShort`) as closing the sequencerFlow can be slow
           timeouts.closing,
-        ),
+        )
       )
     }
 }
@@ -451,10 +402,8 @@ object SequencerWriter {
 
   def apply(
       writerConfig: SequencerWriterConfig,
-      writerStorageFactory: SequencerWriterStoreFactory,
       keepAliveInterval: Option[NonNegativeFiniteDuration],
       processingTimeout: ProcessingTimeout,
-      storage: Storage,
       sequencerStore: SequencerStore,
       rateLimitManagerO: Option[SequencerRateLimitManager],
       clock: Clock,
@@ -499,9 +448,7 @@ object SequencerWriter {
     }
 
     new SequencerWriter(
-      writerStorageFactory,
       DefaultSequencerWriterFlowFactory,
-      storage,
       sequencerStore,
       rateLimitManagerO,
       clock,

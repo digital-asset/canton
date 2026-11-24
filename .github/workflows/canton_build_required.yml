@@ -211,23 +211,7 @@ jobs:
       override_java_version_for_tests: ""
       protocol_version: '36'
       job_name: test
-      runner: ${{ needs.pick_runner.outputs.runner }}
-
-  test_36_requires_external_kms:
-    name: Test protocol version 36 (RequiresExternalKms)
-    needs: [pick_runner, plan_ci, compile]
-    if: |
-      needs.plan_ci.outputs.draft-only != 'true' &&
-      github.event_name != 'merge_group' &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
-    uses: ./.github/workflows/_test.yml
-    secrets: inherit
-    with:
-      include_only_requires_external_kms_tests: true
-      override_java_version_for_tests: ""
-      protocol_version: '36'
-      job_name: test_requires_external_kms
+      test_environment_concurrency: 4
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   build_docs:
@@ -290,12 +274,11 @@ jobs:
 
   crash_recovery_test_37_requires_external_kms:
     name: Crash Recovery Test 37 (RequiresExternalKms)
-    needs: [pick_runner, plan_ci, compile]
+    needs: [pick_runner, compile]
     if: |
-      needs.plan_ci.outputs.draft-only != 'true' &&
-      github.event_name != 'merge_group' &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+      github.event_name == 'push' &&
+      github.ref_type == 'branch' &&
+      (github.ref_name == 'main' || startsWith(github.ref_name, 'release-line-'))
     uses: ./.github/workflows/_crash_recovery_test.yml
     secrets: inherit
     with:
@@ -387,16 +370,6 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  sequential_test_37:
-    name: Sequential Test
-    if: github.event_name == 'push'
-    needs: [pick_runner, compile]
-    uses: ./.github/workflows/_sequential_test.yml
-    secrets: inherit
-    with:
-      runner: ${{ needs.pick_runner.outputs.runner }}
-      protocol_version: '37'
-
   smoke_test:
     name: Smoke Test
     needs: [pick_runner, compile]
@@ -448,34 +421,37 @@ jobs:
     with:
       protocol_version: '37'
       job_name: test_37
+      test_environment_concurrency: 4
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   test_37_requires_external_kms:
     name: Test Protocol Version 37 (RequiresExternalKms)
-    needs: [pick_runner, plan_ci, compile]
+    needs: [pick_runner, compile]
     if: |
-      needs.plan_ci.outputs.draft-only != 'true' &&
-      github.event_name != 'merge_group' &&
-      github.ref_type != 'tag'  &&
-      (github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository)
+      github.event_name == 'push' &&
+      github.ref_type == 'branch' &&
+      (github.ref_name == 'main' || startsWith(github.ref_name, 'release-line-'))
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
       include_only_requires_external_kms_tests: true
       protocol_version: '37'
       job_name: test_protocol_version_37_requires_external_kms
+      test_environment_concurrency: 4
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   test_dev:
     name: Test Protocol Version Dev
     needs: [pick_runner, compile]
-    if: github.event_name == 'push'
+    # NOTE: PRs and release lines never run this, so changes to PV dev must only land on main,
+    # never on a release line.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
       protocol_version: 'DEV'
       job_name: test_dev
+      test_environment_concurrency: 4
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   toxiproxy_test_fast_37:
@@ -492,12 +468,11 @@ jobs:
 
   toxiproxy_test_fast_37_requires_external_kms:
     name: Toxiproxy Test Fast 37 (RequiresExternalKms)
-    needs: [pick_runner, plan_ci, compile]
+    needs: [pick_runner, compile]
     if: |
-      needs.plan_ci.outputs.draft-only != 'true' &&
-      github.event_name != 'merge_group'  &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+      github.event_name == 'push' &&
+      github.ref_type == 'branch' &&
+      (github.ref_name == 'main' || startsWith(github.ref_name, 'release-line-'))
     uses: ./.github/workflows/_toxiproxy_test_fast.yml
     secrets: inherit
     with:
@@ -569,8 +544,11 @@ jobs:
           overwrite: true
           retention-days: 7
 
-  notify:
-    name: Notify on Failure
+  ci_costs:
+    name: CI Costs
+    # Reporting only, so neither the gate nor notify depends on it. Its `needs` is kept
+    # complete by scripts/ci/check_canton_build_required_gate.py.
+    # Costs come from OpenCost in the ARC runners' cluster, so skip GitHub-hosted runners.
     needs:
       - pick_runner
       - plan_ci
@@ -578,7 +556,6 @@ jobs:
       - static_tests
       - compile
       - test_36
-      - test_36_requires_external_kms
       - build_docs
       - build_docs_snippets
       - build_scaladoc
@@ -590,7 +567,55 @@ jobs:
       - size_config_up_to_date
       - protocol_continuity_test_latest
       - scalafix
-      - sequential_test_37
+      - smoke_test
+      - test_data_continuity_dumps
+      - test_docker_images
+      - test_37
+      - test_37_requires_external_kms
+      - test_dev
+      - toxiproxy_test_fast_37
+      - toxiproxy_test_fast_37_requires_external_kms
+      - unstable_test_37
+      - variations_test_37
+      - variations_test_37_selected_users
+      - publish_draft_results
+    if: |
+      !cancelled() &&
+      needs.pick_runner.result == 'success' &&
+      needs.pick_runner.outputs.runner != 'ubuntu-latest'
+    runs-on: ${{ needs.pick_runner.outputs.runner }}
+    # Reporting only: a problem here must never turn the run red.
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Compute cost
+        uses: ./.github/actions/utils/cost
+
+  notify:
+    name: Notify on Failure
+    needs:
+      - pick_runner
+      - plan_ci
+      - setup_and_validation
+      - static_tests
+      - compile
+      - test_36
+      - build_docs
+      - build_docs_snippets
+      - build_scaladoc
+      - crash_recovery_test_37
+      - crash_recovery_test_37_requires_external_kms
+      - ledger_api_compatibility_tests_37
+      - package_community
+      - protobuf_continuity
+      - size_config_up_to_date
+      - protocol_continuity_test_latest
+      - scalafix
       - smoke_test
       - test_data_continuity_dumps
       - test_docker_images
@@ -632,7 +657,6 @@ jobs:
       - static_tests
       - compile
       - test_36
-      - test_36_requires_external_kms
       - build_docs
       - build_docs_snippets
       - build_scaladoc
@@ -644,7 +668,6 @@ jobs:
       - size_config_up_to_date
       - protocol_continuity_test_latest
       - scalafix
-      - sequential_test_37
       - smoke_test
       - test_data_continuity_dumps
       - test_docker_images
@@ -658,76 +681,66 @@ jobs:
       - variations_test_37_selected_users
       - publish_draft_results
     if: ${{ always() }}
-    # Keep required-gate runner selection independent from pick_runner output to avoid
-    # stalling merge queue if pick_runner fails before emitting outputs.
-    # Keep repo-to-runner labels in sync with .github/actions/utils/pick_runner/action.yml.
-    runs-on: >-
-      ${{
-        case(
-          github.repository == 'DACH-NY/canton', 'dach-ny-canton',
-          github.repository == 'digital-asset/canton', 'digital-asset-canton',
-          'ubuntu-latest'
-        )
-      }}
+    runs-on: ubuntu-latest
     steps:
-      # Required before the local nix_script_run action below: a `uses: ./...` action is only
-      # resolvable once the repository is present in the runner workspace.
-      - name: Checkout
-        uses: actions/checkout@v5
       - name: Evaluate workflow results
-        uses: ./.github/actions/nix/nix_script_run
+        shell: bash
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
           IS_PR: ${{ github.event_name == 'pull_request' }}
-        with:
-          command: |
-            python3 <<'PY'
-            import json
-            import os
-            import sys
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          import sys
 
-            needs = json.loads(os.environ["NEEDS_JSON"])
+          needs = json.loads(os.environ["NEEDS_JSON"])
 
-            # The `skip ci` label short-circuits every other job in this workflow to
-            # "skipped" via setup_and_validation's should-skip output, which the
-            # failure check below would otherwise treat as a pass. Fail here instead,
-            # so a skip-ci'd PR can only merge through an explicit branch-protection
-            # bypass rather than a silently green required check.
-            should_skip = (
-                needs.get("setup_and_validation", {}).get("outputs", {}).get("should-skip")
-                == "true"
-            )
-            if should_skip:
-                print(
-                    "The 'skip ci' label is set, so required jobs did not run. "
-                    "Failing this check intentionally: merging requires a branch-protection bypass."
-                )
-                sys.exit(1)
+          # The `skip ci` label short-circuits every other job in this workflow to
+          # "skipped" via setup_and_validation's should-skip output, which the
+          # failure check below would otherwise treat as a pass. Fail here instead,
+          # so a skip-ci'd PR can only merge through an explicit branch-protection
+          # bypass rather than a silently green required check.
+          should_skip = (
+              needs.get("setup_and_validation", {}).get("outputs", {}).get("should-skip")
+              == "true"
+          )
+          if should_skip:
+              print(
+                  "The 'skip ci' label is set, so required jobs did not run. "
+                  "Failing this check intentionally: merging requires a branch-protection bypass."
+              )
+              sys.exit(1)
 
-            failed_or_interrupted = {
-                job_name: job_data.get("result")
-                for job_name, job_data in needs.items()
-                if job_data.get("result") in {"failure", "cancelled"}
-            }
+          failed_or_interrupted = {
+              job_name: job_data.get("result")
+              for job_name, job_data in needs.items()
+              if job_data.get("result") in {"failure", "cancelled"}
+          }
 
-            if failed_or_interrupted:
-                print("The following jobs did not complete successfully:")
-                for job_name, result in failed_or_interrupted.items():
-                    print(f" - {job_name}: {result}")
-                sys.exit(1)
+          if failed_or_interrupted:
+              print("The following jobs did not complete successfully:")
+              for job_name, result in failed_or_interrupted.items():
+                  print(f" - {job_name}: {result}")
+              sys.exit(1)
 
-            if os.environ["IS_PR"] == "true":
-                plan = needs["plan_ci"]["outputs"]
-                required = {
-                    "compile": True,
-                    "test_37": plan.get("reuse-test-37") != "true",
-                    "crash_recovery_test_37": plan.get("reuse-crash-recovery-37") != "true",
-                }
-                missing = [job for job, run in required.items() if run and needs[job]["result"] != "success"]
-                if missing:
-                    print(f"Missing required PR coverage: {', '.join(missing)}")
-                    sys.exit(1)
+          # Docs-only PRs skip compile and every test by design, so they have no coverage to require.
+          docs_only = (
+              needs.get("setup_and_validation", {}).get("outputs", {}).get("docs-only")
+              == "true"
+          )
+          if os.environ["IS_PR"] == "true" and not docs_only:
+              plan = needs["plan_ci"]["outputs"]
+              required = {
+                  "compile": True,
+                  "test_37": plan.get("reuse-test-37") != "true",
+                  "crash_recovery_test_37": plan.get("reuse-crash-recovery-37") != "true",
+              }
+              missing = [job for job, run in required.items() if run and needs[job]["result"] != "success"]
+              if missing:
+                  print(f"Missing required PR coverage: {', '.join(missing)}")
+                  sys.exit(1)
 
-            print("All required canton_build_required jobs either succeeded or were skipped.")
-            sys.exit(0)
-            PY
+          print("All required canton_build_required jobs either succeeded or were skipped.")
+          sys.exit(0)
+          PY

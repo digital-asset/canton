@@ -136,8 +136,7 @@ sealed trait PackageRemovalIntegrationTest
           if (vetted) {
             vettedPkgs should contain(cantonTestsPkg)
           } else {
-            // TODO(#38227): set expected back to 0 when the issue is fixed
-            vettedPkgs should have size 1
+            vettedPkgs should have size 0
           }
         }
 

@@ -462,7 +462,21 @@ class ParticipantTopologyTerminateProcessing(
     logger.info(
       s"Start streamed topology recovery for synchronizer onboarding from record time $initialRecordTime to record time $trustCertificateEffectiveTime"
     )
-    val (ks, doneF) = store
+    // The kill switch is created and registered before the stream is materialized, so that a close
+    // happening before or while the stream starts is never missed (e.g. a short stream completing
+    // before the kill switch is registered).
+    val ks = KillSwitches.shared("pull-streaming-onboarding-killswitch")
+    val killSwitchHandle = flagCloseable.runOnOrAfterClose(new RunOnClosing {
+      override def name: String = "pull-streaming-onboarding-killswitch-on-close"
+      override def done: Boolean = false
+      override def run()(implicit traceContext: TraceContext): Unit =
+        UnlessShutdown.failOnShutdownToAbortException(Success(AbortedDueToShutdown), name) match {
+          case Failure(exception) => ks.abort(exception)
+          case Success(_) => ErrorUtil.invalidArgument("Unable to extract AbortException")
+        }
+    })
+
+    val doneF = store
       .findEffectiveStateChangesAtTopologyInit(
         // invariant: the first effective time is bigger than Genesis
         fromExclusive = EffectiveTime(initialRecordTime),
@@ -489,19 +503,9 @@ class ParticipantTopologyTerminateProcessing(
       }
       // the kill switch is triggered with abort, so it is placed at the end of the pipeline,
       // to reflect that there is no intention to orderly "drain" the source.
-      .viaMat(KillSwitches.single)(Keep.right)
-      .toMat(Sink.ignore)(Keep.both)
+      .via(ks.flow)
+      .toMat(Sink.ignore)(Keep.right)
       .run()
-
-    val killSwitchHandle = flagCloseable.runOnOrAfterClose(new RunOnClosing {
-      override def name: String = "pull-streaming-onboarding-killswitch-on-close"
-      override def done: Boolean = false
-      override def run()(implicit traceContext: TraceContext): Unit =
-        UnlessShutdown.failOnShutdownToAbortException(Success(AbortedDueToShutdown), name) match {
-          case Failure(exception) => ks.abort(exception)
-          case Success(_) => ErrorUtil.invalidArgument("Unable to extract AbortException")
-        }
-    })
 
     FutureUnlessShutdown
       // recover the AbortedDueToShutdown exception thrown in findEffectiveStateChangesAtTopologyInit

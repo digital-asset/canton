@@ -167,17 +167,17 @@ class QueueBasedSynchronizerOutbox(
         idleFuture.getAndSet(None).foreach(_.trySuccess(UnlessShutdown.unit))
       }
       // if anything has been pushed in the meantime, we need to kick off a new flush
-      logger.debug(
+      logger.trace(
         s"Marked flush as done. Current queue size: $queueSize. IsClosing: $isClosing"
       )
       if (hasUnsentTransactions && !isClosing) {
         if (numFailures > 0) {
-          logger.debug(s"Kick off a new delayed flush in ${topologyConfig.broadcastRetryDelay}")
+          logger.trace(s"Kick off a new delayed flush in ${topologyConfig.broadcastRetryDelay}")
           DelayUtil
             .delay(functionFullName, topologyConfig.broadcastRetryDelay.toInternal.toScala, this)
             .map { _ =>
               if (!isClosing) {
-                logger.debug(
+                logger.trace(
                   s"About to kick off a delayed flush scheduled ${topologyConfig.broadcastRetryDelay} ago"
                 )
                 kickOffFlush(numFailures)
@@ -199,7 +199,7 @@ class QueueBasedSynchronizerOutbox(
       ensureIdleFutureIsSet()
     }
 
-    logger.debug(s"Invoked flush with queue size $queueSize")
+    logger.trace(s"Invoked flush with queue size $queueSize")
 
     if (isClosing) {
       logger.debug("Flush invoked in spite of closing")
@@ -207,7 +207,7 @@ class QueueBasedSynchronizerOutbox(
     }
     // only flush if we are not running yet
     else if (!transitionedToRunning) {
-      logger.debug("Another flush cycle is currently ongoing")
+      logger.trace("Another flush cycle is currently ongoing")
       EitherT.rightT(())
     } else {
       // mark as initialised (it's safe now for a concurrent thread to invoke flush as well)
@@ -220,13 +220,13 @@ class QueueBasedSynchronizerOutbox(
           // filter out applicable
           applicable <- onlyApplicable(pending)
           _ = if (applicable.sizeIs != pending.size)
-            logger.debug(
+            logger.trace(
               s"applicable transactions: $applicable"
             )
           // not already present
           notPresent <- notAlreadyPresent(applicable)
           _ = if (notPresent.sizeIs != applicable.size)
-            logger.debug(s"not already present transactions: $notPresent")
+            logger.trace(s"not already present transactions: $notPresent")
         } yield notPresent)
 
         val ret = for {
@@ -287,7 +287,7 @@ class QueueBasedSynchronizerOutbox(
           },
         )(ret)
       } else {
-        logger.debug("Nothing pending. Marking as done.")
+        logger.trace("Nothing pending. Marking as done.")
         markDone(numFailures = 0)
         EitherT.rightT(())
       }
@@ -315,12 +315,10 @@ class QueueBasedSynchronizerOutbox(
         )
         .unlessShutdown(
           {
-            if (logger.underlying.isDebugEnabled()) {
-              logger.debug(
-                s"Attempting to push ${transactions.size} topology transactions to $synchronizerAlias, specifically: ${transactions
-                    .map(_.hash)}"
-              )
-            }
+            logger.debug(
+              s"Attempting to push ${transactions.size} topology transactions to $synchronizerAlias, specifically: ${transactions
+                  .map(_.hash)}"
+            )
             FutureUnlessShutdownUtil.logOnFailureUnlessShutdown(
               handle.submit(transactions),
               s"Pushing topology transactions to $synchronizerAlias",
@@ -335,11 +333,9 @@ class QueueBasedSynchronizerOutbox(
             )
           }
           val responsesWithTransactions = responses.zip(transactions.map(_.hash))
-          if (logger.underlying.isDebugEnabled()) {
-            logger.debug(
-              s"$synchronizerAlias responded the following for the given topology transactions: $responsesWithTransactions"
-            )
-          }
+          logger.trace(
+            s"$synchronizerAlias responded the following for the given topology transactions: $responsesWithTransactions"
+          )
           val failedResponses =
             responsesWithTransactions.collect {
               case (TopologyTransactionsBroadcast.State.Failed, tx) => tx.hash

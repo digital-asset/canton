@@ -256,6 +256,25 @@ jobs:
       protocol_version: '36'
       job_name: stability_crash_recovery_test_36
 
+  stability_crash_recovery_test_alerting:
+    name: Stability Crash Recovery Test Alerting
+    needs: [pick_runner, compile, stability_crash_recovery_test_36]
+    if: >-
+      !cancelled() &&
+      (needs.stability_crash_recovery_test_36.result == 'success' ||
+      needs.stability_crash_recovery_test_36.result == 'failure') &&
+      (inputs.jobs == '' ||
+      contains(format(',{0},', inputs.jobs), ',stability_crash_recovery_test_alerting,'))
+    uses: ./.github/workflows/_stability_crash_recovery_test_alerting.yml
+    permissions:
+      actions: read
+      contents: read
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      stability_crash_recovery_test_name: stability_crash_recovery_test_36
+      min_successes: 8
+
   package_jsonapi:
     name: Package JSON API
     needs: [pick_runner, compile]
@@ -309,6 +328,23 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
+
+  nightly_integration_test_with_session_keys_36:
+    name: Nightly Integration Test With Session Keys 36
+    needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',nightly_integration_test_with_session_keys_36,')
+    uses: ./.github/workflows/_nightly_integration_test.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+      job_name: nightly_integration_test_with_session_keys_36
+      session_signing_keys_enabled: true
 
   # One version at a time, as on CircleCI, to cap the leg at 12 runners.
   postgres_conformance_test_15:
@@ -378,10 +414,44 @@ jobs:
     needs: [pick_runner, compile]
     if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',model_based_test_36,')
     uses: ./.github/workflows/_model_based_test.yml
+    permissions:
+      actions: write
+      contents: read
+      issues: write
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
+      job_name: model_based_test_36
+
+  nightly_test_upgrades_matrix_and_check:
+    name: Nightly Test Upgrades Matrix And Check
+    needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',nightly_test_upgrades_matrix_and_check,')
+    uses: ./.github/workflows/_nightly_test_upgrades_matrix_and_check.yml
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  nightly_integration_test_36_bftordering_only:
+    name: Nightly Integration Test 36 BFT Ordering Only
+    needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',nightly_integration_test_36_bftordering_only,')
+    uses: ./.github/workflows/_nightly_integration_test_bftordering_only.yml
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
+      job_name: nightly_integration_test_36_bftordering_only
 
   build_and_publish_docker:
     name: Build and Publish Docker
@@ -459,6 +529,43 @@ jobs:
       protocol_version: '37'
       job_name: crash_recovery_test_37
 
+  nightly_cn_topology_snapshot_test_only:
+    name: Nightly CN Topology Snapshot Test Only
+    needs: [pick_runner, compile]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',nightly_cn_topology_snapshot_test_only,')
+    uses: ./.github/workflows/_nightly_cn_topology_snapshot_test_only.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      actions: write
+      id-token: write
+      issues: write
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  test_ping_windows:
+    name: Test Ping Windows
+    needs: [package_community]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',test_ping_windows,') || github.ref_type == 'tag'
+    uses: ./.github/workflows/_test_ping_windows.yml
+    with:
+      runner: windows-latest
+
+  test_performance_runner:
+    name: Test Performance Runner
+    needs: [pick_runner, package_community]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',test_performance_runner,')
+    uses: ./.github/workflows/_test_performance_runner.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  test_ping_arm:
+    name: Test Ping ARM
+    needs: [package_community]
+    if: inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',test_ping_arm,') || github.ref_type == 'tag'
+    uses: ./.github/workflows/_test_ping_arm.yml
+
   notify:
     name: Notify on Failure
     needs:
@@ -481,6 +588,7 @@ jobs:
       - assembly_ledger_api_test_tool
       - external_parties_test_36
       - nightly_integration_test_36
+      - nightly_integration_test_with_session_keys_36
       - model_based_test_36
       - postgres_conformance_test_15
       - postgres_conformance_test_16
@@ -490,6 +598,14 @@ jobs:
       - publish_release
       - test_scala3
       - crash_recovery_test_37
+      - nightly_cn_topology_snapshot_test_only
+      - test_ping_windows
+      - test_performance_runner
+      - test_ping_arm
+      # Some jobs are left out on purpose: they ping their owners directly (fixed_volunteer), not the rota:
+      # nightly_test_upgrades_matrix_and_check,
+      # nightly_integration_test_36_bftordering_only,
+      # stability_crash_recovery_test_alerting,
     if: |
       always() &&
       (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))

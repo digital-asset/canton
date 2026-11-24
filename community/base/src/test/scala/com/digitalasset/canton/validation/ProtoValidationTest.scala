@@ -313,6 +313,35 @@ final class ProtoValidationTest extends AnyWordSpec with EitherValues with Match
     }
   }
 
+  "ProtoValidation.validateConditionSince" should {
+    val error = InvariantViolation("my field", "BOOM")
+    def check(pvv: ProtocolVersionValidation, condition: Boolean) =
+      ProtoValidation.validateConditionSince(pvv, ProtocolVersion.v37)(condition, error)
+
+    "return unit when the condition holds" in {
+      check(ProtocolVersionValidation.PV(ProtocolVersion.v37), condition = true).value shouldBe ()
+    }
+
+    "reject from the since protocol version on" in {
+      check(
+        ProtocolVersionValidation.PV(ProtocolVersion.v37),
+        condition = false,
+      ).left.value shouldBe error
+    }
+
+    "not check below the since protocol version" in {
+      check(ProtocolVersionValidation.PV(ProtocolVersion.v36), condition = false).value shouldBe ()
+    }
+
+    "not check on NoValidation" in {
+      check(ProtocolVersionValidation.NoValidation, condition = false).value shouldBe ()
+    }
+
+    "check on AlwaysValidation" in {
+      check(ProtocolVersionValidation.AlwaysValidation, condition = false).left.value shouldBe error
+    }
+  }
+
   "ProtoValidation.validateCondition" should {
     val error = InvariantViolation("my field", "BOOM")
 

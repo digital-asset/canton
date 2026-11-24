@@ -131,4 +131,18 @@ private[bftordering] object P2PMetrics {
           metrics.security.noncompliant.labels.violationType.values.AuthIdentityEquivocation.toString,
       )
     )
+
+  def emitUnparseableMessage(
+      metrics: BftOrderingMetrics,
+      from: BftNodeId,
+  )(implicit
+      mc: MetricsContext
+  ): Unit =
+    metrics.security.noncompliant.behavior.mark()(
+      mc.withExtraLabels(
+        metrics.security.noncompliant.labels.Sequencer -> (from: String),
+        metrics.security.noncompliant.labels.violationType.Key ->
+          metrics.security.noncompliant.labels.violationType.values.UnparseableP2PMessage.toString,
+      )
+    )
 }

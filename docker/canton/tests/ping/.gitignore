@@ -1,0 +1,3 @@
+# Per-run smoke output (compose logs, resolved compose, phase transcripts).
+# Written by run_test.sh on every invocation, never meant to be committed.
+ci-artifacts/

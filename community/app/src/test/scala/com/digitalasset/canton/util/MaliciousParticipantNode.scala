@@ -143,6 +143,46 @@ class MaliciousParticipantNode(
     } yield sendResult
   }
 
+  /** Submit confirmation results in a single batch, impersonating a mediator. */
+  def submitConfirmationResults(
+      results: Seq[(ConfirmationResultMessage, Recipients)],
+      cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi = defaultCryptoSnapshot(),
+      protocolVersion: ProtocolVersion = defaultProtocolVersion,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, SendResult.Success] = {
+    logger.info(
+      s"Malicious participant $participantId submitting confirmation results ${results.map(_._1)}"
+    )
+
+    val now = sequencerClient().clock.now
+    val maxSequencingTime = sequencerClient().generateMaxSequencingTime(now)
+
+    for {
+      signedResults <- MonadUtil.sequentialTraverse(results) { case (result, recipients) =>
+        SignedProtocolMessage
+          .signAndCreate(
+            result,
+            cryptoSnapshot,
+            Some(
+              SigningTimestampOverrides(
+                approximateTimestamp = now,
+                validityPeriodEnd = Some(maxSequencingTime),
+              )
+            ),
+            protocolVersion,
+          )
+          .bimap(_.toString, _ -> recipients)
+      }
+      sendResult <- sendRequestBatchToSequencer(
+        Batch.of[ProtocolMessage](protocolVersion, signedResults*),
+        Some(cryptoSnapshot),
+        approximateTimestampForSigning = now,
+        maxSequencingTime = maxSequencingTime,
+      )
+    } yield sendResult
+  }
+
   def submitUnassignmentRequest(
       fullTree: FullUnassignmentTree,
       mediator: MediatorGroupRecipient = defaultMediatorGroup,

@@ -144,4 +144,56 @@ class DbConfigTest extends AnyWordSpec with BaseTest {
       )
     }
   }
+
+  "DbConfig.hideConfidential" should {
+    val canary = "leak-canary"
+
+    "mask password and URL keys at the root and in properties" in {
+      val masked = hideConfidential(ConfigFactory.parseString(s"""{
+          |  password = "$canary-1"
+          |  url = "jdbc:postgresql://host/db?password=$canary-2"
+          |  jdbcUrl = "jdbc:postgresql://host/db?password=$canary-3"
+          |  user = "canton"
+          |  numThreads = 4
+          |  properties {
+          |    password = "$canary-4"
+          |    Password = "$canary-5"
+          |    sslpassword = "$canary-6"
+          |    url = "jdbc:postgresql://host/db?password=$canary-7"
+          |    URL = "jdbc:postgresql://host/db?password=$canary-8"
+          |    jdbcUrl = "jdbc:postgresql://host/db?password=$canary-9"
+          |    serverName = "db-host"
+          |    user = "canton"
+          |  }
+          |}""".stripMargin))
+
+      masked.root().render() should not include canary
+      masked.getString("properties.sslpassword") shouldBe Confidential.Mask
+      masked.getString("user") shouldBe "canton"
+      masked.getInt("numThreads") shouldBe 4
+      masked.getString("properties.serverName") shouldBe "db-host"
+      masked.getString("properties.user") shouldBe "canton"
+    }
+
+    "leave configs without a properties object unchanged" in {
+      val noProperties = ConfigFactory.parseString("""{ user = "canton" }""")
+      val propertiesNotAnObject =
+        ConfigFactory.parseString("""{ user = "canton", properties = "not-an-object" }""")
+
+      hideConfidential(ConfigFactory.empty()) shouldBe ConfigFactory.empty()
+      hideConfidential(noProperties) shouldBe noProperties
+      hideConfidential(propertiesNotAnObject) shouldBe propertiesNotAnObject
+    }
+
+    "be used when pretty printing a DbConfig" in {
+      val numericPassword = "12345678"
+      val printed = Postgres(ConfigFactory.parseString(s"""{
+          |  password = $numericPassword
+          |  url = "jdbc:postgresql://host/db?password=$canary-1"
+          |  properties.password = "with\\"quote-$canary-2"
+          |}""".stripMargin)).toString
+
+      printed should (not include canary and not include numericPassword)
+    }
+  }
 }

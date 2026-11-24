@@ -1,0 +1,75 @@
+# Runs the tests tagged RequiresExternalKms, which canton_build_required only runs on main and
+# release lines.
+#
+# How to trigger:
+#   gh workflow run manual_kms_tests.yml -R DACH-NY/canton --ref <branch> -f protocol_version=37
+name: Manual KMS Tests
+on:
+  workflow_dispatch:
+    inputs:
+      protocol_version:
+        description: Protocol version to run the tests with, e.g. 37 or dev
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    if: ${{ contains(fromJSON('["DACH-NY/canton", "digital-asset/canton"]'), github.repository) }}
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  compile:
+    name: Compile
+    needs: pick_runner
+    uses: ./.github/workflows/_compile.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  test_requires_external_kms:
+    name: Test Protocol Version ${{ inputs.protocol_version }} (RequiresExternalKms)
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      include_only_requires_external_kms_tests: true
+      protocol_version: ${{ inputs.protocol_version }}
+      job_name: test_protocol_version_${{ inputs.protocol_version }}_requires_external_kms
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  crash_recovery_test_requires_external_kms:
+    name: Crash Recovery Test ${{ inputs.protocol_version }} (RequiresExternalKms)
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_crash_recovery_test.yml
+    secrets: inherit
+    with:
+      include_only_requires_external_kms_tests: true
+      job_name: crash_recovery_test_requires_external_kms
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: ${{ inputs.protocol_version }}
+
+  toxiproxy_test_fast_requires_external_kms:
+    name: Toxiproxy Test Fast ${{ inputs.protocol_version }} (RequiresExternalKms)
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_toxiproxy_test_fast.yml
+    secrets: inherit
+    with:
+      include_only_requires_external_kms_tests: true
+      job_name: toxiproxy_test_fast_requires_external_kms
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: ${{ inputs.protocol_version }}

@@ -16,6 +16,22 @@ object TransactionHelpers {
   def exercisedEvents(transaction: Transaction): Vector[ExercisedEvent] =
     events(transaction).flatMap(_.event.exercised.toList).toVector
 
+  // Party-wildcard queries also return the data of tests running concurrently. Every test
+  // allocates fresh parties, so restricting the results to its own parties isolates it.
+  def createdFor(parties: Party*)(events: Vector[CreatedEvent]): Vector[CreatedEvent] = {
+    val ids = parties.map(_.getValue).toSet
+    events.filter(event => event.signatories.exists(ids) || event.observers.exists(ids))
+  }
+
+  def exercisedBy(parties: Party*)(events: Vector[ExercisedEvent]): Vector[ExercisedEvent] = {
+    val ids = parties.map(_.getValue).toSet
+    events.filter(_.actingParties.exists(ids))
+  }
+
+  def concerns(parties: Party*)(transaction: Transaction): Boolean =
+    createdFor(parties*)(createdEvents(transaction)).nonEmpty ||
+      exercisedBy(parties*)(exercisedEvents(transaction)).nonEmpty
+
   private def events(transaction: Transaction): Iterator[Event] =
     transaction.events.iterator
 }

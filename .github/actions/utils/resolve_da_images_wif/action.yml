@@ -1,0 +1,33 @@
+name: Resolve DA Images with WIF
+description: Resolve DA images with Workload Identity Federation (WIF) for use in GitHub Actions.
+
+outputs:
+  workload_identity_provider:
+    value: ${{ steps.resolve.outputs.workload_identity_provider }}
+    description: Full WIF provider resource to exchange the GitHub OIDC token for GCP credentials.
+  service_account:
+    value: ${{ steps.resolve.outputs.service_account }}
+    description: The GCP service account to impersonate.
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve WIF configuration
+      id: resolve
+      shell: bash
+      env:
+        PROVIDER: >-
+          ${{
+            github.repository == 'DACH-NY/canton' && 'projects/794775982379/locations/global/workloadIdentityPools/github-actions/providers/dny-provider' ||
+            github.repository == 'digital-asset/canton' && 'projects/794775982379/locations/global/workloadIdentityPools/github-actions/providers/da-provider' ||
+            ''
+          }}
+        SERVICE_ACCOUNT: >-
+          ${{
+            github.repository == 'DACH-NY/canton' && 'gh-dny-canton@da-images.iam.gserviceaccount.com' ||
+            github.repository == 'digital-asset/canton' && 'gh-da-canton@da-images.iam.gserviceaccount.com' ||
+            ''
+          }}
+      run: |
+        echo "workload_identity_provider=$PROVIDER" >> "$GITHUB_OUTPUT"
+        echo "service_account=$SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"

@@ -14,11 +14,15 @@ import com.digitalasset.canton.crypto.{
   SigningKeySpec,
   SymmetricKeyScheme,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
-sealed trait CryptoProvider extends PrettyPrinting {
+sealed trait CryptoProvider extends PrettyPrintingFromCompanion {
 
   def name: String
 
@@ -43,10 +47,11 @@ sealed trait CryptoProvider extends PrettyPrinting {
       protocolVersion: ProtocolVersion
   ): NonEmpty[Set[SignatureFormat]]
 
-  override protected def pretty: Pretty[CryptoProvider.this.type] = prettyOfString(_.name)
+  override def prettyCompanion: PrettyPrintingCompanion[CryptoProvider] = CryptoProvider
 }
 
-object CryptoProvider {
+object CryptoProvider extends PrettyPrintingCompanion[CryptoProvider] {
+  override protected val pretty: Pretty[CryptoProvider] = prettyOfString(_.name)
 
   case object Jce extends CryptoProvider {
     override def name: String = "JCE"

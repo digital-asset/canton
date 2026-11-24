@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules
 
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftBlockOrderer
@@ -69,7 +69,7 @@ class BatchIdValidationTest extends AnyWordSpec with BftSequencerBaseTest {
             OrderingRequestBatch
               .fromProtoV30(
                 ProtocolVersionValidation.PV(synchronizerProtocolVersion),
-                BftOrdererLimits.default,
+                BftOrdererLimitsView.default,
                 serializedBatch,
               )
               .getOrElse(fail("Failed to deserialize batch"))

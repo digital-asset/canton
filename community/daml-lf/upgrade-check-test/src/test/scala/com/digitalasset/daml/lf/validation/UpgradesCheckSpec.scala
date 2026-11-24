@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml.lf.validation
 
-import com.digitalasset.daml.lf.archive.DarReader
+import com.digitalasset.daml.lf.archive.DarPackageIdReader
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.validation.buildinfo.BuildInfo
 import org.scalatest.Inspectors.forEvery
@@ -15,9 +15,9 @@ import java.io.File
 
 final class UpgradesCheckSpec extends AsyncWordSpec with Matchers with Inside {
   protected def loadPackageId(path: String): PackageId = {
-    val dar = DarReader.assertReadArchiveFromFile(toTestResourceDarFile(path))
+    val dar = DarPackageIdReader.assertReadArchiveFromFile(toTestResourceDarFile(path))
     assert(dar != null, s"Unable to load test package resource '$path'")
-    dar.main.pkgId
+    dar.main
   }
 
   private def toTestResourceDarFile(rawPath: String): File =

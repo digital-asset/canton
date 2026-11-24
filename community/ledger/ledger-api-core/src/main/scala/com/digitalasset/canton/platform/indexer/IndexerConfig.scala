@@ -7,7 +7,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.indexer.IndexerConfig.*
-import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DataSourceProperties}
+import com.digitalasset.canton.platform.store.DbSupport.ConnectionPoolConfig
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
@@ -60,26 +60,10 @@ final case class IndexerConfig(
 
 object IndexerConfig {
 
-  // Exposed as public method so defaults can be overridden in the downstream code.
-  def createDataSourcePropertiesForTesting(
-      indexerConfig: IndexerConfig,
-      loggerFactory: NamedLoggerFactory,
-  ): DataSourceProperties = DataSourceProperties(
-    // PostgresSQL specific configurations
-    postgres = PostgresDataSourceConfig(
-      synchronousCommit = Some(PostgresDataSourceConfig.SynchronousCommitValue.Off)
-    ),
-    connectionPool = createConnectionPoolConfig(indexerConfig, loggerFactory = loggerFactory),
-  )
-
   def createConnectionPoolConfig(
       indexerConfig: IndexerConfig,
       loggerFactory: NamedLoggerFactory,
-      connectionTimeout: FiniteDuration = FiniteDuration(
-        // 250 millis is the lowest possible value for this Hikari configuration (see HikariConfig JavaDoc)
-        250,
-        "millis",
-      ),
+      connectionTimeout: FiniteDuration,
   ): ConnectionPoolConfig = {
     // Base pool: ingestion + dbPrepare + 2 (tailing ledger_end + post processing end updates)
     val basePoolSize =

@@ -8,6 +8,7 @@ import cats.implicits.{toBifunctorOps, toTraverseOps}
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.config.CantonRequireTypes.String2066
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
@@ -35,8 +36,9 @@ import scala.util.{Failure, Try}
 class DbContractStore(
     override protected val storage: DbStorage,
     cacheConfig: CacheConfig,
-    dbQueryBatcherConfig: BatchAggregatorConfig,
-    insertBatchAggregatorConfig: BatchAggregatorConfig,
+    readBatchAggregatorConfig: BatchAggregatorConfig,
+    writeBatchAggregatorConfig: BatchAggregatorConfig,
+    insertMaxBatchSizeBytes: PositiveInt,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(protected implicit val ec: ExecutionContext)
@@ -131,7 +133,7 @@ class DbContractStore(
       }
     BatchAggregator(
       processor,
-      dbQueryBatcherConfig,
+      readBatchAggregatorConfig,
     )
   }
 
@@ -462,7 +464,12 @@ class DbContractStore(
         }
     }
 
-    BatchAggregator(processor, insertBatchAggregatorConfig)
+    BatchAggregator(
+      processor,
+      writeBatchAggregatorConfig,
+      maxDataSizeHintO = Some(insertMaxBatchSizeBytes),
+      estimateDataSizeOfItem = contract => PositiveInt.tryCreate(contract.encoded.size()),
+    )
   }
 
   override def contractsPruned(

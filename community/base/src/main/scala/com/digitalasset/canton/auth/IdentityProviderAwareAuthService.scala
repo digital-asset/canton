@@ -78,16 +78,19 @@ class IdentityProviderAwareAuthService(
           identityProviderConfig <- identityProviderConfigLoader
             .getIdentityProviderConfig(issuer)(LoggingContextWithTrace(loggerFactory))
           verifier <- jwtVerifierLoader.loadJwtVerifier(
-            jwksUrl = identityProviderConfig.jwksUrl,
+            jwksUrl = identityProviderConfig.jwksUrl.toJwksUrl,
             keyId,
           )
           decodedJwt <- verifyToken(token, verifier)
           payload <- Future(
-            parse(decodedJwt.payload, targetAudience = identityProviderConfig.audience)
+            parse(
+              decodedJwt.payload,
+              targetAudience = identityProviderConfig.audience.map(_.unwrap),
+            )
           )
           // TODO (i#33090): remove together with the scope-only token format
           _ <- toFuture(AuthServiceJWT.rejectScopeOnlyJwtUnlessEnabled(payload, enableScopeOnlyJwt))
-          _ <- checkAudience(payload, identityProviderConfig.audience)
+          _ <- checkAudience(payload, identityProviderConfig.audience.map(_.unwrap))
           jwtPayload <- parsePayload(payload)
         } yield toAuthenticatedUser(jwtPayload, identityProviderConfig.identityProviderId)
     }

@@ -18,6 +18,7 @@ sealed trait Reassignment {
   def packageName: Ref.PackageName
   def stakeholders: Set[Ref.Party]
   def nodeId: Int
+  def contractId: Value.ContractId
 }
 
 object Reassignment {
@@ -91,6 +92,7 @@ object Reassignment {
     def packageName: Ref.PackageName = persistedContractInstance.inst.packageName
     def stakeholders: Set[Ref.Party] = persistedContractInstance.inst.stakeholders
     def internalContractId: Long = persistedContractInstance.internalContractId
+    def contractId: Value.ContractId = persistedContractInstance.inst.contractId
   }
 }
 

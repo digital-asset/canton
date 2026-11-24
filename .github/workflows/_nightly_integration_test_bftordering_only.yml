@@ -1,0 +1,102 @@
+name: Nightly Integration Test BFT Ordering Only
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+      protocol_version:
+        required: true
+        type: string
+      job_name:
+        description: Name reported to the flaky-test pipeline. Empty falls back to this workflow's own job id.
+        default: ""
+        type: string
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+      SLACK_BOT_QA_NOTIFICATIONS:
+        required: false
+      GCLOUD_SHEETS_SA_KEY:
+        required: false
+      SLACK_WEBHOOK_TEAM_CANTON_INTERNAL:
+        required: false
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  nightly_integration_test_bftordering_only:
+    name: Nightly Integration Test BFT Ordering Only
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 80
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
+      SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
+      SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS: ${{ vars.SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS }}
+      # Sheet key the alert's rota mention needs (select_rota.py), same job-level reason.
+      GCLOUD_SHEETS_SA_KEY: ${{ secrets.GCLOUD_SHEETS_SA_KEY }}
+      CANTON_CI_JOB_NAME: ${{ inputs.job_name }}
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+      # As on CircleCI.
+      LOG_LEVEL_CANTON: WARN
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Set Canton Protocol Version
+        uses: ./.github/actions/test/set_canton_protocol_version
+        with:
+          protocol_version: ${{ inputs.protocol_version }}
+
+      - name: Download test file
+        uses: actions/download-artifact@v7
+        with:
+          name: test-full-class-names
+          path: .
+
+      # One bucket: CircleCI ran a single node, and the package holds a single test class.
+      # No failed-only rerun, as on CircleCI, and a rerun would not fit in the job's timeout-minutes.
+      - name: Run BFT Ordering Nightly Integration Tests
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: >-
+            dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+          failed_only_rerun: 'false'
+          num_test_buckets: '1'
+          shard_index: '0'
+          num_parallel_tasks: '1'
+          execution_context_size: '8'
+          include_patterns: |
+            ^com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering(?:\..*)?$
+          setup_gcp_kms: 'false'
+          # Must stay below the job's timeout-minutes so the sbt wrapper reports the timeout
+          # and the cleanup steps still run.
+          timeout: '60m'
+          max_single_test_minutes: '55'
+          job_name: ${{ inputs.job_name }}
+
+      - name: Slack Failure Notification
+        # Posts to DA Slack and needs DA secrets, so skip on the OSS mirror, like _notify.yml.
+        if: (failure() || cancelled()) && github.repository == 'DACH-NY/canton'
+        uses: ./.github/actions/slack/slack_notify_failure_with_volunteer
+        with:
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_TEAM_CANTON_INTERNAL }}
+          failed_job: ${{ inputs.job_name || github.job }}
+          fixed_volunteer: U04S25SG9D5 # Daniel
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: nightly_integration_test_bftordering_only
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: nightly_integration_test_bftordering_only
+      job_name: ${{ inputs.job_name }}
+      shard_job_result: ${{ needs.nightly_integration_test_bftordering_only.result }}
+      protocol_version: ${{ inputs.protocol_version }}

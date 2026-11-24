@@ -742,10 +742,14 @@ object EncryptionPublicKey
     with HasVersionedMessageCompanionDbHelpers[EncryptionPublicKey]
     with PrettyPrintingCompanion[EncryptionPublicKey] {
   override def name: String = "encryption public key"
+  // TODO(#34479): HasVersionedWrapper deserializers do not get a pvv.
+  @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
       ProtocolVersion.minimum,
-      supportedProtoVersion(v30.EncryptionPublicKey)(fromProtoV30),
+      supportedProtoVersion(v30.EncryptionPublicKey)(
+        fromProtoV30(ProtocolVersionValidation.NoValidation, _)
+      ),
       _.toProtoV30,
     )
   )
@@ -770,7 +774,8 @@ object EncryptionPublicKey
 
   @nowarn("cat=deprecation")
   def fromProtoV30(
-      publicKeyP: v30.EncryptionPublicKey
+      pvv: ProtocolVersionValidation,
+      publicKeyP: v30.EncryptionPublicKey,
   ): ParsingResult[EncryptionPublicKey] =
     for {
       format <- CryptoKeyFormat.fromProtoEnum(publicKeyP.format, "format")
@@ -789,6 +794,7 @@ object EncryptionPublicKey
             CryptoParseAndValidationError(err.show)
           )
         )
+      _ <- PublicKey.validateCurve(pvv, encryptionPublicKey)
     } yield encryptionPublicKey
 }
 

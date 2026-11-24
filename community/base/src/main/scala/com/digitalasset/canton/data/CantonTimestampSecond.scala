@@ -28,9 +28,14 @@ final case class CantonTimestampSecond private (underlying: LfTimestamp)
 
   def forgetRefinement: CantonTimestamp = CantonTimestamp(underlying)
 
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. Prefer `safeAddSeconds`.
+    */
   def plusSeconds(seconds: Long): CantonTimestampSecond =
     CantonTimestampSecond(underlying.add(Duration.ofSeconds(seconds)))
 
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. For `Long.MinValue`, it
+    * adds instead of subtracting (and then throws). Prefer `safeSubtractSeconds`.
+    */
   def minusSeconds(seconds: Long): CantonTimestampSecond = plusSeconds(-seconds)
 
   override def compare(that: CantonTimestampSecond): Int = underlying.compare(that.underlying)
@@ -38,15 +43,58 @@ final case class CantonTimestampSecond private (underlying: LfTimestamp)
   override def compareTo(other: CantonTimestampSecond): Int = underlying.compareTo(other.underlying)
 
   def -(other: CantonTimestampSecond): Duration =
-    Duration.ofNanos(1000L * (this.underlying.micros - other.underlying.micros))
+    Duration.between(other.toInstant, this.toInstant)
 
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. Prefer `safeAdd`. */
   def +(duration: PositiveSeconds): CantonTimestampSecond = CantonTimestampSecond(
     underlying.add(duration.duration)
   )
 
+  /** Throws an `IllegalArgumentException` if the result is out of bounds. Prefer `safeSubtract`. */
   def -(duration: PositiveSeconds): CantonTimestampSecond = CantonTimestampSecond(
     underlying.add(Duration.ZERO.minus(duration.duration))
   )
+
+  /** Adds `duration` to this timestamp.
+    *
+    * @return
+    *   Left if the result is not a valid [[CantonTimestampSecond]], either because it is out of
+    *   bounds or because the computation overflows.
+    */
+  def safeAdd(duration: PositiveSeconds): Either[String, CantonTimestampSecond] =
+    forgetRefinement.safeAdd(duration).flatMap(CantonTimestampSecond.fromCantonTimestamp)
+
+  /** Subtracts `duration` from this timestamp.
+    *
+    * @return
+    *   Left if the result is not a valid [[CantonTimestampSecond]], either because it is out of
+    *   bounds or because the computation overflows.
+    */
+  def safeSubtract(duration: PositiveSeconds): Either[String, CantonTimestampSecond] =
+    forgetRefinement.safeSubtract(duration).flatMap(CantonTimestampSecond.fromCantonTimestamp)
+
+  /** Adds `seconds` (which may be negative) to this timestamp.
+    *
+    * @return
+    *   Left if the result is not a valid [[CantonTimestampSecond]], either because it is out of
+    *   bounds or because the computation overflows.
+    */
+  def safeAddSeconds(seconds: Long): Either[String, CantonTimestampSecond] =
+    forgetRefinement
+      .safeAdd(Duration.ofSeconds(seconds))
+      .flatMap(CantonTimestampSecond.fromCantonTimestamp)
+
+  /** Subtracts `seconds` (which may be negative) from this timestamp.
+    *
+    * @return
+    *   Left if the result is not a valid [[CantonTimestampSecond]], either because it is out of
+    *   bounds or because the computation overflows.
+    */
+  def safeSubtractSeconds(seconds: Long): Either[String, CantonTimestampSecond] =
+    // Subtract the duration rather than adding `-seconds`, which overflows for `Long.MinValue`
+    forgetRefinement
+      .safeSubtract(Duration.ofSeconds(seconds))
+      .flatMap(CantonTimestampSecond.fromCantonTimestamp)
 
   def >(other: CantonTimestamp): Boolean = forgetRefinement > other
   def >=(other: CantonTimestamp): Boolean = forgetRefinement >= other

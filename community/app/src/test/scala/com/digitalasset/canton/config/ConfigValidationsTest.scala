@@ -8,6 +8,7 @@ import cats.syntax.option.*
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.auth.AuthorizedUser
 import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmptyString}
+import com.digitalasset.canton.config.Confidential.Implicits.*
 import com.digitalasset.canton.config.ConfigValidations.*
 import com.digitalasset.canton.config.CryptoProvider.{Jce, Kms}
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}

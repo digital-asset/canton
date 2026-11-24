@@ -638,7 +638,7 @@ private[reassignment] class UnassignmentProcessingSteps(
   }
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      resultTs: CantonTimestamp,
       verdict: Verdict,
       pendingRequestData: PendingUnassignment,
       pendingSubmissionDataO: Option[PendingSubmissionData],
@@ -704,7 +704,6 @@ private[reassignment] class UnassignmentProcessingSteps(
       // Additional validation requested during security audit as DIA-003-013.
       // Activeness of the mediator already gets checked in Phase 3,
       // this additional validation covers the case that the mediator gets deactivated between Phase 3 and Phase 7.
-      resultTs = event.event.content.timestamp
       topologySnapshotAtTs <- EitherT(
         sourceCrypto.ips.awaitSnapshot(resultTs).map(snapshot => Either.right(Source(snapshot)))
       )

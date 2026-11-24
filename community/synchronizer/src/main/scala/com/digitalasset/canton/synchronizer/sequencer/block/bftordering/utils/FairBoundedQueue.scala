@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils
 import cats.syntax.functor.*
 import com.daml.metrics.api.MetricHandle.{Gauge, Meter}
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
@@ -22,12 +23,21 @@ import scala.collection.mutable
 /** Provides fairness by having a per-node quota while preserving the original arrival order on top
   * of the bare [[com.digitalasset.canton.util.collection.BoundedQueue]]. For simplicity/safety does
   * not implement any collection-like interface. The implementation is not thread-safe.
+  *
+  * @param maxTotalItemSizePerNodeQuota
+  *   The maximum total size of items per node. If None, there is no limit on the total size of
+  *   items per node.
+  * @param itemSizeOf
+  *   A function to compute the size of an item. The size is used to enforce the total item size
+  *   limit per node. The function should be thread safe
   */
 class FairBoundedQueue[ItemType](
     maxQueueSize: Int,
     perNodeQuota: Int,
     dropStrategy: BoundedQueue.DropStrategy = BoundedQueue.DropStrategy.DropOldest,
     deduplicationStrategy: DeduplicationStrategy = DeduplicationStrategy.Noop,
+    maxTotalItemSizePerNodeQuota: Option[PositiveInt] = None,
+    itemSizeOf: ItemType => Int = (_: ItemType) => 0,
     metrics: Option[BftOrderingMetrics] = None,
     sizeGauge: Option[Gauge[Int]] = None,
     maxSizeGauge: Option[Gauge[Int]] = None,
@@ -35,7 +45,7 @@ class FairBoundedQueue[ItemType](
     orderingStageLatencyLabel: Option[String] = None,
 )(implicit metricsContext: MetricsContext) {
 
-  private val nodeQueues = mutable.Map[BftNodeId, mutable.Queue[ItemType]]()
+  private val nodeQueues = mutable.Map[BftNodeId, SizeLimitedBoundedQueue[ItemType]]()
   private val arrivalOrder =
     // Use `DropNewest` and handle the configured drop strategy separately, so that a node cannot use other nodes'
     //  quotas when exceeding the total capacity.
@@ -59,7 +69,15 @@ class FairBoundedQueue[ItemType](
       metricsContext: MetricsContext
   ): EnqueueResult = {
     val nodeBoundedQueue =
-      nodeQueues.getOrElseUpdate(nodeId, new BoundedQueue(perNodeQuota, dropStrategy))
+      nodeQueues.getOrElseUpdate(
+        nodeId,
+        new SizeLimitedBoundedQueue(
+          totalItemSizeLimit = maxTotalItemSizePerNodeQuota,
+          maxNumberOfItems = perNodeQuota,
+          dropStrategy = dropStrategy,
+          itemSizeOf = itemSizeOf,
+        ),
+      )
 
     deduplicationStrategy match {
       case DeduplicationStrategy.PerNode(duplicateMeter) =>
@@ -77,46 +95,51 @@ class FairBoundedQueue[ItemType](
   private def actuallyEnqueue(
       nodeId: BftNodeId,
       item: ItemType,
-      nodeBoundedQueue: mutable.Queue[ItemType],
+      nodeBoundedQueue: SizeLimitedBoundedQueue[ItemType],
   )(implicit metricsContext: MetricsContext): EnqueueResult = {
     // `ArrayDeque` is the underlying collection and its `size` implementation has constant time complexity.
-    val originalNodeQueueSize = nodeBoundedQueue.size
     val originalArrivalQueueSize = arrivalOrder.size
 
-    val nodeBoundedQueueWasFull = nodeBoundedQueue.enqueue(item).sizeIs == originalNodeQueueSize
+    val numberOfItemsRemovedFromNodeQueue = nodeBoundedQueue.enqueue(item)
 
-    if (nodeBoundedQueueWasFull) {
-      dropMeter.foreach(_.mark())
-      dropStrategy match {
-        case BoundedQueue.DropStrategy.DropOldest =>
-          removeFirstArrivedFrom(nodeId)
-          arrivalOrder.enqueue(nodeId -> Instant.now()).discard
-        case BoundedQueue.DropStrategy.DropNewest => // nothing to change
-      }
-      EnqueueResult.PerNodeQuotaExceeded(nodeId)
-    } else {
-      val totalCapacityWasExceeded =
-        arrivalOrder.enqueue(nodeId -> Instant.now()).sizeIs == originalArrivalQueueSize
-      if (totalCapacityWasExceeded) {
+    numberOfItemsRemovedFromNodeQueue match {
+      case Some(removedCount) =>
         dropMeter.foreach(_.mark())
         dropStrategy match {
           case BoundedQueue.DropStrategy.DropOldest =>
-            // There's always at least one (just inserted) element.
-            nodeBoundedQueue.removeHead().discard
-            removeFirstArrivedFrom(nodeId)
-            arrivalOrder.enqueue(nodeId -> Instant.now()).discard
-          case BoundedQueue.DropStrategy.DropNewest =>
-            nodeBoundedQueue.removeLast().discard
+            (1 to removedCount).foreach { _ =>
+              removeFirstArrivedFrom(nodeId)
+            }
+            // Due to size constraints, the item may be unable to be inserted into the node queue. In that case, we do not want to add it to the arrival order.
+            if (!nodeBoundedQueue.isEmpty) {
+              arrivalOrder.enqueue(nodeId -> Instant.now()).discard
+            }
+          case BoundedQueue.DropStrategy.DropNewest => // nothing to change
         }
-        EnqueueResult.TotalCapacityExceeded
-      } else {
-        sizeGauge.foreach(_.updateValue(size + 1))
-        if (size > maxSizeOverall) {
-          maxSizeOverall = size
-          maxSizeGauge.foreach(_.updateValue(maxSizeOverall))
+        EnqueueResult.PerNodeQuotaExceeded(nodeId)
+      case None =>
+        val totalCapacityWasExceeded =
+          arrivalOrder.enqueue(nodeId -> Instant.now()).sizeIs == originalArrivalQueueSize
+        if (totalCapacityWasExceeded) {
+          dropMeter.foreach(_.mark())
+          dropStrategy match {
+            case BoundedQueue.DropStrategy.DropOldest =>
+              // There's always at least one (just inserted) element.
+              nodeBoundedQueue.removeHead().discard
+              removeFirstArrivedFrom(nodeId)
+              arrivalOrder.enqueue(nodeId -> Instant.now()).discard
+            case BoundedQueue.DropStrategy.DropNewest =>
+              nodeBoundedQueue.removeLast().discard
+          }
+          EnqueueResult.TotalCapacityExceeded
+        } else {
+          sizeGauge.foreach(_.updateValue(size + 1))
+          if (size > maxSizeOverall) {
+            maxSizeOverall = size
+            maxSizeGauge.foreach(_.updateValue(maxSizeOverall))
+          }
+          EnqueueResult.Success
         }
-        EnqueueResult.Success
-      }
     }
   }
 
@@ -163,10 +186,14 @@ class FairBoundedQueue[ItemType](
   def size: Int = arrivalOrder.size
 
   @VisibleForTesting
-  private[bftordering] def dump: Seq[ItemType] = {
-    val nodesToItemQueueCopies = nodeQueues.toMap.fmap(_.clone())
+  private[bftordering] def dump: Seq[ItemType] =
+    dumpWithNodeInfo.map(_._2)
+
+  @VisibleForTesting
+  private[bftordering] def dumpWithNodeInfo: Seq[(BftNodeId, ItemType)] = {
+    val nodesToItemQueueCopies = nodeQueues.toMap.fmap(queue => mutable.Queue.from(queue.toSeq))
     arrivalOrder.view.map { case (nodeId, _) =>
-      nodesToItemQueueCopies(nodeId).dequeue()
+      nodeId -> nodesToItemQueueCopies(nodeId).dequeue()
     }.toSeq
   }
 
@@ -202,4 +229,5 @@ object FairBoundedQueue {
     case object Noop extends DeduplicationStrategy
     final case class PerNode(duplicatedMeter: Option[Meter] = None) extends DeduplicationStrategy
   }
+
 }

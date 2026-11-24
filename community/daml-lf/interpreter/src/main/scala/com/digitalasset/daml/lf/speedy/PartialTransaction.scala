@@ -303,6 +303,22 @@ private[speedy] case class PartialTransaction(
       byKey
     }
 
+  private[this] def bumpVersionForUint256(node: Node): Node =
+    node match {
+      case action: Node.Action if action.version < SerializationVersion.minUint256 =>
+        val values = action match {
+          case create: Node.Create => Iterator(create.arg)
+          case exercise: Node.Exercise =>
+            Iterator(exercise.chosenValue) ++ exercise.exerciseResult.iterator
+          case _ => Iterator.empty
+        }
+        if ((values ++ action.keyOpt.iterator.map(_.value)).exists(Value.hasUint256))
+          action.updateVersion(SerializationVersion.minUint256)
+        else
+          action
+      case _ => node
+    }
+
   /** Finish building a transaction; i.e., try to extract a complete transaction from the given
     * 'PartialTransaction'. This returns:
     *   - a SubmittedTransaction in case of success ;
@@ -314,7 +330,8 @@ private[speedy] case class PartialTransaction(
     context.info match {
       case _: RootContextInfo =>
         val roots = context.children.toImmArray
-        val tx0 = Tx(nodes, roots)
+        // TODO #38491 make detection of node version more efficient
+        val tx0 = Tx(nodes.transform((_, node) => bumpVersionForUint256(node)), roots)
         val (tx, seeds) = NormalizeRollbacks.normalizeTx(tx0)
         val txResult = SubmittedTx(SerializationVersion.asVersionedTransaction(tx))
         Right((txResult, seeds))

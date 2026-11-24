@@ -6,11 +6,12 @@ package typesig
 package reader
 
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.daml.lf.archive.{ArchivePayload, DamlLf}
+import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
 import com.digitalasset.daml.lf.data.Ref.{PackageId, QualifiedName}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
 import com.digitalasset.daml.lf.language.{Ast, Util as AstUtil}
+import com.google.protobuf.ByteString
 import scalaz.std.list.*
 import scalaz.std.map.*
 import scalaz.std.option.*
@@ -81,14 +82,9 @@ object SignatureReader {
 
   def readPackageSignature(
       packageId: Ref.PackageId,
-      damlLf: DamlLf.ArchivePayload,
+      damlLf: ByteString,
   ): (Errors[ErrorLoc, InvalidDataTypeDefinition], typesig.PackageSignature) =
     readPackageSignature(() => DamlLfArchiveReader.readPackage(packageId, damlLf))
-
-  def readPackageSignature(
-      payload: ArchivePayload
-  ): (Errors[ErrorLoc, InvalidDataTypeDefinition], typesig.PackageSignature) =
-    readPackageSignature(() => DamlLfArchiveReader.readPackage(payload))
 
   private val dummyPkgId = PackageId.assertFromString("-dummyPkg-")
   private val dummyPkgMetadata = PackageMetadata(

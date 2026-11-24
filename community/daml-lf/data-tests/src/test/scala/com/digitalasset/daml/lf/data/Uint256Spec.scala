@@ -281,13 +281,10 @@ class Uint256Spec
 
   "toString" should {
     "render ZERO" in {
-      Uint256.toString(Uint256.ZERO) shouldBe "0"
+      Uint256.toString(Uint256.ZERO) shouldBe "0x0"
     }
     "render MAX" in {
-      Uint256.toString(Uint256.MaxValue) shouldBe BigInteger.TWO
-        .pow(256)
-        .subtract(BigInteger.ONE)
-        .toString
+      Uint256.toString(Uint256.MaxValue) shouldBe "0x" + ("f" * 64)
     }
   }
 

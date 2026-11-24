@@ -193,7 +193,7 @@ class SignatureReaderSpec extends AnyWordSpec with Matchers with Inside {
 
     if (v == LanguageVersion.Major.V2 || file.exists()) {
 
-      import archive.DarReader.readArchiveFromFile
+      import archive.DarParser.readArchiveFromFile
       import QualifiedName.assertFromString as qn
       import Ref.ChoiceName.assertFromString as cn
 

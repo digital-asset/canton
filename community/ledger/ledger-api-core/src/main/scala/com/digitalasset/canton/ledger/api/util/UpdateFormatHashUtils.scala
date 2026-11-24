@@ -25,6 +25,10 @@ object UpdateFormatHashUtils {
       )
       .addOptional(eventFormat.filtersForAnyParty.map(_.toByteString), _.addByteString)
       .addBool(eventFormat.verbose)
+      .addIterator(
+        eventFormat.filtersByContractId.iterator.map(_.toByteString),
+        eventFormat.filtersByContractId.size,
+      )((builder, bytestring) => builder.addByteString(bytestring))
 
   def hashTopologyFormat[T <: HashBuilder](
       hashBuilder: T
@@ -46,7 +50,7 @@ object UpdateFormatHashUtils {
       .addInt(transactionFormat.transactionShape.value)
 
   def hashUpdateFormat[T <: HashBuilder](hashBuilder: T)(uf: UpdateFormat): T =
-    hashBuilder // TODO (#37329) include contract id filter in hash
+    hashBuilder
       .addOptional(uf.includeReassignments, hashEventFormat)
       .addOptional(
         uf.includeTopologyEvents,

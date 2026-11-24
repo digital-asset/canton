@@ -34,6 +34,8 @@ and `Canton Build Required` still passes. This is expected.
 - `UNRELEASED.md` and `CONTRIBUTING.md` at the repository root
 - `release-notes/*.md`
 - `contributing/*.md` and `contributing/*.png`
+- `release/*.md`
+- `.claude/skills/*.md`, including Markdown in skill subdirectories
 
 The source of truth is the `git diff-tree` path list in the
 `Detect release notes and contributor docs-only changes` step of

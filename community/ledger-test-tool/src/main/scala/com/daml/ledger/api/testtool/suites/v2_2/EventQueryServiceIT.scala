@@ -153,7 +153,6 @@ class EventQueryServiceIT(testDars: TestDars) extends LedgerTestSuite {
     "TXEventsByContractIdFilterCombinations",
     "EventsByContractId should support event format",
     allocate(TwoParties),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(party, notTheSubmittingParty))) =>
     for {
       dummyCid <- ledger.create(party, new Dummy(party))

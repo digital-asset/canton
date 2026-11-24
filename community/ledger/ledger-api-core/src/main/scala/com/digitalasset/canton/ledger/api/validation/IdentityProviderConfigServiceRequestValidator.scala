@@ -26,13 +26,13 @@ object IdentityProviderConfigServiceRequestValidator {
         "identity_provider_id",
       )
       jwksUrl <- optionalString(config.jwksUrl)(requireJwksUrl(_, "jwks_url"))
-      issuer <- optionalString(config.issuer)(requireNonEmptyString(_, "issuer"))
+      issuer <- optionalString(config.issuer)(requireIssuer(_, "issuer"))
       updateMask <- requireUpdateMask(
         updateMask = request.updateMask,
         limit =
           sizeLimitsConfig.adminLapiSizeConfig.updateIdentityProviderConfigRequest.updateMaskSizeLimit,
       )
-      audience <- optionalString(config.audience)(Right(_))
+      audience <- optionalString(config.audience)(requireAudience(_, "audience"))
     } yield (
       IdentityProviderConfigUpdate(
         identityProviderId,

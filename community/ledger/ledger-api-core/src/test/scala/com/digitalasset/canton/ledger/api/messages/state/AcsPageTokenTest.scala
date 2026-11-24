@@ -218,7 +218,7 @@ class AcsPageTokenTest extends AnyWordSpec with SizeLimitTestUtils {
 
     "calculate the same checksum all the time" in {
       originalRequestChecksum should equal(
-        ByteString.copyFrom(Array[Byte](75, -45, -74, -123))
+        ByteString.copyFrom(Array[Byte](83, -40, -42, 16))
       )
     }
   }

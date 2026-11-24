@@ -32,13 +32,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   ProgrammableUnitTestEnv,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleRef
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
-  BftNodeId,
-  BlockNumber,
-  EpochLength,
-  EpochNumber,
-  WorkflowId,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.OrderingBlock
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.{
@@ -926,6 +920,155 @@ class StateTransferManagerTest
       )
     }
 
+    def createBlockTransferResponse(
+        targetEpoch: EpochNumber
+    ): SignedMessage[StateTransferMessage.BlockTransferResponse] =
+      if (testedProtocolVersion < ProtocolVersion.v37) {
+        StateTransferMessage.BlockTransferResponse30
+          .create(
+            Some(aCommitCert(BlockMetadata.mk(targetEpoch, BlockNumber.First))),
+            from = otherId,
+          )
+          .fakeSign
+      } else {
+        StateTransferMessage.BlockTransferResponse31
+          .create(
+            Seq(aCommitCert(BlockMetadata.mk(targetEpoch, BlockNumber.First))),
+            from = otherId,
+          )
+          .fakeSign
+      }
+
+    "not early fetch if we are not in state transfer when receiving a response for a future epoch" in {
+      implicit val context: ContextType = new ProgrammableUnitTestContext()
+
+      val timeoutManager = mock[TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+        ProgrammableUnitTestEnv
+      ], StateTransferTimeout, String]]
+      val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+      val outputRef = mock[ModuleRef[Output.Message[ProgrammableUnitTestEnv]]]
+      val stateTransferManager =
+        createStateTransferManager[ProgrammableUnitTestEnv](
+          outputModuleRef = outputRef,
+          p2pNetworkOutModuleRef = p2pNetworkOutRef,
+          maybeCustomTimeoutManager = Some(timeoutManager),
+          epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+            NonNegativeLong.tryCreate(parallelEpochs.toLong),
+        )
+
+      val targetEpoch = EpochNumber(2)
+      val latestCompletedEpochLocally = aBootstrapEpoch
+
+      // Speculatively receive both blocks of the (future) 2-block target epoch, each in its own response.
+      val response = createBlockTransferResponse(targetEpoch)
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        postponeFutureResponse(stateTransferManager, response, latestCompletedEpochLocally),
+        LogEntry.assertLogSeq(
+          Seq(
+            (
+              { entry =>
+                entry.warningMessage should include(
+                  "received a block transfer response from 'other' containing pre-prepare(s) with unexpected epoch(s) List(2), expected 0, dropping..."
+                )
+              },
+              "future block transfer",
+            )
+          )
+        ),
+      )
+
+      verifyZeroInteractions(timeoutManager)
+      verifyZeroInteractions(outputRef)
+      verifyZeroInteractions(p2pNetworkOutRef)
+    }
+
+    "reject new messages for a future epoch" when {
+      "the response is too big" onlyRunLessThan ProtocolVersion.v37 in {
+        implicit val context: ContextType = new ProgrammableUnitTestContext()
+
+        val timeoutManager = mock[TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+          ProgrammableUnitTestEnv
+        ], StateTransferTimeout, String]]
+        val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+        val stateTransferManager =
+          createStateTransferManager[ProgrammableUnitTestEnv](
+            p2pNetworkOutModuleRef = p2pNetworkOutRef,
+            maybeCustomTimeoutManager = Some(timeoutManager),
+            epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+              NonNegativeLong.tryCreate(parallelEpochs.toLong),
+            epochStateTransferFutureEpochQueueMaxTotalItemSizePerNodeQuota = Some(
+              PositiveInt.tryCreate(190)
+            ), // one response is about 180 bytes, so this will allow only one response to be postponed
+          )
+
+        val targetEpoch = EpochNumber(2)
+        val latestCompletedEpochLocally = aBootstrapEpoch
+
+        stateTransferManager.startStateTransferForTesting(
+          latestCompletedEpochLocally.info.number
+        )(fail(_))
+        // Speculatively receive both blocks of the (future) 2-block target epoch, each in its own response.
+        val responses = Seq(BlockNumber.First, BlockNumber(1L)).map { blockNumber =>
+          StateTransferMessage.BlockTransferResponse30
+            .create(
+              Some(aCommitCert(BlockMetadata.mk(targetEpoch, blockNumber))),
+              from = otherId,
+            )
+            .fakeSign
+        }
+        responses.foreach { response =>
+          postponeFutureResponse(stateTransferManager, response, latestCompletedEpochLocally)
+        }
+
+        stateTransferManager.getPostponedResponsesForTesting shouldBe responses
+          .take(1)
+          .map(UnverifiedStateTransferMessage(_))
+
+      }
+      "the response is too big for protocol version >= 37" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+        implicit val context: ContextType = new ProgrammableUnitTestContext()
+
+        val timeoutManager = mock[TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+          ProgrammableUnitTestEnv
+        ], StateTransferTimeout, String]]
+        val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+        val stateTransferManager =
+          createStateTransferManager[ProgrammableUnitTestEnv](
+            p2pNetworkOutModuleRef = p2pNetworkOutRef,
+            maybeCustomTimeoutManager = Some(timeoutManager),
+            epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+              NonNegativeLong.tryCreate(parallelEpochs.toLong),
+            epochStateTransferFutureEpochQueueMaxTotalItemSizePerNodeQuota = Some(
+              PositiveInt.tryCreate(190)
+            ), // one response is about 180 bytes, so this will allow only one response to be postponed
+          )
+
+        val targetEpoch = EpochNumber(2)
+        val latestCompletedEpochLocally = aBootstrapEpoch
+
+        stateTransferManager.startStateTransferForTesting(
+          latestCompletedEpochLocally.info.number
+        )(fail(_))
+        // Speculatively receive both blocks of the (future) 2-block target epoch, each in its own response.
+        val responses = Seq(BlockNumber.First, BlockNumber(1L)).map { blockNumber =>
+          StateTransferMessage.BlockTransferResponse31
+            .create(
+              Seq(aCommitCert(BlockMetadata.mk(targetEpoch, blockNumber))),
+              from = otherId,
+            )
+            .fakeSign
+        }
+        responses.foreach { response =>
+          postponeFutureResponse(stateTransferManager, response, latestCompletedEpochLocally)
+        }
+
+        stateTransferManager.getPostponedResponsesForTesting shouldBe responses
+          .take(1)
+          .map(UnverifiedStateTransferMessage(_))
+
+      }
+    }
+
     "wait for postponed responses instead of sending a new request" when {
       "enough responses containing each " +
         "a single commit certificate for the epoch have already been received" onlyRunLessThan ProtocolVersion.v37 in {
@@ -946,6 +1089,9 @@ class StateTransferManagerTest
           val targetEpoch = EpochNumber(2)
           val latestCompletedEpochLocally = aBootstrapEpoch
 
+          stateTransferManager.startStateTransferForTesting(
+            latestCompletedEpochLocally.info.number
+          )(fail(_))
           // Speculatively receive both blocks of the (future) 2-block target epoch, each in its own response.
           Seq(BlockNumber.First, BlockNumber(1L)).foreach { blockNumber =>
             val response =
@@ -988,6 +1134,10 @@ class StateTransferManagerTest
 
           val targetEpoch = EpochNumber(2)
           val latestCompletedEpochLocally = aBootstrapEpoch
+
+          stateTransferManager.startStateTransferForTesting(
+            latestCompletedEpochLocally.info.number
+          )(fail(_))
 
           // A single response carries both blocks of the (future) 2-block target epoch: the count of commit
           //  certificates (not of messages) must be used to detect that the epoch is already complete.
@@ -1071,6 +1221,9 @@ class StateTransferManagerTest
 
         val targetEpoch = EpochNumber(2)
         val latestCompletedEpochLocally = aBootstrapEpoch
+        stateTransferManager.startStateTransferForTesting(latestCompletedEpochLocally.info.number)(
+          fail(_)
+        )
 
         // Receive only the first block of the 2-block target epoch: the epoch is not complete yet, so a new
         //  block transfer request must be sent rather than waiting for the postponed responses.
@@ -1113,6 +1266,9 @@ class StateTransferManagerTest
 
           val targetEpoch = EpochNumber(2)
           val latestCompletedEpochLocally = aBootstrapEpoch
+          stateTransferManager.startStateTransferForTesting(
+            latestCompletedEpochLocally.info.number
+          )(fail(_))
 
           // A single response carries only the first block of the 2-block target epoch: the epoch is not
           //  complete yet, so a new block transfer request must be sent rather than waiting.
@@ -1154,6 +1310,9 @@ class StateTransferManagerTest
 
         val targetEpoch = EpochNumber(2)
         val latestCompletedEpochLocally = aBootstrapEpoch
+        stateTransferManager.startStateTransferForTesting(latestCompletedEpochLocally.info.number)(
+          fail(_)
+        )
 
         // Receive the same (single) block of the 2-block target epoch twice: counting messages (or certificates)
         //  rather than distinct blocks would wrongly consider the epoch complete and suppress the request.
@@ -1198,6 +1357,9 @@ class StateTransferManagerTest
 
           val targetEpoch = EpochNumber(2)
           val latestCompletedEpochLocally = aBootstrapEpoch
+          stateTransferManager.startStateTransferForTesting(
+            latestCompletedEpochLocally.info.number
+          )(fail(_))
 
           // A single response carries the same (single) block of the 2-block target epoch twice: distinct block
           //  numbers (not the number of certificates) must be counted to avoid suppressing the request.
@@ -1240,6 +1402,9 @@ class StateTransferManagerTest
 
           val targetEpoch = EpochNumber(2)
           val latestCompletedEpochLocally = aBootstrapEpoch
+          stateTransferManager.startStateTransferForTesting(
+            latestCompletedEpochLocally.info.number
+          )(fail(_))
 
           // A single (invalid) response carries the first block of the 2-block target epoch plus a certificate
           //  from a future epoch. The mixed-epoch batch is still queued under the target epoch, but only the
@@ -1280,6 +1445,8 @@ class StateTransferManagerTest
       ] = None,
       epochStateTransferHowManyFutureEpochsToDownloadInParallel: NonNegativeLong =
         NonNegativeLong.tryCreate(0L),
+      epochStateTransferFutureEpochQueueMaxTotalItemSizePerNodeQuota: Option[PositiveInt] =
+        BftBlockOrdererConfig.DefaultEpochStateTransferFutureEpochQueueMaxTotalItemSizePerNodeQuota,
       consensusWindowSizeForStateTransferOfCommitCertificates: Option[PositiveInt] =
         BftBlockOrdererConfig.DefaultConsensusWindowSizeForStateTransferOfCommitCertificates,
       protocolVersion: ProtocolVersion = synchronizerProtocolVersion,
@@ -1299,6 +1466,8 @@ class StateTransferManagerTest
         epochStateTransferHowManyFutureEpochsToDownloadInParallel,
       consensusWindowSizeForStateTransferOfCommitCertificates =
         consensusWindowSizeForStateTransferOfCommitCertificates,
+      epochStateTransferFutureEpochQueueMaxTotalItemSizePerNodeQuota =
+        epochStateTransferFutureEpochQueueMaxTotalItemSizePerNodeQuota,
     )
 
     new StateTransferManager(

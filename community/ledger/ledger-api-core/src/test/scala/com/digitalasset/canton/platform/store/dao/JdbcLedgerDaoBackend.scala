@@ -94,7 +94,7 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
       jdbcUrl,
       connectionPool = ConnectionPoolConfig(
         connectionPoolSize = 16,
-        connectionTimeout = 250.millis,
+        connectionTimeout = 30.seconds,
       ),
     )
     for {

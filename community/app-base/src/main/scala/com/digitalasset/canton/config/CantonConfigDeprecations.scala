@@ -33,6 +33,14 @@ trait CantonSharedDeprecations {
 
   implicit val participantBatchingDeprecations: DeprecatedFieldsFor[ParticipantBatchingConfig] =
     new DeprecatedFieldsFor[ParticipantBatchingConfig] {
+      override def movedFields: List[MovedConfigPath] = List(
+        MovedConfigPath(
+          "contract-store-aggregator",
+          since = "3.9.0",
+          to = Seq("contract-store-read-aggregator"),
+        )
+      )
+
       override def deprecatePath: List[DeprecatedConfigPath] = deprecatedSince38(
         "in-flight-aggregations-query-interval",
         "mediator-fetch-finalized-responses-aggregator",

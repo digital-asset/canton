@@ -13,7 +13,9 @@ import com.digitalasset.canton.ledger.api.sizeconfig.v2.{
   PackageMetadataFilterSizeConfig,
   TopologyStateFilterSizeConfig,
 }
+import com.digitalasset.canton.ledger.api.{BoundedPageToken, PageToken}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId, UniqueIdentifier}
 import org.scalatest.wordspec.AnyWordSpec
 
 class PackageServiceRequestValidatorTest
@@ -105,6 +107,27 @@ class PackageServiceRequestValidatorTest
           )
         )
       )
+    }
+
+    "decoding the list vetted packages page token" should {
+      "decode the longest token the participant issues" in {
+        // the longest UniqueIdentifier: a 185-character identifier and a 68-character fingerprint
+        def longestUid(prefix: String): UniqueIdentifier =
+          UniqueIdentifier.tryCreate(prefix * 185, "1220" + "a" * 64)
+        val token = BoundedPageToken(
+          synchronizerBound = SynchronizerId(longestUid("s")),
+          participantBound = ParticipantId(longestUid("p")),
+        )
+
+        token.encode.length shouldBe 688
+        PageToken.decode(token.encode).value shouldBe token
+      }
+
+      "reject a token longer than 1000 characters" in {
+        PageToken.decode("A" * 1001).left.value.message should include(
+          "Longer than 1000 characters"
+        )
+      }
     }
   }
 }

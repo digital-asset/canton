@@ -137,7 +137,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
         val sessionKeyMessages = recorder1.fetchSessionKeyMessages
         sessionKeyMessages should have size 1
         sessionKeyMessages.head should matchPattern {
-          case SequencerChannelSessionKey(enc) if enc.ciphertext.size() > 0 =>
+          case SequencerChannelSessionKey(enc, _) if enc.ciphertext.size() > 0 =>
         }
       }
 

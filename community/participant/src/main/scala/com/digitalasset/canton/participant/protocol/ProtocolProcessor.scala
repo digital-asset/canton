@@ -7,7 +7,6 @@ import cats.data.{EitherT, Nested}
 import cats.syntax.either.*
 import cats.syntax.flatMap.*
 import cats.syntax.foldable.*
-import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
@@ -606,7 +605,7 @@ abstract class ProtocolProcessor[
         registration: Option[TrafficRegistration],
     ): EitherT[FutureUnlessShutdown, SubmissionSendFailure, SendResult] =
       EitherT(sendAndWait(prepared).value.flatTap { sent =>
-        sendOutcome(sent) match {
+        sendOutcome(sent, prepared.mayHaveSentMultipleCopies) match {
           case SendOutcome.Delivered(deliver) =>
             // We only need to schedule a removal if the submission data actually contains something
             if (pendingSubmission.isEmpty) FutureUnlessShutdown.unit
@@ -619,6 +618,10 @@ abstract class ProtocolProcessor[
             removePendingSubmission()
             registration.traverse_(releaseTrafficRegistration)
           case SendOutcome.Unknown =>
+            if (registration.isDefined)
+              logger.info(
+                s"Keeping the traffic registration of submission $submissionId because a copy of the request may still be delivered"
+              )
             FutureUnlessShutdown.pure(removePendingSubmission())
         }
       }).leftMap[SubmissionSendFailure](SequencerRequestError(_))
@@ -1642,39 +1645,28 @@ abstract class ProtocolProcessor[
 
   override def processResult(
       counter: SequencerCounter,
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      resultTs: CantonTimestamp,
+      resultEnvelope: OpenEnvelope[SignedProtocolMessage[ConfirmationResultMessage]],
   )(implicit traceContext: TraceContext): HandlerResult = {
-    val content = event.event.content
-    val ts = content.timestamp
-
     val processedET = synchronizeWithClosing(
       s"ProtocolProcess.processResult(sc=$counter, traceId=${traceContext.traceId}"
     ) {
-      val resultEnvelopes =
-        content.batch.envelopes
-          .mapFilter(ProtocolMessage.select[SignedProtocolMessage[ConfirmationResultMessage]])
-      ErrorUtil.requireArgument(
-        resultEnvelopes.sizeCompare(1) == 0,
-        steps.requestKind + " result contains multiple such messages",
-      )
-
-      val result = resultEnvelopes(0).protocolMessage
+      val result = resultEnvelope.protocolMessage
       val requestId = result.message.requestId
 
       logger.debug(
-        show"Got result for ${steps.requestKind.unquoted} request at $requestId: $resultEnvelopes"
+        show"Got result for ${steps.requestKind.unquoted} request at $requestId: $resultEnvelope"
       )
       phase7startsWithVerdict(result.message.rootHash)
 
-      Nested(processResultInternal1(event, result, requestId, ts, counter))
+      Nested(processResultInternal1(result, requestId, resultTs, counter))
     }.value
 
-    handlerResultForConfirmationResult(ts, processedET)
+    handlerResultForConfirmationResult(resultTs, processedET)
   }
 
   @VisibleForTesting
   private[protocol] def processResultInternal1(
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       result: SignedProtocolMessage[ConfirmationResultMessage],
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1756,7 +1748,6 @@ abstract class ProtocolProcessor[
       asyncResult <-
         if (!precedesCleanReplay(requestId))
           processResultInternal2(
-            event,
             result,
             requestId,
             resultTs,
@@ -1774,7 +1765,6 @@ abstract class ProtocolProcessor[
     * confirmation result. The inner `EitherT` corresponds to the subsequent async stage.
     */
   private[this] def processResultInternal2(
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       result: SignedProtocolMessage[ConfirmationResultMessage],
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1875,7 +1865,6 @@ abstract class ProtocolProcessor[
           }
       ).flatMap { pendingRequestDataOrReplayData =>
         processResultInternal3(
-          event,
           unsignedResult.verdict,
           requestId,
           resultTs,
@@ -1894,7 +1883,6 @@ abstract class ProtocolProcessor[
   // Assigning the internal contract ids to the contracts requires that all the contracts are
   // already persisted in the contract store.
   private[this] def processResultInternal3(
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1931,7 +1919,7 @@ abstract class ProtocolProcessor[
           for {
             commitSetAndContractsAndEventFactory <- steps
               .getCommitSetAndContractsToBeStoredAndEventFactory(
-                event,
+                resultTs,
                 verdict,
                 pendingRequestData,
                 pendingSubmissionDataO,
@@ -2218,13 +2206,16 @@ object ProtocolProcessor {
   private sealed trait SendOutcome extends Product with Serializable
   private object SendOutcome {
     final case class Delivered(deliver: Deliver[Batch[Envelope[?]]]) extends SendOutcome
-    // Deliver errors are sequenced and charged, but no recipient processes the request.
+    // No copy of the request was delivered, and none can be later.
     case object NotDelivered extends SendOutcome
     // An amplified copy of this request may still be sequenced.
     case object Unknown extends SendOutcome
   }
 
-  private def sendOutcome(sent: Either[SendAsyncClientError, SendResult]): SendOutcome =
+  private def sendOutcome(
+      sent: Either[SendAsyncClientError, SendResult],
+      mayHaveSentMultipleCopies: Boolean,
+  ): SendOutcome =
     sent match {
       case Right(SendResult.Success(deliver)) => SendOutcome.Delivered(deliver)
       // An amplified copy of this request already reached the sequencers, so it may still be sequenced.
@@ -2238,8 +2229,8 @@ object ProtocolProcessor {
       case Right(SendResult.Error(error)) =>
         error.reason match {
           case SequencerErrors.AggregateSubmissionAlreadySent(_) => SendOutcome.Unknown
-          // An amplified copy sent before this rejection can still be delivered,
-          // and then its completion isn't charged in TEA. Will be fixed in a follow-up PR.
+          // The sequencer rejected one copy, but it can still deliver another one we sent.
+          case _ if mayHaveSentMultipleCopies => SendOutcome.Unknown
           case _ => SendOutcome.NotDelivered
         }
       case Right(SendResult.Timeout(_)) => SendOutcome.NotDelivered

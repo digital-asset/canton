@@ -22,7 +22,7 @@ import org.slf4j.event.Level
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.{Future, Promise}
 
-class SimpleExecutionQueueTest
+final class SimpleExecutionQueueTest
     extends AsyncWordSpec
     with BaseTest
     with HasExecutionContext
@@ -308,6 +308,30 @@ class SimpleExecutionQueueTest
         task3Res <- task3Result.failed
       } yield {
         task3Res.getMessage shouldBe expectedFailure
+      }
+    }
+
+    "allow to force recovery" in {
+      val queue = mk()
+      val task1 = new MockTask("task1")
+      val task2 = new MockTask("task2")
+      val task3 = new MockTask("task3")
+      val task1Result = queue.executeUS(task1.run(), "Task1", forceRecoverOnFailure = true)
+      val task2Result = queue.executeUS(task2.run(), "Task2")
+      val task3Result = queue.executeUS(task3.run(), "Task3")
+
+      failTask(task1, Seq())
+
+      task2.complete()
+      task3.complete()
+      for {
+        task1Res <- task1Result.failed.failOnShutdown("aborted due to shutdown.")
+        task2Res <- task2Result.failOnShutdown("aborted due to shutdown.")
+        task3Res <- task3Result.failOnShutdown("aborted due to shutdown.")
+      } yield {
+        task1Res.getMessage shouldBe "mocked failure for task1"
+        task2Res shouldBe "task2"
+        task3Res shouldBe "task3"
       }
     }
 

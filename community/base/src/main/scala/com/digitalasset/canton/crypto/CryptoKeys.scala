@@ -13,7 +13,11 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
   String68,
 }
 import com.digitalasset.canton.crypto.CryptoPureApiError.KeyParseAndValidateError
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.resource.ToDbPrimitive
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -48,17 +52,19 @@ trait CryptoKey extends Product with Serializable {
 /** a human readable fingerprint of a key that serves as a unique identifier */
 final case class Fingerprint private (protected val str: String68)
     extends LengthLimitedStringWrapper
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   def toLengthLimitedString: String68 = str
 
-  override protected def pretty: Pretty[Fingerprint] = prettyOfParam(_.unwrap.readableHash)
+  override def prettyCompanion: PrettyPrintingCompanion[Fingerprint] = Fingerprint
 }
 
 trait HasFingerprint {
   @inline def fingerprint: Fingerprint
 }
 
-object Fingerprint {
+object Fingerprint extends PrettyPrintingCompanion[Fingerprint] {
+
+  override protected val pretty: Pretty[Fingerprint] = prettyOfParam(_.unwrap.readableHash)
 
   implicit val fingerprintOrder: Order[Fingerprint] =
     Order.by[Fingerprint, String](_.unwrap)
@@ -257,22 +263,67 @@ object PublicKey {
     publicKeyP.key match {
       case v30.PublicKey.Key.Empty => Left(ProtoDeserializationError.FieldNotSet("key"))
       case v30.PublicKey.Key.EncryptionPublicKey(encPubKeyP) =>
-        EncryptionPublicKey.fromProtoV30(encPubKeyP)
+        EncryptionPublicKey.fromProtoV30(pvv, encPubKeyP)
       case v30.PublicKey.Key.SigningPublicKey(signPubKeyP) =>
         SigningPublicKey.fromProtoV30(pvv, signPubKeyP)
     }
+
+  /** Requires an EC public key to use the curve of its key spec, by naming it or by giving its
+    * parameters; rejects other curves and parameters.
+    *
+    * @param pvv
+    *   the protocol version validation of the enclosing message
+    * @param publicKey
+    *   the deserialized public key
+    */
+  private[crypto] def validateCurve(
+      pvv: ProtocolVersionValidation,
+      publicKey: PublicKey,
+  ): ParsingResult[Unit] = checkCurve(pvv, publicKey, allowExplicitParameters = true)
+
+  /** Requires an EC public key to name the curve of its key spec; rejects curve parameters, even
+    * ones equal to the named curve's. For keys Canton generates itself, such as session keys.
+    *
+    * @param pvv
+    *   the protocol version validation of the enclosing message
+    * @param publicKey
+    *   the deserialized public key
+    */
+  private[crypto] def validateNamedCurve(
+      pvv: ProtocolVersionValidation,
+      publicKey: PublicKey,
+  ): ParsingResult[Unit] = checkCurve(pvv, publicKey, allowExplicitParameters = false)
+
+  private def checkCurve(
+      pvv: ProtocolVersionValidation,
+      publicKey: PublicKey,
+      allowExplicitParameters: Boolean,
+  ): ParsingResult[Unit] =
+    ProtoValidation.validateConditionSince(pvv, ProtocolVersion.strictPublicKeyChecksPV)(
+      CryptoKeyValidation.matchesCurveOfKeySpec(publicKey, allowExplicitParameters),
+      ProtoDeserializationError.CryptoParseAndValidationError(
+        if (allowExplicitParameters)
+          s"Invalid EC public key [${publicKey.id}]: the key must use the curve of its key spec"
+        else
+          s"Invalid EC public key [${publicKey.id}]: the key must name the curve of its key spec, curve parameters are not supported"
+      ),
+    )
 
 }
 
 final case class KeyName(protected val str: String300)
     extends LengthLimitedStringWrapper
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   def emptyStringAsNone: Option[KeyName] = if (str.unwrap.isEmpty) None else Some(this)
-  override protected def pretty: Pretty[KeyName] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[KeyName] = KeyName
+}
+
+object KeyName
+    extends LengthLimitedStringWrapperCompanion[String300, KeyName]
+    with PrettyPrintingCompanion[KeyName] {
+  override protected val pretty: Pretty[KeyName] = prettyOfClass(
     unnamedParam(_.str.unwrap.unquoted)
   )
-}
-object KeyName extends LengthLimitedStringWrapperCompanion[String300, KeyName] {
   override def instanceName: String = "KeyName"
   override protected def companion: String300.type = String300
   override protected def factoryMethodWrapper(str: String300): KeyName = KeyName(str)
@@ -387,13 +438,14 @@ trait MlDsaKeySpec {
   def jcaParameterSpec: MLDSAParameterSpec
 }
 
-sealed trait CryptoKeyFormat extends Product with Serializable with PrettyPrinting {
+sealed trait CryptoKeyFormat extends Product with Serializable with PrettyPrintingFromCompanion {
   def name: String
   def toProtoEnum: v30.CryptoKeyFormat
-  override protected def pretty: Pretty[this.type] = prettyOfString(_.name)
+  override def prettyCompanion: PrettyPrintingCompanion[CryptoKeyFormat] = CryptoKeyFormat
 }
 
-object CryptoKeyFormat {
+object CryptoKeyFormat extends PrettyPrintingCompanion[CryptoKeyFormat] {
+  override protected val pretty: Pretty[CryptoKeyFormat] = prettyOfString(_.name)
 
   implicit val cryptoKeyFormatOrder: Order[CryptoKeyFormat] =
     Order.by[CryptoKeyFormat, String](_.name)
@@ -505,7 +557,7 @@ object CryptoKeyFormat {
     }
 }
 
-sealed trait KeyPurpose extends Product with Serializable with PrettyPrinting {
+sealed trait KeyPurpose extends Product with Serializable with PrettyPrintingFromCompanion {
 
   def name: String
 
@@ -514,10 +566,11 @@ sealed trait KeyPurpose extends Product with Serializable with PrettyPrinting {
 
   def toProtoEnum: v30.KeyPurpose
 
-  override protected def pretty: Pretty[KeyPurpose.this.type] = prettyOfString(_.name)
+  override def prettyCompanion: PrettyPrintingCompanion[KeyPurpose] = KeyPurpose
 }
 
-object KeyPurpose {
+object KeyPurpose extends PrettyPrintingCompanion[KeyPurpose] {
+  override protected val pretty: Pretty[KeyPurpose] = prettyOfString(_.name)
 
   val All: Set[KeyPurpose] = Set(Signing, Encryption)
 

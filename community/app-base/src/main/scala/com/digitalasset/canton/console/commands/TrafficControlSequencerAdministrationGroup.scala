@@ -15,8 +15,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.sequencer.admin.v30.TrafficSummary
-import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
-import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.ThroughputCapByMessageTypeConfig
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerTrafficStatus,
   TimestampSelector,
@@ -241,52 +240,56 @@ class TrafficControlSequencerAdministrationGroup(
   @Help.Description(
     """Throughput caps set general limits on the number of requests being accepted
        | to protect the general availability of the system.
-       Supported request types are: "confirmation request" and "topology transaction"
+       | Settings are identified by name and specify the message type and observation period.
        Note that this option has only an effect if the caps are enabled. Upon restart,
        | the caps will be reset to their original configuration settings.
       """
   )
   def set_throughput_cap(
-      requestType: SubmissionRequestType,
-      config: IndividualThroughputCapConfig,
+      name: String,
+      config: ThroughputCapByMessageTypeConfig,
   ): Unit = consoleEnvironment.run(
     runner.adminCommand(
-      SequencerAdminCommands.SetThroughputCap(requestType, Some(config))
+      SequencerAdminCommands.SetThroughputCap(name, Some(config))
     )
   )
 
   @Help.Summary("Delete a request throughput cap")
-  def unset_throughput_cap(requestType: SubmissionRequestType): Unit =
+  def unset_throughput_cap(name: String): Unit =
     consoleEnvironment.run(
       runner.adminCommand(
-        SequencerAdminCommands.SetThroughputCap(requestType, None)
+        SequencerAdminCommands.SetThroughputCap(name, None)
       )
     )
 
   @Help.Summary("Get the current configured request throughput cap")
   def get_throughput_cap(
-      requestType: SubmissionRequestType
-  ): Option[IndividualThroughputCapConfig] = consoleEnvironment.run(
+      name: String
+  ): Option[ThroughputCapByMessageTypeConfig] = consoleEnvironment.run(
     runner.adminCommand(
-      SequencerAdminCommands.GetThroughputCap(requestType)
+      SequencerAdminCommands.GetThroughputCap(name)
     )
   )
 
+  @Help.Summary("List all named throughput cap settings")
+  def list_throughput_caps(): Map[String, ThroughputCapByMessageTypeConfig] =
+    consoleEnvironment.run(runner.adminCommand(SequencerAdminCommands.ListThroughputCaps()))
+
   @Help.Summary("Update the current configured request throughput cap")
   def update_throughput_cap(
-      requestType: SubmissionRequestType,
-      update: IndividualThroughputCapConfig => IndividualThroughputCapConfig,
+      name: String,
+      update: ThroughputCapByMessageTypeConfig => ThroughputCapByMessageTypeConfig,
   ): Unit =
     consoleEnvironment.runE {
       for {
         currentO <- runner
           .adminCommand(
-            SequencerAdminCommands.GetThroughputCap(requestType)
+            SequencerAdminCommands.GetThroughputCap(name)
           )
           .toEither
-        current <- currentO.toRight(s"Cap of type $requestType is not configured")
+        current <- currentO.toRight(s"Cap '$name' is not configured")
         _ <- runner
-          .adminCommand(SequencerAdminCommands.SetThroughputCap(requestType, Some(update(current))))
+          .adminCommand(SequencerAdminCommands.SetThroughputCap(name, Some(update(current))))
           .toEither
       } yield ()
     }

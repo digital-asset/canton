@@ -6,21 +6,35 @@ package com.digitalasset.canton.crypto.sync
 import com.digitalasset.canton.ProtocolVersionChecksAnyWordSpec
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.SessionSigningKeysConfig
+import com.digitalasset.canton.crypto.provider.jce.JceSecurityProvider
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.signer.SyncCryptoSignerWithSessionKeys
 import com.digitalasset.canton.crypto.{
+  CryptoKeyFormat,
   Signature,
+  SignatureCheckError,
   SignatureDelegation,
   SignatureDelegationValidityPeriod,
+  SigningKeySpec,
+  SigningKeyUsage,
+  SigningPublicKey,
   SynchronizerCryptoClient,
+  TestHash,
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.ResourceUtil
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
+import com.google.protobuf.ByteString
+import org.bouncycastle.asn1.x509.{AlgorithmIdentifier, SubjectPublicKeyInfo}
+import org.bouncycastle.asn1.x9.{ECNamedCurveTable, X962Parameters, X9ObjectIdentifiers}
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.security.KeyPairGenerator
+import java.security.spec.ECGenParameterSpec
 import scala.concurrent.duration.*
 
 final class SyncCryptoWithSessionKeysTest
@@ -176,6 +190,80 @@ final class SyncCryptoWithSessionKeysTest
       sDSigningCached.signatureDelegation shouldBe sDVerificationCached
 
     }
+
+    "sign several hashes with one session key" in {
+      val hashes = NonEmpty(Seq, TestHash.digest(1), TestHash.digest(2))
+      val cryptoSnapshot = p1.snapshot(testSnapshot.timestamp).futureValueUS
+
+      val signatures = cryptoSnapshot
+        .signHashes(hashes, defaultUsage, None)
+        .valueOrFail("sign failed")
+        .futureValueUS
+
+      // The root is signed with the session key, and its delegation is part of every signature
+      val signatureDelegation = checkSignatureDelegation(testSnapshot, signatures.head1.signature)
+      signatures.foreach { multiHashSignature =>
+        withClue(s"at inclusion path ${multiHashSignature.inclusionPath}") {
+          multiHashSignature.signature.signatureDelegation shouldBe Some(signatureDelegation)
+        }
+      }
+    }
+
+    "reject a session key with explicit curve parameters" onlyRunWithOrGreaterThan
+      ProtocolVersion.strictPublicKeyChecksPV in {
+        val signature = syncCryptoSignerP1
+          .sign(testSnapshot, None, hash, defaultUsage)
+          .valueOrFail("sign failed")
+          .futureValueUS
+        val signatureDelegation =
+          signature.signatureDelegation.valueOrFail("no signature delegation")
+
+        val curveName = SigningKeySpec.EcP256.jcaCurveName
+        val kpGen = KeyPairGenerator.getInstance("EC", JceSecurityProvider.bouncyCastleProvider)
+        kpGen.initialize(new ECGenParameterSpec(curveName))
+        val spki = SubjectPublicKeyInfo.getInstance(kpGen.generateKeyPair().getPublic.getEncoded)
+        val explicitKeyBytes = new SubjectPublicKeyInfo(
+          new AlgorithmIdentifier(
+            X9ObjectIdentifiers.id_ecPublicKey,
+            new X962Parameters(ECNamedCurveTable.getByName(curveName)),
+          ),
+          spki.getPublicKeyData.getBytes,
+        ).getEncoded
+        val explicitSessionKey = SigningPublicKey
+          .create(
+            CryptoKeyFormat.DerX509Spki,
+            ByteString.copyFrom(explicitKeyBytes),
+            SigningKeySpec.EcP256,
+            SigningKeyUsage.ProtocolOnly,
+          )
+          .valueOrFail("create session key")
+        val explicitDelegation = signatureDelegation.copy(sessionKey = explicitSessionKey)
+        SignatureDelegation
+          .fromProtoV30(
+            testedProtocolVersionValidation,
+            explicitDelegation.toProtoV30,
+            signature.authorizingLongTermKey,
+          )
+          .left
+          .value
+          .toString should include("Invalid EC public key")
+
+        val explicitSignature = Signature.create(
+          signature.format,
+          signature.unwrap,
+          explicitSessionKey.id,
+          signature.signingAlgorithmSpec,
+          Some(explicitDelegation),
+        )
+
+        val result = syncCryptoVerifierP1
+          .verifySignature(testSnapshot, hash, participant1.member, explicitSignature, defaultUsage)
+          .value
+          .futureValueUS
+        inside(result.left.value) { case SignatureCheckError.InvalidSignatureDelegation(error) =>
+          error should include("Invalid EC public key")
+        }
+      }
 
     "sign and verify message with different synchronizers uses different session keys" in {
 

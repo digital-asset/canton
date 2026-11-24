@@ -281,6 +281,11 @@ object ProtocolVersion {
 
   val nextValidationBoundPV: AlphaProtocolVersion = ProtocolVersion.dev
 
+  /** Enables the check that EC public keys use the named curve of their key spec, not explicit
+    * curve parameters.
+    */
+  val strictPublicKeyChecksPV: AlphaProtocolVersion = ProtocolVersion.dev
+
   val supported: NonEmpty[List[ProtocolVersion]] =
     (NonEmpty.mk(List, dev) ++ alpha ++ beta ++ stable).sorted
 
@@ -342,7 +347,9 @@ object ProtocolVersion {
   // First protocol version with sequencer channels and the ACS replication over them, i.e. all code
   // paths of get_remote_acs. Online party replication stays on dev.
   // TODO(#37839) Move to the stable protocol version that ships get_remote_acs; the proto messages
-  //  then also need to extend `StableProtoVersion`.
+  //  then also need to extend `StableProtoVersion`. The compiler checks this only for messages with
+  //  their own codec, e.g. not for PingRequest, PingResponse and the nested messages of
+  //  acs_replication.proto.
   lazy val sequencerChannel: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] = dev
 
   // TODO(#35449) Remove this once we have a stable protocol version that supports multi-hash signatures

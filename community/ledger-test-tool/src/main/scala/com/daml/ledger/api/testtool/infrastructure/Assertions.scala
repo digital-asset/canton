@@ -19,6 +19,11 @@ import scala.language.implicitConversions
 import scala.util.Try
 
 object Assertions extends OptionValues with LoneElement {
+  // Accept messages from servers both before and after contract-id filters were introduced.
+  val emptyEventFormatErrorMessagePattern: Pattern = Pattern.compile(
+    "filtersByParty( and filtersForAnyParty|, filtersForAnyParty and filtersByContractId) cannot be empty simultaneously"
+  )
+
   def fail(message: String): Nothing =
     throw new AssertionError(message)
 

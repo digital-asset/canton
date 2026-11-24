@@ -4,7 +4,11 @@
 package com.digitalasset.canton.sequencing.client
 
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencing.SequencerAggregator.SequencerAggregatorError
 
 sealed trait SequencerClientSubscriptionError extends Product with Serializable {
@@ -20,11 +24,17 @@ object SequencerClientSubscriptionError {
 
   sealed trait ApplicationHandlerFailure
       extends SequencerClientSubscriptionError
-      with PrettyPrinting
+      with PrettyPrintingFromCompanion
 
   /** The application handler returned that it is being shutdown. */
   case object ApplicationHandlerShutdown extends ApplicationHandlerFailure {
-    override protected def pretty: Pretty[ApplicationHandlerShutdown.type] =
+    override def prettyCompanion: PrettyPrintingCompanion[ApplicationHandlerShutdown.this.type] =
+      ApplicationHandlerShutdownPrettyPrintingCompanion
+  }
+
+  private object ApplicationHandlerShutdownPrettyPrintingCompanion
+      extends PrettyPrintingCompanion[ApplicationHandlerShutdown.type] {
+    override protected val pretty: Pretty[ApplicationHandlerShutdown.type] =
       prettyOfObject[ApplicationHandlerShutdown.type]
   }
 
@@ -40,7 +50,12 @@ object SequencerClientSubscriptionError {
   ) extends ApplicationHandlerError {
     override def mbException: Option[Throwable] = Some(exception)
 
-    override protected def pretty: Pretty[ApplicationHandlerException] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ApplicationHandlerException] =
+      ApplicationHandlerException
+  }
+
+  object ApplicationHandlerException extends PrettyPrintingCompanion[ApplicationHandlerException] {
+    override protected val pretty: Pretty[ApplicationHandlerException] = prettyOfClass(
       param("first sequencing timestamp", _.firstSequencingTimestamp),
       param("last sequencing timestamp", _.lastSequencingTimestamp),
       unnamedParam(_.exception),

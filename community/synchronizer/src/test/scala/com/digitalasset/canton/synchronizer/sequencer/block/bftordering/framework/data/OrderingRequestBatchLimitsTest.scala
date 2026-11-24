@@ -5,19 +5,22 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.{BftOrdererLimits, BftOrdererLimitsView}
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.google.protobuf.ByteString
+import com.google.protobuf.timestamp.Timestamp
 import org.scalatest.wordspec.AnyWordSpec
 
 class OrderingRequestBatchLimitsTest extends AnyWordSpec with BftSequencerBaseTest {
 
   private val bound = 3
-  private val limits = BftOrdererLimits.default.copy(maxOrderingRequests = PositiveInt.three)
+  private val limits = BftOrdererLimitsView.default.copy(
+    limits = BftOrdererLimits.default.copy(maxOrderingRequests = PositiveInt.three)
+  )
 
   private val enforcing = ProtocolVersionValidation.PV(ProtocolVersion.dev)
 
@@ -58,6 +61,18 @@ class OrderingRequestBatchLimitsTest extends AnyWordSpec with BftSequencerBaseTe
       parse(bound + 1, ProtocolVersionValidation.PV(ProtocolVersion.v37)) shouldBe a[Right[?, ?]]
       parse(bound + 1, ProtocolVersionValidation.PV(ProtocolVersion.v36)) shouldBe a[Right[?, ?]]
       parse(bound + 1, ProtocolVersionValidation.NoValidation) shouldBe a[Right[?, ?]]
+    }
+
+    "reject an ordering start instant that is out of range" in {
+      val outOfRange = Timestamp(seconds = Long.MaxValue, nanos = 0)
+      val batch = batchWith(1)
+      val hostileBatch = batch.withOrderingRequests(
+        batch.orderingRequests.map(_.withOrderingStartInstant(outOfRange))
+      )
+
+      OrderingRequestBatch.fromProtoV30(enforcing, limits, hostileBatch) should matchPattern {
+        case Left(ProtoDeserializationError.TimestampConversionError(_)) =>
+      }
     }
   }
 }

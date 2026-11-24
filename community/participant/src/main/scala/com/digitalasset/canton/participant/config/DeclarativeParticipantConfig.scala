@@ -7,8 +7,8 @@ import cats.implicits.toTraverseOps
 import cats.syntax.either.*
 import com.daml.jwt.JwksUrl
 import com.digitalasset.canton.config.CantonRequireTypes.String255
-import com.digitalasset.canton.config.ConfidentialConfigWriter
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.{Confidential, ConfidentialConfigWriter}
 import com.digitalasset.canton.crypto.ValidatedPemCertificate
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
@@ -88,7 +88,8 @@ final case class DeclarativeParticipantConfig(
   */
 final case class DeclarativeDarConfig(
     location: String,
-    requestHeaders: Map[String, String] = Map(),
+    // Header values are marked confidential since they can contain authorization details.
+    requestHeaders: Confidential.HttpRequestHeaders = Confidential.HttpRequestHeaders.empty,
     expectedMainPackage: Option[String] = None,
     synchronizers: Seq[String] = Seq.empty,
 )
@@ -418,14 +419,18 @@ object DeclarativeParticipantConfig {
 
     val confidentialWriter = new ConfidentialConfigWriter(confidential)
 
+    implicit def confidentialValueWriter[A: ConfigWriter]: ConfigWriter[Confidential[A]] =
+      confidentialWriter.confidentialValueWriter[A]
+
     implicit val synchronizerAliasReader: ConfigWriter[SynchronizerAlias] =
       ConfigWriter.toString(_.unwrap)
 
     implicit val declarativeParticipantConfigWriter: ConfigWriter[DeclarativeParticipantConfig] = {
-      implicit val darConfigWriter: ConfigWriter[DeclarativeDarConfig] =
-        confidentialWriter[DeclarativeDarConfig](c =>
-          c.copy(requestHeaders = c.requestHeaders.map { case (k, v) => (k, "*****") })
-        )
+      implicit val darConfigWriter: ConfigWriter[DeclarativeDarConfig] = {
+        implicit val httpRequestHeadersWriter: ConfigWriter[Confidential.HttpRequestHeaders] =
+          confidentialWriter.httpRequestHeadersWriter
+        deriveWriter[DeclarativeDarConfig]
+      }
 
       implicit val permissionWriter: ConfigWriter[ParticipantPermissionConfig] = {
         implicit val submissionWriter: ConfigWriter[ParticipantPermissionConfig.Submission.type] =

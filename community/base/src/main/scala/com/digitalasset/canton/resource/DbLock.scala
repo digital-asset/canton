@@ -19,7 +19,12 @@ import com.digitalasset.canton.lifecycle.{
   HasCloseContext,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+  PrettyUtil,
+}
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   NamedLoggerFactory,
@@ -45,15 +50,16 @@ import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
-sealed abstract case class DbLockCounter(value: Int) extends PrettyPrinting {
+sealed abstract case class DbLockCounter(value: Int) extends PrettyPrintingFromCompanion {
 
   require(value > 0, s"DbLockCounter must be at least 1, but is $value.")
   require(value <= 256, s"DbLockCounter must be at most 256, but is $value.")
 
-  override protected def pretty: Pretty[DbLockCounter] = prettyOfParam(_.value)
+  override def prettyCompanion: PrettyPrintingCompanion[DbLockCounter] = DbLockCounter
 }
 
-object DbLockCounter {
+object DbLockCounter extends PrettyPrintingCompanion[DbLockCounter] {
+  override protected val pretty: Pretty[DbLockCounter] = prettyOfParam(_.value)
 
   private val counters: mutable.Set[Int] = mutable.Set.empty[Int]
 
@@ -93,11 +99,14 @@ object DbLockCounters {
 
 /** Common Wrapper for DB lock identifier
   */
-final case class DbLockId private (id: Int) extends PrettyPrinting {
-  override protected def pretty: Pretty[DbLockId] = prettyOfParam(_.id)
+final case class DbLockId private (id: Int) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[DbLockId] = DbLockId
 }
 
-object DbLockId {
+object DbLockId extends PrettyPrintingCompanion[DbLockId] {
+
+  override protected val pretty: Pretty[DbLockId] = prettyOfParam(_.id)
+
   implicit val setParameterLockId: SetParameter[DbLockId] = (l, pp) => pp.setInt(l.id)
 
   private[resource] def create(scope: String, counter: DbLockCounter)(implicit
@@ -145,13 +154,23 @@ object DbLockId {
     }
 }
 
-sealed trait DbLockMode extends Product with Serializable with PrettyPrinting
+sealed trait DbLockMode extends Product with Serializable with PrettyPrintingFromCompanion
 object DbLockMode {
   case object Exclusive extends DbLockMode {
-    override protected def pretty: Pretty[Exclusive.type] = prettyOfObject[Exclusive.type]
+    override def prettyCompanion: PrettyPrintingCompanion[Exclusive.this.type] =
+      ExclusivePrettyPrintingCompanion
+  }
+
+  private object ExclusivePrettyPrintingCompanion extends PrettyPrintingCompanion[Exclusive.type] {
+    override protected val pretty: Pretty[Exclusive.type] = prettyOfObject[Exclusive.type]
   }
   case object Shared extends DbLockMode {
-    override protected def pretty: Pretty[Shared.type] = prettyOfObject[Shared.type]
+    override def prettyCompanion: PrettyPrintingCompanion[Shared.this.type] =
+      SharedPrettyPrintingCompanion
+  }
+
+  private object SharedPrettyPrintingCompanion extends PrettyPrintingCompanion[Shared.type] {
+    override protected val pretty: Pretty[Shared.type] = prettyOfObject[Shared.type]
   }
 }
 
@@ -580,107 +599,191 @@ object DbLock {
 
 }
 
-sealed trait DbLockConfigError extends Product with Serializable with PrettyPrinting
+sealed trait DbLockConfigError extends Product with Serializable with PrettyPrintingFromCompanion
 
-sealed trait DbLockError extends Product with Serializable with PrettyPrinting
+sealed trait DbLockError extends Product with Serializable with PrettyPrintingFromCompanion
 
 object DbLockError {
 
   final case class UnsupportedDatabaseProfile(profile: DbStorage.Profile) extends DbLockError {
-    override protected def pretty: Pretty[UnsupportedDatabaseProfile] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[UnsupportedDatabaseProfile] =
+      UnsupportedDatabaseProfile
+  }
+
+  object UnsupportedDatabaseProfile extends PrettyPrintingCompanion[UnsupportedDatabaseProfile] {
+    override protected val pretty: Pretty[UnsupportedDatabaseProfile] = prettyOfClass(
       unnamedParam(_.profile)
     )
   }
 
   final case class UnsupportedDatabaseConfig(dbConfig: DbConfig) extends DbLockError {
-    override protected def pretty: Pretty[UnsupportedDatabaseConfig] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[UnsupportedDatabaseConfig] =
+      UnsupportedDatabaseConfig
+  }
+
+  object UnsupportedDatabaseConfig extends PrettyPrintingCompanion[UnsupportedDatabaseConfig] {
+    override protected val pretty: Pretty[UnsupportedDatabaseConfig] = prettyOfClass(
       unnamedParam(_.dbConfig)
     )
   }
 
   final case class InvalidDatabaseConfig(error: String) extends DbLockError {
-    override protected def pretty: Pretty[InvalidDatabaseConfig] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[InvalidDatabaseConfig] =
+      InvalidDatabaseConfig
+  }
+
+  object InvalidDatabaseConfig extends PrettyPrintingCompanion[InvalidDatabaseConfig] {
+    override protected val pretty: Pretty[InvalidDatabaseConfig] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
 
   final case class FailedToAcquireLock(lockId: DbLockId, error: String) extends DbLockError {
-    override protected def pretty: Pretty[FailedToAcquireLock] =
+    override def prettyCompanion: PrettyPrintingCompanion[FailedToAcquireLock] = FailedToAcquireLock
+  }
+
+  object FailedToAcquireLock extends PrettyPrintingCompanion[FailedToAcquireLock] {
+    override protected val pretty: Pretty[FailedToAcquireLock] =
       prettyOfClass(param("lockId", _.lockId), param("error", _.error.unquoted))
   }
 
   final case class LockAcquireRejected(lockId: DbLockId) extends DbLockError {
-    override protected def pretty: Pretty[LockAcquireRejected] =
-      prettyOfClass(param("lockId", _.lockId))
+    override def prettyCompanion: PrettyPrintingCompanion[LockAcquireRejected] = LockAcquireRejected
+  }
+
+  object LockAcquireRejected extends PrettyPrintingCompanion[LockAcquireRejected] {
+    override protected val pretty: Pretty[LockAcquireRejected] = prettyOfClass(
+      param("lockId", _.lockId)
+    )
   }
 
   final case class FailedToReleaseLock(lockId: DbLockId, error: String) extends DbLockError {
-    override protected def pretty: Pretty[FailedToReleaseLock] =
+    override def prettyCompanion: PrettyPrintingCompanion[FailedToReleaseLock] = FailedToReleaseLock
+  }
+
+  object FailedToReleaseLock extends PrettyPrintingCompanion[FailedToReleaseLock] {
+    override protected val pretty: Pretty[FailedToReleaseLock] =
       prettyOfClass(param("lockId", _.lockId), param("error", _.error.unquoted))
   }
 
   final case class LockReleaseRejected(lockId: DbLockId) extends DbLockError {
-    override def pretty: Pretty[LockReleaseRejected] =
-      prettyOfClass(param("lockId", _.lockId))
+    override def prettyCompanion: PrettyPrintingCompanion[LockReleaseRejected] = LockReleaseRejected
+  }
+
+  object LockReleaseRejected extends PrettyPrintingCompanion[LockReleaseRejected] {
+    override protected val pretty: Pretty[LockReleaseRejected] = prettyOfClass(
+      param("lockId", _.lockId)
+    )
   }
 
   final case class FailedToCheckLock(lockId: DbLockId, error: String) extends DbLockError {
-    override protected def pretty: Pretty[FailedToCheckLock] =
-      prettyOfClass(param("lockId", _.lockId), param("error", _.error.unquoted))
+    override def prettyCompanion: PrettyPrintingCompanion[FailedToCheckLock] = FailedToCheckLock
 
+  }
+
+  object FailedToCheckLock extends PrettyPrintingCompanion[FailedToCheckLock] {
+    override protected val pretty: Pretty[FailedToCheckLock] =
+      prettyOfClass(param("lockId", _.lockId), param("error", _.error.unquoted))
   }
 
   final case class FailedToGetLockOwners(lockId: DbLockId, error: String) extends DbLockError {
-    override protected def pretty: Pretty[FailedToGetLockOwners] =
-      prettyOfClass(param("lockId", _.lockId), param("error", _.error.unquoted))
+    override def prettyCompanion: PrettyPrintingCompanion[FailedToGetLockOwners] =
+      FailedToGetLockOwners
 
+  }
+
+  object FailedToGetLockOwners extends PrettyPrintingCompanion[FailedToGetLockOwners] {
+    override protected val pretty: Pretty[FailedToGetLockOwners] =
+      prettyOfClass(param("lockId", _.lockId), param("error", _.error.unquoted))
   }
 
   final case class LockCheckRejected(lockId: DbLockId) extends DbLockError {
-    override protected def pretty: Pretty[LockCheckRejected] =
-      prettyOfClass(param("lockId", _.lockId))
+    override def prettyCompanion: PrettyPrintingCompanion[LockCheckRejected] = LockCheckRejected
 
+  }
+
+  object LockCheckRejected extends PrettyPrintingCompanion[LockCheckRejected] {
+    override protected val pretty: Pretty[LockCheckRejected] = prettyOfClass(
+      param("lockId", _.lockId)
+    )
   }
 
   final case class LockAlreadyAcquired(lockId: DbLockId) extends DbLockError {
-    override protected def pretty: Pretty[LockAlreadyAcquired] =
-      prettyOfClass(param("lockId", _.lockId))
+    override def prettyCompanion: PrettyPrintingCompanion[LockAlreadyAcquired] = LockAlreadyAcquired
+  }
+
+  object LockAlreadyAcquired extends PrettyPrintingCompanion[LockAlreadyAcquired] {
+    override protected val pretty: Pretty[LockAlreadyAcquired] = prettyOfClass(
+      param("lockId", _.lockId)
+    )
   }
 
   final case class LockAlreadyReleased(lockId: DbLockId) extends DbLockError {
-    override protected def pretty: Pretty[LockAlreadyReleased] =
-      prettyOfClass(param("lockId", _.lockId))
+    override def prettyCompanion: PrettyPrintingCompanion[LockAlreadyReleased] = LockAlreadyReleased
+  }
+
+  object LockAlreadyReleased extends PrettyPrintingCompanion[LockAlreadyReleased] {
+    override protected val pretty: Pretty[LockAlreadyReleased] = prettyOfClass(
+      param("lockId", _.lockId)
+    )
   }
 
   final case class LockAlreadyInAcquisition(lockId: DbLockId) extends DbLockError {
-    override protected def pretty: Pretty[LockAlreadyInAcquisition] =
-      prettyOfClass(param("lockId", _.lockId))
+    override def prettyCompanion: PrettyPrintingCompanion[LockAlreadyInAcquisition] =
+      LockAlreadyInAcquisition
+  }
+
+  object LockAlreadyInAcquisition extends PrettyPrintingCompanion[LockAlreadyInAcquisition] {
+    override protected val pretty: Pretty[LockAlreadyInAcquisition] = prettyOfClass(
+      param("lockId", _.lockId)
+    )
   }
 
   final case class LockAlreadyInReleasing(lockId: DbLockId) extends DbLockError {
-    override protected def pretty: Pretty[LockAlreadyInReleasing] =
-      prettyOfClass(param("lockId", _.lockId))
+    override def prettyCompanion: PrettyPrintingCompanion[LockAlreadyInReleasing] =
+      LockAlreadyInReleasing
+  }
+
+  object LockAlreadyInReleasing extends PrettyPrintingCompanion[LockAlreadyInReleasing] {
+    override protected val pretty: Pretty[LockAlreadyInReleasing] = prettyOfClass(
+      param("lockId", _.lockId)
+    )
   }
 
   final case class LockNotFree(lockId: DbLockId, error: String) extends DbLockError {
-    override protected def pretty: Pretty[LockNotFree] =
+    override def prettyCompanion: PrettyPrintingCompanion[LockNotFree] = LockNotFree
+  }
+
+  object LockNotFree extends PrettyPrintingCompanion[LockNotFree] {
+    override protected val pretty: Pretty[LockNotFree] =
       prettyOfClass(param("lockId", _.lockId), param("error", _.error.unquoted))
   }
 
   final case class LockNotAcquired(lockId: DbLockId, error: String) extends DbLockError {
-    override protected def pretty: Pretty[LockNotAcquired] =
-      prettyOfClass(param("lockId", _.lockId), param("error", _.error.unquoted))
+    override def prettyCompanion: PrettyPrintingCompanion[LockNotAcquired] = LockNotAcquired
 
+  }
+
+  object LockNotAcquired extends PrettyPrintingCompanion[LockNotAcquired] {
+    override protected val pretty: Pretty[LockNotAcquired] =
+      prettyOfClass(param("lockId", _.lockId), param("error", _.error.unquoted))
   }
 
   final case class LostLock(lockId: DbLockId) extends DbLockError {
-    override protected def pretty: Pretty[LostLock] =
-      prettyOfClass(param("lockId", _.lockId))
+    override def prettyCompanion: PrettyPrintingCompanion[LostLock] = LostLock
+  }
+
+  object LostLock extends PrettyPrintingCompanion[LostLock] {
+    override protected val pretty: Pretty[LostLock] = prettyOfClass(param("lockId", _.lockId))
   }
 
   final case class LockInvalidState(lockId: DbLockId, error: String) extends DbLockError {
-    override protected def pretty: Pretty[LockInvalidState] =
-      prettyOfClass(param("lockId", _.lockId), param("error", _.error.unquoted))
+    override def prettyCompanion: PrettyPrintingCompanion[LockInvalidState] = LockInvalidState
 
+  }
+
+  object LockInvalidState extends PrettyPrintingCompanion[LockInvalidState] {
+    override protected val pretty: Pretty[LockInvalidState] =
+      prettyOfClass(param("lockId", _.lockId), param("error", _.error.unquoted))
   }
 }

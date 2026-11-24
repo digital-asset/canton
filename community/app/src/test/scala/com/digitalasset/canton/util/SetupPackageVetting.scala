@@ -13,7 +13,7 @@ import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, PhysicalSynchron
 import com.digitalasset.canton.util.SetupPackageVetting.AllUnvettingFlags
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.{BaseTest, LfPackageId}
-import com.digitalasset.daml.lf.archive.DarReader
+import com.digitalasset.daml.lf.archive.DarPackageIdReader
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import org.scalatest.Assertions.fail
 import org.scalatest.LoneElement.convertToCollectionLoneElementWrapper
@@ -47,14 +47,14 @@ class SetupPackageVetting(
       MapsUtil.transpose(participantsPerSynchronizer)
 
     val darsMap: Map[PackageId, (String, Set[PackageId])] = darPaths.view.map { darPath =>
-      val dar = DarReader
+      val dar = DarPackageIdReader
         .readArchiveFromFile(darFile = new File(darPath))
         .fold(
           err => throw new IllegalArgumentException(s"Failed to read DAR: $darPath", err),
           identity,
         )
 
-      dar.main.pkgId -> (darPath, dar.dependencies.map(_.pkgId).toSet)
+      dar.main -> (darPath, dar.dependencies.toSet)
     }.toMap
 
     // Clean-up

@@ -114,6 +114,7 @@ object SValueHash {
     val TEXT_MAP_TAG: Byte = 13
     val GEN_MAP_TAG: Byte = 14
     val CONTRACT_ID_TAG: Byte = 15
+    val UINT256_TAG: Byte = 16
 
     val END_OF_RECORD: Byte = 0xff.toByte
   }
@@ -177,6 +178,9 @@ object SValueHash {
         case SValue.SContractId(cid) =>
           addByte(CONTRACT_ID_TAG, "CONTRACT_ID_TAG")
             .addCid(cid)
+        case SValue.SUint256(v) =>
+          addByte(UINT256_TAG, "UINT256_TAG")
+            .addBytes(data.Uint256.toByteArray(v), "uint256")
         case SValue.SOptional(opt) =>
           addByte(OPTIONAL_TAG, "OPTIONAL_TAG")
             .addOptional(opt)

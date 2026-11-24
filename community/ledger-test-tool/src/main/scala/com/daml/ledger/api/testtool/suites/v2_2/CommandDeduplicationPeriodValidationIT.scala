@@ -9,15 +9,9 @@ import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.ProtobufConverters.*
 import com.daml.ledger.api.testtool.infrastructure.assertions.CommandDeduplicationAssertions.DurationConversion
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
-import com.daml.ledger.api.testtool.infrastructure.{
-  FutureAssertions,
-  LedgerTestSuite,
-  Party,
-  TestConstraints,
-}
+import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party, TestConstraints}
 import com.daml.ledger.api.v2.commands.Commands.DeduplicationPeriod
 import com.daml.ledger.test.java.model.test.Dummy
-import com.daml.logging.LoggingContext
 import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
@@ -25,12 +19,9 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import java.time.Duration
 import java.util.regex.Pattern
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.*
 
 class CommandDeduplicationPeriodValidationIT(testDars: TestDars) extends LedgerTestSuite {
   import testDars.companionImplicits.*
-
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   test(
     "ValidDeduplicationDuration",
@@ -120,20 +111,7 @@ class CommandDeduplicationPeriodValidationIT(testDars: TestDars) extends LedgerT
       )
       end <- ledger.currentEnd()
       _ <- ledger.exercise(party, secondCreate.exerciseDummyChoice1())
-      _ <- FutureAssertions.succeedsEventually(
-        retryDelay = 10.millis,
-        maxRetryDuration = 10.seconds,
-        ledger.delayMechanism,
-        "Prune offsets",
-      ) {
-        for {
-          _ <- ledger.create(party, new Dummy(party))
-          _ <- ledger.submitAndWait(
-            ledger.submitAndWaitRequest(party, new Dummy(party).create.commands)
-          )
-          _ <- ledger.pruneWithAcsCheck(parties = Some(Seq(party)), pruneUpTo = end, attempts = 1)
-        } yield {}
-      }
+      _ <- ledger.pruneCantonSafe(end, party)
       failure <- submitAndWaitWithDeduplication(
         DeduplicationPeriod.DeduplicationOffset(start)
       ).mustFail("using an offset which was pruned")

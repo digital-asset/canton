@@ -67,7 +67,10 @@ final case class AcsContinuationPointerIncompleteReassignments(
 }
 
 object AcsContinuationToken {
-  private val TokenVersion = 2
+  /*
+   * Version 3: the request checksum includes filtersByContractId field of update format
+   */
+  private val TokenVersion = 3
 
   def calcChecksum(
       request: GetActiveContractsRequest,

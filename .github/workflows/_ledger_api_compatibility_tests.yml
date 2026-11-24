@@ -95,7 +95,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with: {fetch-depth: 0}
+        with: {fetch-depth: 1}
 
       - name: Start Postgres container
         id: postgres
@@ -144,5 +144,4 @@ jobs:
     with:
       caller_job: ledger_api_compatibility_tests
       shard_job_result: ${{ needs.ledger_api_compatibility_tests.result }}
-      runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}

@@ -1,0 +1,167 @@
+# Runs the same tests many times to catch flakes: `repetitions` sbt runs on each of `runners`
+# runners. Every runner runs all the tests, and a runner stops at its first failure. Failed tests
+# are not rerun, and results are not reported to Datadog or the flaky-test issues, because
+# repeated runs of a few tests would skew the flakiness statistics.
+name: Test Many Times
+on:
+  workflow_call:
+    inputs:
+      tests:
+        description: >-
+          Whitespace-separated fully qualified test class names or globs, as `testOnly` takes them
+        required: true
+        type: string
+      protocol_version:
+        required: true
+        type: string
+      runners:
+        description: Number of runners, each running all the tests (at most 20)
+        default: 10
+        type: number
+      repetitions:
+        description: Number of times each runner runs the tests (at most 20)
+        default: 5
+        type: number
+      job_name:
+        description: Distinct name of the calling leg, used to name the artifacts
+        default: test_many_times
+        type: string
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    # No DATADOG_API_KEY on purpose: cleanup_test_job posts the canton.stability.* metrics
+    # whenever the key is set, regardless of report_to_datadog, and repeated runs would skew them.
+    secrets:
+      GCLOUD_SERVICE_KEY:
+        required: false
+      AWS_ACCESS_KEY_ID:
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        required: false
+      AWS_SESSION_TOKEN:
+        required: false
+      AWS_REGION:
+        required: false
+
+# Checkout needs contents, and the GCP KMS setup uses workload identity (id-token). Nothing writes
+# issues or artifacts through the token, since reporting is off.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  plan:
+    name: Plan runners
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      runners: ${{ steps.plan.outputs.runners }}
+      command: ${{ steps.plan.outputs.command }}
+    steps:
+      - name: Validate inputs and build the sbt command
+        id: plan
+        shell: bash
+        env:
+          TESTS: ${{ inputs.tests }}
+          RUNNERS: ${{ inputs.runners }}
+          REPETITIONS: ${{ inputs.repetitions }}
+          # Caps the cost of a run; GitHub would also reject a matrix of more than 256 jobs.
+          MAX_RUNNERS: 20
+          MAX_REPETITIONS: 20
+        run: |
+          read -r -a tests <<< "$(tr -s '[:space:]' ' ' <<< "$TESTS")"
+          if (( ${#tests[@]} == 0 )); then
+            echo "::error::No tests given. An empty testOnly would run every test."
+            exit 1
+          fi
+          for test in "${tests[@]}"; do
+            if ! [[ "$test" =~ ^[A-Za-z0-9_.*]+$ ]]; then
+              echo "::error::Not a test class name or glob: '$test'"
+              exit 1
+            fi
+          done
+          for name in RUNNERS REPETITIONS; do
+            max="MAX_$name"
+            if ! [[ "${!name}" =~ ^[1-9][0-9]*$ ]] || (( ${!name} > ${!max} )); then
+              echo "::error::${name,,} must be an integer from 1 to ${!max}, got '${!name}'"
+              exit 1
+            fi
+          done
+          echo "runners=$(jq -c -n --argjson n "$RUNNERS" '[range($n)]')" >> "$GITHUB_OUTPUT"
+          echo "command=dumpClassPath \"testManyTimes $REPETITIONS ${tests[*]}\"" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Test many times"
+            echo "$RUNNERS runners × $REPETITIONS repetitions:"
+            for test in "${tests[@]}"; do echo "- \`$test\`"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  test:
+    name: Test many times (runner ${{ matrix.runner }})
+    needs: plan
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJSON(needs.plan.outputs.runners) }}
+    timeout-minutes: 180
+    env:
+      GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_RETRY_MODE: adaptive
+      AWS_MAX_ATTEMPTS: "10"
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+      CANTON_CI_JOB_NAME: ${{ inputs.job_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 1}
+
+      - name: Start Postgres container
+        id: postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: ${{ matrix.runner }}
+
+      - name: Start Toxiproxy container
+        id: toxiproxy
+        uses: ./.github/actions/utils/toxiproxy/start_toxiproxy_container
+        with:
+          shard-index: ${{ matrix.runner }}
+          network-mode: host
+
+      - name: Set Canton Protocol Version
+        uses: ./.github/actions/test/set_canton_protocol_version
+        with:
+          protocol_version: ${{ inputs.protocol_version }}
+
+      - name: Run tests many times
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: ${{ needs.plan.outputs.command }}
+          execution_context_size: '8'
+          num_parallel_tasks: '4'
+          num_test_buckets: '0'
+          shard_index: ${{ matrix.runner }}
+          failed_only_rerun: 'false'
+          report_to_datadog: 'false'
+          job_name: ${{ inputs.job_name }}
+          # Below the job's timeout-minutes, so that the sbt wrapper reports the timeout and the
+          # cleanup steps still upload the logs.
+          timeout: '165m'
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}
+
+      - name: Stop Toxiproxy container
+        if: always()
+        uses: ./.github/actions/utils/toxiproxy/stop_toxiproxy_container
+        with:
+          container-name: ${{ steps.toxiproxy.outputs.container-name }}

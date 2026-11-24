@@ -188,6 +188,12 @@ object DamlLfFeature {
     versionRange = VersionRange.Inclusive(v2_1, v2_4),
   )
 
+  val featurePV38 = DamlLfFeature(
+    name = "LF versions supported by PV38",
+    cppFlag = "DAML_PV38",
+    versionRange = VersionRange.Inclusive(v2_1, v2_4),
+  )
+
   val allFeatures: Map[String, DamlLfFeature] = Map(
     "featureUnstable" -> featureUnstable,
     "featureBigNumeric" -> featureBigNumeric,
@@ -210,6 +216,7 @@ object DamlLfFeature {
     "featurePV35" -> featurePV35,
     "featurePV36" -> featurePV36,
     "featurePV37" -> featurePV37,
+    "featurePV38" -> featurePV38,
     "featureUnpack" -> featureUnpack,
     "featureUint256" -> featureUint256,
   )

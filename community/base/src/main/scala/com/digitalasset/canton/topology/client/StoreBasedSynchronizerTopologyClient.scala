@@ -216,7 +216,7 @@ class StoreBasedSynchronizerTopologyClient(
   )(implicit
       traceContext: TraceContext
   ): Unit = {
-    logger.debug(
+    logger.trace(
       s"Head update requested: sequenced=$sequencedTimestamp, effective=$effectiveTimestamp, approx=$approximateTimestamp, topologyChange=$topologyChange"
     )
     val curHead =
@@ -240,10 +240,6 @@ class StoreBasedSynchronizerTopologyClient(
       sequencerCounter: SequencerCounter,
       transactions: Seq[GenericSignedTopologyTransaction],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    logger.debug(
-      s"Observed: sequenced=$sequencedTimestamp, effective=$effectiveTimestamp, numTransactions=${transactions.size}"
-    )
-
     // Advance the head timestamps; the head approximate timestamp can be advanced to the observed sequenced timestamp.
     updateHeadInternal(
       sequencedTimestamp,

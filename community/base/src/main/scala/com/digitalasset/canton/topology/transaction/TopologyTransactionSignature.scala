@@ -98,6 +98,17 @@ final case class MultiTransactionSignature(
   override def coversHash(txHash: TxHash): Boolean = transactionHashes.contains(txHash)
 
   @inline override def authorizingLongTermKey: Fingerprint = signature.authorizingLongTermKey
+
+  /** Hashes only `signature` and deliberately ignores `transactionHashes`.
+    *
+    * Deserializing one proto entry with N signatures over M transaction hashes yields N instances
+    * that share the same M-element set. This would make adding these instances to a hash-based
+    * collection cost O(N * M).
+    *
+    * This is consistent with `equals`: equal instances have equal signatures, hence equal hash
+    * codes.
+    */
+  override def hashCode: Int = signature.hashCode
 }
 
 object MultiTransactionSignature {

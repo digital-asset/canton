@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.bfttime
 
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
@@ -44,7 +44,7 @@ object CanonicalCommitSet {
 
   def fromProto(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       canonicalCommitSet: v30.CanonicalCommitSet,
   ): ParsingResult[CanonicalCommitSet] =
     ProtoValidation

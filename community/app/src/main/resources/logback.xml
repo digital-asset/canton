@@ -274,6 +274,9 @@
 
     <logger name="com.digitalasset" level="${LOG_LEVEL_CANTON:-INFO}"/>
     <logger name="com.daml" level="${LOG_LEVEL_CANTON:-INFO}"/>
+    <!-- HikariConfig logs the pool configuration at DEBUG, including data source properties such as
+         JDBC URLs and sslpassword that it does not mask. Canton logs the masked config itself. -->
+    <logger name="com.zaxxer.hikari.HikariConfig" level="INFO"/>
 
     <condition class="ch.qos.logback.core.boolex.IsPropertyDefinedCondition">
         <key>LOG_ACCESS</key>

@@ -25,6 +25,7 @@ import com.digitalasset.canton.crypto.{
   Fingerprint,
   Hash,
   PbkdfScheme,
+  PublicKey,
   Signature,
   SignatureCheckError,
   SignatureDelegation,
@@ -47,6 +48,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.nonempty.NonEmpty
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 import com.google.protobuf.ByteString
@@ -268,6 +270,15 @@ class SyncCryptoVerifier(
         doNotCacheAndWarn: Boolean,
     ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
       for {
+        _ <- PublicKey
+          .validateNamedCurve(
+            ProtocolVersionValidation(staticSynchronizerParameters.protocolVersion),
+            sessionKey,
+          )
+          .leftMap[SignatureCheckError](err =>
+            SignatureCheckError.InvalidSignatureDelegation(err.message)
+          )
+          .toEitherT[FutureUnlessShutdown]
         // validate signature of delegation (key validity is tested below)
         delegationHash <- SignatureDelegation
           .generateHash(
@@ -335,7 +346,6 @@ class SyncCryptoVerifier(
           s"Session signing keys are not supposed to be used for non-protocol messages. Requested usage: $usage"
         ),
       )
-
       // get the current long-term valid keys
       validKeys <- validKeysO.fold(
         getValidKeys(topologySnapshot, signers, usage)

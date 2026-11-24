@@ -7,7 +7,6 @@ import cats.syntax.either.*
 import com.daml.ledger.api.v2.state_service.GetHostedPartiesPageRequest
 import com.daml.platform.v1.page_tokens.HostedPartiesPageTokenPayload
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
-import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.util.PageTokenUtils
 import com.digitalasset.canton.ledger.api.validation.{FieldValidator, LedgerApiSizeLimitsConfig}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
@@ -24,16 +23,11 @@ object HostedPartiesPageToken {
   @SuppressWarnings(Array("com.digitalasset.canton.ProtobufToByteString"))
   def encode(
       request: GetHostedPartiesPageRequest,
-      partyLowerBoundExcl: Ref.Party,
-      hostedAtOffset: Offset,
+      continuationToken: ByteString,
       participantId: Ref.ParticipantId,
   ): ByteString =
     HostedPartiesPageTokenPayload(
-      continuationToken = HostedPartiesContinuationToken.encode(
-        partyLowerBoundExcl,
-        hostedAtOffset,
-        PageTokenUtils.emptyChecksum,
-      ),
+      continuationToken = continuationToken,
       version = TokenVersion,
       participantIdChecksum = calcParticipantChecksum(participantId),
       requestChecksum = calcRequestChecksum(request),

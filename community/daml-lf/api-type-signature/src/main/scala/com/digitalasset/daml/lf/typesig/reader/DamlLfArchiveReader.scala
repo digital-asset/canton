@@ -8,6 +8,7 @@ package reader
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.language.Ast
+import com.google.protobuf.ByteString
 import scalaz.\/
 
 object DamlLfArchiveReader {
@@ -16,19 +17,12 @@ object DamlLfArchiveReader {
     \/.fromEither(either).leftMap(err => s"Cannot parse archive: $err")
 
   def readPackage(lf: DamlLf.Archive): String \/ (Ref.PackageId, Ast.PackageSignature) =
-    fromEither(archive.Reader.readArchive(lf, schemaMode = true)) flatMap readPackage
+    fromEither(archive.Decode.decodeArchiveSchema(lf))
 
   def readPackage(
       packageId: Ref.PackageId,
-      lf: DamlLf.ArchivePayload,
+      lf: ByteString,
   ): String \/ (Ref.PackageId, Ast.PackageSignature) =
-    fromEither(
-      archive.Reader.readArchivePayload(packageId, lf, schemaMode = true)
-    ) flatMap readPackage
-
-  private[typesig] def readPackage(
-      payLoad: archive.ArchivePayload
-  ): String \/ (Ref.PackageId, Ast.PackageSignature) =
-    fromEither(archive.Decode.decodeArchivePayloadSchema(payLoad))
+    fromEither(archive.Decode.decodeArchivePayloadBytesSchema(packageId, lf))
 
 }

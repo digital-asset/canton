@@ -215,6 +215,11 @@ runs:
         cp test-debug-artifacts-${{ github.run_id }}-${{ inputs.shard_index }}.tar.gz .shard-bundle/debug/ 2>/dev/null || true
         cp postgres-query-stats.sql.gz .shard-bundle/postgres/ 2>/dev/null || true
 
+        # A fixed root, so the artifact keeps the summary/ and timings/ prefixes when one is missing.
+        mkdir -p .shard-outputs/{summary,timings}
+        cp -r .shard-bundle/summary/. .shard-outputs/summary/
+        cp -r .shard-bundle/timings/. .shard-outputs/timings/
+
         find .shard-bundle -type f | sort || true
         echo "::endgroup::"
 
@@ -226,13 +231,14 @@ runs:
         JOB_NAME: ${{ inputs.job_name }}
       run: |
         # if you change this pattern, don't forget to update the download pattern in
-        # _aggregate_test_shard_outputs.yml's "Download shard bundle artifacts" step
+        # _aggregate_test_shard_outputs.yml's "Download shard outputs artifacts" step
         LEG_NAME="${JOB_NAME:-${{ github.job }}}"
         NAME="${LEG_NAME}-bundle-run-${{ github.run_id }}"
         NAME="${NAME}-pv-${{ env.CANTON_PROTOCOL_VERSION || 'default' }}"
         NAME="${NAME}-shard-${{ inputs.shard_index }}"
         NAME="${NAME}-attempt-${{ github.run_attempt }}"
         echo "bundle_artifact_name=$NAME" >> $GITHUB_OUTPUT
+        echo "outputs_artifact_name=${NAME/-bundle-run-/-outputs-run-}" >> $GITHUB_OUTPUT
 
     - name: Upload shard bundle artifact
       id: upload_shard_bundle
@@ -241,6 +247,17 @@ runs:
       with:
         name: ${{ steps.artifact_name_gen.outputs.bundle_artifact_name }}
         path: .shard-bundle
+        retention-days: 7
+        include-hidden-files: 'true'
+        if-no-files-found: warn
+
+    # Only the files _aggregate_test_shard_outputs.yml reads, so it does not download the bundle.
+    - name: Upload shard outputs artifact
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ steps.artifact_name_gen.outputs.outputs_artifact_name }}
+        path: .shard-outputs
         retention-days: 7
         include-hidden-files: 'true'
         if-no-files-found: warn

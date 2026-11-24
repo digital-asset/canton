@@ -55,14 +55,20 @@ object GeneratorsCrypto {
     if SigningKeyUsage.isUsageValid(NonEmptyUtil.fromUnsafe(usages.toSet))
   } yield usages.toSet
 
-  // TODO(#15813): Change arbitrary signing keys to match real keys
-  implicit val signingPublicKeyArb: Arbitrary[SigningPublicKey] = Arbitrary(for {
+  // Generator for a key that contains the usages passed as parameter
+  def signingKeyWithUsages(withUsages: Set[SigningKeyUsage]): Gen[SigningPublicKey] = for {
     key <- Arbitrary.arbitrary[ByteString]
     keySpec <- Arbitrary.arbitrary[SigningKeySpec]
     format = CryptoKeyFormat.Symbolic
     usage <- nonEmptySetGen(Arbitrary(Gen.oneOf(SigningKeyUsage.All.toList)))
+      .map(_ ++ withUsages)
       .suchThat(usagesNE => SigningKeyUsage.isUsageValid(usagesNE))
-  } yield SigningPublicKey.create(format, key, keySpec, usage).value)
+  } yield SigningPublicKey.create(format, key, keySpec, usage).value
+
+  // TODO(#15813): Change arbitrary signing keys to match real keys
+  implicit val signingPublicKeyArb: Arbitrary[SigningPublicKey] = Arbitrary(
+    signingKeyWithUsages(Set())
+  )
 
   @nowarn("msg=Raw in object SignatureFormat is deprecated")
   implicit val signatureFormatArb: Arbitrary[SignatureFormat] = genArbitrary
@@ -141,7 +147,7 @@ object GeneratorsCrypto {
     } yield MultiHashSignature.create(
       signature,
       InclusionPath.tryCreate(index, siblings),
-      MultiHashSignature.LeafSalt.tryCreate(salt),
+      MultiHashSignature.LeafSalt.create(salt).value,
     )
   )
 

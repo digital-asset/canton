@@ -167,7 +167,7 @@ class PerformanceReplicatedParticipantDatabaseFaultIntegrationTest
             toxic.remove()
           }
 
-        (1 to 10).foreach(_ => failDbConnection(hasCompleted()))
+        (1 to 10).foreach(_ => failDbConnection(hasCompleted()._1))
       }
       replica1Proxy.controllingToxiproxyClient.reset()
   }

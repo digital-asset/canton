@@ -49,7 +49,7 @@ runs:
         ref_group_key="${EVENT_NAME}-${REF_NAME}"
         base_branch="main"
         version=$(grep -oE '[0-9]+\.[0-9]+' version.sbt 2>/dev/null | head -1 || true)
-        if git rev-parse --verify --quiet "refs/remotes/origin/release-line-${version}" >/dev/null 2>&1; then
+        if git ls-remote --exit-code --heads origin "release-line-${version}" >/dev/null 2>&1; then
           base_branch="release-line-${version}"
         fi
 

@@ -89,7 +89,7 @@ object EnvelopeContent
         case Content.TopologyTransactionsBroadcast(messageP) =>
           TopologyTransactionsBroadcast.fromProtoV30(
             pvv,
-            TopologyTransactionDeserializationContext(synchronizerLimits.topologyLimits),
+            TopologyTransactionDeserializationContext(synchronizerLimits.topologyLimitsView),
             messageP,
           )
         case Content.AcsCommitmentProtocolMessage(messageP) =>

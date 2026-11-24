@@ -96,7 +96,6 @@ final class GetCompletionsIT extends LedgerTestSuite {
     "GCWildcardParties",
     "Read completions through GetCompletions with wildcard parties",
     allocate(TwoParties),
-    runConcurrently = false,
   )(implicit ec => { case Participants(Participant(ledger, Seq(alice, bob))) =>
     val aliceRequest = ledger.submitRequest(alice, new Dummy(alice).create.commands)
     val bobRequest = ledger.submitRequest(bob, new Dummy(bob).create.commands)

@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.Signature
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequired}
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -146,7 +146,7 @@ object Availability {
     /** Deserialization context for BFT orderer availability structures */
     final case class AvailabilityDeserializationContext(
         from: BftNodeId,
-        limits: BftOrdererLimits,
+        limits: BftOrdererLimitsView,
     )
 
     object RemoteBatch

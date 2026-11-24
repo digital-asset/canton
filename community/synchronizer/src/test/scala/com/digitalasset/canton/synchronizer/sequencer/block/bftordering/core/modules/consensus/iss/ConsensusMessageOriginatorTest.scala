@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss
 
 import com.digitalasset.canton.crypto.Signature
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.bfttime.CanonicalCommitSet
@@ -88,7 +88,7 @@ final class ConsensusMessageOriginatorTest extends AnyWordSpec with BftSequencer
     )(synchronizerProtocolVersion)
 
   private val pvv = ProtocolVersionValidation.AlwaysValidation
-  private val limits = BftOrdererLimits.default
+  private val limits = BftOrdererLimitsView.default
   private val segmentContext =
     ConsensusSegmentDeserializationContext(claimedOriginator, Some(actualSender), limits)
 

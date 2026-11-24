@@ -72,7 +72,7 @@ class DbLogicalSyncPersistentState(
     new DbActiveContractStore(
       storage,
       synchronizerIdx,
-      Option.when(enableAdditionalConsistencyChecks)(
+      Option.when(parameters.enableCantonAcsConsistencyChecks)(
         parameters.activationFrequencyForWarnAboutConsistencyChecks
       ),
       parameters.stores.journalPruning.toInternal,

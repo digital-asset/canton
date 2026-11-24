@@ -18,6 +18,8 @@
   <appender name="FILE" class="ch.qos.logback.core.FileAppender">
     <file>${LOG_FILE_NAME:-log/canton_test.log}</file>
     <append>${LOG_APPEND:-true}</append>
+    <!-- Set this to true if you want to flush the log file after every log message -->
+    <immediateFlush>${TEST_LOG_IMMEDIATE_FLUSH:-true}</immediateFlush>
     <encoder>
       <!-- attempt to place the trace-id with a trailing space, however replace with an empty string if it's empty -->
       <pattern>%date [%thread] %-5level %logger{10} %replace(tid:%mdc{trace-id} ){'tid: ', ''}- %msg%replace(, context: %marker){', context: $', ''}%replace( err-context:%mdc{err-context} ){' err-context: ', ''}%n</pattern>

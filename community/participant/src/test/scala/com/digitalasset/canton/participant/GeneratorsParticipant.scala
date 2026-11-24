@@ -94,6 +94,7 @@ final class GeneratorsParticipant(
   import generatorsTransaction.*
   import generatorsLf.*
   import com.digitalasset.canton.ledger.api.GeneratorsApi.*
+  import com.digitalasset.canton.GeneratorsLapi.arbCreatedEvent
   import com.digitalasset.canton.crypto.GeneratorsCrypto.*
 
   implicit val completionInfoArb: Arbitrary[CompletionInfo] = Arbitrary {
@@ -167,16 +168,22 @@ final class GeneratorsParticipant(
     Arbitrary(Gen.chooseNum(0L, Long.MaxValue).map(ReassignmentCounter(_)))
 
   import com.daml.ledger.api.v2.state_service.ActiveContract as LapiActiveContract
+  import com.daml.ledger.api.v2.event.CreatedEvent
+
   implicit val activeContractArb: Arbitrary[ActiveContract] =
     Arbitrary(
       for {
         synchronizerId <- Arbitrary.arbitrary[SynchronizerId]
         reassignmentCounter <- Arbitrary.arbitrary[ReassignmentCounter]
-        // TODO(#26599): Add generator for LapiActiveContract
-        lapiActiveContract <- Gen.const(
-          LapiActiveContract(None, synchronizerId.toProtoPrimitive, reassignmentCounter.unwrap)
+        createdEventP <- Arbitrary.arbitrary[CreatedEvent]
+      } yield {
+        val lapiActiveContract = LapiActiveContract(
+          Some(createdEventP),
+          synchronizerId.toProtoPrimitive,
+          reassignmentCounter.unwrap,
         )
-      } yield ActiveContract.create(lapiActiveContract)(version)
+        ActiveContract.create(lapiActiveContract)(version)
+      }
     )
 
   // If this pattern match is not exhaustive anymore, update the message generator below

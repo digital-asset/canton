@@ -4,9 +4,25 @@
 package com.digitalasset.canton.topology.processing
 
 import cats.instances.order.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.crypto.{
+  CryptoKeyFormat,
+  Fingerprint,
+  SigningKeySpec,
+  SigningKeyUsage,
+  SigningPublicKey,
+}
 import com.digitalasset.canton.topology.Namespace
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
+import com.digitalasset.canton.topology.transaction.{
+  NamespaceDelegation,
+  SignedTopologyTransaction,
+  TopologyChangeOp,
+  TopologyTransaction,
+}
 import com.digitalasset.canton.{BaseTestWordSpec, ProtocolVersionChecksAnyWordSpec}
+import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
 class AuthorizationGraphTest
@@ -347,6 +363,87 @@ class AuthorizationGraphTest
         }.toSet
 
         persistentKeys shouldBe Set(key1.fingerprint, key2.fingerprint, key3.fingerprint)
+      }
+    }
+
+    "recomputing the authorization graph" should {
+      def levelsByTarget(graph: AuthorizationGraph): Map[Fingerprint, Int] =
+        graph
+          .authorizedDelegations(keyToAuthorizeO = None)(namespace)
+          .map { case (delegation, level) => delegation.mapping.target.fingerprint -> level }
+          .toMap
+
+      /** Like `mkAdd`, but with a dummy signature of `key` instead of a real one. The graph does
+        * not verify signatures, and signing every link of a long chain would dominate the test.
+        */
+      def mkAddDummy(
+          nsd: NamespaceDelegation,
+          key: SigningPublicKey,
+      ): AuthorizedTopologyTransaction[NamespaceDelegation] =
+        AuthorizedTopologyTransaction(
+          SignedTopologyTransaction.withSignature(
+            TopologyTransaction.tryCreate(
+              TopologyChangeOp.Replace,
+              PositiveInt.one,
+              nsd,
+              testedProtocolVersion,
+            ),
+            SymbolicCrypto.signature(ByteString.EMPTY, key.fingerprint),
+            isProposal = false,
+            testedProtocolVersion,
+          )
+        )
+
+      "be stack-safe for long delegation chains" in {
+        val chainLength = 50000
+        // Generate only public keys and not keypairs for speed.
+        // The graph requires unique fingerprints but does not verify signatures.
+        val keys = (1 to chainLength).map { i =>
+          SigningPublicKey
+            .create(
+              format = CryptoKeyFormat.Symbolic,
+              key = ByteString.copyFromUtf8(s"chain-key-$i"),
+              keySpec = SigningKeySpec.EcCurve25519,
+              usage = SigningKeyUsage.NamespaceOnly,
+            )
+            .value
+        }
+        // k1 -> chain-key-1 -> chain-key-2 -> ... -> chain-key-<chainLength>
+        val delegations = nsk1k1 +: (key1 +: keys).zip(keys).map { case (signer, target) =>
+          mkAddDummy(mkNSD(namespace, target, canSignNamespaceDelegations = true), signer)
+        }
+        // without extra debug info, as that would render the whole chain into a single log message
+        val graph = new AuthorizationGraph(
+          namespace,
+          extraDebugInfo = false,
+          warnAboutDanglingKeys = true,
+          loggerFactory,
+        )
+        // a single replace, so that the graph gets recomputed only once
+        graph.replace(delegations)
+
+        check(graph, Code.NamespaceDelegation, valid = true)(keys.last)
+        // the root certificate has level 1, every chain link adds 1
+        levelsByTarget(graph) shouldBe (key1 +: keys)
+          .map(_.fingerprint)
+          .zipWithIndex
+          .map { case (fingerprint, index) => fingerprint -> (index + 1) }
+          .toMap
+      }
+
+      "assign the depth-first chain length as level" in {
+        val graph = mkGraph
+        // k1 -> k2 -> k3
+        //  '--> k4
+        val nsk4k1 = mkAdd(mkNSD(namespace, key4, canSignNamespaceDelegations = true), key1)
+        graph.replace(Seq(nsk1k1, nsk2k1, nsk3k2, nsk4k1))
+
+        levelsByTarget(graph) shouldBe Map(
+          key1.fingerprint -> 1,
+          key2.fingerprint -> 2,
+          key3.fingerprint -> 3,
+          key4.fingerprint -> 2,
+        )
       }
     }
   }

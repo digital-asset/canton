@@ -571,7 +571,7 @@ class DecodeV1Spec
   "decodeModuleRef" should {
     "take a dar with interned IDs" in {
       lazy val ArchivePayload.Lf1(pkgId, dalfProto, minorVersion) =
-        DarReader
+        TestReaders.DarReader
           .assertReadArchiveFromFile(
             Paths.get(getClass.getClassLoader.getResource("DarReaderTest-v115.dar").toURI).toFile
           )
