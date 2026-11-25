@@ -74,11 +74,12 @@ private[refinement] final class EnricherImpl(
       contract: FatContractInstance,
       packageIds: NonEmptySet[PackageId],
   )(implicit traceContext: TraceContext): Result[Either[String, FatContractInstance]] = {
-    def neededPkgs = packageIds.toNonEmptyList.iterator.map(pkgId =>
-      pkgId -> language.Reference.Template(
-        Identifier(pkgId, contract.templateId.qualifiedName).toRef
+    def neededPkgs = keyPkgs(contract.contractKeyWithMaintainers).iterator ++
+      packageIds.toNonEmptyList.iterator.map(pkgId =>
+        pkgId -> language.Reference.Template(
+          Identifier(pkgId, contract.templateId.qualifiedName).toRef
+        )
       )
-    )
     safelyRun(pullPackages(neededPkgs.toMap))(
       unsafeEnrichCreateWithPackages(contract.toCreateNode, packageIds).map(
         FatContractInstance.fromCreateNode(_, contract.createdAt, contract.authenticationData)
@@ -208,6 +209,14 @@ private[refinement] final class EnricherImpl(
     unsafeEnrichValue(choice.returnType, value)
   }
 
+  // A key is enriched against its own template id, which can point to an older package than the
+  // node or contract carrying it (e.g. a contract created before a package upgrade).
+  private[this] def keyPkgs(key: Option[GlobalKeyWithMaintainers]): List[(PackageId, Reference)] =
+    key.toList.map { k =>
+      val tyCon = k.globalKey.templateId
+      tyCon.packageId -> language.Reference.TemplateKey(tyCon)
+    }
+
   private[this] def unsafeEnrichContractKey(tyCon: Identifier, value: Value) = {
     val key = handleLookup(pkgInterface.lookupTemplateKey(tyCon))
     unsafeEnrichValue(key.typ, value)
@@ -332,9 +341,9 @@ private[refinement] final class EnricherImpl(
 
   private[this] def pullTransactionPkgs(nodes: Iterable[Node]) = {
     val pkgIds = nodes.flatMap {
-      case leaf: Node.LeafOnlyAction => templatePkg(leaf.templateId)
+      case leaf: Node.LeafOnlyAction => keyPkgs(leaf.keyOpt) ++ templatePkg(leaf.templateId)
       case exe: Node.Exercise =>
-        choicePkgs(
+        keyPkgs(exe.keyOpt) ++ choicePkgs(
           exe.templateId.packageId,
           exe.templateId.qualifiedName,
           exe.interfaceId,

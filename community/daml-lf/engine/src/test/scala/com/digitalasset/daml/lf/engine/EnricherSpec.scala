@@ -27,7 +27,13 @@ import com.digitalasset.daml.lf.transaction.test.{
   TransactionBuilder,
   TreeTransactionBuilder,
 }
-import com.digitalasset.daml.lf.transaction.{CommittedTransaction, NodeId, SerializationVersion}
+import com.digitalasset.daml.lf.transaction.{
+  CommittedTransaction,
+  GlobalKeyWithMaintainers,
+  Node,
+  NodeId,
+  SerializationVersion,
+}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.Inside
@@ -566,6 +572,123 @@ class EnricherSpec
         val result = enricher.enrichVersionedTransaction(largeTx).void
         result.consume(lookupHandler(pkgs = Map(defaultPackageId -> pkg)))
         succeed
+      }
+    }
+  }
+
+  "Enricher on a contract key whose template comes from an older package" should {
+
+    // Two versions of the same keyed template. The key is stamped with the package that created the
+    // contract, here keyPkgId1, while the command runs against the upgrade, keyPkgId2.
+    def keyedPkg(version: String, pkgId: Ref.PackageId, extraField: String) =
+      p""" metadata ( 'keyed-pkg' : '$version' )
+          module M {
+            record @serializable K = { owner: Party };
+            record @serializable T = { owner: Party $extraField };
+            template (this : T) = {
+              precondition True;
+              signatories Cons @Party [M:T {owner} this] (Nil @Party);
+              observers Nil @Party;
+              key @M:K (M:K { owner = M:T {owner} this })
+                (\(k: M:K) -> Cons @Party [M:K {owner} k] (Nil @Party));
+            };
+          }
+      """ (defaultParserParameters.copy(defaultPackageId = pkgId))
+
+    val keyPkgId1 = Ref.PackageId.assertFromString("-keyed-pkg-id-1-")
+    val keyPkgId2 = Ref.PackageId.assertFromString("-keyed-pkg-id-2-")
+    val keyPkg1 = keyedPkg("1.0.0", keyPkgId1, "")
+    val keyPkg2 = keyedPkg("2.0.0", keyPkgId2, ", extra: Option Int64")
+    val keyPkgs = Map(keyPkgId1 -> keyPkg1, keyPkgId2 -> keyPkg2)
+
+    val alice = Ref.Party.assertFromString("alice")
+    val tmplId1 = Ref.TypeConId(keyPkgId1, "M:T")
+    val tmplId2 = Ref.TypeConId(keyPkgId2, "M:T")
+
+    val keySValue = SValue.SRecord(
+      Ref.TypeConId(keyPkgId1, "M:K"),
+      ImmArray("owner"),
+      ArraySeq(SValue.SParty(alice)),
+    )
+    val key = GlobalKeyWithMaintainers(
+      tmplId1,
+      keySValue.toNormalizedValue,
+      SValueHash.assertHashContractKey(keyPkg1.pkgName, tmplId1.qualifiedName, keySValue),
+      Set(alice),
+      keyPkg1.pkgName,
+    )
+    val enrichedKeyValue =
+      ValueRecord(
+        Some(Ref.TypeConId(keyPkgId1, "M:K")),
+        ImmArray(Some[Ref.Name]("owner") -> ValueParty(alice)),
+      )
+
+    val enrichedArg =
+      ValueRecord(Some(tmplId2), ImmArray(Some[Ref.Name]("owner") -> ValueParty(alice)))
+
+    def contract(keyOpt: Option[GlobalKeyWithMaintainers]) =
+      TransactionBuilder.fatContractInstanceWithDummyDefaults(
+        version = SerializationVersion.minVersion,
+        packageName = keyPkg1.pkgName,
+        template = tmplId1,
+        arg = ValueRecord(None, ImmArray(None -> ValueParty(alice))),
+        signatories = Set(alice),
+        contractKeyWithMaintainers = keyOpt,
+      )
+
+    // A fresh engine has nothing compiled yet, like a participant right after a restart.
+    def freshEnricher() = Enricher(
+      Engine.DevEngine(loggerFactory),
+      addTypeInfo = true,
+      addFieldNames = true,
+      addTrailingNoneFields = false,
+    )
+
+    implicit val `Package ID Order`: Order[PackageId] =
+      Order.fromOrdering(PackageId.ordering)
+
+    "load the key's package when enriching an input contract for the upgraded package only" in {
+      val result = freshEnricher()
+        .enrichContractWithPackages(contract(Some(key)), NonEmptySet.of(keyPkgId2))
+        .consume(lookupHandler(pkgs = keyPkgs))
+      inside(result) { case Right(Right(enriched)) =>
+        enriched.createArg shouldBe enrichedArg
+        enriched.contractKeyWithMaintainers.map(_.value) shouldBe Some(enrichedKeyValue)
+      }
+    }
+
+    "still enrich when the key's package is one of the target packages" in {
+      val result = freshEnricher()
+        .enrichContractWithPackages(contract(Some(key)), NonEmptySet.of(keyPkgId1, keyPkgId2))
+        .consume(lookupHandler(pkgs = keyPkgs))
+      inside(result) { case Right(Right(enriched)) =>
+        enriched.contractKeyWithMaintainers.map(_.value) shouldBe Some(enrichedKeyValue)
+      }
+    }
+
+    "not ask for the older package when the contract has no key" in {
+      val result = freshEnricher()
+        .enrichContractWithPackages(contract(None), NonEmptySet.of(keyPkgId2))
+        .consume(lookupHandler(pkgs = Map(keyPkgId2 -> keyPkg2)))
+      inside(result) { case Right(Right(enriched)) =>
+        enriched.createArg shouldBe enrichedArg
+        enriched.contractKeyWithMaintainers shouldBe None
+      }
+    }
+
+    "load the key's package when enriching a transaction node on the upgraded template" in {
+      val fetch = TestNodeBuilder
+        .fetch(contract(Some(key)).toCreateNode, byKey = false)
+        .copy(templateId = tmplId2)
+      val result = freshEnricher()
+        .enrichVersionedTransaction(
+          TreeTransactionBuilder.toVersionedTransaction(TreeTransactionBuilder.Leaf(fetch))
+        )
+        .consume(lookupHandler(pkgs = keyPkgs))
+      inside(result) { case Right(tx) =>
+        inside(tx.nodes.values.toList) { case List(enrichedFetch: Node.Fetch) =>
+          enrichedFetch.keyOpt.map(_.value) shouldBe Some(enrichedKeyValue)
+        }
       }
     }
   }

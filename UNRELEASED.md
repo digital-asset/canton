@@ -164,6 +164,10 @@ fix is deployed on MainNet:
   every thread of the JSON API and make it unresponsive.
 - A DAR upload to the JSON Ledger API that is larger than `max-inbound-message-size` is rejected with HTTP status 413
   and the new error code `JSON_API_REQUEST_BODY_TOO_LARGE` instead of an internal error.
+- Preparing an interactive submission that uses a contract with a contract key no longer fails with
+  `unknown package ... template without contract key` when the contract was created with an older version of an
+  upgraded package and the participant has been restarted since. The enricher now also loads the package the key
+  belongs to.
 
 ## Compatibility
 
