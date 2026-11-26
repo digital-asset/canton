@@ -131,14 +131,14 @@ create_daml_upgrade_pull_request() {
   fi
   $_GIT commit -m "Upstream upgrade to Daml $DAML_VERSION_TO_UPGRADE_TO" >&2
 
-  MAIN_BRANCH="main"
+  BASE_BRANCH="${BASE_BRANCH:-main}"
   MAX_NUMBER_DAML_CHANGES=200
   DAML_REPO="https://github.com/digital-asset/daml"
   PR_DESCRIPTION_FILE="/tmp/pr_description.txt"
   echo -e "Upstream upgrade to Daml ${DAML_VERSION_TO_UPGRADE_TO}\n" | tee $PR_DESCRIPTION_FILE >&2
 
   # Embed daml-repo change list in PR:
-  echo -e "[${MAIN_BRANCH}] Daml changes (listing up to $MAX_NUMBER_DAML_CHANGES):\n" | tee -a $PR_DESCRIPTION_FILE >&2
+  echo -e "[${BASE_BRANCH}] Daml changes (listing up to $MAX_NUMBER_DAML_CHANGES):\n" | tee -a $PR_DESCRIPTION_FILE >&2
   rm -rf /tmp/daml
   $_GIT clone --depth="$MAX_NUMBER_DAML_CHANGES" --no-single-branch "${DAML_REPO}.git" /tmp/daml
   CANTON_DIR=$PWD
@@ -173,7 +173,7 @@ create_daml_upgrade_pull_request() {
   cd $CANTON_DIR
 
   echo "Preparing pull request (Standard-Change as .circleci config is being updated)" >&2
-  URL=$("$_HUB" pull-request --base "main" --head "$BRANCH_NAME" --file "$PR_DESCRIPTION_FILE")
+  URL=$("$_HUB" pull-request --base "$BASE_BRANCH" --head "$BRANCH_NAME" --file "$PR_DESCRIPTION_FILE")
   echo -n "Done sending pull request " >&2
   echo $URL
 }

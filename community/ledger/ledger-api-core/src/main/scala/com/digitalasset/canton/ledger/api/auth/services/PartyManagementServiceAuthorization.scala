@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.api.auth.services
 
 import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.daml.ledger.api.v2.admin.party_management_service.PartyManagementServiceGrpc.PartyManagementService
-import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
+import com.digitalasset.canton.auth.{Authorizer, ClaimApiArea, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.RequiredClaims
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
@@ -26,7 +26,9 @@ final class PartyManagementServiceAuthorization(
   override def getParticipantId(
       request: GetParticipantIdRequest
   ): Future[GetParticipantIdResponse] =
-    authorizer.rpc(service.getParticipantId)(RequiredClaim.Public())(request)
+    authorizer.rpc(service.getParticipantId)(
+      RequiredClaim.ApiArea(ClaimApiArea.baseRead.area)
+    )(request)
 
   override def getParties(request: GetPartiesRequest): Future[GetPartiesResponse] =
     authorizer.rpc(service.getParties)(
@@ -37,9 +39,10 @@ final class PartyManagementServiceAuthorization(
       request: ListKnownPartiesRequest
   ): Future[ListKnownPartiesResponse] =
     authorizer.rpc(service.listKnownParties)(
-      RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId(
+      RequiredClaim.ApiArea(ClaimApiArea.partiesRead.area),
+      RequiredClaim.MatchIdentityProviderId(
         Lens.unit[ListKnownPartiesRequest].identityProviderId
-      )*
+      ),
     )(request)
 
   override def allocateParty(request: AllocatePartyRequest): Future[AllocatePartyResponse] =
@@ -57,12 +60,19 @@ final class PartyManagementServiceAuthorization(
   override def updatePartyIdentityProviderId(
       request: UpdatePartyIdentityProviderIdRequest
   ): Future[UpdatePartyIdentityProviderIdResponse] =
-    authorizer.rpc(service.updatePartyIdentityProviderId)(RequiredClaim.Admin())(request)
+    authorizer.rpc(service.updatePartyIdentityProviderId)(
+      RequiredClaim.ApiArea(ClaimApiArea.idpsWrite.area),
+      RequiredClaim.ApiArea(ClaimApiArea.partiesWrite.area),
+    )(request)
 
   override def generateExternalPartyTopology(
       request: GenerateExternalPartyTopologyRequest
   ): Future[GenerateExternalPartyTopologyResponse] =
-    authorizer.rpc(service.generateExternalPartyTopology)(RequiredClaim.Public())(request)
+    // Note that we can't match on the identity provider ID here, since the request doesn't carry one.
+    // That is okay since it doesn't allow reading any data from other IDPs.
+    authorizer.rpc(service.generateExternalPartyTopology)(
+      RequiredClaim.PartiesReadOrSelfAllocate[GenerateExternalPartyTopologyRequest]()
+    )(request)
 
   override def bindService(): ServerServiceDefinition =
     PartyManagementServiceGrpc.bindService(this, executionContext)
@@ -81,26 +91,31 @@ object PartyManagementServiceAuthorization {
   def updatePartyDetailsClaims(
       request: UpdatePartyDetailsRequest
   ): List[RequiredClaim[UpdatePartyDetailsRequest]] =
-    request.partyDetails match {
+    (request.partyDetails match {
       case Some(_) =>
-        RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId(
-          Lens.unit[UpdatePartyDetailsRequest].partyDetails.identityProviderId
+        List[RequiredClaim[UpdatePartyDetailsRequest]](
+          RequiredClaim.ApiArea(ClaimApiArea.partiesWrite.area),
+          RequiredClaim.MatchIdentityProviderId(
+            Lens.unit[UpdatePartyDetailsRequest].partyDetails.identityProviderId
+          ),
         )
       case None =>
-        RequiredClaim.AdminOrIdpAdmin[UpdatePartyDetailsRequest]() :: Nil
-    }
+        List[RequiredClaim[UpdatePartyDetailsRequest]](
+          RequiredClaim.ApiArea(ClaimApiArea.partiesWrite.area)
+        )
+    })
 
   def getPartiesClaims(
       request: GetPartiesRequest
   ): List[RequiredClaim[GetPartiesRequest]] =
     RequiredClaims(
-      RequiredClaim.AdminOrIdpAdminOrOperateAsParty[GetPartiesRequest](request.parties),
+      RequiredClaim.PartiesReadOrSelfRead[GetPartiesRequest](request.parties),
       RequiredClaim.MatchIdentityProviderId(Lens.unit[GetPartiesRequest].identityProviderId),
     )
 
   def allocatePartyClaims: List[RequiredClaim[AllocatePartyRequest]] =
     RequiredClaims(
-      RequiredClaim.AdminOrIdpAdminOrSelfAdmin[AllocatePartyRequest](
+      RequiredClaim.PartiesWriteOrSelfAllocate[AllocatePartyRequest](
         Lens.unit[AllocatePartyRequest].userId
       ),
       RequiredClaim.MatchIdentityProviderId(Lens.unit[AllocatePartyRequest].identityProviderId),
@@ -108,7 +123,7 @@ object PartyManagementServiceAuthorization {
 
   def allocateExternalPartyClaims: List[RequiredClaim[AllocateExternalPartyRequest]] =
     RequiredClaims(
-      RequiredClaim.AdminOrIdpAdminOrSelfAdmin[AllocateExternalPartyRequest](
+      RequiredClaim.PartiesWriteOrSelfAllocate[AllocateExternalPartyRequest](
         Lens.unit[AllocateExternalPartyRequest].userId
       ),
       RequiredClaim.MatchIdentityProviderId(

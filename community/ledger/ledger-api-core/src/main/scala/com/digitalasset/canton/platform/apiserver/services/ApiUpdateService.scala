@@ -48,12 +48,11 @@ final class ApiUpdateService(
     executionContext: ExecutionContext,
     mat: Materializer,
     sizeLimitsConfig: LedgerApiSizeLimitsConfig,
-) extends UpdateServiceGrpc.UpdateService
-    with StreamingServiceLifecycleManagement
+) extends StreamingServiceLifecycleManagement
     with NamedLogging {
 
-  override def getUpdates(
-      request: GetUpdatesRequest,
+  def getUpdates(
+      request: RequestWithReadAsParty[GetUpdatesRequest],
       responseObserver: StreamObserver[GetUpdatesResponse],
   ): Unit = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
@@ -65,7 +64,7 @@ final class ApiUpdateService(
       logger.debug(s"Received new update request $request.")
       Source.single(updateService.currentLedgerEnd()).flatMapConcat { ledgerEnd =>
         val validation =
-          UpdateServiceRequestValidator.validate(request, ledgerEnd.map(_.lastOffset))
+          UpdateServiceRequestValidator.validate(request.request, ledgerEnd.map(_.lastOffset))
 
         validation.fold(
           t => Source.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
@@ -102,7 +101,7 @@ final class ApiUpdateService(
     }
   }
 
-  override def getUpdateByOffset(
+  def getUpdateByOffset(
       req: GetUpdateByOffsetRequest
   ): Future[GetUpdateResponse] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
@@ -143,7 +142,7 @@ final class ApiUpdateService(
       )
   }
 
-  override def getUpdateById(
+  def getUpdateById(
       req: GetUpdateByIdRequest
   ): Future[GetUpdateResponse] = {
     val loggingContextWithTrace =
@@ -176,7 +175,9 @@ final class ApiUpdateService(
       )
   }
 
-  override def getUpdatesPage(request: GetUpdatesPageRequest): Future[GetUpdatesPageResponse] = {
+  def getUpdatesPage(
+      request: RequestWithReadAsParty[GetUpdatesPageRequest]
+  ): Future[GetUpdatesPageResponse] = {
     val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     implicit val errorLoggingContext: ErrorLoggingContext =
@@ -184,7 +185,7 @@ final class ApiUpdateService(
     logger.debug(s"Received new update request $request.")(loggingContextWithTrace.traceContext)
     val ledgerEnd = updateService.currentLedgerEnd()
     val validation = UpdateServiceRequestValidator.validateUpdatesPageRequest(
-      req = request,
+      req = request.request,
       ledgerEnd = ledgerEnd.map(_.lastOffset),
       participantId = participantId,
       updateServiceConfig = updateServiceConfig,
@@ -261,7 +262,7 @@ final class ApiUpdateService(
       logging.offset(offset),
     )
 
-  override def getUpdateByHash(request: GetUpdateByHashRequest): Future[GetUpdateResponse] = {
+  def getUpdateByHash(request: GetUpdateByHashRequest): Future[GetUpdateResponse] = {
     val loggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     implicit val errorLoggingContext: ErrorLoggingContext =

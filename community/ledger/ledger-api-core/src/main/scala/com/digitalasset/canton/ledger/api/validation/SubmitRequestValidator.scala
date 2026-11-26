@@ -19,6 +19,7 @@ import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.messages.command.submission
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.ExecuteRequest
+import com.digitalasset.canton.ledger.api.validation.FormatValidator.RejectContractIdFilters
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.*
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -190,7 +191,9 @@ class SubmitRequestValidator(
         submissionIdGenerator,
         maxDeduplicationDuration,
       )
-      _ <- transactionFormat.traverse_(format => FormatValidator.validate(format))
+      _ <- transactionFormat.traverse_(format =>
+        FormatValidator.validate(format, RejectContractIdFilters)
+      )
     } yield executeRequest
 
   private def validateSynchronizer(string: String)(implicit

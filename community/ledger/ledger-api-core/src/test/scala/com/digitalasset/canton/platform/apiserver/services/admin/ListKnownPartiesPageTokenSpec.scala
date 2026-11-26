@@ -69,6 +69,20 @@ class ListKnownPartiesPageTokenSpec
     )
   }
 
+  it should "decode the longest token the participant issues" in {
+    val longestParty = com.digitalasset.daml.lf.data.Ref.Party.assertFromString("p" * 255)
+    val token = ListKnownPartiesPageToken.encode(longestParty, Long.MaxValue, participant1)
+    token.length shouldBe 368
+    ListKnownPartiesPageToken.decode(token).value.value.partyIdLowerBoundExcl shouldBe longestParty
+  }
+
+  it should "reject a token longer than 500 characters" in {
+    assertError(
+      actual = ListKnownPartiesPageToken.decode("A" * 501).left.value,
+      expected = invalidPageToken("Invalid page token: longer than 500 characters"),
+    )
+  }
+
   behavior of "ListKnownPartiesPageToken.validate"
 
   it should "accept a valid payload" in {

@@ -9,7 +9,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -63,7 +63,7 @@ object ConsensusStatus {
   /** Deserialization context for BFT orderer consensus status structures */
   final case class ConsensusStatusDeserializationContext(
       from: BftNodeId,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
   )
 
   object EpochStatus
@@ -97,7 +97,7 @@ object ConsensusStatus {
           protoEpochStatus.segments,
           "segments",
           pvv,
-          ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxSegments),
+          ValidationParam(ProtocolVersion.v38 -> limits.maxSegments),
         )((element, _) => SegmentStatus.fromProto(pvv, limits, element))
         nonEmptySegments <- NonEmpty
           .from(segments)
@@ -188,7 +188,7 @@ object ConsensusStatus {
 
     private[modules] def fromProto(
         pvv: ProtocolVersionValidation,
-        limits: BftOrdererLimits,
+        limits: BftOrdererLimitsView,
         proto: v30.SegmentStatus,
     ): ParsingResult[SegmentStatus] =
       proto.status match {
@@ -201,14 +201,14 @@ object ConsensusStatus {
               "view_change_messages_present",
               pvv,
               ValidationParam(
-                ProtocolVersion.nextValidationBoundPV -> limits.maxViewChangeMessagesPresent
+                ProtocolVersion.v38 -> limits.maxViewChangeMessagesPresent
               ),
             )
             areBlocksCompleteBounded <- ProtoValidation.validateLength(
               areBlocksComplete,
               "are_blocks_complete",
               pvv,
-              ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxAreBlocksComplete),
+              ValidationParam(ProtocolVersion.v38 -> limits.maxAreBlocksComplete),
             )
           } yield SegmentStatus.InViewChange(
             ViewNumber(viewChange),
@@ -222,7 +222,7 @@ object ConsensusStatus {
               blockStatuses,
               "block_statuses",
               pvv,
-              ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxBlockStatuses),
+              ValidationParam(ProtocolVersion.v38 -> limits.maxBlockStatuses),
             )((element, _) => BlockStatus.fromProto(pvv, limits, element))
           } yield SegmentStatus.InProgress(
             ViewNumber(viewNumber),
@@ -279,7 +279,7 @@ object ConsensusStatus {
 
     private[modules] def fromProto(
         pvv: ProtocolVersionValidation,
-        limits: BftOrdererLimits,
+        limits: BftOrdererLimitsView,
         proto: v30.BlockStatus,
     ): ParsingResult[BlockStatus] =
       proto.status match {
@@ -291,13 +291,13 @@ object ConsensusStatus {
               preparesPresent,
               "prepares_present",
               pvv,
-              ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxPreparesPresent),
+              ValidationParam(ProtocolVersion.v38 -> limits.maxPreparesPresent),
             )
             commitsPresentBounded <- ProtoValidation.validateLength(
               commitsPresent,
               "commits_present",
               pvv,
-              ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxCommitsPresent),
+              ValidationParam(ProtocolVersion.v38 -> limits.maxCommitsPresent),
             )
           } yield BlockStatus.InProgress(prePrepared, preparesPresentBounded, commitsPresentBounded)
         case v30.BlockStatus.Status.Complete(_) => Right(BlockStatus.Complete)

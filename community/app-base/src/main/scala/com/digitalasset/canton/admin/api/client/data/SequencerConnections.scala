@@ -8,12 +8,14 @@ import cats.syntax.foldable.*
 import cats.{Id, Monad}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.console.ConsoleEnvironment
+import com.digitalasset.canton.crypto.ValidatedPemCertificate
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
 import com.digitalasset.canton.sequencing.{
+  PenaltyValues as PenaltyValuesInternal,
   SequencerConnectionPenaltyConfig as SequencerConnectionPenaltyConfigInternal,
   SequencerConnectionPoolDelays as SequencerConnectionPoolDelaysInternal,
   SequencerConnectionValidation as SequencerConnectionValidationInternal,
@@ -23,7 +25,6 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.{SequencerAlias, config}
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 import io.scalaland.chimney.Transformer
 import io.scalaland.chimney.dsl.*
 
@@ -97,7 +98,7 @@ final case class SequencerConnections(
 
   def withCertificates(
       sequencerAlias: SequencerAlias,
-      certificates: ByteString,
+      certificates: ValidatedPemCertificate,
   ): SequencerConnections =
     modify(sequencerAlias, _.withCertificates(certificates))
 
@@ -439,12 +440,15 @@ object SubscriptionLivenessLimits extends PrettyPrintingCompanion[SubscriptionLi
   * @param zeroThreshold
   *   Decayed penalties below this value are reset to 0 so that a sequencer whose penalty has been
   *   increased can start over after a bounded number of decays.
+  * @param penaltyValues
+  *   The penalty values applied to a sequencer for each kind of adverse event.
   */
 final case class SequencerConnectionPenaltyConfig(
     enabled: Boolean,
     decayInterval: config.PositiveFiniteDuration,
     halfLife: config.PositiveFiniteDuration,
     zeroThreshold: PositiveDouble,
+    penaltyValues: PenaltyValues,
 ) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[SequencerConnectionPenaltyConfig] =
     SequencerConnectionPenaltyConfig
@@ -460,6 +464,9 @@ final case class SequencerConnectionPenaltyConfig(
   def withZeroThreshold(zeroThreshold: PositiveDouble): SequencerConnectionPenaltyConfig =
     copy(zeroThreshold = zeroThreshold)
 
+  def withPenaltyValues(penaltyValues: PenaltyValues): SequencerConnectionPenaltyConfig =
+    copy(penaltyValues = penaltyValues)
+
   private[canton] def toInternal: SequencerConnectionPenaltyConfigInternal =
     this.transformInto[SequencerConnectionPenaltyConfigInternal]
 }
@@ -471,6 +478,7 @@ object SequencerConnectionPenaltyConfig
     param("decayInterval", _.decayInterval),
     param("halfLife", _.halfLife),
     param("zeroThreshold", _.zeroThreshold),
+    param("penaltyValues", _.penaltyValues),
   )
 
   val default: SequencerConnectionPenaltyConfig =
@@ -482,4 +490,52 @@ object SequencerConnectionPenaltyConfig
       internal: SequencerConnectionPenaltyConfigInternal
   ): SequencerConnectionPenaltyConfig =
     internal.transformInto[SequencerConnectionPenaltyConfig]
+}
+
+/** Penalty values applied to a sequencer for each kind of adverse event. A higher value makes the
+  * sequencer less preferred for longer. All values must be positive.
+  *
+  * @param sequencerOverloaded
+  *   The sequencer refused a submission request because it is overloaded.
+  * @param subscriptionError
+  *   The subscription to the sequencer failed with an error.
+  * @param subscriptionPermissionDenied
+  *   The subscription to the sequencer failed because permission was denied.
+  * @param subscriptionInactive
+  *   The subscription to the sequencer became inactive.
+  * @param subscriptionAggregationError
+  *   The sequencer's events caused an error in the aggregation of the subscriptions.
+  * @param subscriptionHandlerException
+  *   The handling of the sequencer's events raised an exception.
+  * @param subscriptionRetriableFailure
+  *   The subscription to the sequencer failed with a retriable failure.
+  * @param subscriptionNonRetriableFailure
+  *   The subscription to the sequencer failed with a non-retriable failure.
+  */
+final case class PenaltyValues(
+    sequencerOverloaded: PositiveInt,
+    subscriptionError: PositiveInt,
+    subscriptionPermissionDenied: PositiveInt,
+    subscriptionInactive: PositiveInt,
+    subscriptionAggregationError: PositiveInt,
+    subscriptionHandlerException: PositiveInt,
+    subscriptionRetriableFailure: PositiveInt,
+    subscriptionNonRetriableFailure: PositiveInt,
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[PenaltyValues] = PenaltyValues
+}
+
+object PenaltyValues extends PrettyPrintingCompanion[PenaltyValues] {
+  override protected val pretty: Pretty[PenaltyValues] = prettyOfClass(
+    param("sequencerOverloaded", _.sequencerOverloaded),
+    param("subscriptionError", _.subscriptionError),
+    param("subscriptionPermissionDenied", _.subscriptionPermissionDenied),
+    param("subscriptionInactive", _.subscriptionInactive),
+    param("subscriptionAggregationError", _.subscriptionAggregationError),
+    param("subscriptionHandlerException", _.subscriptionHandlerException),
+    param("subscriptionRetriableFailure", _.subscriptionRetriableFailure),
+    param("subscriptionNonRetriableFailure", _.subscriptionNonRetriableFailure),
+  )
+
+  val default: PenaltyValues = PenaltyValuesInternal.default.transformInto[PenaltyValues]
 }

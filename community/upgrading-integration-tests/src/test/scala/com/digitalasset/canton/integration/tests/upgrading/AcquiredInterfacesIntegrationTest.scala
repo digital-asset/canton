@@ -619,6 +619,7 @@ class AcquiredInterfacesIntegrationTest extends CommunityIntegrationTest with Sh
               ),
               filtersForAnyParty = None,
               verbose = false,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

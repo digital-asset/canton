@@ -220,8 +220,6 @@ final class Authorizer(
       req: Req,
   ): Either[AuthorizationError, Req] =
     requiredClaim match {
-      case RequiredClaim.Public() => claims.isPublic.map(_ => req)
-
       case RequiredClaim.ReadAs(party) => claims.canReadAs(party).map(_ => req)
 
       case RequiredClaim.ReadAsAnyParty() => claims.canReadAsAnyParty.map(_ => req)
@@ -230,21 +228,23 @@ final class Authorizer(
 
       case RequiredClaim.ExecuteAs(party) => claims.canExecuteAs(party).map(_ => req)
 
+      case RequiredClaim.ReadTrafficFrom(accountId, acceptExecuteRights) =>
+        claims
+          .canListTrafficAccounts(acceptExecuteRights)
+          .recoverWith { _ =>
+            claims
+              .canAccessApiArea(ClaimApiArea.trafficSelf.area)
+              .flatMap { _ =>
+                claims.canDebitTrafficFrom(accountId, acceptExecuteRights)
+              }
+          }
+          .map(_ => req)
+
       case RequiredClaim.DebitTrafficFrom(accountId, acceptExecuteRights) =>
         claims.canDebitTrafficFrom(accountId, acceptExecuteRights).map(_ => req)
 
       case RequiredClaim.ListTrafficAccounts(acceptExecuteRights) =>
         claims.canListTrafficAccounts(acceptExecuteRights).map(_ => req)
-
-      case RequiredClaim.AdminOrDebitTrafficFrom(accountId, acceptExecuteRights) =>
-        claims.isAdmin
-          .orElse(claims.canDebitTrafficFrom(accountId, acceptExecuteRights))
-          .map(_ => req)
-
-      case RequiredClaim.AdminOrListTrafficAccounts(acceptExecuteRights) =>
-        claims.isAdmin
-          .orElse(claims.canListTrafficAccounts(acceptExecuteRights))
-          .map(_ => req)
 
       case RequiredClaim.MatchIdentityProviderId(_) =>
         val identityProviderIdL = requiredClaim.requestStringL
@@ -266,23 +266,40 @@ final class Authorizer(
             .map(_ => userIdL.set(defaultedUserId)(req))
         )
 
-      case RequiredClaim.MatchUserIdForUserManagement(_) =>
+      case RequiredClaim.MatchUserIdForUserRead(_) =>
         val userIdL = requiredClaim.requestStringL
         defaultToAuthenticatedUser(
           claims = claims,
           userId = userIdL.get(req),
         ).flatMap {
-          case Some(userId) => Right(userIdL.set(userId)(req))
-          case None => claims.isAdminOrIDPAdmin.map(_ => req)
+          case Some(userId) =>
+            claims
+              .canAccessApiArea(ClaimApiArea.usersSelf.area)
+              .map(_ => userIdL.set(userId)(req))
+          case None =>
+            claims
+              .canAccessApiArea(ClaimApiArea.usersRead.area)
+              .map(_ => req)
         }
 
-      case RequiredClaim.AdminOrIdpAdminOrSelfAdmin(_) =>
-        claims.isAdminOrIDPAdmin.left
+      case RequiredClaim.PartiesReadOrSelfAllocate() =>
+        claims
+          .canAccessApiArea(ClaimApiArea.partiesRead.area)
+          .left
+          .flatMap { _ =>
+            claims.canAccessApiArea(ClaimApiArea.partiesAllocate.area)
+          }
+          .map(_ => req)
+
+      case RequiredClaim.PartiesWriteOrSelfAllocate(_) =>
+        claims
+          .canAccessApiArea(ClaimApiArea.partiesWrite.area)
+          .left
           .flatMap { err =>
             val userId = requiredClaim.requestStringL.get(req)
             authenticatedUserId(claims).flatMap {
               case Some(authUserId) if authUserId == userId =>
-                Right(())
+                claims.canAccessApiArea(ClaimApiArea.partiesAllocate.area)
               case _ =>
                 Left(err)
             }
@@ -293,6 +310,7 @@ final class Authorizer(
         claims.canReadAsAnyParty match {
           case Right(_) => Right(partiesL.set(Set.empty[String])(req))
           case Left(_) =>
+            // TODO(#36415) we can only do this if we have ``parties:self``
             val parties: Set[String] = claims.claims.view.collect {
               case ClaimActAsParty(p) => p
               case ClaimReadAsParty(p) => p
@@ -306,18 +324,21 @@ final class Authorizer(
 
       case RequiredClaim.Admin() => claims.isAdmin.map(_ => req)
 
-      case RequiredClaim.AdminOrIdpAdmin() => claims.isAdminOrIDPAdmin.map(_ => req)
-
-      case RequiredClaim.AdminOrIdpAdminOrOperateAsParty(parties) =>
-        (claims.isAdminOrIDPAdmin match {
+      case RequiredClaim.PartiesReadOrSelfRead(parties) =>
+        (claims.canAccessApiArea(ClaimApiArea.partiesRead.area) match {
           case Left(_) if parties.nonEmpty =>
-            parties.traverse(claims.canOperateAs) match {
-              case Left(AuthorizationError.MissingOperationClaim(party)) =>
-                Left(AuthorizationError.MissingAdminOrIdpAdminOrOperationClaim(party))
-              case x => x
+            claims.canAccessApiArea(ClaimApiArea.partiesSelf.area).flatMap { _ =>
+              parties.traverse(claims.canOperateAs) match {
+                case Left(AuthorizationError.MissingOperationClaim(party)) =>
+                  Left(AuthorizationError.MissingPartiesReadOrOperateAsPartyClaim(party))
+                case x => x
+              }
             }
           case x => x
         }).map(_ => req)
+
+      case RequiredClaim.ApiArea(area) =>
+        claims.canAccessApiArea(area).map(_ => req)
     }
 
   @tailrec
@@ -394,36 +415,45 @@ sealed trait RequiredClaim[Req] extends Product with Serializable {
 }
 
 object RequiredClaim {
-  final case class Public[Req]() extends RequiredClaim[Req]
   final case class ReadAs[Req](party: String) extends RequiredClaim[Req]
   final case class ReadAsAnyParty[Req]() extends RequiredClaim[Req]
   final case class ActAs[Req](party: String) extends RequiredClaim[Req]
   final case class ExecuteAs[Req](party: String) extends RequiredClaim[Req]
   final case class DebitTrafficFrom[Req](accountId: String, acceptExecuteRights: Boolean)
       extends RequiredClaim[Req]
+  final case class ReadTrafficFrom[Req](accountId: String, acceptExecuteRights: Boolean)
+      extends RequiredClaim[Req]
   final case class ListTrafficAccounts[Req](acceptExecuteRights: Boolean) extends RequiredClaim[Req]
-  final case class AdminOrDebitTrafficFrom[Req](accountId: String, acceptExecuteRights: Boolean)
-      extends RequiredClaim[Req]
-  final case class AdminOrListTrafficAccounts[Req](acceptExecuteRights: Boolean)
-      extends RequiredClaim[Req]
   final case class MatchIdentityProviderId[Req](override val requestStringL: Lens[Req, String])
       extends RequiredClaim[Req]
   final case class MatchUserId[Req](
       override val requestStringL: Lens[Req, String],
       skipUserIdValidationForAnyPartyReaders: Boolean = false,
   ) extends RequiredClaim[Req]
-  final case class MatchUserIdForUserManagement[Req](override val requestStringL: Lens[Req, String])
-      extends RequiredClaim[Req]
-  final case class AdminOrIdpAdminOrSelfAdmin[Req](override val requestStringL: Lens[Req, String])
+  final case class MatchUserIdForUserRead[Req](override val requestStringL: Lens[Req, String])
       extends RequiredClaim[Req]
   final case class Admin[Req]() extends RequiredClaim[Req]
-  final case class AdminOrIdpAdmin[Req]() extends RequiredClaim[Req]
 
   /** Backfills parties for by-hash lookups. The auth layer always replaces the lens target: empty
     * when the caller holds `CanReadAsAnyParty`, or their act/read parties. Fails if neither.
     */
   final case class MatchReadAsParties[Req](partiesL: Lens[Req, Set[String]])
       extends RequiredClaim[Req]
-  final case class AdminOrIdpAdminOrOperateAsParty[Req](parties: Seq[String])
+
+  /** Can read parties from the ledger, or have parties:self and operate as the parties in the
+    * request.
+    */
+  final case class PartiesReadOrSelfRead[Req](parties: Seq[String]) extends RequiredClaim[Req]
+
+  /** Can write parties in the IDP, or a user allocating its own parties. */
+  final case class PartiesWriteOrSelfAllocate[Req](override val requestStringL: Lens[Req, String])
       extends RequiredClaim[Req]
+
+  /** Can read parties in the IDP, or a user generating an external topology for creating their own
+    * parties.
+    */
+  final case class PartiesReadOrSelfAllocate[Req]() extends RequiredClaim[Req]
+
+  /** Can access a specific api area. */
+  final case class ApiArea[Req](area: ClaimApiArea.Area) extends RequiredClaim[Req]
 }

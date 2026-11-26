@@ -3,8 +3,10 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc
 
+import cats.syntax.traverse.*
 import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.crypto.ValidatedPemCertificate
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.{
@@ -148,19 +150,26 @@ object P2PGrpcNetworking {
       clientChannelBuilder: ClientChannelBuilder,
       endpointConfig: P2PEndpointConfig,
       channelCustomizer: NettyChannelBuilder => Unit = _ => (),
-  )(implicit executionContextExecutor: ExecutionContextExecutor) =
-    clientChannelBuilder.create(
-      endpoint = Endpoint(endpointConfig.address, endpointConfig.port),
-      useTls = endpointConfig.tlsConfig.exists(_.enabled),
-      executor = executionContextExecutor,
-      trustCertificate = endpointConfig.tlsConfig.flatMap(_.trustCollectionFile).map(_.pemBytes),
-      params = endpointConfig.channel,
-      // We don't support load balancing nor health-checking for P2P connections,
-      //  as the ordering protocol itself provides resilience.
-      loadBalancingPolicy = None,
-      healthCheck = false,
-      channelCustomizer = channelCustomizer,
-    )
+  )(implicit
+      executionContextExecutor: ExecutionContextExecutor
+  ): Either[String, NettyChannelBuilder] =
+    endpointConfig.tlsConfig
+      .flatMap(_.trustCollectionFile)
+      .traverse(pem => ValidatedPemCertificate.create(pem.pemBytes))
+      .map { pem =>
+        clientChannelBuilder.create(
+          endpoint = Endpoint(endpointConfig.address, endpointConfig.port),
+          useTls = endpointConfig.tlsConfig.exists(_.enabled),
+          executor = executionContextExecutor,
+          trustCertificate = pem,
+          params = endpointConfig.channel,
+          // We don't support load balancing nor health-checking for P2P connections,
+          //  as the ordering protocol itself provides resilience.
+          loadBalancingPolicy = None,
+          healthCheck = false,
+          channelCustomizer = channelCustomizer,
+        )
+      }
 
   private[grpc] def completeGrpcStreamObserver(
       streamObserver: StreamObserver[?],

@@ -25,6 +25,10 @@ object UpdateFormatHashUtils {
       )
       .addOptional(eventFormat.filtersForAnyParty.map(_.toByteString), _.addByteString)
       .addBool(eventFormat.verbose)
+      .addIterator(
+        eventFormat.filtersByContractId.iterator.map(_.toByteString),
+        eventFormat.filtersByContractId.size,
+      )((builder, bytestring) => builder.addByteString(bytestring))
 
   def hashTopologyFormat[T <: HashBuilder](
       hashBuilder: T

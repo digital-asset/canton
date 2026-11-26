@@ -25,7 +25,7 @@ import monocle.syntax.all.*
 
 import scala.concurrent.Promise
 
-class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
+final class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(
     new UseBftSequencer(

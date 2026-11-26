@@ -16,7 +16,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
   TestConsoleEnvironment,
 }
-import com.digitalasset.canton.protocol.TopologyLimits
+import com.digitalasset.canton.protocol.TopologyLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, BaseWriteRequest}
 import com.digitalasset.canton.topology.admin.v30.TopologyManagerReadServiceGrpc.TopologyManagerReadServiceStub
@@ -466,7 +466,7 @@ final class PreviousProtocolVersionPartyAllocationIntegrationTest
     val deserializedTx = TopologyTransaction
       .fromProtoV30(
         ProtocolVersionValidation.PV(ProtocolVersion.v36),
-        TopologyTransactionDeserializationContext(TopologyLimits.default),
+        TopologyTransactionDeserializationContext(TopologyLimitsView.default),
         v30Mapping,
       )(bs)
       .value
@@ -576,7 +576,7 @@ final class PreviousProtocolVersionPartyAllocationIntegrationTest
         participant1.name,
         command,
         participant1.config.clientAdminApi,
-        participant1.config.adminApi.adminTokenConfig.fixedAdminToken,
+        participant1.config.adminApi.adminTokenConfig.fixedAdminToken.map(_.unwrap),
       )
       ._2
       .value

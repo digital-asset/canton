@@ -211,7 +211,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       asyncExec("ping1")(spClient.ping(sequencer1.id, ignorePoolCapacityExhaustion = false))
       asyncExec("ping2")(tpClient.ping(sequencer1.id, ignorePoolCapacityExhaustion = false))
 
-      val channelId = SequencerChannelId("channel1")
+      val channelId = SequencerChannelId.tryCreate("channel1")
       val requestId =
         TestHash.build.addString("OnlinePartyReplicationParticipantProtocolTest").finish()
 

@@ -3,6 +3,10 @@
 
 package com.digitalasset.base.error.utils
 
+import com.digitalasset.base.error.utils.DecodedCantonError.{
+  MaxUnvalidatedStringLength,
+  MaxValidStatusMessageLength,
+}
 import com.digitalasset.base.error.{
   BaseError,
   BaseErrorLogger,
@@ -22,6 +26,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.{Assertion, EitherValues, OptionValues}
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion}
+
+import scala.util.{Failure, Success, Try}
 
 import ErrorDetails.ErrorDetail
 
@@ -74,6 +80,126 @@ class DecodedCantonErrorSpec
     DecodedCantonError.fromGrpcStatus(modifiedErrorGrpcStatus).left.value should include(
       "category key not found in error metadata"
     )
+  }
+
+  // Error statuses can be received from untrusted parties (e.g. the reason of a LocalReject sent by
+  // another participant, or a status returned by a remote gRPC server). Decoding must therefore never
+  // throw on malformed input, but instead return a Left.
+
+  private def replaceDetail[T <: GeneratedMessage](
+      status: RpcStatus,
+      newDetail: T,
+  )(implicit companion: GeneratedMessageCompanion[T]): RpcStatus =
+    status.copy(details = status.details.filterNot(_ is companion) :+ Any.pack(newDetail))
+
+  private def withErrorInfoReason(reason: String): RpcStatus = {
+    val errInfo = errorGrpcStatus.details.find(_ is ErrorInfo).value.unpack[ErrorInfo]
+    replaceDetail(errorGrpcStatus, errInfo.copy(reason = reason))
+  }
+
+  private def withRetryDelay(seconds: Long, nanos: Int): RpcStatus =
+    replaceDetail(
+      errorGrpcStatus,
+      RetryInfo(retryDelay = Some(com.google.protobuf.duration.Duration(seconds, nanos))),
+    )
+
+  private def assertDecodesToLeft(status: RpcStatus): Assertion =
+    Try(DecodedCantonError.fromGrpcStatus(status)) match {
+      case Success(Left(_)) => succeed
+      case Success(Right(decoded)) => fail(s"Expected a Left, but decoding succeeded: $decoded")
+      case Failure(ex) => fail(s"Expected a Left, but decoding threw $ex", ex)
+    }
+
+  it should "use a well-formed status as baseline for the malformed-input tests" in {
+    errorGrpcStatus.details.exists(_ is RetryInfo) shouldBe true
+    DecodedCantonError.fromGrpcStatus(withErrorInfoReason("VALID_ID_123")).isRight shouldBe true
+    DecodedCantonError
+      .fromGrpcStatus(withRetryDelay(seconds = 10L, nanos = 0))
+      .isRight shouldBe true
+  }
+
+  it should s"return a Left on an empty ${classOf[ErrorInfo].getSimpleName} reason" in {
+    assertDecodesToLeft(withErrorInfoReason(""))
+  }
+
+  it should s"return a Left on an ${classOf[ErrorInfo].getSimpleName} reason with invalid characters" in {
+    assertDecodesToLeft(withErrorInfoReason("lower_case"))
+    assertDecodesToLeft(withErrorInfoReason("WITH SPACE"))
+    assertDecodesToLeft(withErrorInfoReason("WITH-DASH"))
+  }
+
+  it should s"return a Left on a too long ${classOf[ErrorInfo].getSimpleName} reason" in {
+    assertDecodesToLeft(withErrorInfoReason("A" * 64))
+    assertDecodesToLeft(withErrorInfoReason("A" * 10000))
+  }
+
+  // The embedded untrusted part is truncated to `MaxUnvalidatedStringLength`; allow some space for the fixed message prefix
+  private val MaxDecodingErrorMessageLength = MaxUnvalidatedStringLength + 100
+
+  it should "truncate decoding error messages that embed untrusted content" in {
+    val longReason = "a" * 100000
+    DecodedCantonError
+      .fromGrpcStatus(withErrorInfoReason(longReason))
+      .left
+      .value
+      .length should be <= MaxDecodingErrorMessageLength
+
+    val errInfo = errorGrpcStatus.details.find(_ is ErrorInfo).value.unpack[ErrorInfo]
+    val invalidCategory = replaceDetail(
+      errorGrpcStatus,
+      errInfo.copy(metadata = errInfo.metadata.updated("category", "x" * 100000)),
+    )
+    DecodedCantonError
+      .fromGrpcStatus(invalidCategory)
+      .left
+      .value
+      .length should be <= MaxDecodingErrorMessageLength
+
+    val missingCategory = replaceDetail(
+      errorGrpcStatus,
+      errInfo.copy(metadata = errInfo.metadata.removed("category").updated("k", "v" * 100000)),
+    )
+    DecodedCantonError
+      .fromGrpcStatus(missingCategory)
+      .left
+      .value
+      .length should be <= MaxDecodingErrorMessageLength
+  }
+
+  it should s"return a Left on a ${classOf[RetryInfo].getSimpleName} delay exceeding the FiniteDuration range" in {
+    // Valid java.time.Duration, but larger than Long.MaxValue nanoseconds
+    assertDecodesToLeft(withRetryDelay(seconds = Long.MaxValue / 1_000_000_000L + 1, nanos = 0))
+    assertDecodesToLeft(withRetryDelay(seconds = Long.MaxValue, nanos = 0))
+  }
+
+  it should s"return a Left on a ${classOf[RetryInfo].getSimpleName} delay overflowing java.time.Duration" in {
+    // nanos are normalized into seconds, which overflows Long.MaxValue.
+    // Such values are out of spec for google.protobuf.Duration (seconds within +-315,576,000,000,
+    // nanos within +-999,999,999), but neither protobuf parsing nor ScalaPB's `asJavaDuration`
+    // enforce these limits, so an attacker can still send them.
+    assertDecodesToLeft(withRetryDelay(seconds = Long.MaxValue, nanos = Int.MaxValue))
+  }
+
+  it should s"return a Left on a negative ${classOf[RetryInfo].getSimpleName} delay below the FiniteDuration range" in {
+    assertDecodesToLeft(withRetryDelay(seconds = Long.MinValue, nanos = 0))
+  }
+
+  // The status message is parsed with regexes (`RedactedMessage` and `ErrorCodeMsg`). As `.` does not
+  // match line terminators, a long message with many partial matches followed by a newline causes
+  // backtracking with quadratic runtime (a ~240KB message takes more than a minute). The decoder
+  // therefore truncates the message before parsing it. Without truncation, the ~1MB messages used
+  // below would take tens of minutes to decode.
+  it should "decode a long ErrorCodeMsg-like status message without excessive backtracking" in {
+    val message = "A(1," + "): " * 350000 + "\n"
+    val decoded = DecodedCantonError.fromGrpcStatus(errorGrpcStatus.copy(message = message)).value
+    decoded.cause.length should be <= MaxValidStatusMessageLength
+  }
+
+  it should "decode a long RedactedMessage-like status message without excessive backtracking" in {
+    val message = BaseError.RedactedMessage.Prefix + " " + " with tid " * 100000 + "\n"
+    val decoded = DecodedCantonError.fromGrpcStatus(errorGrpcStatus.copy(message = message)).value
+    decoded.correlationId.forall(_.length <= MaxValidStatusMessageLength) shouldBe true
+    decoded.traceId.forall(_.length <= MaxValidStatusMessageLength) shouldBe true
   }
 
   it should s"return a Left on invalid number of ${classOf[ErrorInfo].getSimpleName} in the gRPC status" in {

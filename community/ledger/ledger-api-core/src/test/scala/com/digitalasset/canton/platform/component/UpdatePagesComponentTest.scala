@@ -21,6 +21,7 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
           filtersByParty = Map(dsoParty.value -> CumulativeFilter.templateWildcardFilter(true)),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         ),
         transactionShape = transactionShape,
       )

@@ -4,16 +4,26 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.admin.package_management_service.*
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 
 import scala.concurrent.Future
 
-final class UpdateVettedPackagesAuthIT extends AdminServiceCallAuthTests {
+final class UpdateVettedPackagesAuthIT
+    extends AdminServiceCallAuthTests
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "PackageManagementService#UpdateVettedPackages"
+
+  override def apiAreaScopeBaseToken = adminToken
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.vettingWrite.area) -> true,
+    List(ClaimApiArea.packagesWrite.area) -> false,
+    List(ClaimApiArea.ledgerRead.area) -> false,
+  )
 
   lazy private val request = UpdateVettedPackagesRequest(Seq(), false, "", None, Seq.empty)
 

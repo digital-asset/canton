@@ -25,10 +25,14 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   MessageFrom,
   SignedMessage,
 }
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
 trait CryptoProvider[E <: Env[E]] {
+
+  def psid: PhysicalSynchronizerId
 
   def signHash(
       hash: Hash,
@@ -56,7 +60,7 @@ trait CryptoProvider[E <: Env[E]] {
       metricsContext: MetricsContext,
   ): E#FutureUnlessShutdownT[Either[SignatureCheckError, Unit]]
 
-  final def verifySignedMessage[MessageT <: ProtocolVersionedMemoizedEvidence & MessageFrom](
+  def verifySignedMessage[MessageT <: ProtocolVersionedMemoizedEvidence & MessageFrom](
       signedMessage: SignedMessage[MessageT],
       authenticatedMessageType: AuthenticatedMessageType,
   )(implicit
@@ -64,7 +68,7 @@ trait CryptoProvider[E <: Env[E]] {
       metricsContext: MetricsContext,
   ): E#FutureUnlessShutdownT[Either[SignatureCheckError, Unit]] =
     verifySignature(
-      hashForMessage(signedMessage.message, signedMessage.from, authenticatedMessageType),
+      hashForMessage(signedMessage.message, signedMessage.from, authenticatedMessageType, psid),
       signedMessage.from,
       signedMessage.signature,
       operationId = s"verify-signature-$authenticatedMessageType",
@@ -84,12 +88,28 @@ object CryptoProvider {
 
     case object BftOrderingPbftBlock extends AuthenticatedMessageType
     case object BftAvailabilityAck extends AuthenticatedMessageType
-    case object BftBatchId extends AuthenticatedMessageType
     case object BftSignedAvailabilityMessage extends AuthenticatedMessageType
     case object BftSignedConsensusMessage extends AuthenticatedMessageType
     case object BftSignedStateTransferMessage extends AuthenticatedMessageType
     case object BftSignedRetransmissionMessage extends AuthenticatedMessageType
   }
+
+  private val hashPurposeForMessageMapping
+      : Map[AuthenticatedMessageType, (HashPurpose, HashPurpose)] =
+    Map(
+      AuthenticatedMessageType.BftOrderingPbftBlock ->
+        (HashPurpose.BftOrderingPbftBlock, HashPurpose.BftOrderingPbftBlockV2),
+      AuthenticatedMessageType.BftAvailabilityAck ->
+        (HashPurpose.BftAvailabilityAck, HashPurpose.BftSignedAvailabilityAckV2),
+      AuthenticatedMessageType.BftSignedAvailabilityMessage ->
+        (HashPurpose.BftSignedAvailabilityMessage, HashPurpose.BftSignedAvailabilityMessageV2),
+      AuthenticatedMessageType.BftSignedConsensusMessage ->
+        (HashPurpose.BftSignedConsensusMessage, HashPurpose.BftSignedConsensusMessageV2),
+      AuthenticatedMessageType.BftSignedStateTransferMessage ->
+        (HashPurpose.BftSignedStateTransferMessage, HashPurpose.BftSignedStateTransferMessageV2),
+      AuthenticatedMessageType.BftSignedRetransmissionMessage ->
+        (HashPurpose.BftSignedRetransmissionMessage, HashPurpose.BftSignedRetransmissionMessageV2),
+    )
 
   val BftOrderingSigningKeyUsage: NonEmpty[Set[SigningKeyUsage]] =
     SigningKeyUsage.ProtocolOnly
@@ -98,12 +118,16 @@ object CryptoProvider {
       messageT: MessageT,
       from: BftNodeId,
       authenticatedMessageType: AuthenticatedMessageType,
-  ): Hash =
-    Hash
-      .build(toHashPurpose(authenticatedMessageType), Sha256)
+      psid: PhysicalSynchronizerId,
+  ): Hash = {
+    val bindPsid = psid.protocolVersion > ProtocolVersion.v37
+    val builder = Hash.build(toHashPurposeForMessage(authenticatedMessageType, bindPsid), Sha256)
+    if (bindPsid) builder.addString(psid.toProtoPrimitive)
+    builder
       .addString(from)
       .addByteString(messageT.getCryptographicEvidence)
       .finish()
+  }
 
   def timeCrypto[T](
       metrics: BftOrderingMetrics,
@@ -121,28 +145,20 @@ object CryptoProvider {
         )
     )
 
-  private def toHashPurpose(
-      authenticatedMessageType: AuthenticatedMessageType
-  ): HashPurpose =
-    authenticatedMessageType match {
-      case AuthenticatedMessageType.BftOrderingPbftBlock => HashPurpose.BftOrderingPbftBlock
-      case AuthenticatedMessageType.BftAvailabilityAck => HashPurpose.BftAvailabilityAck
-      case AuthenticatedMessageType.BftBatchId => HashPurpose.BftBatchId
-      case AuthenticatedMessageType.BftSignedAvailabilityMessage =>
-        HashPurpose.BftSignedAvailabilityMessage
-      case AuthenticatedMessageType.BftSignedConsensusMessage =>
-        HashPurpose.BftSignedConsensusMessage
-      case AuthenticatedMessageType.BftSignedStateTransferMessage =>
-        HashPurpose.BftSignedStateTransferMessage
-      case AuthenticatedMessageType.BftSignedRetransmissionMessage =>
-        HashPurpose.BftSignedRetransmissionMessage
-    }
+  private def toHashPurposeForMessage(
+      authenticatedMessageType: AuthenticatedMessageType,
+      bindPsid: Boolean,
+  ): HashPurpose = {
+    val (v1, v2) = hashPurposeForMessageMapping(authenticatedMessageType)
+    if (bindPsid) v2 else v1
+  }
 }
 
 final case class DelegationCryptoProvider[E <: Env[E]](
     signer: CryptoProvider[E],
     verifier: CryptoProvider[E],
 ) extends CryptoProvider[E] {
+  override def psid: PhysicalSynchronizerId = verifier.psid
   override def signHash(hash: Hash, operationId: String)(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,

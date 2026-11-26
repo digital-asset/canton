@@ -744,6 +744,7 @@ object TestSubmissionService {
                 .toMap,
               filtersForAnyParty = None,
               verbose = false,
+              filtersByContractId = Seq.empty,
             )
           ),
           TRANSACTION_SHAPE_LEDGER_EFFECTS,

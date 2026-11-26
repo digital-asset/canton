@@ -112,7 +112,7 @@ object ViewCommonData
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.ViewCommonData)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(v30.ViewCommonData)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )

@@ -390,7 +390,7 @@ class DAMLe(
             case Result.Need.Interruption(_) =>
               getEngineAbortStatus().reasonO match {
                 case Some(reason) =>
-                  logger.warn(s"Aborting engine computation, reason = $reason")
+                  logger.info(s"Aborting engine computation, reason = $reason")
                   Left(EngineAborted(reason))
                 case None => iterateOverInterrupts(im.resume(()))
               }

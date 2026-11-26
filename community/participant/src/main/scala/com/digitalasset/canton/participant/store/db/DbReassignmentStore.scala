@@ -72,11 +72,6 @@ class DbReassignmentStore(
       IndexedSynchronizer.indexed(indexedStringStore)(synchronizerId)
     )
 
-  private def indexedSynchronizerET[E, T[_]: SingletonTraverse](
-      synchronizerId: T[SynchronizerId]
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, E, T[IndexedSynchronizer]] =
-    EitherT.right[E](indexedSynchronizerF(synchronizerId))
-
   private def synchronizerIdF(
       idx: Int,
       attributeName: String,
@@ -160,7 +155,7 @@ class DbReassignmentStore(
       unassignmentData: UnassignmentData
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
+  ): FutureUnlessShutdown[Unit] = {
     ErrorUtil.requireArgument(
       unassignmentData.targetPsid.map(_.logical) == targetSynchronizerId,
       s"Synchronizer $targetSynchronizerId: Reassignment store cannot store reassignment for synchronizer ${unassignmentData.targetPsid
@@ -198,14 +193,12 @@ class DbReassignmentStore(
       }
 
     for {
-      indexedSourceSynchronizer <- indexedSynchronizerET(
+      indexedSourceSynchronizer <- indexedSynchronizerF(
         unassignmentData.sourcePsid.map(_.logical)
       )
-      _ <- EitherT.right(
-        storage.update(
-          insert(indexedSourceSynchronizer),
-          functionFullName,
-        )
+      _ <- storage.update(
+        insert(indexedSourceSynchronizer),
+        functionFullName,
       )
     } yield ()
   }
@@ -216,7 +209,7 @@ class DbReassignmentStore(
     */
   def addAssignmentDataIfAbsent(assignmentData: AssignmentData)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
+  ): FutureUnlessShutdown[Unit] = {
     // will be overwritten by the completion of the unassignment
 
     logger.debug(s"Add assignment data in the store: ${assignmentData.reassignmentId}")
@@ -238,14 +231,12 @@ class DbReassignmentStore(
           """
 
     for {
-      indexedSourceSynchronizer <- indexedSynchronizerET(
+      indexedSourceSynchronizer <- indexedSynchronizerF(
         assignmentData.sourceSynchronizer
       )
-      _ <- EitherT.right(
-        storage.update(
-          insert(indexedSourceSynchronizer),
-          functionFullName,
-        )
+      _ <- storage.update(
+        insert(indexedSourceSynchronizer),
+        functionFullName,
       )
     } yield ()
   }

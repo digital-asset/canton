@@ -77,7 +77,7 @@ import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.{
   SequencerConnectionPoolConfig,
   SequencerConnectionPoolError,
 }
-import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.PenaltyKind
 import com.digitalasset.canton.sequencing.client.pool.{
   SequencerConnection,
   SequencerConnectionPool,
@@ -1811,9 +1811,10 @@ final class SequencerClientTest
 
     override def fatal(reason: String)(implicit traceContext: TraceContext): Unit = ()
 
-    override def increasePenalty(amount: Penalty, reason: String)(implicit
+    override def increasePenalty(kind: PenaltyKind, reason: String)(implicit
         traceContext: TraceContext
-    ): Unit = penalties.increase(attributes.sequencerId, amount, reason)
+    ): Unit =
+      penalties.increase(attributes.sequencerId, PenaltyValues.default.penalty(kind), reason)
 
     val lastSend = new AtomicReference[Option[SentSubmission]](None)
     def lastSubmissionTime: Option[CantonTimestamp] = lastSend.get.map(_.submissionTime)

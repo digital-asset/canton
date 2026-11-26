@@ -15,6 +15,7 @@ import com.daml.ledger.api.v2.admin.user_management_service.{
 }
 import com.daml.platform.v1.page_tokens.ListUsersPageTokenPayload
 import com.digitalasset.base.error.ErrorResource
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.UserManagementServiceRequestValidator.{
@@ -631,14 +632,15 @@ object ApiUserManagementService {
       }
       .getOrElse("")
 
-  def decodeUserIdFromPageToken(pageToken: String)(implicit
+  def decodeUserIdFromPageToken(pageTokenUnvalidated: String)(implicit
       loggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Option[Ref.UserId]] =
-    if (pageToken.isEmpty) {
+    if (pageTokenUnvalidated.isEmpty) {
       Right(None)
     } else {
-      val bytes = pageToken.getBytes(StandardCharsets.UTF_8)
       for {
+        pageToken <- String255.create(pageTokenUnvalidated).left.map(_ => invalidPageToken)
+        bytes = pageToken.unwrap.getBytes(StandardCharsets.UTF_8)
         decodedBytes <- Try[Array[Byte]](Base64.getUrlDecoder.decode(bytes)).toEither.left
           .map(_ => invalidPageToken)
         tokenPayload <- Try[ListUsersPageTokenPayload] {

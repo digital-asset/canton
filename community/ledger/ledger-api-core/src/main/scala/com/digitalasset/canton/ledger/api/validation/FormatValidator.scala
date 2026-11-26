@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
-import cats.syntax.traverse.*
+import cats.instances.all.*
+import cats.syntax.all.*
 import com.daml.ledger.api.v2.transaction_filter.CumulativeFilter.IdentifierFilter
 import com.daml.ledger.api.v2.transaction_filter.{
   Filters,
@@ -21,6 +22,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
 import com.daml.ledger.api.v2.value.Identifier
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.*
 import com.digitalasset.canton.ledger.api.{
+  ContractIdFilter,
   CumulativeFilter,
   EventFormat,
   InterfaceFilter,
@@ -34,7 +36,7 @@ import com.digitalasset.canton.ledger.api.{
 }
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.daml.lf.data.Ref.{NameTypeConRef, PackageRef}
+import com.digitalasset.daml.lf.data.Ref.{NameTypeConRef, PackageRef, Party}
 import io.grpc.StatusRuntimeException
 
 object FormatValidator {
@@ -42,18 +44,34 @@ object FormatValidator {
   import FieldValidator.*
   import ValidationErrors.*
 
-  def validate(eventFormat: ProtoEventFormat)(implicit
+  def validate(eventFormat: ProtoEventFormat, allowContractIdFilter: UseContractIdFilters)(implicit
       errorLoggingContext: ErrorLoggingContext,
       sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Either[StatusRuntimeException, EventFormat] =
-    if (eventFormat.filtersByParty.isEmpty && eventFormat.filtersForAnyParty.isEmpty) {
-      Left(invalidArgument("filtersByParty and filtersForAnyParty cannot be empty simultaneously"))
+    if (
+      eventFormat.filtersByParty.isEmpty && eventFormat.filtersForAnyParty.isEmpty && eventFormat.filtersByContractId.isEmpty
+    ) {
+      Left(
+        invalidArgument(
+          "filtersByParty, filtersForAnyParty and filtersByContractId cannot be empty simultaneously"
+        )
+      )
     } else {
       for {
+        _ <- Either.cond(
+          eventFormat.filtersByContractId.isEmpty || (eventFormat.filtersByParty.isEmpty && eventFormat.filtersForAnyParty.isEmpty),
+          (),
+          invalidArgument("filtersByContractId cannot be used together with filtersByParty"),
+        )
         _ <- validateCardinality(
           values = eventFormat.filtersByParty,
           fieldName = "filters_by_party",
           limit = sizeLimitsConfig.publicLapiSizeConfig.eventFormat.filtersByPartySizeLimit,
+        )
+        _ <- validateCardinality(
+          values = eventFormat.filtersByContractId,
+          fieldName = "filters_by_contract_id",
+          limit = sizeLimitsConfig.publicLapiSizeConfig.eventFormat.filtersByContractIdSizeLimit,
         )
         _ <- validateTotalFiltersSize(numberOfFilters(eventFormat))
         convertedFilters <- eventFormat.filtersByParty.toList.traverse { case (party, filters) =>
@@ -64,6 +82,27 @@ object FormatValidator {
             )
           } yield key -> validatedFilters
         }
+        contractIdFilters <- allowContractIdFilter match {
+          case RejectContractIdFilters =>
+            Either.cond(
+              eventFormat.filtersByContractId.isEmpty,
+              Seq.empty,
+              invalidArgument("filtersByContractId not allowed for this type of request"),
+            )
+          case AllowContractIdFilters(readAsParties) =>
+            eventFormat.filtersByContractId.traverse(contractIdFilter =>
+              for {
+                contractId <- requireContractId(contractIdFilter.contractId, "contract_id")
+                includeInterfaceViews <- contractIdFilter.includeInterfaceViews.traverse(
+                  validateNameTypeConRef
+                )
+              } yield ContractIdFilter(
+                contractId = contractId,
+                includeCreatedEventBlob = contractIdFilter.includeCreatedEventBlob,
+                includeInterfaceViews = includeInterfaceViews,
+              )
+            )
+        }
         filtersForAnyParty <- eventFormat.filtersForAnyParty.toList
           .traverse(validateFilters)
           .map(_.headOption)
@@ -71,6 +110,7 @@ object FormatValidator {
         filtersByParty = convertedFilters.toMap,
         filtersForAnyParty = filtersForAnyParty,
         verbose = eventFormat.verbose,
+        filtersByContractId = contractIdFilters,
       )
     }
 
@@ -126,16 +166,73 @@ object FormatValidator {
       )
   }
 
-  def validate(protoTransactionFormat: ProtoTransactionFormat)(implicit
+  def validate(
+      protoTransactionFormat: ProtoTransactionFormat,
+      allowContractIdFilter: UseContractIdFilters,
+  )(implicit
       errorLoggingContext: ErrorLoggingContext,
       sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Either[StatusRuntimeException, TransactionFormat] =
     for {
       transactionShape <- validate(protoTransactionFormat.transactionShape)
-      eventFormat <- requireOptional(protoTransactionFormat.eventFormat, "event_format")(validate)
+      eventFormat <- requireOptional(protoTransactionFormat.eventFormat, "event_format")(
+        validate(_, allowContractIdFilter)
+      )
+      _ <- Either.cond(
+        eventFormat.filtersByContractId.isEmpty || transactionShape == TransactionShape.AcsDelta,
+        (),
+        invalidArgument("Contract id filter is supported only for ACS_DELTA transaction shape"),
+      )
     } yield TransactionFormat(eventFormat, transactionShape)
 
-  def validate(protoUpdateFormat: ProtoUpdateFormat)(implicit
+  private def eventFormatFilterType(eventFormat: ProtoEventFormat): Option[FilterType] =
+    if (
+      eventFormat.filtersByContractId.isEmpty && (eventFormat.filtersByParty.nonEmpty || eventFormat.filtersForAnyParty.nonEmpty)
+    )
+      Some(FilterType.PartyTemplate)
+    else if (
+      eventFormat.filtersByContractId.nonEmpty && eventFormat.filtersByParty.isEmpty && eventFormat.filtersForAnyParty.isEmpty
+    )
+      Some(FilterType.ContractId)
+    else if (
+      eventFormat.filtersByContractId.isEmpty && eventFormat.filtersByParty.isEmpty && eventFormat.filtersForAnyParty.isEmpty
+    )
+      None
+    else
+      Some(FilterType.Invalid)
+
+  private def validateTransactionsVsReassignmentsFilterType(
+      updateFormat: ProtoUpdateFormat
+  )(implicit errorLoggingContext: ErrorLoggingContext): Either[StatusRuntimeException, Unit] = {
+    val reassignmentsFilterType = updateFormat.includeReassignments.flatMap(eventFormatFilterType)
+    val transactionsFilterType =
+      updateFormat.includeTransactions.flatMap(_.eventFormat).flatMap(eventFormatFilterType)
+    (transactionsFilterType, reassignmentsFilterType).tupled.fold(
+      Either.right[StatusRuntimeException, Unit](())
+    )(types =>
+      types match {
+        case (FilterType.ContractId, FilterType.ContractId) => Right(())
+        case (FilterType.PartyTemplate, FilterType.PartyTemplate) => Right(())
+        case (FilterType.ContractId, _) =>
+          Left(
+            invalidArgument(
+              "If contract id filter is used in include_transaction, no other filter types are allowed in include_reassignments"
+            )
+          )
+        case (_, FilterType.ContractId) =>
+          Left(
+            invalidArgument(
+              "If contract id filter is used in include_reassignments, no other filter types are allowed in include_transactions"
+            )
+          )
+        case _ => Right(()) // This covers all Invalid combinations, that should be covered earlier
+      }
+    )
+
+  }
+
+  def validate(protoUpdateFormat: ProtoUpdateFormat, allowContractIdFilters: UseContractIdFilters)(
+      implicit
       errorLoggingContext: ErrorLoggingContext,
       sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Either[StatusRuntimeException, UpdateFormat] =
@@ -156,15 +253,18 @@ object FormatValidator {
           "include_transactions_and_reassignments and include_reassignments cannot both be set"
         ),
       )
+
+      _ <- validateTransactionsVsReassignmentsFilterType(protoUpdateFormat)
+
       _ <- validateTotalFiltersSize(numberOfFilters(protoUpdateFormat))
       includeTransactionsAndReassignments <- validateOptional(
         protoUpdateFormat.includeTransactionsAndReassignments
-      )(validate)
+      )(validate(_, allowContractIdFilters))
       explicitIncludeTransactions <- validateOptional(protoUpdateFormat.includeTransactions)(
-        validate
+        validate(_, allowContractIdFilters)
       )
       explicitIncludeReassignments <- validateOptional(protoUpdateFormat.includeReassignments)(
-        validate
+        validate(_, allowContractIdFilters)
       )
       // include_transactions_and_reassignments is a shorthand for including the transactions
       // and the reassignments with the same event format
@@ -321,7 +421,8 @@ object FormatValidator {
   private[validation] def numberOfFilters(eventFormat: ProtoEventFormat): Int = {
     val filtersByParty = eventFormat.filtersByParty.valuesIterator.map(filtersSize).sum
     val wildcardFilters = eventFormat.filtersForAnyParty.fold(0)(filtersSize)
-    filtersByParty + wildcardFilters
+    val contractIdFilters = eventFormat.filtersByContractId.size
+    filtersByParty + wildcardFilters + contractIdFilters
   }
 
   private[validation] def numberOfFilters(updateFormat: ProtoUpdateFormat): Int = {
@@ -350,4 +451,16 @@ object FormatValidator {
         )
         .asGrpcError,
     )
+
+  sealed trait UseContractIdFilters
+  case object RejectContractIdFilters extends UseContractIdFilters
+  final case class AllowContractIdFilters(readAsParties: Option[Seq[Party]])
+      extends UseContractIdFilters
+
+  private sealed trait FilterType
+  private object FilterType {
+    object ContractId extends FilterType
+    object PartyTemplate extends FilterType
+    object Invalid extends FilterType
+  }
 }

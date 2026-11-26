@@ -20,7 +20,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.AvailabilityAck.ValidationError
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.AvailabilityAck as ProtoAvailabilityAck
-import com.digitalasset.canton.version.ProtocolVersionValidation
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 
 final case class AvailabilityAck(from: BftNodeId, signature: Signature)
     extends PrettyPrintingFromCompanion {
@@ -76,18 +77,22 @@ object AvailabilityAck extends PrettyPrintingCompanion[AvailabilityAck] {
       epoch: EpochNumber,
       from: BftNodeId,
       metrics: BftOrderingMetrics,
+      psid: => PhysicalSynchronizerId,
+      protocolVersion: ProtocolVersion,
   )(implicit metricsContext: MetricsContext): Hash =
-    metrics.performance.orderingStageLatency.time(
-      Hash
-        .build(
-          HashPurpose.BftAvailabilityAck,
-          HashAlgorithm.Sha256,
-        )
+    metrics.performance.orderingStageLatency.time {
+      val bindPsid = protocolVersion > ProtocolVersion.v37
+      val builder = Hash.build(
+        if (bindPsid) HashPurpose.BftAvailabilityAckV2 else HashPurpose.BftAvailabilityAck,
+        HashAlgorithm.Sha256,
+      )
+      if (bindPsid) builder.addString(psid.toProtoPrimitive)
+      builder
         .addByteString(batchId.getCryptographicEvidence)
         .addLong(epoch)
         .addString(from)
         .finish()
-    )(
+    }(
       metricsContext.withExtraLabels(
         metrics.performance.orderingStageLatency.labels.stage.Key -> "availability-hash-batchId"
       )

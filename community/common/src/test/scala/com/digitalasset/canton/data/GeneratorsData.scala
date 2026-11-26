@@ -107,7 +107,7 @@ final class GeneratorsData(
       commandId <- commandIdArb.arbitrary
       submittingParticipant <- Arbitrary.arbitrary[ParticipantId]
       salt <- Arbitrary.arbitrary[Salt]
-      submissionId <- Gen.option(ledgerSubmissionIdArb.arbitrary)
+      submissionId <- Gen.option(ledgerStringArb.arbitrary)
       dedupPeriod <- Arbitrary.arbitrary[DeduplicationPeriod]
       maxSequencingTime <- Arbitrary.arbitrary[CantonTimestamp]
       externalAuthorization <- Gen.option(Arbitrary.arbitrary[ExternalAuthorization])
@@ -495,7 +495,7 @@ final class GeneratorsData(
         userId <- userIdArb.arbitrary.map(_.unwrap)
         submittingParticipant <- Arbitrary.arbitrary[ParticipantId]
         commandId <- commandIdArb.arbitrary.map(_.unwrap)
-        submissionId <- Gen.option(ledgerSubmissionIdArb.arbitrary)
+        submissionId <- Gen.option(ledgerStringArb.arbitrary)
         workflowId <- Gen.option(workflowIdArb.arbitrary.map(_.unwrap))
         maxSequencingTime <- GeneratorsVersion.valueForEmptyOptionExactlyUntilExclusive(
           protocolVersion,

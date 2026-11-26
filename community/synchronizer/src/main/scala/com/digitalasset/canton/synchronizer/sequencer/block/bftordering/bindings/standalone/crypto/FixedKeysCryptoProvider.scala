@@ -33,6 +33,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   MessageFrom,
   SignedMessage,
 }
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.DelayUtil
 
@@ -45,6 +46,7 @@ class FixedKeysCryptoProvider(
     cryptoApi: CryptoPureApi,
     metrics: BftOrderingMetrics,
     delaySignMessageO: Any => Option[FiniteDuration],
+    override val psid: PhysicalSynchronizerId,
 )(implicit executionContext: ExecutionContext)
     extends CryptoProvider[PekkoEnv] {
 
@@ -71,7 +73,7 @@ class FixedKeysCryptoProvider(
   ): PekkoModuleSystem.PekkoFutureUnlessShutdown[
     Either[SyncCryptoError, SignedMessage[MessageT]]
   ] = {
-    def hash() = hashForMessage(message, message.from, authenticatedMessageType)
+    def hash() = hashForMessage(message, message.from, authenticatedMessageType, psid)
 
     PekkoFutureUnlessShutdown(
       "signMessage",

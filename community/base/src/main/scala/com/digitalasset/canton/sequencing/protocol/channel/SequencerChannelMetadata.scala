@@ -3,11 +3,20 @@
 
 package com.digitalasset.canton.sequencing.protocol.channel
 
+import cats.syntax.either.*
+import com.digitalasset.canton.config.CantonRequireTypes.String68
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
+import com.digitalasset.canton.{LfLedgerString, ProtoDeserializationError}
+import com.google.common.annotations.VisibleForTesting
 
 final case class SequencerChannelMetadata(
     channelId: SequencerChannelId,
@@ -34,7 +43,7 @@ object SequencerChannelMetadata extends VersioningCompanion[SequencerChannelMeta
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(-1) -> UnsupportedProtoCodec(),
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.dev)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.sequencerChannel)(
       v30.SequencerChannelMetadata
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),
@@ -77,23 +86,39 @@ object SequencerChannelMetadata extends VersioningCompanion[SequencerChannelMeta
   }
 }
 
-final case class SequencerChannelId(channelId: String) extends AnyVal {
-  def unwrap: String = channelId
-  def toProtoPrimitive: String = channelId
+final case class SequencerChannelId private (channelId: String68)
+    extends AnyVal
+    with PrettyPrintingFromCompanion {
+  def unwrap: String = channelId.unwrap
+  def toProtoPrimitive: String = channelId.toProtoPrimitive
+
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerChannelId] = SequencerChannelId
 }
 
-object SequencerChannelId {
+object SequencerChannelId extends PrettyPrintingCompanion[SequencerChannelId] {
+  override protected val pretty: Pretty[SequencerChannelId] =
+    prettyOfString(chid => chid.channelId.str.show)
+
+  def create(s: String, field: Option[String]): ParsingResult[SequencerChannelId] =
+    String68.fromProtoPrimitive(s, field).flatMap(create(_))
+  def create(s: String68, field: Option[String] = None): ParsingResult[SequencerChannelId] =
+    LfLedgerString
+      .fromString(s.str)
+      .leftMap(ProtoDeserializationError.StringConversionError(_, field))
+      .map(_ => SequencerChannelId(s))
+
+  @VisibleForTesting
+  def tryCreate(s: String): SequencerChannelId =
+    create(s, None).valueOr(err => throw new IllegalArgumentException(err.message))
+
+  @VisibleForTesting
+  def tryCreate(s: String68): SequencerChannelId =
+    create(s, None).valueOr(err => throw new IllegalArgumentException(err.message))
+
   def fromProtoPrimitive(channelId: String): ParsingResult[SequencerChannelId] =
-    fromProtoPrimitive(channelId, field = None)
+    create(channelId, field = None)
 
   def fromProtoPrimitive(channelId: String, field: String): ParsingResult[SequencerChannelId] =
-    fromProtoPrimitive(channelId, Some(field))
+    create(channelId, Some(field))
 
-  private def fromProtoPrimitive(
-      channelId: String,
-      field: Option[String],
-  ): ParsingResult[SequencerChannelId] = {
-    val _ = field
-    Right(SequencerChannelId(channelId))
-  }
 }

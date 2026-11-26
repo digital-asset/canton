@@ -16,4 +16,5 @@ final case class InitializeSequencerRequest(
     synchronizerParameters: StaticSynchronizerParameters,
     sequencerSnapshot: Option[SequencerSnapshot] = None,
     ignoreLsuPsidCheck: Boolean = false,
+    isLsuSuccessorInit: Boolean = false,
 )

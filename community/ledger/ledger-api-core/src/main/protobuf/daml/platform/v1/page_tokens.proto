@@ -54,3 +54,24 @@ message UpdatesPageToken {
   // to verify difference in request (update_format, begin_offset_exclusive, end_offset_inclusive, descending_order)
   bytes request_checksum = 5;
 }
+
+// Describes the payload of a continuation token of a hosted parties stream.
+// Not intended to be handled directly by clients and should be presented to them as opaque bytes.
+message HostedPartiesContinuationTokenPayload {
+  // hosted parties are ordered by party, and the stream continues with parties larger than this one
+  string party_lower_bound_excl = 1;
+  // checksum to validate the token
+  bytes checksum = 2;
+  // the offset of the snapshot, which the subsequent requests continue from
+  int64 hosted_at_offset = 3;
+}
+
+// Describes the payload of a page token of a hosted parties snapshot.
+// Not intended to be handled directly by clients and should be presented to them as opaque bytes.
+message HostedPartiesPageTokenPayload {
+  // the continuation token of the last party in the previous page, which also pins the snapshot offset
+  bytes continuation_token = 1;
+  int32 version = 2;
+  bytes participant_id_checksum = 3;
+  bytes request_checksum = 4;
+}

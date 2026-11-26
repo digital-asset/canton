@@ -489,7 +489,6 @@ object TopologyTransactionProcessor {
       cleanSynchronizerRecordTime = None, // not available for synchronizer nodes
       NoPackageDependencies,
       parameters.cachingConfigs,
-      parameters.enableAdditionalConsistencyChecks,
       topologyConfig,
       parameters.processingTimeouts,
       futureSupervisor,

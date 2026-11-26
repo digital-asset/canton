@@ -24,6 +24,7 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   Error,
   InconsistentLogicalSynchronizerIds,
   InconsistentSequencerIds,
+  LogicalSynchronizerIdAlreadyAdded,
   LsuOngoing,
   LsuSource,
   LsuTarget,
@@ -304,6 +305,28 @@ class DbSynchronizerConnectionConfigStore private[store] (
     )
   } yield ()
 
+  // Ensure the logical synchronizer id of psid is not already registered with another alias
+  private def checkLogicalIdNotUsedByOtherAlias(
+      psid: PhysicalSynchronizerId,
+      alias: SynchronizerAlias,
+  ): EitherT[dbio.DBIO, Error, Unit] = for {
+    otherRows <- dbEitherT[Error](
+      sql"""select synchronizer_alias, physical_synchronizer_id from par_synchronizer_connection_configs
+            where synchronizer_alias <> $alias and physical_synchronizer_id is not null"""
+        .as[(SynchronizerAlias, PhysicalSynchronizerId)]
+    )
+
+    _ <- EitherT.fromEither[DBIO](
+      otherRows
+        .collectFirst {
+          case (existingAlias, existingPsid) if existingPsid.logical == psid.logical =>
+            LogicalSynchronizerIdAlreadyAdded(psid, alias, existingAlias)
+        }
+        .toLeft(())
+        .leftWiden[Error]
+    )
+  } yield ()
+
   // Ensure this psid is not already registered with another alias
   private def checkAliasConsistent(
       psid: PhysicalSynchronizerId,
@@ -457,6 +480,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
           for {
             _ <- checkAliasConsistent(psid, alias)
             _ <- checkLogicalIdConsistent(psid, alias)
+            _ <- checkLogicalIdNotUsedByOtherAlias(psid, alias)
           } yield ()
 
         case UnknownPhysicalSynchronizerId =>
@@ -828,6 +852,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
     for {
       _ <- checkAliasConsistent(psid, alias)
       _ <- checkLogicalIdConsistent(psid, alias)
+      _ <- checkLogicalIdNotUsedByOtherAlias(psid, alias)
       _ <- dbEitherT[Error](updateAction)
     } yield ()
   }

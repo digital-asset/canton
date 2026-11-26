@@ -68,7 +68,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClientImpl.SequencerCl
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.*
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.SequencerConnectionPoolConfig
-import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.PenaltyKind
 import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPool.SequencerSubscriptionPoolConfig
 import com.digitalasset.canton.sequencing.client.pool.{
   HasAcceptableSequencers,
@@ -804,7 +804,7 @@ abstract class SequencerClientImpl(
         error match {
           case SendAsyncClientError.RequestRefused(sendAsyncError) if sendAsyncError.isOverload =>
             connection.increasePenalty(
-              Penalty.SequencerOverloaded,
+              PenaltyKind.SequencerOverloaded,
               "sequencer is overloaded",
             )
           case _ =>

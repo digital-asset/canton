@@ -41,10 +41,10 @@ object AuthorizationChecksErrors extends CantonErrorGroups.AuthorizationChecksEr
   }
 
   @Explanation(
-    """This rejection is given if the submitted command does not contain a JWT token on a participant enforcing JWT authentication."""
+    """This rejection is given if the submitted command does not contain a JWT token, or contains an invalid JWT token on a participant enforcing JWT authentication."""
   )
   @Resolution(
-    "Ask your participant operator or IDP provider to give you an appropriate JWT token."
+    "Ask your participant operator or IDP provider to give you a valid JWT token."
   )
   object Unauthenticated
       extends ErrorCode(
@@ -61,6 +61,12 @@ object AuthorizationChecksErrors extends CantonErrorGroups.AuthorizationChecksEr
         loggingContext: ErrorLoggingContext
     ) extends DamlErrorWithDefiniteAnswer(
           cause = "User based authentication is disabled."
+        )
+
+    final case class UserBasedAuthenticationFailed(override val cause: String)(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause = s"User based authentication failed: $cause"
         )
   }
 

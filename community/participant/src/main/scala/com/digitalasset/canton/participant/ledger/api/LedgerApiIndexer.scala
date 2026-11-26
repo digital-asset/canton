@@ -91,6 +91,9 @@ class LedgerApiIndexer(
     TraceContext.empty
   )
 
+  /** Caller MUST ensure that the node is not connected to any synchronizer while the
+    * repairOperation is running.
+    */
   def withRepairIndexer(
       repairOperation: FutureQueue[RepairUpdate] => EitherT[Future, String, Unit]
   )(implicit

@@ -48,8 +48,8 @@ message ConnectToSequencerChannelRequest {
     // for use by the sequencer channel service to match channel endpoint members.
     SequencerChannelMetadata metadata = 1;
     // SequencerChannelSessionKey and SequencerChannelSessionKeyAck are used to send and acknowledge an asymmetrically
-    // encrypted session key between the sequencer channel client endpoints. The SequencerChannelSessionKey is opaque to
-    // sequencer channel service.
+    // encrypted session key between the sequencer channel client endpoints. The sequencer channel service cannot read
+    // the session key.
     SequencerChannelSessionKey session_key = 2;
     SequencerChannelSessionKeyAck session_key_acknowledgement = 3;
     // Payload is opaque to the sequencer channel service and client.
@@ -70,8 +70,8 @@ message ConnectToSequencerChannelResponse {
     // for use by the sequencer channel client to notify the request initiator that the channel is ready for use.
     SequencerChannelConnectedToAllEndpoints connected = 1;
     // SequencerChannelSessionKey and SequencerChannelSessionKeyAck are used to send and acknowledge an asymmetrically
-    // encrypted session key between the sequencer channel client endpoints. The SequencerChannelSessionKey is opaque to
-    // sequencer channel service.
+    // encrypted session key between the sequencer channel client endpoints. The sequencer channel service cannot read
+    // the session key.
     SequencerChannelSessionKey session_key = 2;
     SequencerChannelSessionKeyAck session_key_acknowledgement = 3;
     // Payload is opaque to the sequencer channel service and client.
@@ -112,15 +112,36 @@ message SequencerChannelConnectedToAllEndpoints {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 }
 
-// Public key encrypted session key to secure the communication between two members.
+// Session key that secures the communication between two members, encrypted to the receiver and signed by the
+// session key owner.
+// The sequencer channel service relays this message field by field and drops fields it does not know, so a new
+// field also requires upgrading the sequencers.
 message SequencerChannelSessionKey {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
-  // The public key is determined by the timestamp as agreed by the connecting members beforehand.
-  // The timestamp is expected to originate from a recent topology transaction that has already taken effect;
-  // meaning it's not a future timestamp.
+  // SequencerChannelSessionKeyContent, encrypted to one of the receiver's current encryption keys.
   // Required
   com.digitalasset.canton.crypto.v30.AsymmetricEncrypted encrypted_session_key = 1;
+
+  // Signature by the session key owner, with its current signing key, over a hash of the physical
+  // synchronizer id, the channel id, the sender, the receiver and the encrypted session key.
+  // The receiver verifies it against the expected sender in its current topology before decrypting,
+  // and rejects the session key if verification fails.
+  // Required
+  com.digitalasset.canton.crypto.v30.Signature session_key_signature = 2;
+}
+
+// Plaintext of SequencerChannelSessionKey.encrypted_session_key.
+message SequencerChannelSessionKeyContent {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // Required
+  com.digitalasset.canton.crypto.v30.SymmetricKey session_key = 1;
+
+  // Hash of the physical synchronizer id, the channel id, the sender and the receiver.
+  // The receiver recomputes it for the expected sender and rejects the session key on a mismatch.
+  // Required
+  bytes context_hash = 2;
 }
 
 // Acknowledgement that the session key has been received

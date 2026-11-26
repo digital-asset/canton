@@ -88,21 +88,32 @@ object HashPurpose {
   val DecentralizedNamespaceNamespace = HashPurpose(37, "DecentralizedNamespace")
   val SignedProtocolMessageSignature = HashPurpose(38, "SignedProtocolMessageSignature")
   val AggregationId = HashPurpose(39, "AggregationId")
+
   val BftOrderingPbftBlock = HashPurpose(40, "BftOrderingPbftBlock")
+
   val _SetTrafficPurchased = HashPurpose(41, "SetTrafficPurchased")
   val OrderingRequestSignature = HashPurpose(42, "OrderingRequestSignature")
   val TopologyMappingUniqueKey = HashPurpose(43, "TopologyMappingUniqueKey")
   val CantonScript = HashPurpose(44, "CantonScriptHash")
+
+  // Legacy purpose for availability acknowledgements. The V1 ack hash covers the batch ID, epoch,
+  //  and sender, but does not bind the physical synchronizer ID. CryptoProvider also maps V1
+  //  authenticated ack messages to this purpose.
   val BftAvailabilityAck = HashPurpose(45, "BftAvailabilityAck")
+  // Used for raw batch IDs at every protocol version.
   val BftBatchId = HashPurpose(46, "BftBatchId")
+  // Legacy hash purpose for signed P2P availability protocol messages.
   val BftSignedAvailabilityMessage = HashPurpose(47, "BftSignedAvailabilityMessage")
+
   val PreparedSubmission = HashPurpose(48, "PreparedSubmission")
   val TopologyUpdateId = HashPurpose(49, "TopologyUpdateId")
   val OnlinePartyReplicationId = HashPurpose(50, "OnlinePartyReplication")
   val PartyUpdateId = HashPurpose(51, "PartyUpdateId")
+
   val BftSignedConsensusMessage = HashPurpose(52, "BftSignedConsensusMessage")
   val BftSignedStateTransferMessage = HashPurpose(53, "BftSignedStateTransferMessage")
   val BftSignedRetransmissionMessage = HashPurpose(54, "BftSignedRetransmissionMessage")
+
   val MultiTopologyTransaction = HashPurpose(55, "MultiTopologyTransaction")
   val SessionKeyDelegation = HashPurpose(56, "SessionKeyDelegation")
   val ReassignmentId = HashPurpose(57, "ReassignmentId")
@@ -127,6 +138,21 @@ object HashPurpose {
   val _LfLedgerApiReassignmentChangeId =
     HashPurpose(73, "Daml-LF Hash.Purpose.LedgerApiReassignmentChangeId")
   val _LfAssignmentReassignmentId = HashPurpose(74, "Daml-LF Hash.Purpose.AssignmentReassignmentId")
+  val SequencerChannelSessionKey = HashPurpose(75, "SequencerChannelSessionKey")
+  val SequencerChannelSessionKeyContext = HashPurpose(76, "SequencerChannelSessionKeyContext")
+  val HostedPartiesToken = HashPurpose(77, "HostedPartiesToken")
+
+  val BftOrderingPbftBlockV2 = HashPurpose(78, "BftOrderingPbftBlockV2")
+  // V2 hash purpose for the fields an availability ack signs: batch ID, epoch, sender, and
+  //  physical synchronizer ID. Unlike the V1 purpose, this binds the ack to its synchronizer.
+  val BftAvailabilityAckV2 = HashPurpose(79, "BftAvailabilityAckV2")
+  // V2 purpose for signatures on P2P availability protocol messages.
+  val BftSignedAvailabilityMessageV2 = HashPurpose(80, "BftSignedAvailabilityMessageV2")
+  // V2 purpose for authenticated availability-ack messages, distinct from the direct ack hash.
+  val BftSignedAvailabilityAckV2 = HashPurpose(81, "BftSignedAvailabilityAckV2")
+  val BftSignedConsensusMessageV2 = HashPurpose(82, "BftSignedConsensusMessageV2")
+  val BftSignedStateTransferMessageV2 = HashPurpose(83, "BftSignedStateTransferMessageV2")
+  val BftSignedRetransmissionMessageV2 = HashPurpose(84, "BftSignedRetransmissionMessageV2")
 
   // Do not use for anything other than testing or "mock" hashes
   // Is not in a testing-only module because it used in traffic cost estimation that requires mock hashes

@@ -36,20 +36,9 @@ class JsJoseService(
     ledgerClient.serviceClient(jose_service.JoseServiceGrpc.stub, token)
 
   def endpoints() = List(
-    JsJoseService.getJwksEndpoint
-      .mapIn(Endpoints.traceHeadersMapping[jose_service.GetJwksRequest]())
-      .serverSecurityLogic(caller =>
-        // We allow anyone to access the endpoint, as JWKS URLs typically don't
-        // have any authentication.
-        Future.successful[Either[CustomError, CallerContext]](Right(caller))
-      )
-      .serverLogic(caller =>
-        tracedInput => {
-          Future
-            .delegate(getJwks(caller)(tracedInput))
-            .transform(handleErrorResponse(caller.traceContext()))
-        }
-      )
+    // We allow anyone to access the endpoint, as JWKS URLs typically don't
+    // have any authentication.
+    withPublicServerLogic(JsJoseService.getJwksEndpoint, getJwks)
   )
 
   private def getJwks(

@@ -209,16 +209,28 @@ final case class SequencerPruningStatus(
         .map(_.member)
     )
 
+  private def hasRegistration(status: SequencerMemberStatus): Boolean = status match {
+    case _: Onboarding => false
+    case _: Active => true
+    case disabled: Disabled => disabled.registeredAt.isDefined
+  }
+
+  /** Members with a registration timestamp: the active ones and those disabled after their
+    * registration.
+    */
+  def registeredMembers: Set[Member] = members.filter(hasRegistration).map(_.member)
+
+  /** Members without a registration timestamp: those still onboarding and those disabled while
+    * onboarding.
+    */
+  def unregisteredMembers: Set[Member] = members.filterNot(hasRegistration).map(_.member)
+
   /** Drops the members without a registration timestamp: those still onboarding and those disabled
     * while onboarding. The v30 encoding cannot represent them, and as they have no events they do
     * not affect pruning.
     */
   def withoutUnregisteredMembers: SequencerPruningStatus =
-    copy(members = members.filter {
-      case _: Onboarding => false
-      case _: Active => true
-      case disabled: Disabled => disabled.registeredAt.isDefined
-    })
+    copy(members = members.filter(hasRegistration))
 
   def toProtoV30: Either[String, v30.SequencerPruningStatus] =
     members.toSeq.traverse(_.toProtoV30).map { membersP =>

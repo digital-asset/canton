@@ -163,7 +163,7 @@ object CryptoKeyPair extends HasVersionedMessageCompanionE[CryptoKeyPair[PublicK
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v36,
+      ProtocolVersion.minimum,
       supportedProtoVersion(v30.CryptoKeyPair)(fromProtoCryptoKeyPairV30),
       _.toProtoCryptoKeyPairV30,
     )
@@ -257,10 +257,51 @@ object PublicKey {
     publicKeyP.key match {
       case v30.PublicKey.Key.Empty => Left(ProtoDeserializationError.FieldNotSet("key"))
       case v30.PublicKey.Key.EncryptionPublicKey(encPubKeyP) =>
-        EncryptionPublicKey.fromProtoV30(encPubKeyP)
+        EncryptionPublicKey.fromProtoV30(pvv, encPubKeyP)
       case v30.PublicKey.Key.SigningPublicKey(signPubKeyP) =>
         SigningPublicKey.fromProtoV30(pvv, signPubKeyP)
     }
+
+  /** Requires an EC public key to use the curve of its key spec, by naming it or by giving its
+    * parameters; rejects other curves and parameters.
+    *
+    * @param pvv
+    *   the protocol version validation of the enclosing message
+    * @param publicKey
+    *   the deserialized public key
+    */
+  private[crypto] def validateCurve(
+      pvv: ProtocolVersionValidation,
+      publicKey: PublicKey,
+  ): ParsingResult[Unit] = checkCurve(pvv, publicKey, allowExplicitParameters = true)
+
+  /** Requires an EC public key to name the curve of its key spec; rejects curve parameters, even
+    * ones equal to the named curve's. For keys Canton generates itself, such as session keys.
+    *
+    * @param pvv
+    *   the protocol version validation of the enclosing message
+    * @param publicKey
+    *   the deserialized public key
+    */
+  private[crypto] def validateNamedCurve(
+      pvv: ProtocolVersionValidation,
+      publicKey: PublicKey,
+  ): ParsingResult[Unit] = checkCurve(pvv, publicKey, allowExplicitParameters = false)
+
+  private def checkCurve(
+      pvv: ProtocolVersionValidation,
+      publicKey: PublicKey,
+      allowExplicitParameters: Boolean,
+  ): ParsingResult[Unit] =
+    ProtoValidation.validateConditionSince(pvv, ProtocolVersion.strictPublicKeyChecksPV)(
+      CryptoKeyValidation.matchesCurveOfKeySpec(publicKey, allowExplicitParameters),
+      ProtoDeserializationError.CryptoParseAndValidationError(
+        if (allowExplicitParameters)
+          s"Invalid EC public key [${publicKey.id}]: the key must use the curve of its key spec"
+        else
+          s"Invalid EC public key [${publicKey.id}]: the key must name the curve of its key spec, curve parameters are not supported"
+      ),
+    )
 
 }
 
@@ -309,7 +350,7 @@ object PublicKeyWithName extends HasVersionedMessageCompanionE[PublicKeyWithName
   @SuppressWarnings(Array("com.digitalasset.canton.NoProtocolVersionValidation"))
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v36,
+      ProtocolVersion.minimum,
       supportedProtoVersion(v30.PublicKeyWithName)(
         fromProto30(ProtocolVersionValidation.NoValidation, _)
       ),

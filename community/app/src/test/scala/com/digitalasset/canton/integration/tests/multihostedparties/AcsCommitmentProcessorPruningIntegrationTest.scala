@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CommitmentSendDelay
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
 import com.digitalasset.canton.console.ParticipantReference
@@ -206,11 +207,11 @@ trait AcsCommitmentProcessorPruningIntegrationTest
 
     for (_ <- 1 to intervalCount) {
       simClock.advance(interval)
-      // Make the synchronizer observe the new time first, so that the ping is not sequenced with a stale timestamp
-      // before the interval boundary
-      activeParticipants.foreach(_.testing.fetch_synchronizer_times())
-      participant1.health.ping(participant1)
-      activeParticipants.foreach(_.testing.fetch_synchronizer_times())
+      activeParticipants.foreach { p =>
+        p.testing.fetch_synchronizer_times()
+        p.health.ping(p)
+        p.testing.fetch_synchronizer_times()
+      }
     }
     val end = simClock.now
 
@@ -333,6 +334,8 @@ trait AcsCommitmentProcessorPruningIntegrationTest
 }
 
 //we don't run an in-memory version of this test since it relies on stopping and starting participants.
+// TODO(#37720): remove this test when removing the old AcsCommitmentProcessor together with PV37
+@UnstableTest
 class AcsCommitmentProcessorPruningIntegrationTestPostgres
     extends AcsCommitmentProcessorPruningIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

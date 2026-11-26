@@ -496,6 +496,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
 
   protected def newMockCrypto: CryptoProvider[ProgrammableUnitTestEnv] = {
     val cryptoProvider = mock[CryptoProvider[ProgrammableUnitTestEnv]]
+    when(cryptoProvider.psid).thenReturn(testPsid)
     when(cryptoProvider.signHash(any[Hash], any[String])(any[TraceContext], any[MetricsContext]))
       .thenReturn(() => Right(Signature.noSignature))
     cryptoProvider

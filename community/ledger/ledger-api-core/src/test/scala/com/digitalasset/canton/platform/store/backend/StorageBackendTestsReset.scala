@@ -9,6 +9,7 @@ import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   PaginationFromTo,
   PaginationInput,
 }
+import com.digitalasset.canton.platform.store.dao.events.DecomposedTemplatePartyFilter
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -161,9 +162,8 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
 
     def activateStakeholderIds = executeSql(
       backend.event.updateStreamingQueries
-        .activateStakeholderIds(
-          witnessO = None,
-          templateIdO = None,
+        .activateIds(
+          DecomposedTemplatePartyFilter(party = None, templateId = None)
         )
         .fetchPage(_)(paginationInput)
         .ids
@@ -172,8 +172,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     def activateWitnessesIds = executeSql(
       backend.event.updateStreamingQueries
         .activateWitnessesIds(
-          witnessO = None,
-          templateIdO = None,
+          templatePartyFilter = DecomposedTemplatePartyFilter(party = None, templateId = None)
         )
         .fetchPage(_)(paginationInput)
         .ids
@@ -181,9 +180,8 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
 
     def deactivateStakeholderIds = executeSql(
       backend.event.updateStreamingQueries
-        .deactivateStakeholderIds(
-          witnessO = None,
-          templateIdO = None,
+        .deactivateIds(
+          DecomposedTemplatePartyFilter(party = None, templateId = None)
         )
         .fetchPage(_)(paginationInput)
         .ids
@@ -192,8 +190,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     def deactivateWitnessesIds = executeSql(
       backend.event.updateStreamingQueries
         .deactivateWitnessesIds(
-          witnessO = None,
-          templateIdO = None,
+          templatePartyFilter = DecomposedTemplatePartyFilter(party = None, templateId = None)
         )
         .fetchPage(_)(paginationInput)
         .ids
@@ -202,8 +199,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     def variousWitnessesIds = executeSql(
       backend.event.updateStreamingQueries
         .variousWitnessIds(
-          witnessO = None,
-          templateIdO = None,
+          DecomposedTemplatePartyFilter(party = None, templateId = None)
         )
         .fetchPage(_)(paginationInput)
         .ids

@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.synchronizer
 
 import cats.syntax.traverse.*
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
-import com.digitalasset.canton.protocol.TopologyLimits
+import com.digitalasset.canton.protocol.TopologyLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.{PendingOperation, PendingOperationStore}
 import com.digitalasset.canton.topology.SynchronizerId
@@ -67,7 +67,7 @@ object PendingOnboardingTransactions extends VersioningCompanion[PendingOnboardi
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec
-      .storage(ReleaseProtocolVersion(ProtocolVersion.v36), v30.PendingOnboardingTransactions)(
+      .storage(ReleaseProtocolVersion(ProtocolVersion.minimum), v30.PendingOnboardingTransactions)(
         supportedProtoVersion(_)(fromProtoV30),
         _.toProtoV30,
       )
@@ -87,7 +87,7 @@ object PendingOnboardingTransactions extends VersioningCompanion[PendingOnboardi
       // Trusted bytes from the node's own store, so the limits in the context are never read.
       transactions <- proto.transactions.traverse(
         SignedTopologyTransaction.fromTrustedByteString(
-          TopologyTransactionDeserializationContext(TopologyLimits.default)
+          TopologyTransactionDeserializationContext(TopologyLimitsView.default)
         )
       )
       transactionsNE <- NonEmpty

@@ -127,7 +127,14 @@ class AvailabilityModuleDisseminationTest
           ctx.runPipedMessagesAndReceiveOnModule(availability) // Perform signing
 
           verify(cryptoProvider).signHash(
-            AvailabilityAck.hashFor(ABatchId, anEpochNumber, Node0, metrics),
+            AvailabilityAck.hashFor(
+              ABatchId,
+              anEpochNumber,
+              Node0,
+              metrics,
+              testPsid,
+              synchronizerProtocolVersion,
+            ),
             operationId = "availability-sign-local-batchId",
           )
 
@@ -183,7 +190,14 @@ class AvailabilityModuleDisseminationTest
         ctx.runPipedMessagesAndReceiveOnModule(availability) // Perform signing
 
         verify(cryptoProvider).signHash(
-          AvailabilityAck.hashFor(ABatchId, anEpochNumber, Node0, metrics),
+          AvailabilityAck.hashFor(
+            ABatchId,
+            anEpochNumber,
+            Node0,
+            metrics,
+            testPsid,
+            synchronizerProtocolVersion,
+          ),
           operationId = "availability-sign-local-batchId",
         )
 
@@ -221,7 +235,8 @@ class AvailabilityModuleDisseminationTest
         ctx.runPipedMessagesAndReceiveOnModule(availability) // Perform signing
 
         verify(cryptoProvider).signHash(
-          AvailabilityAck.hashFor(ABatchId, anEpochNumber, me, metrics),
+          AvailabilityAck
+            .hashFor(ABatchId, anEpochNumber, me, metrics, testPsid, synchronizerProtocolVersion),
           operationId = "availability-sign-local-batchId",
         )
 
@@ -267,7 +282,8 @@ class AvailabilityModuleDisseminationTest
           )
 
           verify(cryptoProvider).signHash(
-            AvailabilityAck.hashFor(ABatchId, anEpochNumber, me, metrics),
+            AvailabilityAck
+              .hashFor(ABatchId, anEpochNumber, me, metrics, testPsid, synchronizerProtocolVersion),
             operationId = "availability-sign-local-batchId",
           )
 
@@ -341,7 +357,8 @@ class AvailabilityModuleDisseminationTest
           )
 
           verify(cryptoProvider).signHash(
-            AvailabilityAck.hashFor(ABatchId, anEpochNumber, me, metrics),
+            AvailabilityAck
+              .hashFor(ABatchId, anEpochNumber, me, metrics, testPsid, synchronizerProtocolVersion),
             operationId = "availability-sign-local-batchId",
           )
 
@@ -787,6 +804,7 @@ class AvailabilityModuleDisseminationTest
     "just acknowledge the originating node" in {
       val disseminationProtocolState = new DisseminationProtocolState()
       val cryptoProvider = mock[CryptoProvider[IgnoringUnitTestEnv]]
+      when(cryptoProvider.psid).thenReturn(testPsid)
 
       val myId = Node0
       val availability =
@@ -807,7 +825,8 @@ class AvailabilityModuleDisseminationTest
       disseminationProtocolState.disseminationProgress should be(empty)
       disseminationProtocolState.nextToBeProvidedToConsensus.maxBatchesPerProposal shouldBe None
       verify(cryptoProvider).signHash(
-        AvailabilityAck.hashFor(ABatchId, anEpochNumber, myId, metrics),
+        AvailabilityAck
+          .hashFor(ABatchId, anEpochNumber, myId, metrics, testPsid, synchronizerProtocolVersion),
         operationId = "availability-sign-remote-batchId",
       )
     }
@@ -857,6 +876,7 @@ class AvailabilityModuleDisseminationTest
         val disseminationProtocolState = new DisseminationProtocolState()
 
         val cryptoProvider = mock[CryptoProvider[IgnoringUnitTestEnv]]
+        when(cryptoProvider.psid).thenReturn(testPsid)
         val availability =
           createAndStartAvailability[IgnoringUnitTestEnv](
             cryptoProvider = cryptoProvider,
@@ -883,6 +903,7 @@ class AvailabilityModuleDisseminationTest
           ABatchDisseminationProgressNode0And1WithNode0Vote
         )
         val cryptoProvider = mock[CryptoProvider[IgnoringUnitTestEnv]]
+        when(cryptoProvider.psid).thenReturn(testPsid)
         val availability =
           createAndStartAvailability[IgnoringUnitTestEnv](
             otherNodes = Set(Node1),
@@ -893,7 +914,14 @@ class AvailabilityModuleDisseminationTest
         availability.receive(msg)
 
         verify(cryptoProvider).verifySignature(
-          AvailabilityAck.hashFor(msg.batchId, anEpochNumber, msg.from, metrics),
+          AvailabilityAck.hashFor(
+            msg.batchId,
+            anEpochNumber,
+            msg.from,
+            metrics,
+            testPsid,
+            synchronizerProtocolVersion,
+          ),
           msg.from,
           msg.signature,
           operationId = "availability-signature-verify-ack",
@@ -941,6 +969,7 @@ class AvailabilityModuleDisseminationTest
             ABatchDisseminationProgressNode0To3WithNode0Vote
           )
           val cryptoProvider = mock[CryptoProvider[IgnoringUnitTestEnv]]
+          when(cryptoProvider.psid).thenReturn(testPsid)
           val availability =
             createAndStartAvailability[IgnoringUnitTestEnv](
               otherNodes = Node1To3,
@@ -950,7 +979,14 @@ class AvailabilityModuleDisseminationTest
           QuorumAcksForNode0To3.tail.foreach { quorumAck =>
             availability.receive(quorumAck)
             verify(cryptoProvider).verifySignature(
-              AvailabilityAck.hashFor(quorumAck.batchId, anEpochNumber, quorumAck.from, metrics),
+              AvailabilityAck.hashFor(
+                quorumAck.batchId,
+                anEpochNumber,
+                quorumAck.from,
+                metrics,
+                testPsid,
+                synchronizerProtocolVersion,
+              ),
               quorumAck.from,
               quorumAck.signature,
               operationId = "availability-signature-verify-ack",
@@ -1006,6 +1042,7 @@ class AvailabilityModuleDisseminationTest
           ABatchDisseminationProgressNode0To6WithNode0Vote._1 -> ABatchDisseminationProgressNode0To6WithNode0Vote._2
         )
         val cryptoProvider = mock[CryptoProvider[IgnoringUnitTestEnv]]
+        when(cryptoProvider.psid).thenReturn(testPsid)
         val availability =
           createAndStartAvailability[IgnoringUnitTestEnv](
             otherNodes = Node1To6,
@@ -1016,7 +1053,14 @@ class AvailabilityModuleDisseminationTest
         availability.receive(node1Ack)
 
         verify(cryptoProvider).verifySignature(
-          AvailabilityAck.hashFor(node1Ack.batchId, anEpochNumber, node1Ack.from, metrics),
+          AvailabilityAck.hashFor(
+            node1Ack.batchId,
+            anEpochNumber,
+            node1Ack.from,
+            metrics,
+            testPsid,
+            synchronizerProtocolVersion,
+          ),
           node1Ack.from,
           node1Ack.signature,
           operationId = "availability-signature-verify-ack",
@@ -1060,6 +1104,7 @@ class AvailabilityModuleDisseminationTest
           disseminationProtocolState.nextToBeProvidedToConsensus = ANextToBeProvidedToConsensus
           val consensusCell = new AtomicReference[Option[Consensus.ProtocolMessage]](None)
           val cryptoProvider = mock[CryptoProvider[IgnoringUnitTestEnv]]
+          when(cryptoProvider.psid).thenReturn(testPsid)
           val availability =
             createAndStartAvailability[IgnoringUnitTestEnv](
               otherNodes = Set(Node1),
@@ -1071,7 +1116,14 @@ class AvailabilityModuleDisseminationTest
           availability.receive(msg)
 
           verify(cryptoProvider).verifySignature(
-            AvailabilityAck.hashFor(msg.batchId, anEpochNumber, msg.from, metrics),
+            AvailabilityAck.hashFor(
+              msg.batchId,
+              anEpochNumber,
+              msg.from,
+              metrics,
+              testPsid,
+              synchronizerProtocolVersion,
+            ),
             msg.from,
             msg.signature,
             operationId = "availability-signature-verify-ack",
@@ -1105,6 +1157,7 @@ class AvailabilityModuleDisseminationTest
           disseminationProtocolState.nextToBeProvidedToConsensus = ANextToBeProvidedToConsensus
           val consensusCell = new AtomicReference[Option[Consensus.ProtocolMessage]](None)
           val cryptoProvider = mock[CryptoProvider[IgnoringUnitTestEnv]]
+          when(cryptoProvider.psid).thenReturn(testPsid)
           val availability =
             createAndStartAvailability[IgnoringUnitTestEnv](
               otherNodes = Node1To3,
@@ -1116,7 +1169,14 @@ class AvailabilityModuleDisseminationTest
             availability.receive(quorumAck)
 
             verify(cryptoProvider).verifySignature(
-              AvailabilityAck.hashFor(quorumAck.batchId, anEpochNumber, quorumAck.from, metrics),
+              AvailabilityAck.hashFor(
+                quorumAck.batchId,
+                anEpochNumber,
+                quorumAck.from,
+                metrics,
+                testPsid,
+                synchronizerProtocolVersion,
+              ),
               quorumAck.from,
               quorumAck.signature,
               operationId = "availability-signature-verify-ack",
@@ -1153,6 +1213,7 @@ class AvailabilityModuleDisseminationTest
         )
         disseminationProtocolState.nextToBeProvidedToConsensus = ANextToBeProvidedToConsensus
         val cryptoProvider = mock[CryptoProvider[IgnoringUnitTestEnv]]
+        when(cryptoProvider.psid).thenReturn(testPsid)
         val availability =
           createAndStartAvailability[IgnoringUnitTestEnv](
             otherNodes = Node1To6,
@@ -1163,7 +1224,14 @@ class AvailabilityModuleDisseminationTest
         availability.receive(node1Ack)
 
         verify(cryptoProvider).verifySignature(
-          AvailabilityAck.hashFor(node1Ack.batchId, anEpochNumber, node1Ack.from, metrics),
+          AvailabilityAck.hashFor(
+            node1Ack.batchId,
+            anEpochNumber,
+            node1Ack.from,
+            metrics,
+            testPsid,
+            synchronizerProtocolVersion,
+          ),
           node1Ack.from,
           node1Ack.signature,
           operationId = "availability-signature-verify-ack",
@@ -1207,6 +1275,7 @@ class AvailabilityModuleDisseminationTest
         )
         disseminationProtocolState.nextToBeProvidedToConsensus = ANextToBeProvidedToConsensus
         val cryptoProvider = mock[CryptoProvider[IgnoringUnitTestEnv]]
+        when(cryptoProvider.psid).thenReturn(testPsid)
         val availability =
           createAndStartAvailability[IgnoringUnitTestEnv](
             otherNodes = Node1To6,
@@ -1222,7 +1291,14 @@ class AvailabilityModuleDisseminationTest
         availability.receive(node1Ack)
 
         verify(cryptoProvider, times(1)).verifySignature(
-          AvailabilityAck.hashFor(node1Ack.batchId, anEpochNumber, node1Ack.from, metrics),
+          AvailabilityAck.hashFor(
+            node1Ack.batchId,
+            anEpochNumber,
+            node1Ack.from,
+            metrics,
+            testPsid,
+            synchronizerProtocolVersion,
+          ),
           node1Ack.from,
           node1Ack.signature,
           operationId = "availability-signature-verify-ack",
@@ -1255,6 +1331,8 @@ class AvailabilityModuleDisseminationTest
         // Second time receiving node1Ack: deduplicated before cryptoProvider.verify
         availability.receive(node1Ack)
 
+        if (synchronizerProtocolVersion > com.digitalasset.canton.version.ProtocolVersion.v37)
+          verify(cryptoProvider).psid
         verifyNoMoreInteractions(cryptoProvider)
         disseminationProtocolState.disseminationProgress should contain only expectedDisseminationProgress
         disseminationProtocolState.nextToBeProvidedToConsensus shouldBe ANextToBeProvidedToConsensus

@@ -58,7 +58,7 @@ trait ReassignmentStore extends ReassignmentLookup {
     */
   def addUnassignmentData(unassignmentData: UnassignmentData)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit]
+  ): FutureUnlessShutdown[Unit]
 
   /** Adds the given offsets to the reassignment data in the store, in order. An offset that
     * conflicts with the stored or earlier offsets raises an alarm and is not stored.
@@ -148,7 +148,7 @@ trait ReassignmentStore extends ReassignmentLookup {
     */
   def addAssignmentDataIfAbsent(assignmentData: AssignmentData)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit]
+  ): FutureUnlessShutdown[Unit]
 
   /** Removes the reassignment from the store, when the unassignment request is rejected or the
     * reassignment is pruned.

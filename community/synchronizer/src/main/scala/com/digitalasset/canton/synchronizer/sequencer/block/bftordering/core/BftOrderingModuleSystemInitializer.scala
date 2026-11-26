@@ -221,7 +221,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
           new P2PNetworkInModule(
             metrics,
             ProtocolVersionValidation(synchronizerProtocolVersion),
-            synchronizerLimits.bftOrdererLimits,
+            synchronizerLimits.bftOrdererLimitsView,
             availabilityRef,
             consensusRef,
             loggerFactory,

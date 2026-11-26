@@ -72,7 +72,7 @@ object SetTrafficPurchasedMessage
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(1) -> VersionedProtoCodec(ProtocolVersion.v36)(
+    ProtoVersion(1) -> VersionedProtoCodec(ProtocolVersion.minimum)(
       v30.SetTrafficPurchasedMessage
     )(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),

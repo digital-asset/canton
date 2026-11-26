@@ -32,6 +32,7 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.protocol.reassignment.{
   AssignmentProcessor,
   UnassignmentProcessor,
@@ -183,6 +184,7 @@ final class ReplayedRejectedReassignmentIntegrationTest
     val token = SequencerTestHelper
       .requestToken(
         sequencerChannel,
+        Endpoint(sequencer.config.publicApi.address, sequencer.config.publicApi.port),
         synchronizerId,
         participant2.id,
         SynchronizerCrypto(participant2.crypto, staticSynchronizerParameters),

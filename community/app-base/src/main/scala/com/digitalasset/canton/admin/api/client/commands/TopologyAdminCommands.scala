@@ -20,7 +20,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, Hash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.protocol.TopologyLimits
+import com.digitalasset.canton.protocol.TopologyLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, BaseWriteRequest, TopologyStoreId}
@@ -930,7 +930,7 @@ object TopologyAdminCommands {
             SignedTopologyTransactions
               .fromProtoV30(
                 AdminApiResponseValidation.Trusted,
-                TopologyTransactionDeserializationContext(TopologyLimits.default),
+                TopologyTransactionDeserializationContext(TopologyLimitsView.default),
                 _,
               ),
             "result",
@@ -1300,7 +1300,7 @@ object TopologyAdminCommands {
             SignedTopologyTransaction
               .fromProtoV30(
                 AdminApiResponseValidation.Trusted,
-                TopologyTransactionDeserializationContext(TopologyLimits.default),
+                TopologyTransactionDeserializationContext(TopologyLimitsView.default),
                 tx,
               )
           )
@@ -1343,7 +1343,7 @@ object TopologyAdminCommands {
               parsedTopologyTransaction <-
                 TopologyTransaction.fromByteString(
                   AdminApiResponseValidation.Trusted,
-                  TopologyTransactionDeserializationContext(TopologyLimits.default),
+                  TopologyTransactionDeserializationContext(TopologyLimitsView.default),
                   serializedTransaction,
                 )
               // We don't really need the hash from the response here because we can re-build it from the deserialized
@@ -1456,7 +1456,7 @@ object TopologyAdminCommands {
           SignedTopologyTransaction
             .fromProtoV30(
               AdminApiResponseValidation.Trusted,
-              TopologyTransactionDeserializationContext(TopologyLimits.default),
+              TopologyTransactionDeserializationContext(TopologyLimitsView.default),
               _,
             )
             .leftMap(_.message)
@@ -1533,7 +1533,7 @@ object TopologyAdminCommands {
           SignedTopologyTransaction
             .fromProtoV30(
               AdminApiResponseValidation.Trusted,
-              TopologyTransactionDeserializationContext(TopologyLimits.default),
+              TopologyTransactionDeserializationContext(TopologyLimitsView.default),
               _,
             )
             .leftMap(_.message)

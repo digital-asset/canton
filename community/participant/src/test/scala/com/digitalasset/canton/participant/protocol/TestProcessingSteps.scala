@@ -330,7 +330,7 @@ class TestProcessingSteps(
     Right(None)
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      resultTs: CantonTimestamp,
       verdict: Verdict,
       pendingRequestData: RequestType#PendingRequestData,
       pendingSubmissionDataO: Option[PendingSubmissionData],

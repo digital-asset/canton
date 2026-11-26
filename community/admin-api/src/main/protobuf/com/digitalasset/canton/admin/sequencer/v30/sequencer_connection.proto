@@ -142,4 +142,20 @@ message SequencerConnectionPenaltyConfig {
   //
   // This value must be positive.
   double zero_threshold = 4;
+
+  // Penalty values applied to a sequencer for each kind of adverse event.
+  // If absent, the default values are used.
+  PenaltyValues penalty_values = 5;
+
+  // All values must be positive.
+  message PenaltyValues {
+    uint32 sequencer_overloaded = 1;
+    uint32 subscription_error = 2;
+    uint32 subscription_permission_denied = 3;
+    uint32 subscription_inactive = 4;
+    uint32 subscription_aggregation_error = 5;
+    uint32 subscription_handler_exception = 6;
+    uint32 subscription_retriable_failure = 7;
+    uint32 subscription_non_retriable_failure = 8;
+  }
 }

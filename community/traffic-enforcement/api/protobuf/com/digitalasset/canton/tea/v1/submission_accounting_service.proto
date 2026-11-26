@@ -13,10 +13,14 @@ service SubmissionAccountingService {
   // Store the account for a submission so its completion can be debited.
   // Fails with TRAFFIC_ACCOUNT_VALIDATION_FAILED if the balance is below required_balance,
   // and with TRAFFIC_CORRELATION_CONFLICT if the submission is already registered.
+  //
+  // Required permissions: none as it is not exposed through the Ledger API.
   rpc RegisterSubmission(RegisterSubmissionRequest) returns (RegisterSubmissionResponse);
 
   // Delete the correlation with this key and registration time.
   // Does nothing if there is no such correlation.
+  //
+  // Required permissions: none as it is not exposed through the Ledger API.
   rpc ReleaseSubmission(ReleaseSubmissionRequest) returns (ReleaseSubmissionResponse);
 }
 

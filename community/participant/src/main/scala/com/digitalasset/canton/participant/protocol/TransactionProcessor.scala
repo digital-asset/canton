@@ -20,8 +20,8 @@ import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.error.*
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.SubmissionErrorGroup
+import com.digitalasset.canton.error.{TransactionRoutingError, *}
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors
 import com.digitalasset.canton.ledger.participant.state.{ChangeId, SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -188,6 +188,7 @@ class TransactionProcessor(
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
       topologySnapshot: TopologySnapshot,
+      reassignContracts: () => EitherT[FutureUnlessShutdown, TransactionRoutingError, Unit],
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -204,6 +205,7 @@ class TransactionProcessor(
             transaction,
             disclosedContracts,
             accounting,
+            reassignContracts,
           ),
         topologySnapshot,
       )

@@ -899,18 +899,23 @@ class DeclarativeParticipantApi(
       ).map(_ => ())
 
     def update(config: DeclarativeIdpConfig): Either[String, Unit] =
-      queryLedgerApi(
-        LedgerApiCommands.IdentityProviderConfigs.Update(
-          identityProviderConfig = user.IdentityProviderConfig(
-            identityProviderId = config.apiIdentityProviderId,
-            isDeactivated = config.isDeactivated,
-            jwksUrl = config.apiJwksUrl,
-            issuer = config.issuer,
-            audience = config.audience,
-          ),
-          updateMask = FieldMask(Seq("is_deactivated", "jwks_url", "audience", "issuer")),
+      for {
+        jwksUrl <- user.JwksUrlLengthLimited.fromJwksUrl(config.apiJwksUrl)
+        issuer <- user.Issuer.create(config.issuer)
+        audience <- config.audience.traverse(user.Audience.create)
+        _ <- queryLedgerApi(
+          LedgerApiCommands.IdentityProviderConfigs.Update(
+            identityProviderConfig = user.IdentityProviderConfig(
+              identityProviderId = config.apiIdentityProviderId,
+              isDeactivated = config.isDeactivated,
+              jwksUrl = jwksUrl,
+              issuer = issuer,
+              audience = audience,
+            ),
+            updateMask = FieldMask(Seq("is_deactivated", "jwks_url", "audience", "issuer")),
+          )
         )
-      ).map(_ => ())
+      } yield ()
 
     def removeIdp(idpName: String): Either[String, Unit] =
       queryLedgerApi(
@@ -951,7 +956,11 @@ class DeclarativeParticipantApi(
         val output = new File(fetchDarDirectory, matched.matched)
         logger.info(s"Downloading ${dar.location} to $output")
         BinaryFileUtil
-          .downloadFile(dar.location, output.toString, dar.requestHeaders)
+          .downloadFile(
+            dar.location,
+            output.toString,
+            dar.requestHeaders.all,
+          )
           .leftMap { err =>
             logger.warn(s"Failed to download ${dar.location}: $err")
           }

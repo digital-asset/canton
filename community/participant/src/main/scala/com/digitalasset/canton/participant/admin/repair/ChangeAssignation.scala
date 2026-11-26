@@ -27,6 +27,7 @@ import com.digitalasset.canton.participant.admin.repair.ChangeAssignation.{
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.ContractState
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
@@ -43,6 +44,7 @@ private final class ChangeAssignation(
     syncCrypto: SyncCryptoApiParticipantProvider,
     repairIndexer: FutureQueue[RepairUpdate],
     contractStore: ContractStore,
+    contractValidator: ContractValidator,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
@@ -83,7 +85,7 @@ private final class ChangeAssignation(
             s"Current status: ${contractStatusAtSource.get(contractId).map(_.status.toString).getOrElse("NOT_FOUND")}.",
         )
       }
-      unassignedContracts <- readContracts(contractIdCounters)
+      unassignedContracts = Changes(Seq(unassignmentData.payload.contractsBatch))
       internalContractIdsForUnassignedContracts <- persistContracts(unassignedContracts)
       batchesWithTargetTors <- EitherT.fromEither[FutureUnlessShutdown](
         zipBatchesWithTimes(
@@ -116,6 +118,7 @@ private final class ChangeAssignation(
   def changeAssignation(
       changes: ChangeAssignation.Data[Seq[(LfContractId, Option[ReassignmentCounter])]],
       skipInactive: Boolean,
+      packageMetadata: PackageMetadata,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
@@ -149,30 +152,50 @@ private final class ChangeAssignation(
       }
 
       _ = logger.debug(s"Contracts changing assignation: $assignmentCidWithCounter")
-      changeBatch <- readContracts(assignmentCidWithCounter)
+      changeBatch <- buildBatches(assignmentCidWithCounter, packageMetadata)
       _ = logger.debug(
         s"Contracts that need to change assignation with persistence status: $changeBatch"
       )
-      internalContractIds <- persistContracts(changeBatch)
-      newChanges = changes.map(_ => changeBatch)
+
+      _ <- persistChanges(
+        changes = changeBatch,
+        unassignmentCounters = unassignmentCidCounterMap,
+        sourceTimesOfRepair = changes.sourceTimesOfRepair,
+        targetTimesOfRepair = changes.targetTimesOfRepair,
+      )
+
+    } yield ()
+  }
+
+  private def persistChanges(
+      changes: Changes,
+      unassignmentCounters: Map[LfContractId, ReassignmentCounter],
+      sourceTimesOfRepair: Source[Seq[TimeOfRepair]],
+      targetTimesOfRepair: Target[Seq[TimeOfRepair]],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    for {
+
+      internalContractIds <- persistContracts(changes)
       batchesWithSourceTors <- EitherT.fromEither[FutureUnlessShutdown](
         zipBatchesWithTimes(
-          changeBatch.batches,
-          newChanges.sourceTimesOfRepair.unwrap,
+          changes.batches,
+          sourceTimesOfRepair.unwrap,
           "source",
         )
       )
       batchesWithTargetTors <- EitherT.fromEither[FutureUnlessShutdown](
         zipBatchesWithTimes(
-          changeBatch.batches,
-          newChanges.targetTimesOfRepair.unwrap,
+          changes.batches,
+          targetTimesOfRepair.unwrap,
           "target",
         )
       )
       _ <- persistUnassignAndAssign(
         batchesWithSourceTors,
         batchesWithTargetTors,
-        unassignmentCidCounterMap,
+        unassignmentCounters,
       ).toEitherT
       _ <- EitherT.right(
         publishReassignmentEvents(
@@ -180,11 +203,43 @@ private final class ChangeAssignation(
           batchesWithSourceTors,
           batchesWithTargetTors,
           internalContractIds,
-          unassignmentCidCounterMap,
+          unassignmentCounters,
         )
       )
     } yield ()
-  }
+
+  def reverseAssignation(changeData: ChangeAssignation.Data[ContractsReassignmentBatch])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    for {
+
+      reversedReassignments <- EitherT
+        .fromEither[FutureUnlessShutdown](changeData.payload.contracts.forgetNE.traverse {
+          reassignment =>
+            reassignment.counter.increment.map { incrementedCounter =>
+              ContractReassignment(
+                reassignment.contract,
+                Source(reassignment.targetValidationPackageId.unwrap),
+                Target(reassignment.sourceValidationPackageId.unwrap),
+                incrementedCounter,
+              )
+            }
+        })
+
+      incrementedCounters = reversedReassignments
+        .map(reassignment => reassignment.contract.contractId -> reassignment.counter)
+        .toMap
+
+      changes = Changes(ContractsReassignmentBatch.partition(reversedReassignments))
+
+      _ <- persistChanges(
+        changes = changes,
+        unassignmentCounters = incrementedCounters,
+        sourceTimesOfRepair = changeData.sourceTimesOfRepair,
+        targetTimesOfRepair = changeData.targetTimesOfRepair,
+      )
+
+    } yield ()
 
   /** Filter out contracts whose assignation should not be changed. Checks status on source and
     * target synchronizer.
@@ -313,31 +368,52 @@ private final class ChangeAssignation(
       .lookupStakeholders(contractIds)
       .leftMap(e => s"Failed to look up stakeholder of contracts in synchronizer $sourceLsid: $e")
 
-  private def readContracts(
-      contractIdsWithCounter: Seq[ContractIdWithCounter]
+  private def buildBatches(
+      contractIdsWithCounter: Seq[ContractIdWithCounter],
+      packageMetadata: PackageMetadata,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Changes] = {
     val cids = contractIdsWithCounter.map(_.contractId)
+    for {
+      contracts <- contractStore
+        .lookupManyExistingUncached(cids)
+        .leftMap(contractId =>
+          s"Failed to look up contract $contractId in synchronizer $sourceLsid"
+        )
 
-    contractStore
-      .lookupManyExistingUncached(cids)
-      .leftMap(contractId => s"Failed to look up contract $contractId in synchronizer $sourceLsid")
-      .flatMap { contracts =>
-        val contractsById = contracts.view.map(contract => contract.contractId -> contract).toMap
-        val contractWithCounter = contractIdsWithCounter
-          .flatMap { cidWithCounter =>
-            // TODO(#37350): Ensure validation packages are available
-            contractsById.get(cidWithCounter.contractId).map { contract =>
-              val sourcePkg = Source(contract.templateId.packageId)
-              val targetPkg = Target(contract.templateId.packageId)
+      contractsById = contracts.view.map(contract => contract.contractId -> contract).toMap
 
-              ContractReassignment(contract, sourcePkg, targetPkg, cidWithCounter.counter)
-            }
-          }
+      contractWithCounter <- MonadUtil.sequentialTraverse(contractIdsWithCounter) {
+        cidWithCounter =>
+          for {
+            contract <- EitherT.fromEither[FutureUnlessShutdown](
+              contractsById
+                .get(cidWithCounter.contractId)
+                .toRight(s"Failed to look up contract ${cidWithCounter.contractId}")
+            )
 
-        val batches = ContractsReassignmentBatch.partition(contractWithCounter)
+            packageResolution <- EitherT.fromEither[FutureUnlessShutdown](
+              packageMetadata.packageNameMap
+                .get(contract.inst.packageName)
+                .toRight(s"Failed to look up package resolution for ${contract.inst.packageName}")
+            )
 
-        EitherT.rightT[FutureUnlessShutdown, String](Changes(batches))
+            validationPackageId =
+              if (packageResolution.allPackageIdsForName.contains(contract.templateId.packageId))
+                contract.templateId.packageId
+              else
+                packageResolution.preference.packageId
+
+            _ <- contractValidator.authenticate(contract.inst, validationPackageId)
+
+          } yield ContractReassignment(
+            contract,
+            Source(validationPackageId),
+            Target(validationPackageId),
+            cidWithCounter.counter,
+          )
       }
+
+    } yield Changes(ContractsReassignmentBatch.partition(contractWithCounter))
   }
 
   /** Write contracts in [[ContractStore]]

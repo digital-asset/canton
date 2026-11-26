@@ -662,12 +662,14 @@ class TransactionServiceFiltersIT(testDars: TestDars) extends LedgerTestSuite {
           filtersByParty = Map(party.getValue -> filters),
           filtersForAnyParty = None,
           verbose = true,
+          filtersByContractId = Seq.empty,
         )
       case None =>
         EventFormat(
           filtersByParty = Map.empty,
           filtersForAnyParty = Some(filters),
           verbose = true,
+          filtersByContractId = Seq.empty,
         )
     }
   }
@@ -729,6 +731,7 @@ class TransactionServiceFiltersIT(testDars: TestDars) extends LedgerTestSuite {
       case None => t2.filtersForAnyParty
     },
     verbose = t1.verbose || t2.verbose,
+    filtersByContractId = t1.filtersByContractId ++ t2.filtersByContractId,
   )
 
   private def mergeFilters(f1: Filters, f2: Filters): Filters =

@@ -388,7 +388,14 @@ class ProgrammableUnitTestEnv extends BaseIgnoringUnitTestEnv[ProgrammableUnitTe
 }
 
 object ProgrammableUnitTestEnv {
+
   case object noSignatureCryptoProvider extends CryptoProvider[ProgrammableUnitTestEnv] {
+
+    override val psid =
+      com.digitalasset.canton.topology.DefaultTestIdentities.physicalSynchronizerId.copy(
+        protocolVersion = com.digitalasset.canton.version.ProtocolVersion.forSynchronizer
+      )
+
     override def signHash(hash: Hash, operationId: String)(implicit
         traceContext: TraceContext,
         metricsContext: MetricsContext,

@@ -7,7 +7,6 @@ import cats.data.{EitherT, Nested}
 import cats.syntax.either.*
 import cats.syntax.flatMap.*
 import cats.syntax.foldable.*
-import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
@@ -248,9 +247,8 @@ abstract class ProtocolProcessor[
         explicitMediatorGroupIndex
           .map { index =>
             allActiveMediatorGroups
-              .lift(index.value)
-              .map(_.index)
-              .map(MediatorGroupRecipient(_))
+              .find(_.index == index)
+              .map(group => MediatorGroupRecipient(group.index))
               .toRight(NoMediatorError(recentSnapshot.timestamp))
           }
           .getOrElse {
@@ -1643,39 +1641,28 @@ abstract class ProtocolProcessor[
 
   override def processResult(
       counter: SequencerCounter,
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
+      resultTs: CantonTimestamp,
+      resultEnvelope: OpenEnvelope[SignedProtocolMessage[ConfirmationResultMessage]],
   )(implicit traceContext: TraceContext): HandlerResult = {
-    val content = event.event.content
-    val ts = content.timestamp
-
     val processedET = synchronizeWithClosing(
       s"ProtocolProcess.processResult(sc=$counter, traceId=${traceContext.traceId}"
     ) {
-      val resultEnvelopes =
-        content.batch.envelopes
-          .mapFilter(ProtocolMessage.select[SignedProtocolMessage[ConfirmationResultMessage]])
-      ErrorUtil.requireArgument(
-        resultEnvelopes.sizeCompare(1) == 0,
-        steps.requestKind + " result contains multiple such messages",
-      )
-
-      val result = resultEnvelopes(0).protocolMessage
+      val result = resultEnvelope.protocolMessage
       val requestId = result.message.requestId
 
       logger.debug(
-        show"Got result for ${steps.requestKind.unquoted} request at $requestId: $resultEnvelopes"
+        show"Got result for ${steps.requestKind.unquoted} request at $requestId: $resultEnvelope"
       )
       phase7startsWithVerdict(result.message.rootHash)
 
-      Nested(processResultInternal1(event, result, requestId, ts, counter))
+      Nested(processResultInternal1(result, requestId, resultTs, counter))
     }.value
 
-    handlerResultForConfirmationResult(ts, processedET)
+    handlerResultForConfirmationResult(resultTs, processedET)
   }
 
   @VisibleForTesting
   private[protocol] def processResultInternal1(
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       result: SignedProtocolMessage[ConfirmationResultMessage],
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1757,7 +1744,6 @@ abstract class ProtocolProcessor[
       asyncResult <-
         if (!precedesCleanReplay(requestId))
           processResultInternal2(
-            event,
             result,
             requestId,
             resultTs,
@@ -1775,7 +1761,6 @@ abstract class ProtocolProcessor[
     * confirmation result. The inner `EitherT` corresponds to the subsequent async stage.
     */
   private[this] def processResultInternal2(
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       result: SignedProtocolMessage[ConfirmationResultMessage],
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1876,7 +1861,6 @@ abstract class ProtocolProcessor[
           }
       ).flatMap { pendingRequestDataOrReplayData =>
         processResultInternal3(
-          event,
           unsignedResult.verdict,
           requestId,
           resultTs,
@@ -1895,7 +1879,6 @@ abstract class ProtocolProcessor[
   // Assigning the internal contract ids to the contracts requires that all the contracts are
   // already persisted in the contract store.
   private[this] def processResultInternal3(
-      event: WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1932,7 +1915,7 @@ abstract class ProtocolProcessor[
           for {
             commitSetAndContractsAndEventFactory <- steps
               .getCommitSetAndContractsToBeStoredAndEventFactory(
-                event,
+                resultTs,
                 verdict,
                 pendingRequestData,
                 pendingSubmissionDataO,

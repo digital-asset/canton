@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencing.service.channel
 
+import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -15,9 +16,14 @@ import com.digitalasset.canton.sequencing.protocol.channel.{
   SequencerChannelId,
   SequencerChannelMetadata,
 }
+import com.digitalasset.canton.synchronizer.sequencing.authentication.{
+  MemberAuthenticationStore,
+  StoredAuthenticationToken,
+}
 import com.digitalasset.canton.synchronizer.sequencing.service.channel.SequencerChannelInternalError.{
   InvalidRequest,
   PendingConnectionClosed,
+  PermissionDenied,
   PoolCapacityExhausted,
   PoolClosed,
 }
@@ -54,6 +60,7 @@ import scala.util.control.NonFatal
 @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))
 private[channel] final class GrpcSequencerChannelPool(
     clock: Clock,
+    memberAuthenticationStore: MemberAuthenticationStore,
     protocolVersion: ProtocolVersion, // technically the channel protocol is separate from the canton protocol, but use for now at least
     override protected val timeouts: ProcessingTimeout,
     maxPoolSize: PositiveInt,
@@ -92,7 +99,11 @@ private[channel] final class GrpcSequencerChannelPool(
     }
 
     if (tryAcquireSlot()) {
-      try f
+      try
+        f.leftMap { error =>
+          availableSlots.incrementAndGet().discard
+          error
+        }
       catch {
         case NonFatal(t) =>
           // Release the slot if f throws before handing it over.
@@ -116,18 +127,37 @@ private[channel] final class GrpcSequencerChannelPool(
   private[channel] def numOfPendingConnections: Int = lock.exclusive(uninitializedChannels.size)
   private[channel] def numOfAvailableSlots: Long = availableSlots.get()
 
+  private def checkAuthenticationToken(
+      tokenO: Option[StoredAuthenticationToken]
+  ): Either[SequencerChannelInternalError, Unit] =
+    tokenO match {
+      case Some(token) =>
+        Either.cond(
+          memberAuthenticationStore
+            .tokenForMemberAt(token.member, token.token, clock.now)
+            .isDefined,
+          (),
+          PermissionDenied("Authentication token has expired or been revoked."),
+        )
+      case None => Right(())
+    }
+
   /** @param responseObserver
     *   GRPC response observer for messages to the client
-    * @param authTokenExpiresAtO
-    *   The member's sequencer token expiration time
+    * @param authenticatedMemberO
+    *   The authenticated owner of the stream, before channel metadata is available
+    * @param authenticationTokenO
+    *   The captured sequencer token, rechecked during registration and initialization and used to
+    *   schedule expiry
     * @param authenticationCheck
-    *   Callback to use upon channel initialization
+    *   Checks the initiating member's identity upon channel initialization
     * @return
     *   GRPC request observer needed by GrpcSequencerChannelService
     */
   def createUninitializedChannel(
       responseObserver: ServerCallStreamObserver[v30.ConnectToSequencerChannelResponse],
-      authTokenExpiresAtO: Option[CantonTimestamp],
+      authenticatedMemberO: Option[Member],
+      authenticationTokenO: Option[StoredAuthenticationToken],
       authenticationCheck: Member => Either[String, Unit],
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -137,14 +167,22 @@ private[channel] final class GrpcSequencerChannelPool(
     synchronizeWithClosingSync(functionFullName) {
       // Acquired outside the lock, so that rejections are fast and don't contend.
       withAcquiredSlot {
-        lock.exclusive {
+        // The member could be revoked after the token check but before this stream is added.
+        // The lock makes disconnection wait, so it can find and close this stream too.
+        lock.exclusive(checkAuthenticationToken(authenticationTokenO).map { _ =>
+          val authTokenExpiresAtO = authenticationTokenO.map(_.expireAt)
           val (pendingConnectionExpiresAt, channelExpiresAt) = {
             val now = clock.now
-            (now.add(maxMetadataWaitingTime.duration), now.add(channelTtl.duration))
+            val metadataExpiresAt = now.add(maxMetadataWaitingTime.duration)
+            val pendingExpiresAt =
+              authTokenExpiresAtO.fold(metadataExpiresAt)(metadataExpiresAt.min)
+
+            (pendingExpiresAt, now.add(channelTtl.duration))
           }
           val pendingTtlHandle = new AtomicReference[ClockHandle[Unit]](ClockHandle.Dummy)
           val channel = new UninitializedGrpcSequencerChannel(
             responseObserver,
+            authenticatedMemberO,
             authTokenExpiresAtO,
             authenticationCheck,
             channel => {
@@ -191,6 +229,7 @@ private[channel] final class GrpcSequencerChannelPool(
                     Left(PendingConnectionClosed)
                   else
                     for {
+                      _ <- checkAuthenticationToken(authenticationTokenO)
                       channelInfo <- initializedChannels.get(metadata.channelId) match {
                         case None if initializedChannels.sizeIs < maxPoolSize.value =>
                           logger.debug(
@@ -285,8 +324,8 @@ private[channel] final class GrpcSequencerChannelPool(
           }
           pendingTtlHandle.set(handle)
 
-          Right(channel.requestObserverAdapter)
-        }
+          channel.requestObserverAdapter
+        })
       }
     } onShutdown Left(PoolClosed)
 
@@ -367,16 +406,13 @@ private[channel] final class GrpcSequencerChannelPool(
   ): Unit = {
     val (channels, pending) = lock.exclusive {
       val channels = initializedChannels.toList.filter { case (_, ch) =>
-        memberO.forall(_ == ch.firstMember)
+        memberO.forall(m => m == ch.firstMember || m == ch.secondMember)
       }
       channels.foreach { case (_, ch) => removeChannel(ch) } // remove + release slots
-      val pending =
-        if (memberO.isEmpty) {
-          val all = uninitializedChannels.toList
-          uninitializedChannels.clear()
-          availableSlots.addAndGet(all.size.toLong).discard
-          all
-        } else Nil
+      val pending = uninitializedChannels.toList.filter { ch =>
+        memberO.forall(ch.authenticatedMemberO.contains)
+      }
+      pending.foreach(ch => detachPendingConnection(ch).discard)
       (channels, pending)
     }
     pending.foreach { ch =>

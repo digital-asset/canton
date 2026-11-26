@@ -1751,20 +1751,21 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
         PhysicalSynchronizerId(psid.logical, synchronizerParameters)
       )
     for {
-      expectedUpgradePsidO <- EitherT.right[TopologyManagerError](
-        findPositiveTransactions(
-          asOf = CantonTimestamp.MaxValue,
-          asOfInclusive = true, // doesn't really matter
-          isProposal = false,
-          types = Seq(LsuAnnouncement.code),
-          filterUid = None,
-          filterNamespace = None,
-        ).map(
-          _.collectOfMapping[LsuAnnouncement].result
-            .map(_.mapping.successorSynchronizerId)
-            .headOption
+      expectedUpgradePsidO <-
+        EitherT.right[TopologyManagerError](
+          findPositiveTransactions(
+            asOf = CantonTimestamp.MaxValue,
+            asOfInclusive = true, // doesn't really matter
+            isProposal = false,
+            types = Seq(LsuAnnouncement.code),
+            filterUid = None,
+            filterNamespace = None,
+          ).map(
+            _.collectOfMapping[LsuAnnouncement].result
+              .map(_.mapping.successorSynchronizerId)
+              .headOption
+          )
         )
-      )
 
       // If there's an announcement in the topology snapshot, we expect that the sequencer being initialized is the successor
       _ <- EitherT.fromEither[FutureUnlessShutdown](

@@ -70,6 +70,7 @@ import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{BaseTest, HasExecutorService, RequestCounter, SequencerCounter}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
+import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.eq as isEq
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
@@ -162,7 +163,8 @@ trait MessageDispatcherTest {
         when(
           processor.processResult(
             any[SequencerCounter],
-            any[WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]]],
+            any[CantonTimestamp],
+            any[OpenEnvelope[SignedProtocolMessage[ConfirmationResultMessage]]],
           )(anyTraceContext)
         )
           .thenReturn(processingResultHandlerF)
@@ -586,7 +588,8 @@ trait MessageDispatcherTest {
     def checkProcessResult(processor: AnyProcessor): Assertion = {
       verify(processor).processResult(
         any[SequencerCounter],
-        any[WithOpeningErrors[AggregatedSignedContent[Deliver[Batch[DefaultOpenEnvelope]]]]],
+        any[CantonTimestamp],
+        any[OpenEnvelope[SignedProtocolMessage[ConfirmationResultMessage]]],
       )(anyTraceContext)
       succeed
     }
@@ -1293,6 +1296,51 @@ trait MessageDispatcherTest {
             ),
           )
           .futureValue
+      }
+
+      "not be confused by results for foreign synchronizers" in {
+        // Regression test: the dispatcher filters out envelopes for foreign synchronizers before
+        // deciding that a batch contains a single result. The processor must be handed that
+        // single result.
+        val foreignMediatorResult = SignedProtocolMessage.from(
+          testMediatorResult.typedMessage.content.copy(
+            synchronizerId = SynchronizerId.tryFromString("foo::bar").toPhysical
+          ),
+          testedProtocolVersion,
+          dummySignature,
+        )
+        val batch = Batch.of[ProtocolMessage](
+          testedProtocolVersion,
+          testMediatorResult -> Recipients.cc(participantId),
+          foreignMediatorResult -> Recipients.cc(participantId),
+        )
+        val sut = mk()
+
+        loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          handle(sut, SequencerCounter.Genesis, mkDeliver(batch)) {
+            checkTicks(sut)
+
+            @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+            val envelopeCaptor = ArgumentCaptor
+              .forClass(classOf[OpenEnvelope[?]])
+              .asInstanceOf[ArgumentCaptor[
+                OpenEnvelope[SignedProtocolMessage[ConfirmationResultMessage]]
+              ]]
+            verify(sut.testProcessor).processResult(
+              isEq(SequencerCounter.Genesis),
+              isEq(CantonTimestamp.Epoch),
+              envelopeCaptor.capture(),
+            )(anyTraceContext)
+
+            envelopeCaptor.getValue.protocolMessage shouldBe testMediatorResult
+          }.futureValue,
+          logEntries => {
+            logEntries should not be empty
+            forEvery(logEntries) {
+              _.warningMessage should include("Received messages with wrong synchronizer ids")
+            }
+          },
+        )
       }
     }
 

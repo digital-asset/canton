@@ -12,7 +12,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Postgres}
 import com.digitalasset.canton.resource.{DbStorage, DbStore, ToDbPrimitive}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -130,7 +130,7 @@ class DbAvailabilityStore(
             // Trusted path from DB: data was already validated when it was written.
             // Without validation, the limits are not read.
             ProtocolVersionValidation.NoValidation,
-            BftOrdererLimits.default,
+            BftOrdererLimitsView.default,
             value,
           ) match {
             case Left(error) =>

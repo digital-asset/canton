@@ -3,13 +3,11 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import com.digitalasset.canton.Generators
-import com.digitalasset.canton.config.CantonRequireTypes.String73
+import com.digitalasset.canton.config.CantonRequireTypes.{String68, String73}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
-import com.digitalasset.canton.crypto.{AsymmetricEncrypted, Signature}
+import com.digitalasset.canton.crypto.{AsymmetricEncrypted, Hash, Signature, SymmetricKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.protocol.ProtocolSymmetricKey
 import com.digitalasset.canton.protocol.messages.{GeneratorsMessages, ProtocolMessage}
 import com.digitalasset.canton.sequencing.channel.{
   ConnectToSequencerChannelRequest,
@@ -21,6 +19,7 @@ import com.digitalasset.canton.sequencing.protocol.channel.{
   SequencerChannelMetadata,
   SequencerChannelSessionKey,
   SequencerChannelSessionKeyAck,
+  SequencerChannelSessionKeyContent,
 }
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.serialization.{
@@ -31,6 +30,7 @@ import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{GeneratorsTopology, Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{Generators, LfLedgerString}
 import com.digitalasset.nonempty.NonEmptyUtil
 import com.google.protobuf.ByteString
 import magnolify.scalacheck.auto.*
@@ -186,7 +186,11 @@ final class GeneratorsProtocol(
   )
 
   implicit val sequencerChannelId: Arbitrary[SequencerChannelId] = Arbitrary(
-    Gen.alphaNumStr.filter(_.nonEmpty).map(SequencerChannelId.apply)
+    Arbitrary
+      .arbitrary[LfLedgerString]
+      .filter(_.nonEmpty)
+      .map(String68.tryCreate(_))
+      .map(SequencerChannelId.tryCreate)
   )
 
   implicit val sequencerChannelMetadataArb: Arbitrary[SequencerChannelMetadata] =
@@ -213,8 +217,15 @@ final class GeneratorsProtocol(
 
   implicit val sequencerChannelSessionKeyArb: Arbitrary[SequencerChannelSessionKey] =
     Arbitrary(for {
-      encrypted <- Arbitrary.arbitrary[AsymmetricEncrypted[ProtocolSymmetricKey]]
-    } yield SequencerChannelSessionKey.apply(encrypted, protocolVersion))
+      encrypted <- Arbitrary.arbitrary[AsymmetricEncrypted[SequencerChannelSessionKeyContent]]
+      signature <- Arbitrary.arbitrary[Signature]
+    } yield SequencerChannelSessionKey.apply(encrypted, signature, protocolVersion))
+
+  implicit val sequencerChannelSessionKeyContentArb: Arbitrary[SequencerChannelSessionKeyContent] =
+    Arbitrary(for {
+      sessionKey <- Arbitrary.arbitrary[SymmetricKey]
+      contextHash <- Arbitrary.arbitrary[Hash]
+    } yield SequencerChannelSessionKeyContent.apply(sessionKey, contextHash, protocolVersion))
 
   implicit val sequencerChannelSessionKeyAckArb: Arbitrary[SequencerChannelSessionKeyAck] =
     Arbitrary(SequencerChannelSessionKeyAck.apply(protocolVersion))

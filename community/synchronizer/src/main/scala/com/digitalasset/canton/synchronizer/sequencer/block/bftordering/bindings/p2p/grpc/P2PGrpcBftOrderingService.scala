@@ -43,13 +43,13 @@ class P2PGrpcBftOrderingService(
             logger.debug(s"Received completion")
         }
       case None =>
-        logger.error(s"Peer sender ${objId(sendingStreamObserver)} is not a supported type")
-        // `withCallStreamObserverG` has already failed the sender with an INTERNAL status.
+        // Receiver setup already failed the response stream. Return a listener without closing
+        //  it again or propagating an exception through gRPC's startCall.
         new StreamObserver[BftOrderingMessage]() {
           override def onNext(value: BftOrderingMessage): Unit =
-            logger.debug(s"Received message $value, ignoring due to peer sender not supported")
+            logger.debug(s"Received message $value, ignoring after receiver setup failed")
           override def onError(t: Throwable): Unit =
-            logger.debug(s"Received error, ignoring due to peer sender not supported", t)
+            logger.debug(s"Received error after receiver setup failed", t)
           override def onCompleted(): Unit =
             logger.debug(s"Received completion")
         }

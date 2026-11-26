@@ -59,10 +59,8 @@ final class SequencerChannelClient(
     * communication between them, that member "owns" the session key. The decision which member owns
     * the session key is taken by the client of the sequencer channel.
     *
-    * The session key is transferred to another member through public key encryption. The public key
-    * is determined by a timestamp that been agreed upon by the connecting members beforehand. This
-    * timestamp is expected to originate from a recent topology transaction that has already taken
-    * effect.
+    * The session key owner encrypts the session key to the other member and signs it, using the
+    * keys of each member's latest topology snapshot.
     *
     * @param sequencerId
     *   [[com.digitalasset.canton.topology.SequencerId]] of the sequencer to create the channel on
@@ -75,7 +73,7 @@ final class SequencerChannelClient(
     * @param isSessionKeyOwner
     *   Whether this member owns the session key
     * @param topologyTs
-    *   Timestamp that determines the public key encryption of the session key
+    *   Timestamp of the synchronizer parameters that limit the size of decompressed payloads
     * @param onSentMessage
     *   Message notification for testing only! None for production.
     */
@@ -112,15 +110,13 @@ final class SequencerChannelClient(
             processor,
             synchronizerCryptoApi,
             isSessionKeyOwner,
-            topologyTs,
             synchronizerParameters.protocolVersion,
             maxBytesToDecompress,
             context,
             hasRunOnClosing,
             timeouts,
             loggerFactory
-              .append("sequencerId", sequencerId.uid.toString)
-              .append("channel", channelId.unwrap),
+              .append("sequencerId", sequencerId.uid.toString),
             onSentMessage,
           )
 

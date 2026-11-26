@@ -63,7 +63,7 @@ final class LedgerClientAuthIT extends CantonFixture with CreatesParties with Cr
               exception <- client.partyManagementClient
                 .allocateParty(
                   hint = Some("Bob"),
-                  token = Some(toHeader(standardToken(someParty))),
+                  token = Some(toHeader(standardToken(someUser))),
                 )
                 .failed
             } yield {

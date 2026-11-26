@@ -21,7 +21,6 @@ import com.daml.ledger.api.v2.{
   reassignment_commands,
 }
 import com.digitalasset.canton.auth.AuthInterceptor
-import com.digitalasset.canton.http.WebsocketConfig
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
 import com.digitalasset.canton.http.json.v2.Endpoints.{
   CallerContext,
@@ -38,6 +37,7 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
   OneOfSchemaExtension,
 }
 import com.digitalasset.canton.http.json.v2.damldefinitionsservice.Schema.Codecs.*
+import com.digitalasset.canton.http.{ServerRequestTimeout, WebsocketConfig}
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -66,6 +66,7 @@ class JsCommandService(
     esf: ExecutionSequencerFactory,
     materializer: Materializer,
     wsConfig: WebsocketConfig,
+    serverRequestTimeout: ServerRequestTimeout,
     val authInterceptor: AuthInterceptor,
 ) extends Endpoints
     with NamedLogging {

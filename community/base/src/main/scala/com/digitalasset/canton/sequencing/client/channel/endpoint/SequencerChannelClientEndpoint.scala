@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.client.channel.endpoint
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasRunOnClosing}
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -49,10 +48,10 @@ import scala.concurrent.ExecutionContext
   *   1. the SequencerChannelProtocolProcessor provided by the SequencerChannelClient caller
   *
   * To that end, this channel endpoint transitions through several stages: Bootstrapping the channel
-  * which establishes unsecured member-to-member communication (the connected stage), followed by
-  * setting up a session key to secure it (the securely connected stage). Next, the sequencer
-  * channel client user such as the Online Party Replication can start exchanging their messages
-  * transparently and securely through the sequencer channel protocol processor.
+  * which establishes unsecured member-to-member communication, followed by setting up a session key
+  * to secure it (the securely connected stage). Next, the sequencer channel client user such as the
+  * Online Party Replication can start exchanging their messages transparently and securely through
+  * the sequencer channel protocol processor.
   *
   * @param channelId
   *   Unique channel identifier known to both channel endpoints.
@@ -66,14 +65,12 @@ import scala.concurrent.ExecutionContext
   * @param isSessionKeyOwner
   *   Whether this endpoint is responsible for generating the session key.
   * @param synchronizerCryptoApi
-  *   Provides the crypto API for symmetric and asymmetric encryption operations.
+  *   Provides the crypto API for symmetric and asymmetric encryption and for signing.
   * @param protocolVersion
   *   Used for the proto messages versioning.
   * @param maxBytesToDecompress
   *   Upper bound on the decompressed size of payloads received via the channel, derived from the
   *   synchronizer `maxRequestSize` parameter.
-  * @param timestamp
-  *   Determines the public key for asymmetric encryption.
   * @param onSentMessage
   *   Message notification for testing purposes only; None for production.
   */
@@ -84,7 +81,6 @@ private[channel] final class SequencerChannelClientEndpoint(
     processor: SequencerChannelProtocolProcessor,
     val synchronizerCryptoApi: SynchronizerCryptoClient,
     isSessionKeyOwner: Boolean,
-    timestamp: CantonTimestamp,
     protocolVersion: ProtocolVersion,
     maxBytesToDecompress: MaxBytesToDecompress,
     context: CancellableContext,
@@ -102,14 +98,20 @@ private[channel] final class SequencerChannelClientEndpoint(
   override protected def useManualFlowControl: Boolean = false
 
   private val security: SequencerChannelSecurity =
-    new SequencerChannelSecurity(synchronizerCryptoApi, protocolVersion, timestamp)
+    new SequencerChannelSecurity(
+      synchronizerCryptoApi,
+      protocolVersion,
+      channelId,
+      member,
+      connectTo,
+    )
 
   /** Keeps track of this endpoint's channel stage. */
   private val stage: AtomicReference[ChannelStage] = {
     val initialStage = new ChannelStageBootstrap(
       isSessionKeyOwner,
-      connectTo,
       ChannelStage.InternalData(
+        channelId,
         security,
         protocolVersion,
         processor,
@@ -221,8 +223,11 @@ private[channel] final class SequencerChannelClientEndpoint(
         logger.warn(err)
         EitherT.leftT[FutureUnlessShutdown, Unit](err)
 
-      case (Some(_), currentStage: ChannelStageConnected)
-          if message.request.isInstanceOf[Payload] =>
+      case (
+            Some(_),
+            currentStage @ (_: ChannelStageAwaitingSessionKey |
+            _: ChannelStageAwaitingSessionKeyAck),
+          ) if message.request.isInstanceOf[Payload] =>
         val err =
           s"Attempt to send $operation before channel is ready while in stage $currentStage}"
         logger.warn(err)

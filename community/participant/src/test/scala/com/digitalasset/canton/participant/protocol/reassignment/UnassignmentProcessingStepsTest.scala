@@ -107,7 +107,6 @@ import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordO
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.store.packagemeta.PackageMetadata.{
@@ -1415,30 +1414,8 @@ final class UnassignmentProcessingStepsTest
       CantonTimestamp.MinValue,
       None,
     )
-    val signedResult = SignedProtocolMessage
-      .trySignAndCreate(
-        reassignmentResult,
-        cryptoSnapshot,
-        None,
-        testedProtocolVersion,
-      )
-      .futureValueUS
 
-    val deliver: Deliver[Batch[OpenEnvelope[SignedProtocolMessage[ConfirmationResultMessage]]]] = {
-      val batch: Batch[OpenEnvelope[SignedProtocolMessage[ConfirmationResultMessage]]] =
-        Batch.of(testedProtocolVersion, (signedResult, Recipients.cc(submittingParticipant)))
-      Deliver.create(
-        None,
-        CantonTimestamp.Epoch,
-        sourceSynchronizer.unwrap,
-        Some(MessageId.tryCreate("msg-0")),
-        batch,
-        Option.empty[TrafficReceipt],
-        testedProtocolVersion,
-      )
-    }
-    val signedContent =
-      AggregatedSignedContent(deliver, SymbolicCrypto.emptySignature, testedProtocolVersion)
+    val resultTs = CantonTimestamp.Epoch
 
     val assignmentExclusivity = synchronizerParameters
       .assignmentExclusivityLimitFor(targetTs.unwrap)
@@ -1486,7 +1463,7 @@ final class UnassignmentProcessingStepsTest
         result <- valueOrFail(
           unassignmentProcessingSteps
             .getCommitSetAndContractsToBeStoredAndEventFactory(
-              NoOpeningErrors(signedContent),
+              resultTs,
               reassignmentResult.verdict,
               pendingUnassignment,
               None,
@@ -1509,7 +1486,7 @@ final class UnassignmentProcessingStepsTest
       valueOrFail(
         steps
           .getCommitSetAndContractsToBeStoredAndEventFactory(
-            NoOpeningErrors(signedContent),
+            resultTs,
             reassignmentResult.verdict,
             pendingUnassignment,
             pendingSubmissionDataO,
@@ -1535,7 +1512,7 @@ final class UnassignmentProcessingStepsTest
           valueOrFail(
             unassignmentProcessingSteps
               .getCommitSetAndContractsToBeStoredAndEventFactory(
-                NoOpeningErrors(signedContent),
+                resultTs,
                 reassignmentResult.verdict,
                 // request used MediatorGroupIndex.zero
                 pendingUnassignment.copy(mediator = MediatorGroupRecipient(MediatorGroupIndex.one)),
@@ -1567,7 +1544,7 @@ final class UnassignmentProcessingStepsTest
     ] =
       steps
         .getCommitSetAndContractsToBeStoredAndEventFactory(
-          NoOpeningErrors(signedContent),
+          resultTs,
           reassignmentResult.verdict,
           failingActivenessValidation,
           None,
@@ -1622,7 +1599,7 @@ final class UnassignmentProcessingStepsTest
       for {
         result <- unassignmentProcessingSteps
           .getCommitSetAndContractsToBeStoredAndEventFactory(
-            NoOpeningErrors(signedContent),
+            resultTs,
             reassignmentResult.verdict,
             failingUnassignmentValidation,
             None,

@@ -25,7 +25,9 @@ if [[ "${BRANCH_EXISTS}" -gt "0" ]]; then
     err "Branch $BRANCH_NAME already exists. Aborting."
     exit 0
 else
-  info "Check out $BRANCH_NAME"
+  # The PR targets the branch the job runs on (main or a release line)
+  BASE_BRANCH="${CIRCLE_BRANCH:-$($_GIT rev-parse --abbrev-ref HEAD)}"
+  info "Check out $BRANCH_NAME (base: $BASE_BRANCH)"
   $_GIT checkout -b $BRANCH_NAME
 
   # first update daml project

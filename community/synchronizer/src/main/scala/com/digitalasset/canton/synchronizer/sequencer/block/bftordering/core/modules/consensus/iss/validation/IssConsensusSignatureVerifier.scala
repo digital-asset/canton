@@ -48,11 +48,14 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   PureFun,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 /** If the verifier approves a message then the message is from whom it says it is, recursively
   * (e.g., commit certificates contain commit messages that are from whom they say they are).
   */
-final class IssConsensusSignatureVerifier[E <: Env[E]](metrics: BftOrderingMetrics) {
+final class IssConsensusSignatureVerifier[E <: Env[E]](metrics: BftOrderingMetrics)(implicit
+    synchronizerProtocolVersion: ProtocolVersion
+) {
 
   private type VerificationResult =
     E#FutureUnlessShutdownT[Either[Seq[SignatureCheckError], Unit]]
@@ -106,6 +109,8 @@ final class IssConsensusSignatureVerifier[E <: Env[E]](metrics: BftOrderingMetri
           proofOfAvailability.epochNumber,
           ack.from,
           metrics,
+          cryptoProvider.psid,
+          synchronizerProtocolVersion,
         )
         cryptoProvider.verifySignature(
           hash,

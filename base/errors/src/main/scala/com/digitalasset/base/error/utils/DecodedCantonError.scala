@@ -7,6 +7,11 @@ import cats.implicits.toTraverseOps
 import cats.syntax.either.*
 import com.digitalasset.base.error.BaseError.RedactedMessage
 import com.digitalasset.base.error.ErrorCategory.GenericErrorCategory
+import com.digitalasset.base.error.NonSecuritySensitiveErrorCodeComponents.MaxCauseLogLength
+import com.digitalasset.base.error.SerializableErrorCodeComponents.{
+  MaxTraceIdCorrelationIdSize,
+  truncateString,
+}
 import com.digitalasset.base.error.{
   BaseError,
   ErrorCategory,
@@ -62,7 +67,11 @@ object DecodedCantonError {
     * of throwables, all serialized error information is extracted, making this method an inverse of
     * [[BaseError.rpcStatus]].
     */
-  def fromGrpcStatus(status: RpcStatus): Either[String, DecodedCantonError] = {
+  def fromGrpcStatus(unsafeStatus: RpcStatus): Either[String, DecodedCantonError] = {
+    // Protect against regex attacks among other things
+    val status =
+      unsafeStatus.copy(message = truncateString(unsafeStatus.message, MaxValidStatusMessageLength))
+
     val rawDetails = status.details
 
     val statusCode = Status.fromCodeValue(status.code).getCode
@@ -75,7 +84,15 @@ object DecodedCantonError {
             traceId = traceId,
           )
         )
-      case _ => tryDeserializeStatus(status, rawDetails)
+      case _ =>
+        // Defense-in-depth: in case there is another exception we missed...
+        Either
+          .catchNonFatal(tryDeserializeStatus(status, rawDetails))
+          .leftMap(exc =>
+            s"Failed to deserialize gRPC status to DecodedCantonError:" +
+              s" ${truncateString(exc.toString, MaxUnvalidatedStringLength)}" // .getMessage could be null
+          )
+          .flatten
     }
   }
 
@@ -105,18 +122,32 @@ object DecodedCantonError {
       resources = resourceInfo.map { resourceInfo =>
         ErrorResource(resourceInfo.resourceType) -> resourceInfo.resourceName
       }
+      // `retryDelay` is an unvalidated field which can be controlled by an attacker
+      retryDelayAsJavaDurationO <- Either
+        .catchOnly[ArithmeticException](retryInfo.flatMap(_.retryDelay).map(_.asJavaDuration))
+        .leftMap(exc => s"retry-delay out of spec: ${exc.getMessage}")
+      retryDelayAsScalaDurationO <- Either
+        .catchOnly[IllegalArgumentException](retryDelayAsJavaDurationO.map(_.toScala))
+        .leftMap(exc => s"retry-delay out of Scala range: ${exc.getMessage}")
       errorCategory <- extractErrorCategory(
         errorInfo = errorInfo,
         statusCode = status.code,
-        retryableDuration = retryInfo.flatMap(_.retryDelay).map(_.asJavaDuration.toScala),
+        retryableDuration = retryDelayAsScalaDurationO,
       )
       traceId = errorInfo.metadata.get("tid")
       cause = extractCause(status)
       correlationId = requestInfoO.collect {
         case requestInfo if !traceId.contains(requestInfo.requestId) => requestInfo.requestId
       }
+      // `ErrorInfo.reason` is an unvalidated field which can be controlled by an attacker
+      // The spec defines it as <= 64 characters in capital snake, which we enforce in the `ErrorCode` constructor
+      errorCode <- Either
+        .catchOnly[IllegalArgumentException](
+          GenericErrorCode(id = errorInfo.reason, category = errorCategory)
+        )
+        .leftMap(exc => s"error-id out of spec: ${exc.getMessage}")
     } yield DecodedCantonError(
-      code = GenericErrorCode(id = errorInfo.reason, category = errorCategory),
+      code = errorCode,
       cause = cause,
       context = errorInfo.metadata,
       resources = resources,
@@ -184,9 +215,12 @@ object DecodedCantonError {
     for {
       categoryValue <- errorInfo.metadata
         .get("category")
-        .toRight(s"category key not found in error metadata: ${errorInfo.metadata}")
+        .toRight(
+          s"category key not found in error metadata:" +
+            s" ${truncateString(errorInfo.metadata.toString, MaxUnvalidatedStringLength)}"
+        )
       categoryId <- Try(categoryValue.toInt).toEither.left.map(e =>
-        s"Failed parsing category value: ${e.getMessage}"
+        s"Failed parsing category value: ${truncateString(e.toString, MaxUnvalidatedStringLength)}"
       )
     } yield ErrorCategory.all.find(_.asInt == categoryId).getOrElse(unknownCategory(categoryId))
   }
@@ -200,7 +234,8 @@ object DecodedCantonError {
       .filter(_ is expectedTypeCompanion)
       .traverse { errDetail =>
         Try(errDetail.unpack[T]).toEither.left.map(throwable =>
-          s"Could not extract ${expectedTypeCompanion.scalaDescriptor.fullName} from error details: ${throwable.getMessage}"
+          s"Could not extract ${expectedTypeCompanion.scalaDescriptor.fullName} from error details:" +
+            s" ${truncateString(throwable.toString, MaxUnvalidatedStringLength)}"
         )
       }
 
@@ -218,6 +253,11 @@ object DecodedCantonError {
     private def invalid(times: String) =
       s"Could not extract error detail. Expected $times ${expectedTypeCompanion.scalaDescriptor.fullName} in status details, but got ${seq.size}"
   }
+
+  private[error] val MaxUnvalidatedStringLength = 200
+  // Estimate maximum valid length, with generous leeway
+  private[error] val MaxValidStatusMessageLength =
+    2 * (MaxTraceIdCorrelationIdSize + MaxCauseLogLength)
 
   /** Dummy error class for the purpose of creating the [[GenericErrorCode]]. It has no effect on
     * documentation as its intended user ([[DecodedCantonError]]) does not appear in documentation.

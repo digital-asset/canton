@@ -96,7 +96,7 @@ class AcsReplicationTopologyWorkflow(
       )
       _ <- partyToParticipantTopologyTransactionO.fold(
         EitherT.rightT[FutureUnlessShutdown, String](())
-      )(verifyPtpTopologyTransaction(params, _))
+      )(tx => EitherT.fromEither[FutureUnlessShutdown](verifyPtpTopologyTransaction(params, tx)))
     } yield partyToParticipantTopologyTransactionO.map { partyToParticipantTopologyPartyAdded =>
       TopologyTransactionInfo(
         partyToParticipantTopologyPartyAdded.validFrom,
@@ -116,17 +116,22 @@ class AcsReplicationTopologyWorkflow(
         TopologyChangeOp.Replace,
         PartyToParticipant,
       ],
-  ): EitherT[FutureUnlessShutdown, String, Unit] =
+  ): Either[String, Unit] = {
+    val tpHostingO = partyToParticipantTopologyTransaction.mapping.participants.collectFirst {
+      case tp @ HostingParticipant(params.targetParticipantId, _, _) => tp
+    }
     for {
       // Check that the SP and TP are authorized to host the party.
-      _ <- EitherT.cond[FutureUnlessShutdown](
-        partyToParticipantTopologyTransaction.mapping.participants.exists(p =>
-          p.participantId == params.targetParticipantId
-        ),
+      tpHosting <-
+        tpHostingO.toRight(
+          s"Target participant ${params.targetParticipantId} not authorized to host party ${params.partyId} during processing of ACS replication request ${params.requestId}."
+        )
+      _ <- Either.cond(
+        tpHosting.state != HostingState.Nominated,
         (),
-        s"Target participant ${params.targetParticipantId} not authorized to host party ${params.partyId} during processing of ACS replication request ${params.requestId}.",
+        s"Party ${params.partyId} is still nominated on target participant ${params.targetParticipantId} as of ${partyToParticipantTopologyTransaction.validFrom.value} as part of ACS replication request ${params.requestId}",
       )
-      _ <- EitherT.cond[FutureUnlessShutdown](
+      _ <- Either.cond(
         partyToParticipantTopologyTransaction.mapping.participants.exists(
           _.participantId == params.sourceParticipantId
         ),
@@ -134,6 +139,7 @@ class AcsReplicationTopologyWorkflow(
         s"Source participant ${params.sourceParticipantId} authorization to host party ${params.partyId} has been removed, but is necessary for ACS replication request ${params.requestId}.",
       )
     } yield ()
+  }
 }
 
 object AcsReplicationTopologyWorkflow {

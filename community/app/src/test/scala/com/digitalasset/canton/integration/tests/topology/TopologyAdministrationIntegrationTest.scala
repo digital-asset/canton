@@ -22,7 +22,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.participant.store.DamlPackageStore
-import com.digitalasset.canton.protocol.TopologyLimits
+import com.digitalasset.canton.protocol.TopologyLimitsView
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
@@ -263,7 +263,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
 
           SignedTopologyTransaction
             .readFromTrustedFile(
-              TopologyTransactionDeserializationContext(TopologyLimits.default),
+              TopologyTransactionDeserializationContext(TopologyLimitsView.default),
               plainFile.pathAsString,
             )
             .map(_.hash) shouldBe Right(revocation.hash)
@@ -699,16 +699,15 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
     ) should contain noElementsOf startingPackages
 
     // having the same package in adds and removes should cause an error
-    the[IllegalArgumentException]
-      .thrownBy(
-        participant1.topology.vetted_packages.propose_delta(
-          participant1.id,
-          store = daId,
-          adds = VettedPackage.unbounded(startingPackages),
-          removes = startingPackages,
-        )
-      )
-      .getMessage should include("Cannot both add and remove a packageId: ")
+    loggerFactory.assertThrowsAndLogs[CommandFailure](
+      participant1.topology.vetted_packages.propose_delta(
+        participant1.id,
+        store = daId,
+        adds = VettedPackage.unbounded(startingPackages),
+        removes = startingPackages,
+      ),
+      _.errorMessage should include("Cannot both add and remove a packageId: "),
+    )
 
     participant1.topology.synchronisation.await_idle()
     sequencer1.topology.synchronisation.await_idle()

@@ -40,13 +40,14 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BlockTransferResponse,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.util.{Failure, Success}
 
 final class StateTransferMessageValidator[E <: Env[E]](
     metrics: BftOrderingMetrics,
     override val loggerFactory: NamedLoggerFactory,
-)(implicit mc: MetricsContext)
+)(implicit mc: MetricsContext, synchronizerProtocolVersion: ProtocolVersion)
     extends NamedLogging {
 
   private val signatureVerifier = new IssConsensusSignatureVerifier[E](metrics)

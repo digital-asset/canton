@@ -41,7 +41,6 @@ import com.digitalasset.canton.topology.{
   UnknownPhysicalSynchronizerId,
 }
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 import monocle.syntax.all.*
 import org.scalatest.Assertion
 
@@ -174,7 +173,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       sequencer1.id,
       endpoints = NonEmpty(Set, new URI("https://localhost:5000")),
       successorSynchronizerId = successorPsid,
-      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      customTrustCertificates = None,
     )
     // check that participant1 automatically created a synchronizer config for the successor synchronizer
     // with a connection to the same sequencer alias/id
@@ -218,7 +217,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       sequencer1.id,
       endpoints = NonEmpty(Set, new URI("https://localhost:5005")),
       successorSynchronizerId = successorPsid,
-      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      customTrustCertificates = None,
     )
 
     // check that the participants automatically modified their synchronizer configs for the successor synchronizer
@@ -379,7 +378,7 @@ final class LsuAnnouncementTopologyIntegrationTest
         sequencer1.id,
         endpoints = NonEmpty(Set, new URI("https://localhost:5001")),
         successorSynchronizerId = successor2,
-        customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+        customTrustCertificates = None,
       ),
       _.errorMessage should include(
         LsuSequencerSuccessorInvalidSuccessorPsid
@@ -396,7 +395,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       sequencer1.id,
       endpoints = NonEmpty(Set, new URI("https://localhost:5001")),
       successorSynchronizerId = successor1,
-      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      customTrustCertificates = None,
     )
     listKnownSuccessors() shouldBe (sequencer1.id, successor1.opaque, 5001)
 
@@ -413,7 +412,7 @@ final class LsuAnnouncementTopologyIntegrationTest
         sequencer1.id,
         endpoints = NonEmpty(Set, new URI("https://localhost:5002")),
         successorSynchronizerId = successor2,
-        customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+        customTrustCertificates = None,
       ),
       _.errorMessage should include(NoLsuAnnounced.Failure().cause),
     )
@@ -429,7 +428,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       sequencer1.id,
       endpoints = NonEmpty(Set, new URI("https://localhost:5002")),
       successorSynchronizerId = successor2,
-      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      customTrustCertificates = None,
     )
     listKnownSuccessors() shouldBe (sequencer1.id, successor2.opaque, 5002)
 
@@ -438,7 +437,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       sequencer1.id,
       endpoints = NonEmpty(Set, new URI("https://localhost:5003")),
       successorSynchronizerId = successor2,
-      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      customTrustCertificates = None,
     )
     listKnownSuccessors() shouldBe (sequencer1.id, successor2.opaque, 5003)
 
@@ -453,7 +452,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       sequencer1.id,
       endpoints = NonEmpty(Set, new URI("https://localhost:5004")),
       successorSynchronizerId = successor3,
-      customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
+      customTrustCertificates = None,
     )
     listKnownSuccessors() shouldBe (sequencer1.id, successor3.opaque, 5004)
   }

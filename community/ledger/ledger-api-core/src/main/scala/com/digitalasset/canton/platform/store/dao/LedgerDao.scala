@@ -5,15 +5,17 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
-import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
+import com.daml.ledger.api.v2.state_service.{GetActiveContractsResponse, GetHostedPartiesResponse}
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.health.ReportsHealth
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
+import com.digitalasset.canton.ledger.api.util.PageTokenUtils
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
 import com.digitalasset.canton.ledger.participant.state.index.{
+  IndexerHostedPartyFilter,
   IndexerKnownPartiesPage,
   IndexerPartyDetails,
 }
@@ -50,7 +52,7 @@ private[platform] trait LedgerDaoUpdateReader {
 
   def getActiveContracts(
       activeAt: Option[Offset],
-      filter: TemplatePartiesFilter,
+      filter: EventFilter,
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
       configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
@@ -140,6 +142,30 @@ private[platform] trait LedgerReadDao extends ReportsHealth {
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[IndexerKnownPartiesPage]
+
+  /** Streams matching hosted parties at an inclusive snapshot offset.
+    *
+    * @param filter
+    *   the parties, participants and synchronizers of interest
+    * @param validAt
+    *   The inclusive snapshot offset, between the pruning offset and ledger end. Individual
+    *   hostings may report earlier offsets for the topology events that established their state.
+    * @param fromExcl
+    *   only parties positioned after this party in the stream order are streamed
+    * @param limit
+    *   The maximum number of parties streamed. A party's matching hostings are not split.
+    * @param continuationChecksum
+    *   the request checksum embedded in the stream continuation token of each response
+    */
+  def hostedParties(
+      filter: IndexerHostedPartyFilter,
+      validAt: Offset,
+      fromExcl: Option[Party],
+      limit: Option[Int],
+      continuationChecksum: PageTokenUtils.Checksum,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[GetHostedPartiesResponse, NotUsed]
 
   /** Prunes participant events and completions in archived history and remembers largest pruning
     * offset processed thus far.

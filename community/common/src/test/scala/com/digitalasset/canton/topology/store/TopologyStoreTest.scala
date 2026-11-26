@@ -2634,5 +2634,89 @@ trait TopologyStoreTest
         )
       }
     }
+
+    "require an LSU announcement when requested" in {
+      val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "missing LSU announcement")
+      val announcement = LsuAnnouncement(
+        successorSynchronizerId = synchronizer1_p1p2_physicalSynchronizerId.opaque,
+        upgradeTime = ts2,
+      )
+      val proposal = makeSignedTx(announcement, isProposal = true)(dnd_p1p2_keys*)
+      val authorized = makeSignedTx(announcement)(dnd_p1p2_keys*)
+      val cancellation =
+        makeSignedTx(announcement, op = TopologyChangeOp.Remove, serial = PositiveInt.two)(
+          dnd_p1p2_keys*
+        )
+      val replacementSuccessor = store.storeId.psid.incrementSerial.value
+      val replacement = makeSignedTx(
+        LsuAnnouncement(replacementSuccessor.opaque, upgradeTime = ts4),
+        serial = PositiveInt.three,
+      )(dnd_p1p2_keys*)
+      for {
+        // An empty store passes optional consistency checks, but not the announcement requirement.
+        optionalResult <- store
+          .checkConsistency(
+            synchronizerParameters = defaultStaticSynchronizerParameters,
+            ignoreLsuPsidCheck = false,
+          )
+          .value
+        requiredResult <- store.requireLsuAnnouncement(store.storeId.psid).value
+        // A proposal does not count as a fully authorized announcement.
+        _ <- store.update(
+          SequencedTime(ts1),
+          EffectiveTime(ts1),
+          removals = Map.empty,
+          additions = Seq(ValidatedTopologyTransaction(proposal)),
+        )
+        proposalResult <- store.requireLsuAnnouncement(store.storeId.psid).value
+        // A fully authorized announcement satisfies the requirement only for its named successor.
+        _ <- store.update(
+          SequencedTime(ts2),
+          EffectiveTime(ts2),
+          removals = Map.empty,
+          additions = Seq(ValidatedTopologyTransaction(authorized)),
+        )
+        authorizedResult <- store.requireLsuAnnouncement(store.storeId.psid).value
+        otherSuccessorResult <- store
+          .requireLsuAnnouncement(store.storeId.psid.incrementSerial.value)
+          .value
+        // Cancellation invalidates the announcement even though its positive transaction is retained.
+        _ <- store.update(
+          SequencedTime(ts3),
+          EffectiveTime(ts3),
+          removals = Map(announcement.uniqueKey -> (Some(PositiveInt.two), Set.empty)),
+          additions = Seq(ValidatedTopologyTransaction(cancellation)),
+        )
+        cancelledResult <- store.requireLsuAnnouncement(store.storeId.psid).value
+        // Re-announcing for another successor must not make the cancelled successor valid again.
+        _ <- store.update(
+          SequencedTime(ts4),
+          EffectiveTime(ts4),
+          removals = Map(announcement.uniqueKey -> (Some(PositiveInt.three), Set.empty)),
+          additions = Seq(ValidatedTopologyTransaction(replacement)),
+        )
+        replacedResult <- store.requireLsuAnnouncement(store.storeId.psid).value
+        replacementResult <- store.requireLsuAnnouncement(replacementSuccessor).value
+      } yield {
+        optionalResult shouldBe Right(())
+        requiredResult.left.value shouldBe a[
+          TopologyManagerError.MissingTopologyMapping.MissingLsuAnnouncement
+        ]
+        proposalResult.left.value shouldBe a[
+          TopologyManagerError.MissingTopologyMapping.MissingLsuAnnouncement
+        ]
+        authorizedResult shouldBe Right(())
+        otherSuccessorResult.left.value shouldBe a[
+          TopologyManagerError.MissingTopologyMapping.MissingLsuAnnouncement
+        ]
+        cancelledResult.left.value shouldBe a[
+          TopologyManagerError.MissingTopologyMapping.MissingLsuAnnouncement
+        ]
+        replacedResult.left.value shouldBe a[
+          TopologyManagerError.MissingTopologyMapping.MissingLsuAnnouncement
+        ]
+        replacementResult shouldBe Right(())
+      }
+    }
   }
 }

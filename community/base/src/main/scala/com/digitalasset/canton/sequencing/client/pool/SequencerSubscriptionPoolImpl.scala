@@ -27,7 +27,7 @@ import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.{
   UnreachableTrustThreshold,
 }
 import com.digitalasset.canton.sequencing.client.pool.InternalSequencerConnection.SequencerConnectionState
-import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.PenaltyKind
 import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPool.{
   SequencerSubscriptionPoolConfig,
   SequencerSubscriptionPoolHealth,
@@ -342,7 +342,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
       */
     private def handleFaultySequencer(
         failure: String,
-        penalty: Penalty,
+        penalty: PenaltyKind,
         penaltyReason: String,
         throwableO: Option[Throwable] = None,
     )(implicit traceContext: TraceContext): Unit = {
@@ -431,7 +431,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
           } else {
             logger.warn(s"Closing sequencer subscription due to error: $subscriptionError")
             connection.increasePenalty(
-              Penalty.SubscriptionError,
+              PenaltyKind.SubscriptionError,
               reason = s"subscription error: $subscriptionError",
             )
           }
@@ -440,7 +440,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
         case Success(_: SubscriptionCloseReason.PermissionDeniedError) =>
           logger.warn("Closing sequencer subscription due to permission denied")
           connection.increasePenalty(
-            Penalty.SubscriptionPermissionDenied,
+            PenaltyKind.SubscriptionPermissionDenied,
             reason = "permission denied",
           )
           connection.fail(closingReason.toString)
@@ -453,7 +453,10 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
 
         case Success(SubscriptionCloseReason.SubscriptionIsSilent) =>
           logger.info("Closing sequencer subscription due to inactivity")
-          connection.increasePenalty(Penalty.SubscriptionInactive, reason = "inactive subscription")
+          connection.increasePenalty(
+            PenaltyKind.SubscriptionInactive,
+            reason = "inactive subscription",
+          )
           removeSubscriptionsFromPool(this)
 
         case Success(SubscriptionCloseReason.HandlerError(ApplicationHandlerShutdown)) =>
@@ -482,7 +485,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
             case _: SequencerAggregatorError.BogusEvent if useNewAggregator =>
               logger.warn(s"Closing sequencer subscription due to aggregation error: $error")
               connection.increasePenalty(
-                Penalty.SubscriptionAggregationError,
+                PenaltyKind.SubscriptionAggregationError,
                 reason = "bogus event on subscription",
               )
               connection.fail(closingReason.toString)
@@ -509,7 +512,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
                 s"Closing sequencer subscription due to aggregation error: $error"
               )
               connection.increasePenalty(
-                Penalty.SubscriptionAggregationError,
+                PenaltyKind.SubscriptionAggregationError,
                 reason = "threshold unreachable on subscription",
               )
               connection.fail(closingReason.toString)
@@ -539,7 +542,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
         case Success(SubscriptionCloseReason.HandlerError(error: EventValidationError)) =>
           handleFaultySequencer(
             s"event validation error: $error",
-            Penalty.SubscriptionAggregationError,
+            PenaltyKind.SubscriptionAggregationError,
             penaltyReason = "event validation error on subscription",
           )
           connection.fail(closingReason.toString)
@@ -547,7 +550,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
         case Success(SubscriptionCloseReason.HandlerException(throwable)) =>
           handleFaultySequencer(
             s"handler exception: $throwable",
-            Penalty.SubscriptionHandlerException,
+            PenaltyKind.SubscriptionHandlerException,
             penaltyReason = "handler exception on subscription",
           )
           connection.fail(closingReason.toString)
@@ -560,13 +563,13 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
             // Kept here in case the retry policy changes in the future.
             logger.warn(s"Closing sequencer subscription due to exception", throwable)
             connection.increasePenalty(
-              Penalty.SubscriptionRetriableFailure,
+              PenaltyKind.SubscriptionRetriableFailure,
               reason = "retryable failure on subscription",
             )
           } else
             handleFaultySequencer(
               "exception",
-              Penalty.SubscriptionNonRetriableFailure,
+              PenaltyKind.SubscriptionNonRetriableFailure,
               penaltyReason = "non-retryable failure on subscription",
               throwableO = Some(throwable),
             )

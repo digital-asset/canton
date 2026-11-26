@@ -37,8 +37,9 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.SimulationEnv
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.future.SimulationFuture
+import com.digitalasset.canton.topology.{DefaultTestIdentities, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ReleaseProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertions.fail
 
@@ -52,6 +53,7 @@ final case class SimulationCryptoProvider(
     crypto: SymbolicCrypto,
     timestamp: CantonTimestamp,
     loggerFactory: NamedLoggerFactory,
+    override val psid: PhysicalSynchronizerId,
 ) extends CryptoProvider[SimulationEnv] {
 
   private def fetchSigningKey(): Either[SyncCryptoError, Fingerprint] =
@@ -112,7 +114,7 @@ final case class SimulationCryptoProvider(
   ): SimulationFuture[Either[SyncCryptoError, SignedMessage[MessageT]]] =
     SimulationFuture("signMessage") { () =>
       Try {
-        innerSign(hashForMessage(message, message.from, authenticatedMessageType))
+        innerSign(hashForMessage(message, message.from, authenticatedMessageType, psid))
           .map(SignedMessage(message, _))
       }
     }
@@ -177,7 +179,7 @@ object SimulationCryptoProvider {
       sequencerToTopologyData: Map[BftNodeId, NodeSimulationTopologyData],
       timestamp: CantonTimestamp,
       loggerFactory: NamedLoggerFactory,
-  ): SimulationCryptoProvider = {
+  )(implicit protocolVersion: ProtocolVersion): SimulationCryptoProvider = {
 
     implicit val ec: ExecutionContext = directExecutionContext
 
@@ -220,6 +222,7 @@ object SimulationCryptoProvider {
       crypto,
       timestamp,
       loggerFactory,
+      DefaultTestIdentities.physicalSynchronizerId.copy(protocolVersion = protocolVersion),
     )
   }
 }

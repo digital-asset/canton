@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringCompanion,
 }
 import com.digitalasset.canton.version.IgnoreInSerializationTestExhaustivenessCheck
+import com.digitalasset.daml.lf.data.Ref.LedgerString
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.reflections.Reflections
@@ -29,8 +30,8 @@ object Generators {
   implicit val commandIdArb: Arbitrary[CommandId] = Arbitrary(
     Gen.stringOfN(32, Gen.alphaNumChar).map(CommandId.assertFromString)
   )
-  implicit val ledgerSubmissionIdArb: Arbitrary[LedgerSubmissionId] = Arbitrary(
-    Gen.stringOfN(32, Gen.alphaNumChar).map(LedgerSubmissionId.assertFromString)
+  implicit val ledgerStringArb: Arbitrary[LedgerString] = Arbitrary(
+    Gen.stringOfN(32, Gen.alphaNumChar).map(LedgerString.assertFromString)
   )
   implicit val workflowIdArb: Arbitrary[WorkflowId] = Arbitrary(
     Gen.stringOfN(32, Gen.alphaNumChar).map(WorkflowId.assertFromString)

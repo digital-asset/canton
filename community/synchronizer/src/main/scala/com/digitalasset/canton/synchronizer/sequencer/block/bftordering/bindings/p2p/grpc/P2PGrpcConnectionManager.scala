@@ -79,6 +79,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.util.EitherUtil.*
 import com.digitalasset.canton.util.collection.BoundedQueue
 import com.digitalasset.canton.util.collection.BoundedQueue.DropStrategy
 import com.digitalasset.canton.util.{
@@ -745,17 +746,18 @@ private[bftordering] final class P2PGrpcConnectionManager(
 
     logger.info(s"Creating a gRPC channel to $p2pEndpointId")
 
-    val channel =
-      createNettyClientChannelBuilder(
+    for {
+      channel <- createNettyClientChannelBuilder(
         clientChannelBuilder,
         p2pEndpoint.endpointConfig,
         channelCustomizer =
           builder => transportInstrumentationO.foreach(_.customize(builder).discard),
-      ).build()
-    val channelId = channel.toString
+      ).toFutureUS(err => new IllegalArgumentException(s"Unable to build channel: $err"))
+        .map(_.build())
 
-    val authenticationContextO =
-      authenticationInitialState.map(auth =>
+      channelId = channel.toString
+
+      authenticationContextO = authenticationInitialState.map(auth =>
         new GrpcSequencerClientAuth(
           auth.psId,
           member = auth.sequencerId,
@@ -771,10 +773,10 @@ private[bftordering] final class P2PGrpcConnectionManager(
           loggerFactory = loggerFactory,
         )
       )
-    val authenticationContextId = authenticationContextO.map(objId)
 
-    val success =
-      AtomicUtil
+      authenticationContextId = authenticationContextO.map(objId)
+
+      success = AtomicUtil
         .updateAndGetComputed(stateRef)(
           _.attemptTransitionToConnectingWithChannel(
             p2pEndpointId,
@@ -789,63 +791,65 @@ private[bftordering] final class P2PGrpcConnectionManager(
             s"State transition for $p2pEndpointId when attempting to start outgoing connection after creating a channel: ",
         )
 
-    if (success) {
-      logger.info(
-        s"Created gRPC channel $channelId with authentication context $authenticationContextId to $p2pEndpointId"
-      )
-
-      // When authentication is enabled, the external address normally also
-      //  appears as the P2P endpoint for this peer in other peers' configurations, so
-      //  if the connecting peer always sends it (i.e., even when authentication is disabled),
-      //  the server peer can use it to deduplicate connections:
-      //
-      // - If the server already connected to the peer with that endpoint or there is
-      //   already an incoming connection from that peer, it will close the duplicate connection.
-      // - Else it will associate the incoming connection with the endpoint and reuse it
-      //   instead of creating a new outgoing connection to the same peer.
-      def stubWithEndpointHeaderClientInterceptor[S <: AbstractStub[S]](
-          stub: S,
-          endpoint: P2PEndpoint,
-      ) =
-        stub.withInterceptors(
-          new P2PAddEndpointHeaderGrpcClientInterceptor(
-            endpoint,
-            loggerFactory,
+      openChannel <-
+        if (success) {
+          logger.info(
+            s"Created gRPC channel $channelId with authentication context $authenticationContextId to $p2pEndpointId"
           )
-        )
 
-      def maybeAuthenticateStub[S <: AbstractStub[S]](stub: S) =
-        serverToClientAuthenticationEndpoint.fold(stub) { endpoint =>
-          val augmentedStub = stubWithEndpointHeaderClientInterceptor(stub, endpoint)
-          authenticationContextO.fold(augmentedStub)(_.apply(augmentedStub))
-        }
-
-      val (potentiallyCheckedChannel, maybeSequencerIdFromAuthenticationPromiseUS) =
-        maybeApplyServerAuthenticatingClientInterceptor(channel)
-
-      FutureUnlessShutdown.pure(
-        Some(
-          OpenChannel(
-            channel,
-            authenticationContextO,
-            maybeSequencerIdFromAuthenticationPromiseUS,
-            maybeAuthenticateStub(
-              TraceContextGrpc.addTraceContextToCallOptions(
-                BftOrderingServiceGrpc.stub(potentiallyCheckedChannel)
+          // When authentication is enabled, the external address normally also
+          //  appears as the P2P endpoint for this peer in other peers' configurations, so
+          //  if the connecting peer always sends it (i.e., even when authentication is disabled),
+          //  the server peer can use it to deduplicate connections:
+          //
+          // - If the server already connected to the peer with that endpoint or there is
+          //   already an incoming connection from that peer, it will close the duplicate connection.
+          // - Else it will associate the incoming connection with the endpoint and reuse it
+          //   instead of creating a new outgoing connection to the same peer.
+          def stubWithEndpointHeaderClientInterceptor[S <: AbstractStub[S]](
+              stub: S,
+              endpoint: P2PEndpoint,
+          ) =
+            stub.withInterceptors(
+              new P2PAddEndpointHeaderGrpcClientInterceptor(
+                endpoint,
+                loggerFactory,
               )
-            ),
+            )
+
+          def maybeAuthenticateStub[S <: AbstractStub[S]](stub: S) =
+            serverToClientAuthenticationEndpoint.fold(stub) { endpoint =>
+              val augmentedStub = stubWithEndpointHeaderClientInterceptor(stub, endpoint)
+              authenticationContextO.fold(augmentedStub)(_.apply(augmentedStub))
+            }
+
+          val (potentiallyCheckedChannel, maybeSequencerIdFromAuthenticationPromiseUS) =
+            maybeApplyServerAuthenticatingClientInterceptor(channel)
+
+          FutureUnlessShutdown.pure(
+            Some(
+              OpenChannel(
+                channel,
+                authenticationContextO,
+                maybeSequencerIdFromAuthenticationPromiseUS,
+                maybeAuthenticateStub(
+                  TraceContextGrpc.addTraceContextToCallOptions(
+                    BftOrderingServiceGrpc.stub(potentiallyCheckedChannel)
+                  )
+                ),
+              )
+            )
           )
-        )
-      )
-    } else {
-      logger.info(
-        s"Shutting down gRPC channel $channelId with authentication context $authenticationContextId " +
-          s"to connect to $p2pEndpointId due to connection status having moved away from 'Connecting'"
-      )
-      shutdownGrpcChannelIfNeeded(p2pEndpointId, channel, authenticationContextO).map(_ =>
-        Option.empty[OpenChannel]
-      )
-    }
+        } else {
+          logger.info(
+            s"Shutting down gRPC channel $channelId with authentication context $authenticationContextId " +
+              s"to connect to $p2pEndpointId due to connection status having moved away from 'Connecting'"
+          )
+          shutdownGrpcChannelIfNeeded(p2pEndpointId, channel, authenticationContextO).map(_ =>
+            Option.empty[OpenChannel]
+          )
+        }
+    } yield openChannel
   }
 
   // Returns a tuple of the channel, with the server-authenticating gRPC client interceptor applied
@@ -1368,9 +1372,10 @@ private[bftordering] final class P2PGrpcConnectionManager(
               s"Failed to send the connection opener message to peer sender $peerSenderId",
               exception,
             )
-            // Close the sender and fail accepting the connection
+            // Reject setup and terminate the response once. Rethrowing after onError would let
+            //  the enclosing authentication interceptor try to close the same server call again.
             failGrpcStreamObserver(peerSender, exception, logger)
-            throw exception
+            None
 
           case Success(()) =>
             val sequencerIdPromiseUS = PromiseUnlessShutdown.unsupervised[SequencerId]()

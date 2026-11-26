@@ -108,6 +108,7 @@ class JsonErrorHandlingOfDamlVariantTest
               filtersByParty = Map(party.unwrap -> Filters(Nil)),
               filtersForAnyParty = None,
               verbose = true,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

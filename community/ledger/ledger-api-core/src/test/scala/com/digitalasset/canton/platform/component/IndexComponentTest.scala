@@ -27,9 +27,9 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
 import com.digitalasset.canton.ledger.participant.state.Update.{
   ContractInfo,
-  OnPRReassignmentAccepted,
+  OnlinePartyReplicationParticipantEventUpdate,
+  RepairParticipantEventUpdate,
   RepairReassignmentAccepted,
-  RepairTransactionAccepted,
   SequencedReassignmentAccepted,
   SequencedTransactionAccepted,
   TopologyTransactionEffective,
@@ -37,7 +37,6 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
 import com.digitalasset.canton.ledger.participant.state.index.IndexService
 import com.digitalasset.canton.ledger.participant.state.{
   CompletionInfo,
-  IndexingWatermark,
   ParticipantEvent,
   Reassignment,
   ReassignmentInfo,
@@ -232,28 +231,22 @@ trait IndexComponentTest
                 internalContractIds,
               )
             )
-          case txAccepted: RepairTransactionAccepted =>
-            txAccepted.copy(contractInfos =
-              injectInternalContractIds(
-                txAccepted.contractInfos,
-                internalContractIds,
-              )
-            )
           case reassignment: SequencedReassignmentAccepted =>
             reassignment.copy(
               reassignment =
                 injectInternalContractIds(reassignment.reassignment, internalContractIds)
+            )
+          case participantEvent: RepairParticipantEventUpdate =>
+            participantEvent.copy(events =
+              participantEvent.events.map(injectInternalContractIds(internalContractIds))
             )
           case reassignment: RepairReassignmentAccepted =>
             reassignment.copy(
               reassignment =
                 injectInternalContractIds(reassignment.reassignment, internalContractIds)
             )
-          case reassignment: OnPRReassignmentAccepted =>
-            reassignment.copy(
-              reassignment =
-                injectInternalContractIds(reassignment.reassignment, internalContractIds)
-            )
+          case onpr: OnlinePartyReplicationParticipantEventUpdate =>
+            onpr.copy(events = onpr.events.map(injectInternalContractIds(internalContractIds)))
           case other => other
         }
       }
@@ -271,6 +264,24 @@ trait IndexComponentTest
           )
         )
       )
+    }
+
+  private def injectInternalContractIds(
+      internalContractIds: Map[LfContractId, Long]
+  )(ev: ParticipantEvent) =
+    ev match {
+      case add: ParticipantEvent.Added =>
+        add.copy(contractInstance =
+          add.contractInstance.copy(
+            internalContractId = internalContractIds.getOrElse(
+              add.contractInstance.inst.contractId,
+              throw new IllegalStateException(
+                s"Internal contract ID is not provided for ${add.contractInstance.inst.contractId}"
+              ),
+            )
+          )
+        )
+      case remove: ParticipantEvent.Removed => remove
     }
 
   private def injectInternalContractIds(
@@ -300,11 +311,13 @@ trait IndexComponentTest
     ),
     filtersForAnyParty = None,
     verbose = false,
+    filtersByContractId = Seq.empty,
   )
   protected val allPartyEventFormat = EventFormat(
     filtersByParty = Map.empty,
     filtersForAnyParty = Some(wildcardTemplates),
     verbose = false,
+    filtersByContractId = Seq.empty,
   )
 
   private val indexComponentTestDbMetrics = DatabaseMetrics.ForTesting("index-component-test")
@@ -834,13 +847,6 @@ trait IndexComponentTest
     }
   }
 
-  protected def repairCreates(recordTime: () => CantonTimestamp, payloadLength: Int)(
-      size: Int
-  ): (Update.RepairTransactionAccepted, Vector[ContractInstance]) = {
-    val (sequenced, contracts) = creates(recordTime, payloadLength)(size)
-    repairTransaction(sequenced) -> contracts
-  }
-
   protected def archives(
       recordTime: () => CantonTimestamp,
       argumentLength: Int,
@@ -1030,13 +1036,13 @@ trait IndexComponentTest
       updateIdS: String,
       withAcsChange: Boolean,
       contracts: Seq[ContractInstance],
-  ): Update.ReassignmentAccepted = {
+  ): Update = {
     val synchronizer1 = SynchronizerId.tryFromString("x::synchronizer1")
     val synchronizer2 = SynchronizerId.tryFromString("x::synchronizer2")
     val updateId = TestUpdateId(updateIdS)
     val recordTime = Time.Timestamp.now()
     if (withAcsChange)
-      Update.OnPRReassignmentAccepted(
+      Update.SequencedReassignmentAccepted(
         workflowId = None,
         updateId = updateId,
         reassignmentInfo = ReassignmentInfo(
@@ -1070,50 +1076,34 @@ trait IndexComponentTest
             )
           )*
         ),
-        watermark = IndexingWatermark.fromTimestamp(CantonTimestamp(recordTime)),
         recordTime = CantonTimestamp(recordTime),
         synchronizerId = synchronizer2,
         acsChangeFactory = TestAcsChangeFactory(),
         traceContext = implicitly,
+        optCompletionInfo = None,
       )
     else
-      Update.RepairReassignmentAccepted(
+      Update.RepairParticipantEventUpdate(
         workflowId = None,
         updateId = updateId,
-        reassignmentInfo = ReassignmentInfo(
-          sourceSynchronizer = Source(synchronizer1),
-          targetSynchronizer = Target(synchronizer2),
-          submitter = Option(party),
-          reassignmentId = ReassignmentId.tryCreate("00"),
-          isReassigningParticipant = true,
-        ),
-        reassignment = Reassignment.Batch(
-          Reassignment.Assign(
-            reassignmentCounter = 15L,
-            nodeId = 0,
-            persistedContractInstance = PersistedContractInstance(
-              // will be filled when contracts are stored in the participant contract store
-              internalContractId = -1,
-              inst = contracts.head.inst,
-            ),
-            representativePackageId = contracts.head.templateId.packageId,
-          ),
-          contracts.tail.map(contract =>
-            Reassignment.Assign(
+        synchronizerId = synchronizer2,
+        recordTime = CantonTimestamp(recordTime),
+        events = Seq(
+          contracts.map(contract =>
+            ParticipantEvent.Added(
               reassignmentCounter = 15L,
               nodeId = 0,
-              persistedContractInstance = PersistedContractInstance(
+              contractInstance = PersistedContractInstance(
                 // will be filled when contracts are stored in the participant contract store
                 internalContractId = -1,
                 inst = contract.inst,
               ),
-              representativePackageId = contracts.head.templateId.packageId,
+              representativePackageId = SameAsContractPackageId,
             )
           )*
         ),
+        category = PersistentParticipantEventUpdateCategory.AcsImport,
         repairCounter = RepairCounter.Genesis,
-        recordTime = CantonTimestamp(recordTime),
-        synchronizerId = synchronizer2,
         traceContext = implicitly,
       )
   }
@@ -1205,20 +1195,6 @@ trait IndexComponentTest
       synchronizerId = sourceSynchronizerId,
       sourceSynchronizerId = sourceSynchronizerId,
       targetSynchronizerId = targetSynchronizerId,
-    )
-
-  protected def repairTransaction(
-      sequenced: Update.SequencedTransactionAccepted
-  ): Update.RepairTransactionAccepted =
-    Update.RepairTransactionAccepted(
-      transactionMeta = sequenced.transactionMeta,
-      transactionInfo = sequenced.transactionInfo,
-      updateId = sequenced.updateId,
-      synchronizerId = sequenced.synchronizerId,
-      repairCounter = RepairCounter.Genesis,
-      recordTime = sequenced.recordTime,
-      contractInfos = sequenced.contractInfos,
-      traceContext = implicitly,
     )
 
   protected def activeContractIds(

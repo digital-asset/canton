@@ -29,7 +29,17 @@ class ReleaseExamplesIntegrationTest extends ReleaseArtifactIntegrationTestUtils
             cwd = interactiveTopologyDir.toJava,
           ).run(processLogger)
         )
-        utils.retry_until_true(NonNegativeDuration.ofSeconds(40))(portsFile.exists)
+        try {
+          utils.retry_until_true(NonNegativeDuration.ofSeconds(80))(portsFile.exists)
+        } catch {
+          case ex: IllegalStateException =>
+            // The ports file is written only after the bootstrap script completed. Surface the
+            // output of the Canton process, otherwise a timeout here gives no hint why.
+            logger.error(
+              s"Canton did not write $portsFile in time. Process output:\n${processLogger.output()}"
+            )
+            throw ex
+        }
 
         Process(
           "./interactive_topology_example.sh",

@@ -203,12 +203,9 @@ final class TransactionTreeFactoryImplTest
             val transactionViewMetrics = newTransactionViewMetrics()
             lazy val treeFactory = createTransactionTreeFactory(transactionViewMetrics)
 
-            val largestParseDepth = example.rootViews
-              .map(_.parseDepth)
-              .maxOption
-            val maxParseDepth = largestParseDepth
-              .filter(_ > 0)
-              .fold(PositiveInt.one)(PositiveInt.tryCreate)
+            val expectedParseDepth =
+              example.fullInformeeTree.tree.rootViews.parseDepth(_.subviews.subviews)
+            val maxParseDepth = PositiveInt.create(expectedParseDepth).getOrElse(PositiveInt.one)
 
             s"create the correct views for: $example" in {
               createTransactionTree(
@@ -218,7 +215,7 @@ final class TransactionTreeFactoryImplTest
                 maxTreeDepth = maxParseDepth,
               ).value.flatMap { v =>
                 v should equal(Right(example.transactionTree))
-                transactionViewMetrics.treeDepth.getValue shouldBe largestParseDepth.getOrElse(0)
+                transactionViewMetrics.treeDepth.getValue shouldBe expectedParseDepth
               }
             }
 
@@ -232,8 +229,7 @@ final class TransactionTreeFactoryImplTest
                 ).value.flatMap(e =>
                   inside(e) { case Left(TransactionViewLimitError(message)) =>
                     message shouldBe s"The parse depth of the transaction view exceeded $maxDepthMinusOne"
-                    transactionViewMetrics.treeDepth.getValue shouldBe largestParseDepth
-                      .getOrElse(0)
+                    transactionViewMetrics.treeDepth.getValue shouldBe expectedParseDepth
                   }
                 )
               }

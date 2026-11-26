@@ -406,6 +406,30 @@ trait SequencerStoreTest
           afterOnboarding.members shouldBe Set(SequencerMemberStatus.Disabled(alice, None, None))
         }
       }
+
+      "list the members that are onboarding at a given time" in {
+        val store = mk()
+        val dave: Member = ParticipantId("dave")
+        for {
+          // alice stays onboarding
+          _ <- store.registerOnboardingMember(alice, ts1)
+          // bob registers at ts3 without onboarding first
+          _ <- store.registerMember(bob, ts3)
+          // carole completes her onboarding at ts3
+          _ <- store.registerOnboardingMember(carole, ts1)
+          _ <- store.registerMember(carole, ts3)
+          // dave is disabled while onboarding
+          _ <- store.registerOnboardingMember(dave, ts1)
+          _ <- store.disableMember(dave)
+          beforeRegistration <- store.onboardingMembersAt(ts2)
+          atRegistration <- store.onboardingMembersAt(ts3)
+          afterRegistration <- store.onboardingMembersAt(ts4)
+        } yield {
+          beforeRegistration shouldBe Set(alice, carole)
+          atRegistration shouldBe Set(alice, carole)
+          afterRegistration shouldBe Set(alice)
+        }
+      }
     }
 
     "reading and writing" should {

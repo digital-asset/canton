@@ -2192,8 +2192,20 @@ jobs:
     nightly_cn_topology_snapshot_test_only:
         executor: canton-2xlarge-docker-with-postgres
         parallelism: 4
+        parameters:
+            protocol_version:
+                default: ""
+                type: string
         steps:
-            - allow_automatic_protocol_version
+            - when:
+                condition: << parameters.protocol_version >>
+                steps:
+                    - set_canton_protocol_version:
+                        protocol_version: << parameters.protocol_version >>
+            - unless:
+                condition: << parameters.protocol_version >>
+                steps:
+                    - allow_automatic_protocol_version
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.topology
@@ -3133,6 +3145,7 @@ workflows:
                     - maven-mirror
                     - da-images
                     - gcp_topology_testing
+                protocol_version: << pipeline.parameters.protocol_version >>
                 requires:
                     - compile
         when:

@@ -99,7 +99,7 @@ object InformeeMessage
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.InformeeMessage)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(v30.InformeeMessage)(
       supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )

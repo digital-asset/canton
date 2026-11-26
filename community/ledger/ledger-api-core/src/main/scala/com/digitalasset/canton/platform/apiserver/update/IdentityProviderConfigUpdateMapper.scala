@@ -3,8 +3,12 @@
 
 package com.digitalasset.canton.platform.apiserver.update
 
-import com.daml.jwt.JwksUrl
-import com.digitalasset.canton.user.IdentityProviderConfigUpdate
+import com.digitalasset.canton.user.{
+  Audience,
+  IdentityProviderConfigUpdate,
+  Issuer,
+  JwksUrlLengthLimited,
+}
 
 object IdentityProviderConfigUpdateMapper extends UpdateMapperBase {
 
@@ -42,12 +46,12 @@ object IdentityProviderConfigUpdateMapper extends UpdateMapperBase {
 
   def resolveAudienceUpdate(
       updateTrie: UpdatePathsTrie,
-      newValue: Option[Option[String]],
-  ): Result[Option[Option[String]]] =
+      newValue: Option[Option[Audience]],
+  ): Result[Option[Option[Audience]]] =
     updateTrie
       .findMatch(IdentityProviderConfigPaths.audience)
-      .fold(noUpdate[Option[String]])(updateMatch =>
-        makePrimitiveFieldUpdate[Option[String]](
+      .fold(noUpdate[Option[Audience]])(updateMatch =>
+        makePrimitiveFieldUpdate[Option[Audience]](
           updateMatch = updateMatch,
           defaultValue = None,
           newValue = newValue.flatten,
@@ -70,11 +74,11 @@ object IdentityProviderConfigUpdateMapper extends UpdateMapperBase {
 
   def resolveIssuerUpdate(
       updateTrie: UpdatePathsTrie,
-      newValue: Option[String],
-  ): Result[Option[String]] =
+      newValue: Option[Issuer],
+  ): Result[Option[Issuer]] =
     updateTrie
       .findMatch(IdentityProviderConfigPaths.issuer)
-      .fold(noUpdate[String])(updateMatch =>
+      .fold(noUpdate[Issuer])(updateMatch =>
         if (updateMatch.isExact) {
           Right(newValue)
         } else {
@@ -84,11 +88,11 @@ object IdentityProviderConfigUpdateMapper extends UpdateMapperBase {
 
   def resolveJwksUrlUpdate(
       updateTrie: UpdatePathsTrie,
-      newValue: Option[JwksUrl],
-  ): Result[Option[JwksUrl]] =
+      newValue: Option[JwksUrlLengthLimited],
+  ): Result[Option[JwksUrlLengthLimited]] =
     updateTrie
       .findMatch(IdentityProviderConfigPaths.jwksUrl)
-      .fold(noUpdate[JwksUrl])(updateMatch =>
+      .fold(noUpdate[JwksUrlLengthLimited])(updateMatch =>
         if (updateMatch.isExact) {
           Right(newValue)
         } else {

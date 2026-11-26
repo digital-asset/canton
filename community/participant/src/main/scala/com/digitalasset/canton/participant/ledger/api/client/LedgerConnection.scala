@@ -81,6 +81,7 @@ object LedgerConnection {
       },
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
 
   def mapTemplateIds(id: javaapi.data.Identifier): Identifier =

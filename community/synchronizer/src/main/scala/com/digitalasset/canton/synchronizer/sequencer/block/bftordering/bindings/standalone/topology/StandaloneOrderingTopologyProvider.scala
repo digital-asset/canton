@@ -32,6 +32,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SequencingParameters,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Probability
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.DelayUtil
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
@@ -46,6 +47,7 @@ class StandaloneOrderingTopologyProvider(
     standaloneConfig: BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig,
     crypto: CryptoPureApi,
     metrics: BftOrderingMetrics,
+    psid: PhysicalSynchronizerId,
     delaySignMessageO: Any => Option[FiniteDuration] = _ => None,
 )(implicit executionContext: ExecutionContext, synchronizerProtocolVersion: ProtocolVersion)
     extends OrderingTopologyProvider[PekkoEnv] {
@@ -138,6 +140,7 @@ class StandaloneOrderingTopologyProvider(
                 crypto,
                 metrics,
                 delaySignMessageO,
+                psid,
               ),
             )
           )
@@ -165,6 +168,7 @@ class StandaloneOrderingTopologyProvider(
                       crypto,
                       metrics,
                       delaySignMessageO,
+                      psid,
                     ),
                   )
                 )

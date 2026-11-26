@@ -148,6 +148,18 @@ class InMemorySequencerStore(
         .toSet
     )
 
+  override def onboardingMembersAt(asOf: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[Member]] =
+    FutureUnlessShutdown.pure(
+      memberMap.collect {
+        case (member, _: RegisteredMember.Onboarding) => member
+        case (member, RegisteredMember.Active(_, registeredAt))
+            if registeredAt >= asOf && memberOnboardedAt.contains(member) =>
+          member
+      }.toSet
+    )
+
   override def savePayloads(
       payloadsToInsert: NonEmpty[Seq[BytesPayload]],
       instanceDiscriminator: UUID,

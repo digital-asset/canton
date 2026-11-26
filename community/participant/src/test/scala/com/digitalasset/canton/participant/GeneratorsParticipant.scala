@@ -100,7 +100,7 @@ final class GeneratorsParticipant(
     for {
       actAs <- boundedListGen[LfPartyId]
       userId <- Arbitrary.arbitrary[LedgerUserId]
-      commandId <- ledgerSubmissionIdArb.arbitrary
+      commandId <- ledgerStringArb.arbitrary
       optDedupPeriod <- Gen.option(Arbitrary.arbitrary[DeduplicationPeriod])
       submissionId <- Gen.option(lfSubmissionIdArb.arbitrary)
       trafficCost <- Arbitrary.arbitrary[NonNegativeLong]

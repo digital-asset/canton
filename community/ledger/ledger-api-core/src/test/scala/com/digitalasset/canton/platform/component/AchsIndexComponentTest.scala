@@ -443,7 +443,7 @@ class AchsIndexComponentTest
     val repairRepetitions = 10
     val repairUpdates = (1 to repairRepetitions)
       .map { _ =>
-        repairCreates(recordTime = nextRecordTime, payloadLength = 42)(repairTxSize)
+        participantEventCreate(recordTime = nextRecordTime, payloadLength = 42)(repairTxSize)
       }
       .toVector
       .appended(CommitRepair() -> Vector.empty) // commit the repair to advance the ledger end

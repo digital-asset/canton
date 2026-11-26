@@ -12,7 +12,7 @@ import com.daml.ledger.api.v2.command_completion_service.{
   GetCompletionByHashResponse,
   GetCompletionsRequest,
 }
-import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
+import com.digitalasset.canton.auth.{Authorizer, ClaimApiArea, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.RequiredClaims
 import com.digitalasset.canton.ledger.api.auth.services.CommandCompletionServiceAuthorization.completionStreamClaims
@@ -75,7 +75,8 @@ final class CommandCompletionServiceAuthorization(
     authorizer.rpc[InternalGetCompletionByHashRequest, GetCompletionByHashResponse](
       service.getCompletionByHash
     )(
-      RequiredClaim.MatchReadAsParties(InternalGetCompletionByHashRequest.partiesLens)
+      RequiredClaim.MatchReadAsParties(InternalGetCompletionByHashRequest.partiesLens),
+      RequiredClaim.ApiArea(ClaimApiArea.ledgerRead.area),
     )(InternalGetCompletionByHashRequest(request.transactionHash, Set.empty))
 }
 
@@ -83,12 +84,14 @@ object CommandCompletionServiceAuthorization {
   def completionStreamClaims(
       request: CompletionStreamRequest
   ): List[RequiredClaim[CompletionStreamRequest]] =
-    RequiredClaim.MatchUserId(
-      requestStringL = Lens.unit[CompletionStreamRequest].userId,
-      skipUserIdValidationForAnyPartyReaders = true,
-    ) :: request.parties.view.map(RequiredClaim.ReadAs[CompletionStreamRequest]).toList
+    RequiredClaim.ApiArea[CompletionStreamRequest](ClaimApiArea.ledgerRead.area) ::
+      RequiredClaim.MatchUserId(
+        requestStringL = Lens.unit[CompletionStreamRequest].userId,
+        skipUserIdValidationForAnyPartyReaders = true,
+      ) :: request.parties.view.map(RequiredClaim.ReadAs[CompletionStreamRequest]).toList
   def getCompletionsClaims(
       request: GetCompletionsRequest
   ): List[RequiredClaim[GetCompletionsRequest]] =
-    RequiredClaims.readAsForAllPartiesOrAnyPartyIfEmpty[GetCompletionsRequest](request.parties)
+    RequiredClaim.ApiArea[GetCompletionsRequest](ClaimApiArea.ledgerRead.area) ::
+      RequiredClaims.readAsForAllPartiesOrAnyPartyIfEmpty[GetCompletionsRequest](request.parties)
 }

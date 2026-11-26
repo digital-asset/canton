@@ -1273,13 +1273,6 @@ class ProtocolProcessorTest
         .thenReturn(EitherT.rightT(()))
       sut
         .processResultInternal1(
-          NoOpeningErrors(
-            AggregatedSignedContent(
-              mock[Deliver[Batch[DefaultOpenEnvelope]]],
-              Signature.noSignature,
-              testedProtocolVersion,
-            )
-          ),
           mockSignedProtocolMessage,
           requestId,
           timestamp,

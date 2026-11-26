@@ -23,6 +23,7 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   InconsistentLogicalSynchronizerIds,
   InconsistentPredecessorLogicalSynchronizerIds,
   InconsistentSequencerIds,
+  LogicalSynchronizerIdAlreadyAdded,
   LsuOngoing,
   LsuSource,
   LsuTarget,
@@ -59,7 +60,6 @@ import com.digitalasset.canton.{
   SynchronizerAlias,
 }
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -89,7 +89,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
   private val connection1 = GrpcSequencerConnection(
     NonEmpty(Set, Endpoint("host1", Port.tryCreate(500)), Endpoint("host2", Port.tryCreate(600))),
     transportSecurity = false,
-    Some(ByteString.copyFrom("stuff".getBytes)),
+    None,
     sequencerAlias1,
     sequencerId = None,
   )
@@ -97,7 +97,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
   private val connection2 = GrpcSequencerConnection(
     NonEmpty(Set, Endpoint("host3", Port.tryCreate(501)), Endpoint("host4", Port.tryCreate(601))),
     transportSecurity = false,
-    Some(ByteString.copyFrom("stuff".getBytes)),
+    None,
     sequencerAlias2,
     sequencerId = None,
   )
@@ -460,6 +460,44 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
           setIdError <- sut.setPhysicalSynchronizerId(c2.synchronizerAlias, psid).value
 
         } yield setIdError.left.value shouldBe SynchronizerIdAlreadyAdded(psid, daAlias)
+      }
+
+      "return error when trying to assign a physical id of the same logical synchronizer to different aliases" in {
+        val successor = psid.copy(serial = psid.serial.tryIncrement.toNonNegative)
+        val c1 = config
+        val c2 = config.copy(synchronizerAlias = acmeAlias, psid = Some(successor))
+
+        for {
+          sut <- mk
+          _ <- sut
+            .put(c1, Active, KnownPhysicalSynchronizerId(psid), None)
+            .valueOrFail("first store of config")
+
+          putError <- sut
+            .put(c2, Inactive, KnownPhysicalSynchronizerId(successor), None)
+            .value
+
+          _ <- sut
+            .put(c2, Inactive, UnknownPhysicalSynchronizerId, None)
+            .valueOrFail("second store of config")
+
+          // logical synchronizer id already used for c1.alias
+          setIdError <- sut.setPhysicalSynchronizerId(c2.synchronizerAlias, successor).value
+
+          // the same alias can still be used for another physical synchronizer of the same logical one
+          _ <- sut
+            .put(
+              c1.copy(psid = Some(successor)),
+              Inactive,
+              KnownPhysicalSynchronizerId(successor),
+              None,
+            )
+            .valueOrFail("store successor config for the same alias")
+        } yield {
+          val expectedError = LogicalSynchronizerIdAlreadyAdded(successor, acmeAlias, daAlias)
+          putError.left.value shouldBe expectedError
+          setIdError.left.value shouldBe expectedError
+        }
       }
 
       "return error when trying to have multiple active configs for a synchronizer alias" in {

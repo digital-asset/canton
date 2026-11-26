@@ -32,7 +32,7 @@ import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.{
   SequencerConnectionPoolError,
   SequencerConnectionPoolHealth,
 }
-import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.PenaltyKind
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
@@ -779,10 +779,14 @@ class SequencerConnectionPoolImpl private[sequencing] (
           synchronizerCrypto,
           clock,
           penaltyModifier = new SequencerPenaltyModifier {
-            override def increase(amount: Penalty, reason: String)(implicit
+            override def increase(kind: PenaltyKind, reason: String)(implicit
                 traceContext: TraceContext
             ): Unit =
-              penalties.increase(sequencerId, amount, reason)
+              penalties.increase(
+                sequencerId,
+                config.sequencerConnectionPenaltyConfig.penaltyValues.penalty(kind),
+                reason,
+              )
           },
         )
         .map { userConnection =>

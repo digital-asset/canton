@@ -24,6 +24,7 @@ import com.digitalasset.canton.validation.{
   ProtoUnvalidatedSeq,
   ProtoUnvalidatedString,
   ProtoValidation,
+  ValidationParam,
 }
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{
@@ -391,8 +392,26 @@ final case class ViewParticipantData private (
     )(hashOps, representativeProtocolVersion, None)
 }
 
+/** Context for deserializing a [[ViewParticipantData]].
+  *
+  * @param hashOps
+  *   hashing operations
+  * @param protocolVersion
+  *   the negotiated protocol version, used for content validation
+  * @param transactionProtocolLimits
+  *   protocol limits
+  */
+final case class ViewParticipantDataDeserializationContext(
+    hashOps: HashOps,
+    protocolVersion: ProtocolVersion,
+    transactionProtocolLimits: TransactionProtocolLimits,
+)
+
 object ViewParticipantData
-    extends VersioningCompanionContextMemoization[ViewParticipantData, (HashOps, ProtocolVersion)]
+    extends VersioningCompanionContextMemoization[
+      ViewParticipantData,
+      ViewParticipantDataDeserializationContext,
+    ]
     with PrettyPrintingCompanion[ViewParticipantData] {
   override val name: String = "ViewParticipantData"
 
@@ -412,18 +431,9 @@ object ViewParticipantData
     ),
   )
 
-  // Inline context helper: forwards the negotiated pv (for content validation) alongside the
-  // deserialization context (HashOps, ProtocolVersion).
-  private def ic[C1, C2, P, R](
-      f: (ProtocolVersionValidation, C1, C2, P) => R
-  )(pvv: ProtocolVersionValidation, c: (C1, C2), p: P): R = {
-    val (c1, c2) = c
-    f(pvv, c1, c2, p)
-  }
-
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.ViewParticipantData)(
-      supportedProtoVersionMemoizedPVV(_)(ic(fromProtoV32)),
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(v32.ViewParticipantData)(
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV32),
       _.toProtoV32,
     )
   )
@@ -484,12 +494,12 @@ object ViewParticipantData
 
   private def fromProtoV32(
       pvv: ProtocolVersionValidation,
-      hashOps: HashOps,
-      protocolVersion: ProtocolVersion,
+      context: ViewParticipantDataDeserializationContext,
       dataP: v32.ViewParticipantData,
   )(
       bytes: ByteString
   ): ParsingResult[ViewParticipantData] = {
+    val ViewParticipantDataDeserializationContext(hashOps, protocolVersion, limits) = context
     val v32.ViewParticipantData(
       saltP,
       coreInputsP,
@@ -502,29 +512,42 @@ object ViewParticipantData
     ) = dataP
 
     for {
+      // resolved_keys, created_core, core_inputs and created_in_subview_archived_in_core share one
+      // limit, maxContractsPerView, applied to each collection on its own (not to their sum). All
+      // four count the contracts or contract keys of one view: nothing but the request size in
+      // bytes (maxRequestSize) bounded them before, and the view limits maxTransactionRootViews
+      // and maxTransactionSubViews count views, not contracts per view, so none of them fits. One
+      // parameter is enough because the four counts are of the same order (they are derived from
+      // the same core nodes, NextGenTransactionTreeFactory.createViewParticipantData).
       keyResolution <- ProtoValidation
         .validateLengthThen(
           resolvedKeysP,
           "resolved_keys",
           pvv,
-          ProtoValidation.MaxCollectionSize,
+          ValidationParam(ProtocolVersion.v38 -> limits.maxContractsPerView),
         )((element, _) => KeyResolutionWithMaintainers.fromProtoV31(pvv, element))
       actionDescription <- ProtoConverter
         .required("action_description", actionDescriptionP)
         .flatMap(ActionDescription.fromProtoV31(pvv, _))
+      // Dedicated limit, maxExternalCallResultsPerView: no existing limit counts the external
+      // calls of a view (the engine's own limit is local, per exercise node, and unbounded by
+      // default).
       externalCallResults <- ProtoValidation
         .validateLengthThen(
           externalCallResultsP,
           "external_call_results",
           pvv,
-          ProtoValidation.MaxCollectionSize,
-        )((element, _) => ViewExternalCallResult.fromProtoV32(pvv, element))
+          ValidationParam(
+            ProtocolVersion.v38 -> limits.maxExternalCallResultsPerView
+          ),
+        )((element, _) => ViewExternalCallResult.fromProtoV32(pvv, limits, element))
+      // maxContractsPerView, see resolved_keys above.
       createdCore <- ProtoValidation
         .validateLengthThen(
           createdCoreP,
           "created_core",
           pvv,
-          ProtoValidation.MaxCollectionSize,
+          ValidationParam(ProtocolVersion.v38 -> limits.maxContractsPerView),
         )((element, _) => CreatedContract.fromProtoV31(element))
       viewParticipantData <- fromProto(
         pvv,
@@ -535,6 +558,7 @@ object ViewParticipantData
         createdCore,
         protocolVersion,
         ProtoVersion(32),
+        limits,
         bytes,
       )(
         saltP,
@@ -554,6 +578,7 @@ object ViewParticipantData
       createdCore: Seq[CreatedContract],
       protocolVersion: ProtocolVersion,
       protoVersion: ProtoVersion,
+      limits: TransactionProtocolLimits,
       bytes: ByteString,
   )(
       saltP: Option[com.digitalasset.canton.crypto.v30.Salt],
@@ -562,21 +587,23 @@ object ViewParticipantData
       externalCallResults: Seq[ViewExternalCallResult],
   ): ParsingResult[ViewParticipantData] =
     for {
+      // maxContractsPerView, see resolved_keys in fromProtoV32.
       coreInputsSeq <- ProtoValidation
         .validateLengthThen(
           coreInputsP,
           "core_inputs",
           pvv,
-          ProtoValidation.MaxCollectionSize,
+          ValidationParam(ProtocolVersion.v38 -> limits.maxContractsPerView),
         )((element, _) => InputContract.fromProtoV30(element))
       coreInputs = coreInputsSeq.view
         .map(inputContract => inputContract.contract.contractId -> inputContract)
         .toMap
+      // maxContractsPerView, see resolved_keys in fromProtoV32.
       createdInSubviewArchivedInCore <- ProtoValidation.validateThen(
         createdInSubviewArchivedInCoreP,
         "created_in_subview_archived_in_core",
         pvv,
-        ProtoValidation.MaxCollectionSize,
+        ValidationParam(ProtocolVersion.v38 -> limits.maxContractsPerView),
       )(ProtoConverter.parseLfContractId)
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV30, "salt", saltP)
@@ -640,6 +667,7 @@ object ViewParticipantData
   object ViewExternalCallResult {
     def fromProtoV32(
         pvv: ProtocolVersionValidation,
+        limits: TransactionProtocolLimits,
         resultP: v32.ViewExternalCallResult,
     ): ParsingResult[ViewExternalCallResult] = {
       val v32.ViewExternalCallResult(
@@ -665,12 +693,22 @@ object ViewParticipantData
           "function_id",
           pvv,
         )
+        // Reuses maxQuorumSize instead of a dedicated limit. The checking parties of a call are
+        // the signatories (or maintainers) and the acting parties of the exercise node that made
+        // the call (NextGenTransactionTreeFactory.externalCallResultsFromCoreNode), and those are
+        // exactly the confirming parties of that node's quorum
+        // (TransactionViewDecompositionFactory), so the count is at most the size of a quorum. It
+        // is NOT bounded by maxActAs, which only limits the actAs of the submitter. maxQuorumSize
+        // is the number of confirmers a quorum may have (Quorum.fromProtoV30, from PV37). Its
+        // default is very large, so this only becomes a real bound once an operator lowers it. The
+        // check is new for this field and only applies from v38, not from the
+        // PV37 gate of the quorum.
         checkingParties <- ProtoValidation
           .validateThen(
             checkingPartiesP,
             "checking_parties",
             pvv,
-            ProtoValidation.MaxCollectionSize,
+            ValidationParam(ProtocolVersion.v38 -> limits.maxQuorumSize),
           )(
             ProtoConverter.parseLfPartyId
           )

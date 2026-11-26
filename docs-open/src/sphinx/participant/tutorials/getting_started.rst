@@ -403,13 +403,13 @@ To validate that the DAR has been uploaded, run:
 
 .. snippet:: getting_started
     .. success:: participant1.dars.list()
-    .. assert:: RES.length == 2 && RES.exists(dar => dar.name == "CantonExamples")
+    .. assert:: RES.length == 3 && RES.exists(dar => dar.name == "CantonExamples")
 
 and on the second participant, run:
 
 .. snippet:: getting_started
     .. success:: participant2.dars.list()
-    .. assert:: RES.length == 2 && RES.exists(dar => dar.name == "CantonExamples")
+    .. assert:: RES.length == 3 && RES.exists(dar => dar.name == "CantonExamples")
 
 One important observation is that you cannot list the uploaded DARs on the synchronizer ``mysynchronizer``. You
 will simply get an error if you run ``mysynchronizer.dars.list()``.

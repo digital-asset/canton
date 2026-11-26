@@ -154,7 +154,7 @@ object ListDecentralizedNamespaceDefinitionResult {
       itemProto <- ProtoConverter.required("item", value.item)
       item <- DecentralizedNamespaceDefinition.fromProtoV30(
         AdminApiResponseValidation.Trusted,
-        SynchronizerLimits.default.topologyLimits,
+        SynchronizerLimits.default.topologyLimitsView,
         itemProto,
       )
     } yield ListDecentralizedNamespaceDefinitionResult(context, item)
@@ -176,7 +176,7 @@ object ListOwnerToKeyMappingResult {
         case v30.ListOwnerToKeyMappingResponse.Result.Item.V30(i) =>
           OwnerToKeyMapping.fromProtoV30(
             AdminApiResponseValidation.Trusted,
-            SynchronizerLimits.default.topologyLimits,
+            SynchronizerLimits.default.topologyLimitsView,
             i,
           )
         case v30.ListOwnerToKeyMappingResponse.Result.Item.Empty =>
@@ -202,7 +202,7 @@ object ListPartyToKeyMappingResult {
         case v30.ListPartyToKeyMappingResponse.Result.Item.V30(i) =>
           PartyToKeyMapping.fromProtoV30(
             AdminApiResponseValidation.Trusted,
-            SynchronizerLimits.default.topologyLimits,
+            SynchronizerLimits.default.topologyLimitsView,
             i,
           )
         case v30.ListPartyToKeyMappingResponse.Result.Item.Empty =>
@@ -283,7 +283,7 @@ object ListVettedPackagesResult {
       itemProto <- ProtoConverter.required("item", value.item)
       item <- VettedPackages.fromProtoV30(
         AdminApiResponseValidation.Trusted,
-        SynchronizerLimits.default.topologyLimits,
+        SynchronizerLimits.default.topologyLimitsView,
         itemProto,
       )
     } yield ListVettedPackagesResult(context, item)
@@ -305,13 +305,13 @@ object ListPartyToParticipantResult {
         case v30.ListPartyToParticipantResponse.Result.Item.V30(mappingP) =>
           PartyToParticipant.fromProtoV30(
             AdminApiResponseValidation.Trusted,
-            SynchronizerLimits.default.topologyLimits,
+            SynchronizerLimits.default.topologyLimitsView,
             mappingP,
           )
         case v30.ListPartyToParticipantResponse.Result.Item.V31(mappingP) =>
           PartyToParticipant.fromProtoV31(
             AdminApiResponseValidation.Trusted,
-            SynchronizerLimits.default.topologyLimits,
+            SynchronizerLimits.default.topologyLimitsView,
             mappingP,
           )
         case v30.ListPartyToParticipantResponse.Result.Item.Empty =>
@@ -422,7 +422,7 @@ object ListMediatorSynchronizerStateResult {
       itemProto <- ProtoConverter.required("item", value.item)
       item <- MediatorSynchronizerState.fromProtoV30(
         AdminApiResponseValidation.Trusted,
-        SynchronizerLimits.default.topologyLimits,
+        SynchronizerLimits.default.topologyLimitsView,
         itemProto,
       )
     } yield ListMediatorSynchronizerStateResult(context, item)
@@ -443,7 +443,7 @@ object ListSequencerSynchronizerStateResult {
       itemProto <- ProtoConverter.required("item", value.item)
       item <- SequencerSynchronizerState.fromProtoV30(
         AdminApiResponseValidation.Trusted,
-        SynchronizerLimits.default.topologyLimits,
+        SynchronizerLimits.default.topologyLimitsView,
         itemProto,
       )
     } yield ListSequencerSynchronizerStateResult(context, item)
@@ -481,7 +481,7 @@ object ListLsuSequencerConnectionSuccessorResult {
       itemProto <- ProtoConverter.required("item", value.item)
       item <- LsuSequencerConnectionSuccessor.fromProtoV30(
         AdminApiResponseValidation.Trusted,
-        SynchronizerLimits.default.topologyLimits,
+        SynchronizerLimits.default.topologyLimitsView,
         itemProto,
       )
     } yield ListLsuSequencerConnectionSuccessorResult(context, item)

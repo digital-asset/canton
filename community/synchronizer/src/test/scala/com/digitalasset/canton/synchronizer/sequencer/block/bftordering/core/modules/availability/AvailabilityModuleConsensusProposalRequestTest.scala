@@ -569,6 +569,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               batchIdsWithDisseminationCompletions
             )
             val cryptoProvider = mock[CryptoProvider[ProgrammableUnitTestEnv]]
+            when(cryptoProvider.psid).thenReturn(testPsid)
             val availability = createAndStartAvailability[ProgrammableUnitTestEnv](
               disseminationProtocolState = disseminationProtocolState,
               consensus = fakeCellModule(consensusCell),
@@ -598,7 +599,14 @@ class AvailabilityModuleConsensusProposalRequestTest
             def applyAck(msg: RemoteDissemination.RemoteBatchAcknowledged): Unit = {
               availability.receive(msg)
               verify(cryptoProvider).verifySignature(
-                AvailabilityAck.hashFor(msg.batchId, anEpochNumber, msg.from, metrics),
+                AvailabilityAck.hashFor(
+                  msg.batchId,
+                  anEpochNumber,
+                  msg.from,
+                  metrics,
+                  testPsid,
+                  synchronizerProtocolVersion,
+                ),
                 msg.from,
                 msg.signature,
                 operationId = "availability-signature-verify-ack",
