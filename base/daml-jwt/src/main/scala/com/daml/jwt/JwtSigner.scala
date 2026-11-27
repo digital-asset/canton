@@ -4,7 +4,9 @@
 package com.daml.jwt
 
 import com.auth0.jwt.algorithms.Algorithm
+import org.bouncycastle.asn1.{ASN1Integer, ASN1Sequence}
 import org.bouncycastle.jce.provider.BouncyCastleProvider
+import org.bouncycastle.util.BigIntegers
 
 import java.nio.charset.Charset
 import java.security.Signature
@@ -110,6 +112,29 @@ object JwtSigner extends WithExecuteUnsafe {
       extends ECDSA(privateKey, Algorithm.ECDSA512)
       with JwtSigner {
     def alg = "ES512"
+  }
+
+  /** ES256K (ECDSA over secp256k1 with SHA-256, RFC 8812). Implemented with BouncyCastle, as the
+    * default JCA provider does not support secp256k1.
+    */
+  final case class ES256K(privateKey: ECPrivateKey, kid: Option[String] = None) extends JwtSigner {
+    def alg = "ES256K"
+    def sign(jwt: DecodedJwt[String]): Either[Error, Jwt] =
+      for {
+        base64Jwt <- base64Encode(jwt)
+        bytesToSign = base64Jwt.header ++ Array('.': Byte) ++ base64Jwt.payload
+        sig = Signature.getInstance("SHA256withECDSA", bouncyCastleProvider)
+        _ = sig.initSign(privateKey)
+        _ = sig.update(bytesToSign)
+        // JCA produces a DER-encoded signature, JWS requires the fixed-size R || S form.
+        derSeq = ASN1Sequence.getInstance(sig.sign())
+        r = ASN1Integer.getInstance(derSeq.getObjectAt(0)).getValue
+        s = ASN1Integer.getInstance(derSeq.getObjectAt(1)).getValue
+        signature = BigIntegers.asUnsignedByteArray(32, r) ++ BigIntegers.asUnsignedByteArray(32, s)
+        base64Signature <- base64Encode(signature)
+      } yield Jwt(
+        s"${str(base64Jwt.header): String}.${str(base64Jwt.payload)}.${str(base64Signature): String}"
+      )
   }
 
   final case class EdDSA(privateKey: EdECPrivateKey, kid: Option[String] = None) extends JwtSigner {

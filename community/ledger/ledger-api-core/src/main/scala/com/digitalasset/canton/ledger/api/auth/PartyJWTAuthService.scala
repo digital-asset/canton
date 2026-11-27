@@ -250,6 +250,19 @@ class PartyJWTAuthService(
         }
     }
 
+    private object ES256K extends Verifier {
+      def alg = "ES256K"
+
+      def fromJwtSignature(signatureBytes: Array[Byte]): Either[String, SignatureWithoutSigner] =
+        concatToDer(64, signatureBytes).map { der =>
+          SignatureWithoutSigner(
+            format = SignatureFormat.Der,
+            signingAlgorithmSpec = SigningAlgorithmSpec.EcDsaSha256,
+            signature = ByteString.copyFrom(der),
+          )
+        }
+    }
+
     /** Coversion of concat-based signature format (used by some JWT signature algorithms) to
       * DER-based signature format. Note that this does not change the "value" of the signature,
       * only its wire encoding.
@@ -269,7 +282,7 @@ class PartyJWTAuthService(
         Right(seq.getEncoded(asn1.ASN1Encoding.DER))
       }
 
-    private val supported = List(EdDSA, ES256, ES384)
+    private val supported = List(EdDSA, ES256, ES384, ES256K)
 
     def get(alg: String): Either[String, Verifier] =
       supported.find(_.alg == alg).toRight(s"no verifier for alg=$alg")

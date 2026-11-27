@@ -446,7 +446,8 @@ class PartyJWTTokenAuthIT
         import env.*
         case class WrongAlgJwtSigner(delegate: JwtSigner) extends JwtSigner {
           def kid = delegate.kid
-          def alg = if (delegate.alg == "ES256") "ES384" else "ES256"
+          // ES256 and ES256K have the same signature size, so use a size-mismatched alg for ES256K
+          def alg = if (delegate.alg == "ES256" || delegate.alg == "ES256K") "ES384" else "ES256"
           def sign(jwt: DecodedJwt[String]) = delegate.sign(jwt)
         }
         loggerFactory.suppress(suppressionRule) {
@@ -504,6 +505,17 @@ class PartyJWTTokenAuthIT
       keySpec = ExternalPartyKeySpec.EcP384,
       jwtSigner = {
         case pk: ECPrivateKey => JwtSigner.ES384(pk)
+        case pk => throw new RuntimeException("expected ECPrivateKey: " + pk)
+      },
+    )
+  }
+
+  "using EcSecp256k1" should {
+    runTests(
+      prefix = "EcSecp256k1",
+      keySpec = ExternalPartyKeySpec.EcSecp256k1,
+      jwtSigner = {
+        case pk: ECPrivateKey => JwtSigner.ES256K(pk)
         case pk => throw new RuntimeException("expected ECPrivateKey: " + pk)
       },
     )
