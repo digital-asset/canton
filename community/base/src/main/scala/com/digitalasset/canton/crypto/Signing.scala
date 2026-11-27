@@ -401,7 +401,7 @@ object Signature
 /** This is a variation of Signature without signedBy, used when we don't know which key was used to
   * sign.
   *
-  * @param signingKeySpec
+  * @param expectedKeySpec
   *   the only key spec the signing key may have. Keys with another spec are not tried, which
   *   prevents algorithm confusion (e.g., an ES256 signature checked against a secp256k1 key).
   */
@@ -409,7 +409,7 @@ final case class SignatureWithoutSigner(
     format: SignatureFormat,
     signature: ByteString,
     signingAlgorithmSpec: SigningAlgorithmSpec,
-    signingKeySpec: SigningKeySpec,
+    expectedKeySpec: SigningKeySpec,
 )
 
 /** Defines the validity period of a session signing key delegation within a specific synchronizer

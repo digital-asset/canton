@@ -375,7 +375,7 @@ trait SyncCryptoTest
         format = signature.format,
         signature = signature.unwrap,
         signingAlgorithmSpec = signature.signingAlgorithmSpec.valueOrFail("no algorithm spec"),
-        signingKeySpec = SigningKeySpec.EcCurve25519,
+        expectedKeySpec = SigningKeySpec.EcCurve25519,
       )
 
       List(syncCryptoVerifierP1, syncCryptoVerifierP2).foreach { verifier =>
@@ -432,7 +432,7 @@ trait SyncCryptoTest
           topologySnapshot = testSnapshot,
           bytes = ByteString.copyFromUtf8("hello, world!"),
           signer = externalParty1Id,
-          signature = signatureWithoutSigner.copy(signingKeySpec = SigningKeySpec.EcP256), // Wrong
+          signature = signatureWithoutSigner.copy(expectedKeySpec = SigningKeySpec.EcP256), // Wrong
           usage = SigningKeyUsage.ProtocolOnly,
         )
         .futureValueUS

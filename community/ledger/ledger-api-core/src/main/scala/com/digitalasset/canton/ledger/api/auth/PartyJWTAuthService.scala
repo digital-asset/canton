@@ -220,7 +220,7 @@ class PartyJWTAuthService(
           SignatureWithoutSigner(
             format = SignatureFormat.Concat,
             signingAlgorithmSpec = SigningAlgorithmSpec.Ed25519,
-            signingKeySpec = SigningKeySpec.EcCurve25519,
+            expectedKeySpec = SigningKeySpec.EcCurve25519,
             signature = ByteString.copyFrom(signatureBytes),
           )
         )
@@ -234,7 +234,7 @@ class PartyJWTAuthService(
           SignatureWithoutSigner(
             format = SignatureFormat.Der,
             signingAlgorithmSpec = SigningAlgorithmSpec.EcDsaSha256,
-            signingKeySpec = SigningKeySpec.EcP256,
+            expectedKeySpec = SigningKeySpec.EcP256,
             signature = ByteString.copyFrom(der),
           )
         }
@@ -248,7 +248,7 @@ class PartyJWTAuthService(
           SignatureWithoutSigner(
             format = SignatureFormat.Der,
             signingAlgorithmSpec = SigningAlgorithmSpec.EcDsaSha384,
-            signingKeySpec = SigningKeySpec.EcP384,
+            expectedKeySpec = SigningKeySpec.EcP384,
             signature = ByteString.copyFrom(der),
           )
         }
@@ -262,7 +262,7 @@ class PartyJWTAuthService(
           SignatureWithoutSigner(
             format = SignatureFormat.Der,
             signingAlgorithmSpec = SigningAlgorithmSpec.EcDsaSha256,
-            signingKeySpec = SigningKeySpec.EcSecp256k1,
+            expectedKeySpec = SigningKeySpec.EcSecp256k1,
             signature = ByteString.copyFrom(der),
           )
         }
