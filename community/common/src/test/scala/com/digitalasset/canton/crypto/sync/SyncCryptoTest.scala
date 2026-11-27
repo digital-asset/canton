@@ -437,7 +437,10 @@ trait SyncCryptoTest
         )
         .futureValueUS
         .left
-        .value shouldBe a[SignatureCheckError.UnsupportedKeySpec]
+        .value shouldBe SignatureCheckError.UnsupportedKeySpec(
+          signingKeySpec = externalParty1Key.keySpec,
+          supportedKeySpecs = Set(SigningKeySpec.EcP256),
+        )
     }
   }
 
