@@ -127,10 +127,15 @@ object JwtSigner extends WithExecuteUnsafe {
         _ = sig.initSign(privateKey)
         _ = sig.update(bytesToSign)
         // JCA produces a DER-encoded signature, JWS requires the fixed-size R || S form.
-        derSeq = ASN1Sequence.getInstance(sig.sign())
-        r = ASN1Integer.getInstance(derSeq.getObjectAt(0)).getValue
-        s = ASN1Integer.getInstance(derSeq.getObjectAt(1)).getValue
-        signature = BigIntegers.asUnsignedByteArray(32, r) ++ BigIntegers.asUnsignedByteArray(32, s)
+        signature <- executeUnsafe(
+          {
+            val derSeq = ASN1Sequence.getInstance(sig.sign())
+            val r = ASN1Integer.getInstance(derSeq.getObjectAt(0)).getValue
+            val s = ASN1Integer.getInstance(derSeq.getObjectAt(1)).getValue
+            BigIntegers.asUnsignedByteArray(32, r) ++ BigIntegers.asUnsignedByteArray(32, s)
+          },
+          Symbol("ES256K.sign"),
+        )
         base64Signature <- base64Encode(signature)
       } yield Jwt(
         s"${str(base64Jwt.header): String}.${str(base64Jwt.payload)}.${str(base64Signature): String}"
