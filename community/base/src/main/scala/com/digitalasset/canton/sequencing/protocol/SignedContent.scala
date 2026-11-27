@@ -133,7 +133,7 @@ object SignedContent
 
   override val versioningTable: VersioningTable = VersioningTable(
     // TODO(i37895): Split the wire format of SignedContent and AggregatedSignedContent
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.SignedContent)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(v30.SignedContent)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
@@ -249,7 +249,7 @@ object SignedContent
           ValidationParam(ProtocolVersion.minimum -> PositiveInt.one),
         )
       case SignatureCountCheck.ByProtocolVersion =>
-        (pvv, ValidationParam(ProtocolVersion.nextValidationBoundPV -> PositiveInt.one))
+        (pvv, ValidationParam(ProtocolVersion.v38 -> PositiveInt.one))
     }
     for {
       contentB <- ProtoConverter.required("content", content)
@@ -293,11 +293,10 @@ object SignatureCountCheck {
     */
   case object Strict extends SignatureCountCheck
 
-  /** Reject more than one signature from
-    * [[com.digitalasset.canton.version.ProtocolVersion.nextValidationBoundPV]] on, and keep only
-    * the last signature on earlier protocol versions. Use where all nodes must reach the same
-    * result, e.g. after ordering, including nodes on different releases in cross-version
-    * deployments.
+  /** Reject more than one signature from [[com.digitalasset.canton.version.ProtocolVersion.v38]]
+    * on, and keep only the last signature on earlier protocol versions. Use where all nodes must
+    * reach the same result, e.g. after ordering, including nodes on different releases in
+    * cross-version deployments.
     */
   case object ByProtocolVersion extends SignatureCountCheck
 }

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.state_service.ConvertRecordTimeToOffsetRequest
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
@@ -12,11 +13,19 @@ import org.scalatest.Assertion
 
 import scala.concurrent.{ExecutionContext, Future}
 
-final class ConvertRecordTimeToOffsetAuthIT extends PublicServiceCallAuthTests {
+final class ConvertRecordTimeToOffsetAuthIT
+    extends PublicServiceCallAuthTests
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "StateService#ConvertRecordTimeToOffset"
+
+  override def apiAreaScopeBaseToken = standardToken(randomPartyActUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerRead.area) -> true,
+    List(ClaimApiArea.partiesAllocate.area) -> false,
+  )
 
   private def request(implicit env: TestConsoleEnvironment) = ConvertRecordTimeToOffsetRequest(
     Some(CantonTimestamp.MinValue.toProtoTimestamp),

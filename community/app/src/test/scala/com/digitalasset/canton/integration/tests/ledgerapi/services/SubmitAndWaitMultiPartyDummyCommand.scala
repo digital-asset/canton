@@ -47,6 +47,7 @@ trait SubmitAndWaitMultiPartyDummyCommand extends TestCommands { self: ServiceCa
               filtersByParty = actAs.map(_ -> Filters(Nil)).toMap,
               filtersForAnyParty = None,
               verbose = false,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

@@ -8,7 +8,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
 import com.digitalasset.canton.ledger.participant.state.Update.CommandRejected.FinalReason
 import com.digitalasset.canton.ledger.participant.state.Update.{
-  RepairTransactionAccepted,
+  RepairParticipantEventUpdate,
   SequencedCommandRejected,
   SequencedReassignmentAccepted,
   SequencedTransactionAccepted,
@@ -23,6 +23,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   TransactionMeta,
 }
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
+import com.digitalasset.canton.platform.store.backend.PersistentParticipantEventUpdateCategory
 import com.digitalasset.canton.protocol.{ReassignmentId, TestUpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -124,15 +125,14 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
 
   it should "populate no post PostPublishData for repair transactions" in {
     PostPublishData.from(
-      update = RepairTransactionAccepted(
-        transactionMeta = transactionMeta,
-        transactionInfo =
-          TransactionAccepted.TransactionInfo(CommittedTransaction(TransactionBuilder.Empty)),
+      update = RepairParticipantEventUpdate(
         updateId = updateId,
+        workflowId = None,
         synchronizerId = synchronizerId,
+        events = Seq.empty,
+        category = PersistentParticipantEventUpdateCategory.AcsImportTxStyle,
         repairCounter = RepairCounter(65),
         recordTime = cantonTime2,
-        contractInfos = Map.empty,
         traceContext = TraceContext.empty,
       ),
       offset = offset,

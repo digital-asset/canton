@@ -23,14 +23,20 @@ option java_package = "com.daml.ledger.api.v2";
 service CommandService {
   // Submits a single composite command and waits for its result.
   // Propagates the gRPC error of failed submissions including Daml interpretation errors.
+  //
+  // Required permissions: ``ledger:act`` and ``CanActAs`` for the relevant parties.
   rpc SubmitAndWait(SubmitAndWaitRequest) returns (SubmitAndWaitResponse);
 
   // Submits a single composite command, waits for its result, and returns the transaction.
   // Propagates the gRPC error of failed submissions including Daml interpretation errors.
+  //
+  // Required permissions: ``ledger:act`` and ``CanActAs`` for the relevant parties.
   rpc SubmitAndWaitForTransaction(SubmitAndWaitForTransactionRequest) returns (SubmitAndWaitForTransactionResponse);
 
   // Submits a single composite reassignment command, waits for its result, and returns the reassignment.
   // Propagates the gRPC error of failed submission.
+  //
+  // Required permissions: ``ledger:act`` and ``CanActAs`` for the relevant parties.
   rpc SubmitAndWaitForReassignment(SubmitAndWaitForReassignmentRequest) returns (SubmitAndWaitForReassignmentResponse);
 }
 

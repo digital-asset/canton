@@ -116,7 +116,7 @@ trait PublicServiceCallAuthTests extends SecuredServiceCallAuthTests {
       ) in { implicit env =>
       import env.*
       loggerFactory.suppress(AuthInterceptorSuppressionRule) {
-        expectPermissionDenied(serviceCall(canReadAsUnknownUserStandardJWT))
+        expectUnauthenticated(serviceCall(canReadAsUnknownUserStandardJWT))
       }
     }
 

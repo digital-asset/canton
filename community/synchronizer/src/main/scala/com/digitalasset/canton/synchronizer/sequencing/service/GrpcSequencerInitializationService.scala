@@ -148,7 +148,7 @@ class GrpcSequencerInitializationService(
             FutureUnlessShutdown.failed(ProtoDeserializationFailure.WrapNoLogging(err).toGrpcError)
           )
         _ <- FutureUnlessShutdown.outcomeF(
-          initializeSequencerFromGenesisStateInternalStreaming(
+          initializeSequencerFromLsuPredecessorInternalStreaming(
             synchronizerId,
             source,
             synchronizerParametersE,
@@ -247,7 +247,7 @@ class GrpcSequencerInitializationService(
     }
   }
 
-  private def initializeSequencerFromGenesisStateInternalStreaming(
+  private[service] def initializeSequencerFromLsuPredecessorInternalStreaming(
       synchronizerId: SynchronizerId,
       topologyStateSource: Source[GenericStoredTopologyTransaction, NotUsed],
       synchronizerParametersE: ParsingResult[StaticSynchronizerParameters],
@@ -269,6 +269,7 @@ class GrpcSequencerInitializationService(
         synchronizerParameters,
         None,
         ignoreLsuPsidCheck = ignoreLsuPsidCheck,
+        isLsuSuccessorInit = true,
       )
       result <- handler
         .initialize(initializeRequest)

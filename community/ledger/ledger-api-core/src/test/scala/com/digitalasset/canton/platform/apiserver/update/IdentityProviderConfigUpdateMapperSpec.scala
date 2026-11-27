@@ -4,7 +4,13 @@
 package com.digitalasset.canton.platform.apiserver.update
 
 import com.daml.jwt.JwksUrl
-import com.digitalasset.canton.user.{IdentityProviderConfigUpdate, IdentityProviderId}
+import com.digitalasset.canton.user.{
+  Audience,
+  IdentityProviderConfigUpdate,
+  IdentityProviderId,
+  Issuer,
+  JwksUrlLengthLimited,
+}
 import com.digitalasset.daml.lf.data.Ref.LedgerString
 import com.google.protobuf.field_mask.FieldMask
 import org.scalatest.EitherValues
@@ -25,9 +31,9 @@ class IdentityProviderConfigUpdateMapperSpec extends AnyFreeSpec with Matchers w
   ): IdentityProviderConfigUpdate = IdentityProviderConfigUpdate(
     identityProviderId = identityProviderId,
     isDeactivatedUpdate = isDeactivatedUpdate,
-    jwksUrlUpdate = jwksUrlUpdate,
-    issuerUpdate = issuerUpdate,
-    audienceUpdate = audienceUpdate,
+    jwksUrlUpdate = jwksUrlUpdate.map(JwksUrlLengthLimited.tryFromJwksUrl),
+    issuerUpdate = issuerUpdate.map(Issuer.tryCreate),
+    audienceUpdate = audienceUpdate.map(_.map(Audience.tryCreate)),
   )
 
   val emptyConfigUpdate: IdentityProviderConfigUpdate = makeConfigUpdate()
@@ -67,7 +73,10 @@ class IdentityProviderConfigUpdateMapperSpec extends AnyFreeSpec with Matchers w
           .value shouldBe makeConfigUpdate(audienceUpdate = Some(None))
 
         IdentityProviderConfigUpdateMapper
-          .toUpdate(config.copy(audienceUpdate = Some(Some(""))), FieldMask(Seq("audience")))
+          .toUpdate(
+            config.copy(audienceUpdate = Some(Some(Audience.tryCreate("")))),
+            FieldMask(Seq("audience")),
+          )
           .value shouldBe makeConfigUpdate(audienceUpdate = Some(Some("")))
 
         IdentityProviderConfigUpdateMapper

@@ -5,18 +5,18 @@ package com.digitalasset.canton.synchronizer.sequencer.block
 
 import com.daml.metrics.api.{HistogramInventory, MetricName}
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.metrics.{MetricValue, MetricsUtils}
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType.{
+  Commitment,
   ConfirmationRequest,
   ConfirmationResponse,
   TopologyTransaction,
 }
 import com.digitalasset.canton.synchronizer.metrics.{SequencerHistograms, SequencerMetrics}
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.{
-  IndividualThroughputCapConfig,
   ThroughputCapByMessageTypeConfig,
   ThroughputCapConfig,
 }
@@ -55,7 +55,8 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       globalKbpsCap: Double = defaultGlobalKbpsCap,
       perClientTpsCap: Double = defaultPerClientTpsCap,
       perClientKbpsCap: Double = defaultPerClientKbpsCap,
-  ): IndividualThroughputCapConfig = IndividualThroughputCapConfig(
+  ): ThroughputCapByMessageTypeConfig = ThroughputCapByMessageTypeConfig(
+    requestType = ConfirmationRequest,
     globalTpsCap = PositiveDouble.tryCreate(globalTpsCap),
     globalKbpsCap = PositiveDouble.tryCreate(globalKbpsCap),
     perClientTpsCap = PositiveDouble.tryCreate(perClientTpsCap),
@@ -63,7 +64,7 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
   )
 
   private def mkCap(
-      config: IndividualThroughputCapConfig,
+      config: ThroughputCapByMessageTypeConfig,
       strict: Boolean = true,
       thresholds: NonEmpty[Seq[PositiveDouble]] =
         NonEmpty.mk(Seq, 0.9, 0.8, 0.7).map(PositiveDouble.tryCreate),
@@ -76,13 +77,14 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       observationPeriodSeconds,
       clock,
       new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
         strict = strict,
-        delayedActivation = false,
         thresholdsConfig = thresholds,
         updateEveryMs = NonNegativeInt.zero,
-        config,
-        requestType,
+        config.copy(
+          observationPeriodSeconds = PositiveInt.tryCreate(observationPeriodSeconds),
+          requestType = requestType,
+        ),
+        requestType.name,
         clock,
         sequencerMetrics,
         timeouts,
@@ -97,11 +99,19 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
   ): ThroughputCapConfig =
     ThroughputCapConfig(
       enabled = true,
-      observationPeriodSeconds,
-      messages = ThroughputCapByMessageTypeConfig(
-        confirmationRequest = createIndividualConfig(perClientTpsCap = perClientTpsCap),
-        topology = createIndividualConfig(perClientTpsCap = perClientTpsCap),
-      ),
+      messages = Seq[SubmissionRequestType](
+        ConfirmationRequest,
+        TopologyTransaction,
+        ConfirmationResponse,
+        Commitment,
+      )
+        .map(requestType =>
+          requestType.name -> createIndividualConfig(perClientTpsCap = perClientTpsCap).copy(
+            requestType = requestType,
+            observationPeriodSeconds = PositiveInt.tryCreate(observationPeriodSeconds),
+          )
+        )
+        .toMap,
     )
 
   private def sequencerMetrics = {
@@ -115,6 +125,115 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
   }
 
   "BlockSequencerThroughputCap" should {
+    "cap time proofs at six per minute per member by default" in {
+      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
+      val cap = new BlockSequencerThroughputCap(
+        ThroughputCapConfig(enabled = true),
+        clock,
+        mockScheduler(clock),
+        sequencerMetrics,
+        timeouts,
+        loggerFactory,
+      )
+      val requestType = SubmissionRequestType.TimeProof
+      val setting = cap.getCap("time-proofs").value
+      setting.requestType shouldBe requestType
+      setting.observationPeriodSeconds.value shouldBe 60
+      setting.perClientTpsCap.value * setting.observationPeriodSeconds.value shouldBe 6.0
+
+      cap.addBlockUpdateInternal(
+        Seq.fill(6)(SubmissionRequestEntry(m1, requestType, clock.now, 1L))
+      )
+      cap.shouldAllowTransaction(requestType, m1, 0) shouldBe Right(())
+      cap.addBlockUpdateInternal(Seq(SubmissionRequestEntry(m1, requestType, clock.now, 1L)))
+      cap.shouldAllowTransaction(requestType, m1, 0).isLeft shouldBe true
+      cap.shouldAllowTransaction(requestType, m2, 0) shouldBe Right(())
+
+      clock.advance(Duration.ofSeconds(60).plusMillis(1))
+      cap.shouldAllowTransaction(requestType, m1, 0) shouldBe Right(())
+      cap.close()
+      succeed
+    }
+
+    "enforce multiple named windows for the same type and replace settings by name" in {
+      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
+      val short = createIndividualConfig().copy(observationPeriodSeconds = PositiveInt.one)
+      val long = short.copy(observationPeriodSeconds = PositiveInt.tryCreate(10))
+      val cap = new BlockSequencerThroughputCap(
+        ThroughputCapConfig(
+          enabled = true,
+          messages = Map("short-window" -> short, "long-window" -> long),
+        ),
+        clock,
+        mockScheduler(clock),
+        sequencerMetrics,
+        timeouts,
+        loggerFactory,
+      )
+
+      cap.getCaps shouldBe Map("short-window" -> short, "long-window" -> long)
+      cap.getCap("missing") shouldBe None
+      cap.addBlockUpdateInternal(
+        Seq.fill(2)(SubmissionRequestEntry(m1, ConfirmationRequest, clock.now, 1L))
+      )
+      cap.shouldAllowTransaction(ConfirmationRequest, m1, 0).isLeft shouldBe true
+      cap.shouldAllowTransaction(TopologyTransaction, m1, 0) shouldBe Right(())
+
+      clock.advance(Duration.ofSeconds(2))
+      cap.shouldAllowTransaction(ConfirmationRequest, m1, 0) shouldBe Right(())
+
+      cap.addBlockUpdateInternal(
+        Seq.fill(9)(SubmissionRequestEntry(m1, ConfirmationRequest, clock.now, 1L))
+      )
+      clock.advance(Duration.ofSeconds(2))
+      // The short window is empty, but the long window still exceeds its cap.
+      cap.shouldAllowTransaction(ConfirmationRequest, m1, 0).isLeft shouldBe true
+
+      cap.replaceCap("short-window", None)
+      cap.getCap("short-window") shouldBe None
+      cap.getCap("long-window") shouldBe Some(long)
+      cap.shouldAllowTransaction(ConfirmationRequest, m1, 0).isLeft shouldBe true
+
+      val topology = short.copy(requestType = TopologyTransaction)
+      cap.replaceCap("long-window", Some(topology))
+      cap.getCap("long-window") shouldBe Some(topology)
+      cap.shouldAllowTransaction(ConfirmationRequest, m1, 0) shouldBe Right(())
+      cap.addBlockUpdateInternal(
+        Seq.fill(2)(SubmissionRequestEntry(m1, TopologyTransaction, clock.now, 1L))
+      )
+      cap.shouldAllowTransaction(TopologyTransaction, m1, 0).isLeft shouldBe true
+
+      cap.replaceCap("another-window", Some(short))
+      cap.getCap("another-window") shouldBe Some(short)
+      cap.addBlockUpdateInternal(
+        Seq.fill(2)(SubmissionRequestEntry(m1, ConfirmationRequest, clock.now, 1L))
+      )
+      cap.shouldAllowTransaction(ConfirmationRequest, m1, 0).isLeft shouldBe true
+      cap.replaceCap("another-window", None)
+      cap.shouldAllowTransaction(ConfirmationRequest, m1, 0) shouldBe Right(())
+      cap.shouldAllowTransaction(TopologyTransaction, m1, 0).isLeft shouldBe true
+      cap.replaceCap("long-window", None)
+      cap.getCaps shouldBe empty
+      cap.shouldAllowTransaction(TopologyTransaction, m1, 0) shouldBe Right(())
+      cap.close()
+      succeed
+    }
+
+    "serialize each setting's message type and observation period and reject invalid values" in {
+      val setting = createIndividualConfig().copy(
+        requestType = Commitment,
+        observationPeriodSeconds = PositiveInt.tryCreate(7),
+      )
+      ThroughputCapByMessageTypeConfig.fromAdminProto(setting.toAdminProto) shouldBe Right(setting)
+      ThroughputCapByMessageTypeConfig
+        .fromAdminProto(setting.toAdminProto.copy(observationPeriodSeconds = 0))
+        .isLeft shouldBe true
+      ThroughputCapByMessageTypeConfig
+        .fromAdminProto(setting.toAdminProto.copy(requestType = "invalid"))
+        .isLeft shouldBe true
+      succeed
+    }
+
     "have separate caps per message type and update based on scheduler" in {
       val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
       val observationPeriodSeconds = 1
@@ -133,11 +252,14 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
         SubmissionRequestEntry(m1, TopologyTransaction, ts, 1L)
       def confirmationResponse(ts: CantonTimestamp) =
         SubmissionRequestEntry(m1, ConfirmationResponse, ts, 1L)
+      def commitment(ts: CantonTimestamp) =
+        SubmissionRequestEntry(m1, Commitment, ts, 1L)
 
       def assertAllAreAccepted: Assertion = {
         cap.shouldAllowTransaction(ConfirmationRequest, m1, 0) shouldBe Right(())
         cap.shouldAllowTransaction(TopologyTransaction, m1, 0) shouldBe Right(())
         cap.shouldAllowTransaction(ConfirmationResponse, m1, 0) shouldBe Right(())
+        cap.shouldAllowTransaction(Commitment, m1, 0) shouldBe Right(())
       }
 
       // initially all are accepted
@@ -147,6 +269,7 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       cap.addBlockUpdateInternal(Seq(confirmationRequest(clock.now)))
       cap.addBlockUpdateInternal(Seq(topologyTransaction(clock.now)))
       cap.addBlockUpdateInternal(Seq(confirmationResponse(clock.now)))
+      cap.addBlockUpdateInternal(Seq(commitment(clock.now)))
       clock.advance(Duration.ofSeconds(observationPeriodSeconds.toLong))
       assertAllAreAccepted
       // should now be initialized
@@ -158,6 +281,7 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       cap.shouldAllowTransaction(ConfirmationRequest, m1, 0).left.value should myInclude(msg)
       cap.shouldAllowTransaction(TopologyTransaction, m1, 0) shouldBe Right(())
       cap.shouldAllowTransaction(ConfirmationResponse, m1, 0) shouldBe Right(())
+      cap.shouldAllowTransaction(Commitment, m1, 0) shouldBe Right(())
 
       // after receiving more than 1 topology transaction requests in a second, they are also rejected
       cap.addBlockUpdateInternal(Seq(topologyTransaction(clock.now)))
@@ -166,12 +290,19 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       cap.shouldAllowTransaction(ConfirmationRequest, m1, 0).left.value should myInclude(msg)
       cap.shouldAllowTransaction(ConfirmationResponse, m1, 0) shouldBe Right(())
 
-      // confirmation responses (and all other message types) are not counted, so they don't get rejected
+      // after receiving more than 1 confirmation response in a second, they are also throttled
       cap.addBlockUpdateInternal(Seq(confirmationResponse(clock.now)))
       cap.addBlockUpdateInternal(Seq(confirmationResponse(clock.now)))
       cap.shouldAllowTransaction(TopologyTransaction, m1, 0).left.value should myInclude(msg)
       cap.shouldAllowTransaction(ConfirmationRequest, m1, 0).left.value should myInclude(msg)
-      cap.shouldAllowTransaction(ConfirmationResponse, m1, 0) shouldBe Right(())
+      cap.shouldAllowTransaction(ConfirmationResponse, m1, 0).left.value should myInclude(msg)
+      cap.shouldAllowTransaction(Commitment, m1, 0) shouldBe Right(())
+
+      // check that commitments are also throttled
+      cap.addBlockUpdateInternal(Seq(commitment(clock.now)))
+      cap.shouldAllowTransaction(Commitment, m1, 0) shouldBe Right(())
+      cap.addBlockUpdateInternal(Seq(commitment(clock.now)))
+      cap.shouldAllowTransaction(Commitment, m1, 0).left.value should myInclude(msg)
 
       // after advancing, the scheduler takes care of updating the cap (so now submissions are all accepted again)
       clock.advance(Duration.ofSeconds(observationPeriodSeconds.toLong).plusMillis(1L))
@@ -216,30 +347,23 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
 
   "IndividualBlockSequencerThroughputCap" should {
 
-    "initialize the cap logic correctly" in {
+    "enforce caps immediately without an activation grace period" in {
       val config = createIndividualConfig()
       val (observationPeriodSeconds, clock, tpsCap) = mkCap(config)
       val thresholdLevel = 0
       val eventSize: Long = 128
 
-      // originally, initialized = false, so nothing should be rejected
       tpsCap.shouldAllowTransaction(m1, thresholdLevel) shouldBe Right(())
 
-      // add two events for m1, the second of which is directly at the observationPeriod
       tpsCap.addEvent(clock.now, m1, eventSize)
-      clock.advance(Duration.ofSeconds(observationPeriodSeconds.toLong))
-      tpsCap.addEvent(clock.now, m1, eventSize)
-
-      // the second event is added but does not trigger a removal, and thus does not
-      // cause initialized to be set to true
-      tpsCap.shouldAllowTransaction(m1, thresholdLevel) shouldBe Right(())
-
-      // finally, initialized becomes true once > observationPeriod has been observed
-      clock.advance(Duration.ofNanos(1000))
       tpsCap.addEvent(clock.now, m1, eventSize)
       tpsCap.shouldAllowTransaction(m1, thresholdLevel).left.value should myInclude(
         "2 transactions over the past 1 seconds is more than the allowed 1,0 for the period"
       )
+
+      clock.advance(Duration.ofSeconds(observationPeriodSeconds.toLong).plusMillis(1))
+      tpsCap.advanceWindow()
+      tpsCap.shouldAllowTransaction(m1, thresholdLevel) shouldBe Right(())
     }
 
     "advance window if no events arrive and enough time elapsed to run the scheduled tick" in {

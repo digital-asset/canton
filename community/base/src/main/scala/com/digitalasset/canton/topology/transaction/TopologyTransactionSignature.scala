@@ -132,7 +132,7 @@ object MultiTransactionSignature {
         "transaction_hashes",
         pvv,
         ValidationParam(
-          ProtocolVersion.nextValidationBoundPV -> maxTransactionHashesPerMultiSignature
+          ProtocolVersion.v38 -> maxTransactionHashesPerMultiSignature
         ),
       )
       transactionHashes <- ProtoConverter.parseRequiredNonEmpty(

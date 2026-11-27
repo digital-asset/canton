@@ -35,6 +35,8 @@ class CantonCryptoProvider(
 )(implicit ec: ExecutionContext)
     extends CryptoProvider[PekkoEnv] {
 
+  override val psid = cryptoApi.psid
+
   override def signHash(
       hash: Hash,
       operationId: String,
@@ -75,7 +77,7 @@ class CantonCryptoProvider(
             timeCrypto(
               metrics,
               FutureUnlessShutdown.outcomeF(
-                Future(hashForMessage(message, message.from, authenticatedMessageType))
+                Future(hashForMessage(message, message.from, authenticatedMessageType, psid))
               ),
               operationId = s"hash-$authenticatedMessageType",
             )

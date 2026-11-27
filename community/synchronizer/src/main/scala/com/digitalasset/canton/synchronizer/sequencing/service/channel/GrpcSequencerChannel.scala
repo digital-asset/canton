@@ -58,12 +58,10 @@ private[channel] final class GrpcSequencerChannel(
     firstMemberResponseObserver: ServerCallStreamObserver[v30.ConnectToSequencerChannelResponse],
     protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
-    baseLoggerFactory: NamedLoggerFactory,
+    override protected val loggerFactory: NamedLoggerFactory,
 ) extends FlagCloseable
     with CloseNotification
     with NamedLogging {
-  protected val loggerFactory: NamedLoggerFactory =
-    baseLoggerFactory.append("channel", channelId.unwrap)
 
   private val secondMemberHandler = new SingleUseCell[GrpcSequencerChannelMemberMessageHandler]
   private val closedMemberHandlers = new AtomicReference(
@@ -71,6 +69,7 @@ private[channel] final class GrpcSequencerChannel(
   )
 
   private[channel] val firstMemberHandler = new GrpcSequencerChannelMemberMessageHandler(
+    channelId,
     firstMember,
     firstMemberResponseObserver,
     // Let the first member message handler know how to forward messages to the second handler,
@@ -90,6 +89,7 @@ private[channel] final class GrpcSequencerChannel(
       traceContext: TraceContext
   ): Either[SequencerChannelInternalError, GrpcSequencerChannelMemberMessageHandler] = {
     val secondHandler = new GrpcSequencerChannelMemberMessageHandler(
+      channelId,
       secondMember,
       secondMemberResponseObserver,
       Some(firstMemberHandler),
@@ -126,7 +126,9 @@ private[channel] final class GrpcSequencerChannel(
     val expectedCloses = secondMemberHandler.get
       .fold(Set(firstMemberHandler))(secondHandler => Set(firstMemberHandler, secondHandler))
     val awaitingCloses = expectedCloses -- closedHandlers
-    logger.info(s"Closed handler ${handler.member} - down to $awaitingCloses")(
+    logger.info(
+      s"Closed handler ${handler.member} for channel $channelId - down to $awaitingCloses"
+    )(
       TraceContext.empty
     )
     if (awaitingCloses.isEmpty) {
@@ -160,6 +162,8 @@ private[channel] trait CreatesSequencerChannelMemberMessageHandler {
   *
   * @param responseObserver
   *   The response GRPC StreamObserver used to send messages to the channel client
+  * @param authenticatedMemberO
+  *   The authenticated member that opened this stream.
   * @param authTokenExpiresAtO
   *   The expiration time of the authentication token, if "sequencer-authentication-token" available
   *   on the GRPC context
@@ -171,6 +175,7 @@ private[channel] abstract class UninitializedGrpcSequencerChannel(
     private[channel] val responseObserver: ServerCallStreamObserver[
       v30.ConnectToSequencerChannelResponse
     ],
+    private[channel] val authenticatedMemberO: Option[Member],
     authTokenExpiresAtO: Option[CantonTimestamp],
     authenticationCheck: Member => Either[String, Unit],
     onUninitializedChannelCompleted: UninitializedGrpcSequencerChannel => Unit,

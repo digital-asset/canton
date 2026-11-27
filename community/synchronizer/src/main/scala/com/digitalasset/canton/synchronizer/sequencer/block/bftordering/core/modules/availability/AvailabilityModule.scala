@@ -9,7 +9,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
@@ -389,7 +389,14 @@ final class AvailabilityModule[E <: Env[E]](
   ): Unit =
     pipeToSelf(
       activeCryptoProvider.signHash(
-        AvailabilityAck.hashFor(batchId, epochNumber, activeMembership.myId, metrics),
+        AvailabilityAck.hashFor(
+          batchId,
+          epochNumber,
+          activeMembership.myId,
+          metrics,
+          activeCryptoProvider.psid,
+          synchronizerProtocolVersion,
+        ),
         "availability-sign-remote-batchId",
       )
     )(handleFailure(s"Failed to sign $batchId") { signature =>
@@ -407,7 +414,14 @@ final class AvailabilityModule[E <: Env[E]](
         batches.map { case (batchId, batch) =>
           activeCryptoProvider.signHash(
             AvailabilityAck
-              .hashFor(batchId.value, batch.epochNumber, activeMembership.myId, metrics),
+              .hashFor(
+                batchId.value,
+                batch.epochNumber,
+                activeMembership.myId,
+                metrics,
+                activeCryptoProvider.psid,
+                synchronizerProtocolVersion,
+              ),
             "availability-sign-local-batchId",
           )
         },
@@ -1085,7 +1099,14 @@ final class AvailabilityModule[E <: Env[E]](
               pipeToSelf(
                 activeCryptoProvider
                   .verifySignature(
-                    AvailabilityAck.hashFor(batchId, epochNumber, from, metrics),
+                    AvailabilityAck.hashFor(
+                      batchId,
+                      epochNumber,
+                      from,
+                      metrics,
+                      activeCryptoProvider.psid,
+                      synchronizerProtocolVersion,
+                    ),
                     from,
                     signature,
                     "availability-signature-verify-ack",
@@ -1989,7 +2010,7 @@ object AvailabilityModule {
 
   private def parseAvailabilityNetworkMessage(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       claimedOriginator: BftNodeId,
       message: v30.AvailabilityMessage,
       originalMessage: ByteString,
@@ -2031,7 +2052,7 @@ object AvailabilityModule {
 
   def parseNetworkMessage(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       protoSignedMessage: v30.SignedMessage,
   ): ParsingResult[Availability.UnverifiedProtocolMessage] =
     SignedMessage

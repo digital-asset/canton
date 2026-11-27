@@ -13,6 +13,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   MessageFrom,
   SignedMessage,
 }
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalactic.source
 import org.scalatest.Assertion
@@ -25,6 +26,8 @@ trait BftSequencerBaseTest extends BaseTest {
 
   protected final implicit lazy val synchronizerProtocolVersion: ProtocolVersion =
     testedProtocolVersion
+  protected lazy val testPsid =
+    DefaultTestIdentities.physicalSynchronizerId.copy(protocolVersion = synchronizerProtocolVersion)
 
   protected implicit val metricsContext: MetricsContext = MetricsContext.Empty
 

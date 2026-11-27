@@ -106,6 +106,7 @@ class UpdateServiceRequestValidatorTest
                   filtersByParty = filtersByParty,
                   filtersForAnyParty = None,
                   verbose = verbose,
+                  filtersByContractId = Seq.empty,
                 )
               ),
               transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
@@ -118,6 +119,7 @@ class UpdateServiceRequestValidatorTest
               filtersByParty = filtersByParty,
               filtersForAnyParty = None,
               verbose = false,
+              filtersByContractId = Seq.empty,
             )
           ),
         includeTopologyEvents = None,
@@ -144,6 +146,7 @@ class UpdateServiceRequestValidatorTest
                   filtersByParty = Map(party -> Filters(Nil)),
                   filtersForAnyParty = None,
                   verbose = false,
+                  filtersByContractId = Seq.empty,
                 )
               ),
               transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
@@ -168,6 +171,7 @@ class UpdateServiceRequestValidatorTest
                   filtersByParty = Map(party -> Filters(Nil)),
                   filtersForAnyParty = None,
                   verbose = false,
+                  filtersByContractId = Seq.empty,
                 )
               ),
               transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
@@ -285,6 +289,46 @@ class UpdateServiceRequestValidatorTest
           UpdateServiceRequestValidator.validate(
             reassignmentsReq.update(
               _.updateFormat.includeReassignments.filtersByParty := Map.empty
+            ),
+            ledgerEnd,
+          )
+        )
+      }
+
+      // TODO add contract id filters validation test and remove rejecting tests below one once it's implemented (#37335)
+      "return the correct error with contract id filters in the event format of transactions" in {
+        mustRejectContractIdFilters(
+          UpdateServiceRequestValidator.validate(
+            txReq.update(
+              _.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty,
+              _.updateFormat.includeTransactions.eventFormat.filtersByContractId := protoContractIdFilters,
+            ),
+            ledgerEnd,
+          )
+        )
+      }
+
+      "return the correct error with contract id filters in the event format of reassignments" in {
+        mustRejectContractIdFilters(
+          UpdateServiceRequestValidator.validate(
+            reassignmentsReq.update(
+              _.updateFormat.includeReassignments.filtersByParty := Map.empty,
+              _.updateFormat.includeReassignments.filtersByContractId := protoContractIdFilters,
+            ),
+            ledgerEnd,
+          )
+        )
+      }
+
+      "return the correct error with contract id filters in the event format of transactions and reassignments" in {
+        val transactionFormat = txReq.updateFormat.value.includeTransactions.value
+        mustRejectContractIdFilters(
+          UpdateServiceRequestValidator.validate(
+            txReq.update(
+              _.updateFormat.optionalIncludeTransactions := None,
+              _.updateFormat.includeTransactionsAndReassignments := transactionFormat,
+              _.updateFormat.includeTransactionsAndReassignments.eventFormat.filtersByParty := Map.empty,
+              _.updateFormat.includeTransactionsAndReassignments.eventFormat.filtersByContractId := protoContractIdFilters,
             ),
             ledgerEnd,
           )
@@ -691,7 +735,7 @@ class UpdateServiceRequestValidatorTest
       "reject event formats exceeding the total filters limit across transactions and reassignments" in {
         val maxTotalFilters = 1
         // a template wildcard per event format: each event format is within the limit on its own
-        val eventFormat = EventFormat(Map(party -> Filters(Nil)), None, verbose = false)
+        val eventFormat = EventFormat(Map(party -> Filters(Nil)), None, verbose = false, Seq.empty)
         requestMustFailWith(
           request = UpdateServiceRequestValidator.validate(
             GetUpdatesRequest(
@@ -760,6 +804,17 @@ class UpdateServiceRequestValidatorTest
           )
         )
       }
+
+      "return the correct error with contract id filters in the event format of transactions" in {
+        mustRejectContractIdFilters(
+          UpdateServiceRequestValidator.validateUpdateById(
+            updateByIdReq.update(
+              _.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty,
+              _.updateFormat.includeTransactions.eventFormat.filtersByContractId := protoContractIdFilters,
+            )
+          )
+        )
+      }
     }
 
     "validating transaction by offset requests" should {
@@ -810,6 +865,17 @@ class UpdateServiceRequestValidatorTest
         )
       }
 
+      "return the correct error with contract id filters in the event format of transactions" in {
+        mustRejectContractIdFilters(
+          UpdateServiceRequestValidator.validateUpdateByOffset(
+            txByOffsetReq.update(
+              _.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty,
+              _.updateFormat.includeTransactions.eventFormat.filtersByContractId := protoContractIdFilters,
+            )
+          )
+        )
+      }
+
     }
 
     "validating transaction by hash requests" should {
@@ -831,6 +897,20 @@ class UpdateServiceRequestValidatorTest
         )(noLogging, sizeLimitsConfigWithLimits)
 
       byteSizeLimit("transaction_hash", limit = maxTransactionHashBytes)(validateUpdateByHash)
+
+      "return the correct error with contract id filters in the event format of transactions" in {
+        mustRejectContractIdFilters(
+          UpdateServiceRequestValidator.validateUpdateByHash(
+            GetUpdateByHashRequest(
+              transactionHash = bytes(maxTransactionHashBytes),
+              updateFormat = updateByIdReq.updateFormat,
+            ).update(
+              _.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty,
+              _.updateFormat.includeTransactions.eventFormat.filtersByContractId := protoContractIdFilters,
+            )
+          )(noLogging, sizeLimitsConfigWithLimits)
+        )
+      }
     }
   }
 
@@ -950,6 +1030,28 @@ class UpdateServiceRequestValidatorTest
             descendingOrder = false,
             pageToken = None,
           ).update(_.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty),
+          ledgerEnd = Some(Offset.tryFromLong(100L)),
+          participantId = participant,
+          updateServiceConfig = UpdateServiceConfig(),
+        )
+      )
+    }
+
+    // TODO add contract id filters validation test and remove rejecting test below one once it's implemented (#37335)
+    "return the correct error with contract id filters in the event format of transactions" in {
+      mustRejectContractIdFilters(
+        UpdateServiceRequestValidator.validateUpdatesPageRequest(
+          req = GetUpdatesPageRequest(
+            beginOffsetExclusive = None,
+            endOffsetInclusive = None,
+            maxPageSize = None,
+            updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+            descendingOrder = false,
+            pageToken = None,
+          ).update(
+            _.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty,
+            _.updateFormat.includeTransactions.eventFormat.filtersByContractId := protoContractIdFilters,
+          ),
           ledgerEnd = Some(Offset.tryFromLong(100L)),
           participantId = participant,
           updateServiceConfig = UpdateServiceConfig(),
@@ -1305,6 +1407,29 @@ class UpdateServiceRequestValidatorTest
         validated.requestChecksum shouldBe token.requestChecksum
         validated.participantChecksum shouldBe token.participantIdChecksum
       }
+    }
+
+    "calculate the same checksum all the time" in {
+      val request = GetUpdatesPageRequest(
+        beginOffsetExclusive = Some(3L),
+        endOffsetInclusive = Some(20L),
+        maxPageSize = Some(17),
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), Some(Seq(templateId))),
+        descendingOrder = true,
+        pageToken = None,
+      )
+      com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken
+        .requestChecksum(request) should equal(
+        ByteString.copyFrom(Array[Byte](-126, -111, -84, -117))
+      )
+
+      val requestWithContractIdFilters = request.update(
+        _.updateFormat.includeTransactions.eventFormat.filtersByContractId := protoContractIdFilters
+      )
+      com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken
+        .requestChecksum(requestWithContractIdFilters) should equal(
+        ByteString.copyFrom(Array[Byte](-60, 38, 22, 96))
+      )
     }
 
   }

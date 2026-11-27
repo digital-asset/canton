@@ -48,8 +48,11 @@ abstract class ErrorCode(val id: String, val category: ErrorCategory)(implicit
 ) {
 
   require(id.nonEmpty, "error-id must be non empty")
-  require(id.length < 64, s"error-id is too long: $id")
-  require(id.forall(c => c.isUpper || c == '_' || c.isDigit), s"Invalid characters in error-id $id")
+  require(id.length < 64, s"error-id is too long: ${id.length} characters, must be < 64")
+  require(
+    id.forall(c => c.isUpper || c == '_' || c.isDigit),
+    s"Invalid characters in error-id (must be capital, underscore or digit)",
+  )
 
   implicit val code: ErrorCode = this
 

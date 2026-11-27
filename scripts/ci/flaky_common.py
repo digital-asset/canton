@@ -44,19 +44,17 @@ NIGHTLY_REPORT_DELAY: Final[datetime.timedelta] = datetime.timedelta(hours=12)
 # Nightly jobs that keep a historical name instead of the `nightly_` prefix. Matched
 # on the job name (CIRCLE_JOB, or the job_name canton_nightly.yml passes on GHA), so
 # keep the nightly job names on both CIs and this list in sync.
+# check_canton_nightly_job_classification.py fails CI when they drift apart.
 NIGHTLY_JOBS_WITHOUT_PREFIX: Final[frozenset[str]] = frozenset(
     {
         "toxiproxy_test_slow_36",
         "external_parties_test_36",
         "test_36_with_java17",
         "protocol_continuity_test_all",
-        "crash_recovery_test_35",
         "crash_recovery_test_37",
-        "postgres_conformance_test_14",
         "postgres_conformance_test_15",
         "postgres_conformance_test_16",
         "postgres_conformance_test_17",
-        "postgres_conformance_test_18",
         "benchmark",
         "topology_chaos_test_36",
         "stability_crash_recovery_test_36",
@@ -797,13 +795,10 @@ def test_is_nightly_job():
     assert is_nightly_job("test_36_with_java17")  # nightly, keeps its historical name
     assert not is_nightly_job("test_37")  # runs per-commit, not nightly
     assert is_nightly_job("protocol_continuity_test_all")  # nightly, keeps its historical name
-    assert is_nightly_job("crash_recovery_test_35")  # nightly, keeps its historical name
     assert is_nightly_job("crash_recovery_test_37")  # nightly, keeps its historical name
-    assert is_nightly_job("postgres_conformance_test_14")  # nightly, keeps its historical name
     assert is_nightly_job("postgres_conformance_test_15")  # nightly, keeps its historical name
     assert is_nightly_job("postgres_conformance_test_16")  # nightly, keeps its historical name
     assert is_nightly_job("postgres_conformance_test_17")  # nightly, keeps its historical name
-    assert is_nightly_job("postgres_conformance_test_18")  # nightly, keeps its historical name
     assert is_nightly_job("benchmark")  # nightly, keeps its historical name
     assert is_nightly_job("topology_chaos_test_36")  # nightly, keeps its historical name
     assert is_nightly_job("stability_crash_recovery_test_36")  # nightly, keeps its historical name

@@ -122,6 +122,11 @@ private[logging] final class SimpleNamedLoggerFactory(
         _.replaceFirst("\\.+$", "") // Remove trailing dots.
           .replace("...", "") // Explicitly remove the "abbreviation" dots anywhere in the string
           .replaceAll("\\.", "_") // Replace any other individual "." by "_".
+          .replaceFirst("\\$+$", "") // Remove trailing "$"
+          .replaceAll( // Replace "$", since Logback treats it as separator and would create extra loggers
+            "\\$",
+            "_",
+          )
       )
       .mkString("/")
 }

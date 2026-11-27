@@ -12,8 +12,10 @@ import com.digitalasset.canton.crypto.{
   SymmetricKeyScheme,
   TestHash,
 }
+import com.digitalasset.canton.data.LightTransactionViewTree
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.protocol.{TransactionProtocolLimits, ViewHash, v32}
+import com.digitalasset.canton.protocol.{TransactionProtocolLimits, ViewHash, v31, v32}
+import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.validation.ProtoUnvalidatedSeq
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
@@ -25,7 +27,7 @@ class EncryptedViewMessageTest extends AnyWordSpec with BaseTest {
 
   // The newest supported version on which the bounds of the next protocol version do not apply yet
   private lazy val pvBeforeNextValidationBound: ProtocolVersion =
-    ProtocolVersion.supported.forgetNE.filter(_ < ProtocolVersion.nextValidationBoundPV).max
+    ProtocolVersion.supported.forgetNE.filter(_ < ProtocolVersion.v38).max
 
   "session key lookup bounded by the synchronizer's transaction protocol limits" should {
 
@@ -88,7 +90,7 @@ class EncryptedViewMessageTest extends AnyWordSpec with BaseTest {
 
     "apply the limit from ProtocolVersion.nextValidationBoundPV" in {
       parse(
-        ProtocolVersionValidation(ProtocolVersion.nextValidationBoundPV),
+        ProtocolVersionValidation(ProtocolVersion.v38),
         max + 1,
       ).left.value shouldBe a[ProtoDeserializationError.InvariantViolation]
     }
@@ -98,6 +100,111 @@ class EncryptedViewMessageTest extends AnyWordSpec with BaseTest {
         ProtocolVersionValidation(pvBeforeNextValidationBound),
         max + 1,
       ).value.viewEncryptionKeyRandomness.forgetNE should have size (max + 1).toLong
+    }
+  }
+
+  "view hashes bounded by the synchronizer's transaction protocol limits" should {
+
+    val limits: TransactionProtocolLimits =
+      testedTransactionLimits.copy(maxViewsPerMessage = PositiveInt.three)
+    val max = limits.maxViewsPerMessage.unwrap
+
+    val encrypted = AsymmetricEncrypted[SecureRandomness](
+      ByteString.copyFromUtf8("ciphertext"),
+      EncryptionAlgorithmSpec.RsaOaepSha256,
+      Fingerprint.tryFromString("fingerprint"),
+    )
+
+    // Repeats the same hash, because the limit counts the entries of the field
+    def messageP(entryCount: Int): v32.EncryptedMultipleViewsMessage = {
+      val viewHash = ViewHash(TestHash.digest(1))
+      val message = EncryptedViewMessageUtils.exampleEncryptedSingleView(TransactionViewType)(
+        None,
+        viewHash,
+        com.digitalasset.nonempty.NonEmpty.mk(Seq, encrypted),
+        ByteString.copyFromUtf8("view"),
+        DefaultTestIdentities.physicalSynchronizerId,
+        SymmetricKeyScheme.Aes128Gcm,
+        testedProtocolVersion,
+      )
+      message.toProtoSomeEnvelopeContentV32 match {
+        case v32.EnvelopeContent.SomeEnvelopeContent.EncryptedMultipleViewsMessage(proto) =>
+          proto.copy(viewHashes =
+            ProtoUnvalidatedSeq(Seq.fill(entryCount)(viewHash.toProtoPrimitive))
+          )
+        case other => fail(s"Unexpected content $other")
+      }
+    }
+
+    def parse(pvv: ProtocolVersionValidation, entryCount: Int) =
+      EncryptedViewMessage.fromProtoV32(pvv, limits, messageP(entryCount))
+
+    "accept the entries at the limit" in {
+      parse(
+        ProtocolVersionValidation.AlwaysValidation,
+        max,
+      ).value.viewHashes.forgetNE should have size max.toLong
+    }
+
+    "reject the entries above it, naming the field" in {
+      parse(ProtocolVersionValidation.AlwaysValidation, max + 1).left.value shouldBe
+        ProtoDeserializationError.InvariantViolation(
+          "view_hashes",
+          s"repeated or map field has ${max + 1} elements, exceeding the maximum of $max",
+        )
+    }
+
+    "apply the limit from ProtocolVersion.nextValidationBoundPV" in {
+      parse(
+        ProtocolVersionValidation(ProtocolVersion.v38),
+        max + 1,
+      ).left.value shouldBe a[ProtoDeserializationError.InvariantViolation]
+    }
+
+    "not apply the limit before ProtocolVersion.nextValidationBoundPV" in {
+      parse(
+        ProtocolVersionValidation(pvBeforeNextValidationBound),
+        max + 1,
+      ).value.viewHashes.forgetNE should have size (max + 1).toLong
+    }
+  }
+
+  "view trees bounded by the synchronizer's transaction protocol limits" should {
+
+    val limits: TransactionProtocolLimits =
+      testedTransactionLimits.copy(maxViewsPerMessage = PositiveInt.three)
+    val max = limits.maxViewsPerMessage.unwrap
+
+    val acceptedMarker = "view tree deserializer reached"
+
+    // The view tree deserializer always fails, so reaching it means that the limit accepted the entries
+    def parse(pv: ProtocolVersion, entryCount: Int) = {
+      val bytes = v31.EncryptedMultipleViewsMessage
+        .UncompressedViewTrees(
+          ProtoUnvalidatedSeq(Seq.fill(entryCount)(ByteString.copyFromUtf8("tree")))
+        )
+        .toByteString
+      EncryptedMultipleViews.deserializeViewTrees[LightTransactionViewTree](
+        pv,
+        limits,
+        _ => Left(DefaultDeserializationError(acceptedMarker)),
+      )(bytes)
+    }
+
+    "accept the entries at the limit" in {
+      parse(ProtocolVersion.v38, max).left.value.message shouldBe acceptedMarker
+    }
+
+    "reject the entries above it, naming the field" in {
+      parse(ProtocolVersion.v38, max + 1).left.value.message should (
+        include("view_trees") and include(
+          s"repeated or map field has ${max + 1} elements, exceeding the maximum of $max"
+        )
+      )
+    }
+
+    "not apply the limit before ProtocolVersion.nextValidationBoundPV" in {
+      parse(pvBeforeNextValidationBound, max + 1).left.value.message shouldBe acceptedMarker
     }
   }
 }

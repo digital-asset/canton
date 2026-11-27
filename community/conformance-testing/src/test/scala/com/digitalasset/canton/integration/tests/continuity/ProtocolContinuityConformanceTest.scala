@@ -369,8 +369,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.sequencer.block.circuit-breaker.messages.lsu-sequencing-test",
         // introduced with 3.5.2
         s"$base.parameters.enable-async-sequencer-logging",
-        s"$base.sequencer.block.throughput-cap.messages.confirmation-response", // Introduced with 3.6
-        s"$base.sequencer.block.throughput-cap.delayed-activation", // Introduced with 3.6
+        s"$base.sequencer.block.throughput-cap.messages", // Named settings are unknown to releases
       )
     }
 

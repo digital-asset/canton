@@ -724,6 +724,7 @@ class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest 
       filtersByParty = partyIds.map(_.toLf -> Filters(Nil)).toMap,
       filtersForAnyParty = None,
       verbose = false,
+      filtersByContractId = Seq.empty,
     )
     UpdateFormat(
       includeTransactions = Some(
@@ -1234,7 +1235,6 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
           .filter(_._1) shouldBe empty
       }
 
-      // TODO(#34818): Enable this test to also run for PV36 onwards
       if (testedProtocolVersion <= ProtocolVersion.v35) {
         eventually(20.seconds) {
           val optSafeTs = stateInspection1.noOutstandingCommitmentsTs(daName, CantonTimestamp.now())
@@ -2611,6 +2611,7 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
               filtersByParty = Map(participant1.adminParty.toLf -> Filters(Nil)),
               filtersForAnyParty = None,
               verbose = false,
+              filtersByContractId = Seq.empty,
             )
           ),
           transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

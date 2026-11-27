@@ -14,10 +14,17 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   MessageFrom,
   SignedMessage,
 }
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertions.fail
 
 class FailingCryptoProvider[E <: Env[E]] extends CryptoProvider[E] {
+
+  override val psid =
+    DefaultTestIdentities.physicalSynchronizerId.copy(protocolVersion =
+      ProtocolVersion.forSynchronizer
+    )
 
   override def signHash(hash: Hash, operationId: String)(implicit
       traceContext: TraceContext,

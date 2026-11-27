@@ -7,7 +7,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeDouble, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.{Penalty, PenaltyKind}
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
@@ -18,15 +18,15 @@ import scala.collection.concurrent.TrieMap
 /** Penalty modifier for sequencers. */
 trait SequencerPenaltyModifier {
 
-  /** Increase the penalty of the associated sequencer by `amount`, which must be positive. */
-  def increase(amount: Penalty, reason: String)(implicit traceContext: TraceContext): Unit
+  /** Increase the penalty of the associated sequencer by the value configured for `kind`. */
+  def increase(kind: PenaltyKind, reason: String)(implicit traceContext: TraceContext): Unit
 }
 
 object SequencerPenaltyModifier {
 
   /** A modifier that discards all penalty increases. */
   val noOp: SequencerPenaltyModifier = new SequencerPenaltyModifier {
-    override def increase(amount: Penalty, reason: String)(implicit
+    override def increase(kind: PenaltyKind, reason: String)(implicit
         traceContext: TraceContext
     ): Unit = ()
   }
@@ -111,16 +111,30 @@ object SequencerPenalties {
   final case class Penalty private (value: PositiveInt) extends AnyVal
 
   object Penalty {
-    val SequencerOverloaded: Penalty = Penalty(PositiveInt.one)
-    val SubscriptionError: Penalty = Penalty(PositiveInt.one)
-    val SubscriptionPermissionDenied: Penalty = Penalty(PositiveInt.tryCreate(5))
-    val SubscriptionInactive: Penalty = Penalty(PositiveInt.one)
-    val SubscriptionAggregationError: Penalty = Penalty(PositiveInt.tryCreate(10))
-    val SubscriptionHandlerException: Penalty = Penalty(PositiveInt.tryCreate(15))
-    val SubscriptionRetriableFailure: Penalty = Penalty(PositiveInt.tryCreate(10))
-    val SubscriptionNonRetriableFailure: Penalty = Penalty(PositiveInt.tryCreate(20))
-
     @VisibleForTesting
     def tryCreate(value: Int): Penalty = new Penalty(PositiveInt.tryCreate(value))
+
+    def create(value: PositiveInt): Penalty = new Penalty(value)
+  }
+
+  /** The kinds of adverse events for which a sequencer is penalized. The actual penalty is taken
+    * from the [[com.digitalasset.canton.sequencing.PenaltyValues]] in the configuration, see
+    * [[com.digitalasset.canton.sequencing.PenaltyValues.penalty]].
+    */
+  sealed trait PenaltyKind extends Product with Serializable
+
+  object PenaltyKind {
+    case object SequencerOverloaded extends PenaltyKind
+    case object SubscriptionError extends PenaltyKind
+    case object SubscriptionPermissionDenied extends PenaltyKind
+    case object SubscriptionInactive extends PenaltyKind
+    case object SubscriptionAggregationError extends PenaltyKind
+    case object SubscriptionHandlerException extends PenaltyKind
+    case object SubscriptionRetriableFailure extends PenaltyKind
+    case object SubscriptionNonRetriableFailure extends PenaltyKind
+
+    /** A fixed penalty, independent of the configuration. */
+    @VisibleForTesting
+    final case class Fixed(fixed: Penalty) extends PenaltyKind
   }
 }

@@ -15,6 +15,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
   UpdateFormat,
 }
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
+import com.digitalasset.canton.auth.ClaimApiArea
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId}
@@ -23,11 +24,19 @@ import org.scalatest.Assertion
 
 import scala.concurrent.{ExecutionContext, Future}
 
-final class GetEventsByContractIdRequestAuthIT extends ReadOnlyServiceCallAuthTests {
+final class GetEventsByContractIdRequestAuthIT
+    extends ReadOnlyServiceCallAuthTests
+    with ApiAreaScopeServiceCallAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "EventQueryService#GetEventsByContractId"
+
+  override def apiAreaScopeBaseToken = standardToken(mainActorReadUser)
+  override def apiAreaScopeRestrictions = List(
+    List(ClaimApiArea.ledgerRead.area) -> true,
+    List(ClaimApiArea.partiesAllocate.area) -> false,
+  )
 
   override def successfulBehavior(f: Future[Any])(implicit ec: ExecutionContext): Assertion =
     expectFailure(f, Status.Code.NOT_FOUND)
@@ -90,6 +99,7 @@ final class GetEventsByContractIdRequestAuthIT extends ReadOnlyServiceCallAuthTe
                         filtersByParty = Map.empty,
                         filtersForAnyParty = Some(Filters(Nil)),
                         verbose = false,
+                        filtersByContractId = Seq.empty,
                       )
                     ),
                     transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
@@ -124,6 +134,7 @@ final class GetEventsByContractIdRequestAuthIT extends ReadOnlyServiceCallAuthTe
                         filtersByParty = Map.empty,
                         filtersForAnyParty = Some(Filters(Nil)),
                         verbose = false,
+                        filtersByContractId = Seq.empty,
                       )
                     ),
                     transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,

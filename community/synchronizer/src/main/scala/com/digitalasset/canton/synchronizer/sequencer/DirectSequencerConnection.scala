@@ -33,7 +33,7 @@ import com.digitalasset.canton.sequencing.client.pool.InternalSequencerConnectio
   SequencerConnectionHealth,
 }
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionWithPekkoSubscribe
-import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.PenaltyKind
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
   SequencerSubscription,
@@ -95,7 +95,7 @@ class DirectSequencerConnection(
   override def fatal(reason: String)(implicit traceContext: TraceContext): Unit = ()
 
   // There is a single sequencer, so its penalty is irrelevant
-  override def increasePenalty(amount: Penalty, reason: String)(implicit
+  override def increasePenalty(kind: PenaltyKind, reason: String)(implicit
       traceContext: TraceContext
   ): Unit = ()
 

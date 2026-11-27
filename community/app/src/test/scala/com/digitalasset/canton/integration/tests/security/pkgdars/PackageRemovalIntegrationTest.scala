@@ -110,12 +110,12 @@ sealed trait PackageRemovalIntegrationTest
       "prevent removal of the admin workflow DAR" in { implicit env =>
         import env.*
         participant1.synchronizers.connect_local(sequencer1, alias = daName)
-        val dars = participant1.dars.list()
-        dars should have length 1
-        val adminWorkflowDar = dars.headOption.value
+        val adminWorkflowDars = participant1.dars.list()
+        adminWorkflowDars should have length 2
+        val adminPingWorkflowDar = adminWorkflowDars.find(_.mainPackageId == adminWorkflowPkg).value
 
         assertThrowsAndLogsCommandFailures(
-          participant1.dars.remove(adminWorkflowDar.mainPackageId),
+          participant1.dars.remove(adminPingWorkflowDar.mainPackageId),
           entry =>
             entry.shouldBeCommandFailure(
               com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.code,

@@ -40,8 +40,7 @@ final class PartyFreezeRemoteReadIntegrationTest
     )
 
   "End to end" should {
-    // TODO(#37839): Run from PV37 on once the remote read is available there
-    "E1: DA replicates the party with the remote read and the import, without manual steps after the import" onlyRunWith ProtocolVersion.dev in {
+    "E1: DA replicates the party with the remote read and the import, without manual steps after the import" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
       implicit env =>
         val scenario = newScenario("E1")
         scenario.nominate(Seq(da -> Confirmation), PositiveInt.one)

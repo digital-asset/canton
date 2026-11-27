@@ -14,6 +14,7 @@ import com.digitalasset.canton.integration.util.SequencerPenaltyUtils.sequencerP
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError.InitialOnboardingError
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.version.ProtocolVersion
 import io.scalaland.chimney.dsl.*
 import org.slf4j.event.Level
 
@@ -60,9 +61,7 @@ sealed trait PermissionedSynchronizerTest
       assertThrowsAndLogsCommandFailures(
         // connection will fail as the participant is not known to the synchronizer
         participant.synchronizers.reconnect(daName, retry = false),
-        _.commandFailureMessage should include(
-          InitialOnboardingError.id
-        ),
+        _.commandFailureMessage should include(InitialOnboardingError.id),
       )
     }
   }
@@ -85,9 +84,7 @@ sealed trait PermissionedSynchronizerTest
     assertThrowsAndLogsCommandFailures(
       // registration with handshake fails as the participant is not known to the synchronizer
       attemptRegistration(performHandshake = true),
-      _.commandFailureMessage should include(
-        InitialOnboardingError.id
-      ),
+      _.commandFailureMessage should include(InitialOnboardingError.id),
     )
 
     // registration without handshake succeeds as it is a local operation
@@ -129,83 +126,88 @@ sealed trait PermissionedSynchronizerTest
     }
   }
 
-  "synchronizer can revoke the participant synchronizer permission" in { implicit env =>
-    import env.*
+  "synchronizer can revoke the participant synchronizer permission" onlyRunLessThan ProtocolVersion.v38 in {
+    implicit env =>
+      import env.*
 
-    val adminPartyBefore = sequencer1.parties.list(
-      filterParty = participant1.id.adminParty.filterString,
-      synchronizerIds = daId,
-    )
-    adminPartyBefore.loneElement.participants.exists(_.participant == participant1.id)
+      val adminPartyBefore = sequencer1.parties.list(
+        filterParty = participant1.id.adminParty.filterString,
+        synchronizerIds = daId,
+      )
+      adminPartyBefore.loneElement.participants.exists(_.participant == participant1.id)
 
-    val subscriptionPermissionDenied = "Closing sequencer subscription due to permission denied"
-    // revoking the participant synchronizer permission results in the sequencer denying the participant's subscriptions.
-    // The participant stays connected and keeps retrying, in case it is allowed back on the synchronizer.
-    // this produces a bunch of warnings
-    loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-      {
-        sequencer1.topology.participant_synchronizer_permissions.revoke(
-          sequencer1.synchronizer_id,
-          participant1.id,
-        )
-
-        val adminPartyAfter =
-          sequencer1.parties.list(
-            filterParty = participant1.id.adminParty.filterString,
-            synchronizerIds = daId,
-          )
-        adminPartyAfter.loneElement.participants.map(
-          _.participant
-        ) should not contain participant1.id
-
-        eventually() {
-          sequencerPenalty(participant1, sequencer1.synchronizer_id, sequencer1.id) should be > 0.0
-        }
-
-        // the participant recovers without any operator action: its retries succeed once the renewed permission is
-        // effective. Until then, including while the permission is proposed, it may still be denied, and it may warn
-        // about the missing permission.
-        // In some specific case, where the sequencer terminates the connection before sending the
-        // revocation transaction, no warning will be emitted.
-        clue("allow the participant back on the synchronizer") {
-          sequencer1.topology.participant_synchronizer_permissions.propose(
+      val subscriptionPermissionDenied = "Closing sequencer subscription due to permission denied"
+      // revoking the participant synchronizer permission results in the sequencer denying the participant's subscriptions.
+      // The participant stays connected and keeps retrying, in case it is allowed back on the synchronizer.
+      // this produces a bunch of warnings
+      loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+        {
+          sequencer1.topology.participant_synchronizer_permissions.revoke(
             sequencer1.synchronizer_id,
             participant1.id,
-            ParticipantPermission.Submission,
           )
-        }
 
-        // Increase retry time to exceed ping timeout and the backoff of the connection restarts
-        eventually(timeUntilSuccess = 45.seconds) {
-          participant1.health.maybe_ping(participant1) should not be empty
-        }
-      },
-      LogEntry.assertLogSeq(
-        mustContainWithClue = Seq(
-          (
-            _.warningMessage should include(
-              s"Unable to find ParticipantSynchronizerPermission for participant ${participant1.id} on synchronizer ${daId.logical}"
+          val adminPartyAfter =
+            sequencer1.parties.list(
+              filterParty = participant1.id.adminParty.filterString,
+              synchronizerIds = daId,
+            )
+          adminPartyAfter.loneElement.participants.map(
+            _.participant
+          ) should not contain participant1.id
+
+          eventually() {
+            sequencerPenalty(
+              participant1,
+              sequencer1.synchronizer_id,
+              sequencer1.id,
+            ) should be > 0.0
+          }
+
+          // the participant recovers without any operator action: its retries succeed once the renewed permission is
+          // effective. Until then, including while the permission is proposed, it may still be denied, and it may warn
+          // about the missing permission.
+          // In some specific case, where the sequencer terminates the connection before sending the
+          // revocation transaction, no warning will be emitted.
+          clue("allow the participant back on the synchronizer") {
+            sequencer1.topology.participant_synchronizer_permissions.propose(
+              sequencer1.synchronizer_id,
+              participant1.id,
+              ParticipantPermission.Submission,
+            )
+          }
+
+          // Increase retry time to exceed ping timeout and the backoff of the connection restarts
+          eventually(timeUntilSuccess = 45.seconds) {
+            participant1.health.maybe_ping(participant1) should not be empty
+          }
+        },
+        LogEntry.assertLogSeq(
+          mustContainWithClue = Seq(
+            (
+              _.warningMessage should include(
+                s"Unable to find ParticipantSynchronizerPermission for participant ${participant1.id} on synchronizer ${daId.logical}"
+              ),
+              "warn about missing participant synchronizer permission",
             ),
-            "warn about missing participant synchronizer permission",
+            (
+              _.warningMessage should include(s"${participant1.id} access is disabled"),
+              "all token expiry related errors",
+            ),
+            (
+              _.warningMessage should include(subscriptionPermissionDenied),
+              "subscription closed due to permission denied",
+            ),
           ),
-          (
-            _.warningMessage should include(s"${participant1.id} access is disabled"),
-            "all token expiry related errors",
-          ),
-          (
-            _.warningMessage should include(subscriptionPermissionDenied),
-            "subscription closed due to permission denied",
+          mayContain = Seq(
+            _.warningMessage should include("PERMISSION_DENIED/Authentication token refresh error"),
+            _.warningMessage should include("Token refresh aborted due to shutdown"),
+            // a ping submitted while the participant is still replaying past the revocation is
+            // rejected until the re-granted permission becomes effective
+            _.warningMessage should include("UNKNOWN_SUBMITTERS"),
           ),
         ),
-        mayContain = Seq(
-          _.warningMessage should include("PERMISSION_DENIED/Authentication token refresh error"),
-          _.warningMessage should include("Token refresh aborted due to shutdown"),
-          // a ping submitted while the participant is still replaying past the revocation is
-          // rejected until the re-granted permission becomes effective
-          _.warningMessage should include("UNKNOWN_SUBMITTERS"),
-        ),
-      ),
-    )
+      )
   }
 
   "synchronizer can change from restricted to unrestricted locked" in { implicit env =>
@@ -227,8 +229,7 @@ sealed trait PermissionedSynchronizerTest
       manualConnect = true,
     )
     attemptConnectButFail(participant2)
-    participant3.synchronizers.active(daName) shouldBe false
-
+    participant2.synchronizers.active(daName) shouldBe false
     setRestriction(OnboardingRestriction.UnrestrictedOpen)
 
     participant2.synchronizers.reconnect(daName) // should succeed
@@ -256,6 +257,19 @@ sealed trait PermissionedSynchronizerTest
     participant3.synchronizers.reconnect(daName) // should succeed
     participant3.synchronizers.active(daName) shouldBe true
     participant3.health.ping(participant1)
+  }
+
+  "onboarded participants retain their rights when an unrestricted synchronizer becomes restricted" onlyRunWithOrGreaterThan ProtocolVersion.v38 in {
+    implicit env =>
+      import env.*
+
+      participant3.synchronizers.disconnect(daName)
+      setRestriction(OnboardingRestriction.RestrictedOpen)
+      // participant3 is not on the allow list, but already onboarded.
+      // Therefore, it can reconnect and transact normally
+      participant3.synchronizers.reconnect(daName)
+
+      participant3.health.ping(participant1)
   }
 }
 

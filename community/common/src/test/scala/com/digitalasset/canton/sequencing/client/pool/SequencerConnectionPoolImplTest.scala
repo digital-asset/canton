@@ -13,8 +13,9 @@ import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.metrics.{SequencerClientHistograms, SequencerClientMetrics}
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.SequencerConnectionPoolError
-import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.{Penalty, PenaltyKind}
 import com.digitalasset.canton.sequencing.{
+  PenaltyValues,
   SequencerConnectionPenaltyConfig,
   SequencerConnectionPoolDelays,
 }
@@ -54,6 +55,7 @@ class SequencerConnectionPoolImplTest
       decayInterval = PositiveFiniteDuration.tryOfMillis(100),
       halfLife = halfLife,
       zeroThreshold = PositiveDouble.tryCreate(0.01),
+      penaltyValues = PenaltyValues.default,
     )
 
   /** Half-life long enough for the penalties not to decay noticeably during a test */
@@ -72,7 +74,7 @@ class SequencerConnectionPoolImplTest
   private def increasePenalty(
       pool: SequencerConnectionPool,
       sequencerId: SequencerId,
-      amount: Penalty,
+      amount: PenaltyKind,
       reason: String = "test",
   ): Unit = pool.contents(sequencerId).headOption.value.increasePenalty(amount, reason = reason)
 
@@ -802,7 +804,7 @@ class SequencerConnectionPoolImplTest
             }
           }
 
-          increasePenalty(pool, seq0, Penalty.tryCreate(1))
+          increasePenalty(pool, seq0, PenaltyKind.Fixed(Penalty.tryCreate(1)))
 
           {
             val metrics = getPenaltyMetrics(Set(seq0, seq1, seq2))
@@ -817,7 +819,7 @@ class SequencerConnectionPoolImplTest
             }
           }
 
-          increasePenalty(pool, seq1, Penalty.tryCreate(2))
+          increasePenalty(pool, seq1, PenaltyKind.Fixed(Penalty.tryCreate(2)))
 
           {
             val metrics = getPenaltyMetrics(Set(seq0, seq1, seq2))
@@ -842,7 +844,7 @@ class SequencerConnectionPoolImplTest
     "pick a sequencer again once its penalty has decayed" in {
       withValidatedPool(halfLife = fastDecay) { (pool, _, _) =>
         // 0.5^7 < 0.01, so the penalty goes back to 0 after 7 decays
-        increasePenalty(pool, seq0, Penalty.tryCreate(1))
+        increasePenalty(pool, seq0, PenaltyKind.Fixed(Penalty.tryCreate(1)))
         pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
 
         eventually() {
@@ -853,7 +855,7 @@ class SequencerConnectionPoolImplTest
 
     "apply a new half-life after a configuration update" in {
       withValidatedPool(halfLife = noDecay) { (pool, _, _) =>
-        increasePenalty(pool, seq0, Penalty.tryCreate(1))
+        increasePenalty(pool, seq0, PenaltyKind.Fixed(Penalty.tryCreate(1)))
         eventuallyForever(durationOfSuccess = 500.millis) {
           pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
         }
@@ -872,7 +874,7 @@ class SequencerConnectionPoolImplTest
 
     "keep the penalty of a sequencer across connection restarts" in {
       withValidatedPool(halfLife = noDecay) { (pool, createdConnections, _) =>
-        increasePenalty(pool, seq0, Penalty.tryCreate(1))
+        increasePenalty(pool, seq0, PenaltyKind.Fixed(Penalty.tryCreate(1)))
 
         val initialConnection = pool.contents(seq0).loneElement
         createdConnections(0).fail(reason = "test")
@@ -892,7 +894,7 @@ class SequencerConnectionPoolImplTest
     "not keep the penalty of a sequencer removed from and added back to the configuration" in {
       withValidatedPool(halfLife = noDecay, trustThreshold = PositiveInt.one) {
         (pool, _, getPenaltyMetrics) =>
-          increasePenalty(pool, seq0, Penalty.tryCreate(1))
+          increasePenalty(pool, seq0, PenaltyKind.Fixed(Penalty.tryCreate(1)))
           pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
 
           // Remove the only connection to `seq0`
@@ -938,7 +940,7 @@ class SequencerConnectionPoolImplTest
         halfLife = noDecay,
         trustThreshold = PositiveInt.one,
       ) { (pool, _, _) =>
-        increasePenalty(pool, seq0, Penalty.tryCreate(1))
+        increasePenalty(pool, seq0, PenaltyKind.Fixed(Penalty.tryCreate(1)))
         pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
 
         // Remove only one connection to `seq0`
@@ -955,9 +957,41 @@ class SequencerConnectionPoolImplTest
       }
     }
 
+    "use new penalty values after reconfiguration" in {
+      withValidatedPool(
+        nbConnections = PositiveInt.tryCreate(4),
+        halfLife = noDecay,
+        trustThreshold = PositiveInt.one,
+      ) { (pool, _, _) =>
+        def currentConfiguredValue: PositiveInt =
+          pool.config.sequencerConnectionPenaltyConfig.penaltyValues.subscriptionHandlerException
+
+        def checkPenaltyValue(expected: PositiveInt): Unit =
+          pool.connectionPenalties(seq0).value shouldBe expected.value.toDouble +- 0.01
+
+        val originalValue = currentConfiguredValue
+        increasePenalty(pool, seq0, PenaltyKind.SubscriptionHandlerException)
+        checkPenaltyValue(originalValue)
+
+        pool
+          .updateConfig(
+            pool.config
+              .focus(_.sequencerConnectionPenaltyConfig.penaltyValues.subscriptionHandlerException)
+              .modify(_ + PositiveInt.one)
+          )
+          .valueOrFail("update penalty values")
+
+        val updatedValue = currentConfiguredValue
+        updatedValue shouldBe originalValue + PositiveInt.one
+
+        increasePenalty(pool, seq0, PenaltyKind.SubscriptionHandlerException)
+        checkPenaltyValue(originalValue + updatedValue)
+      }
+    }
+
     "still track penalty increases while penalties are disabled, but ignore them for selection" in {
       withValidatedPool(halfLife = noDecay, penaltiesEnabled = false) { (pool, _, _) =>
-        increasePenalty(pool, seq0, Penalty.tryCreate(1))
+        increasePenalty(pool, seq0, PenaltyKind.Fixed(Penalty.tryCreate(1)))
 
         clue("we still track the penalties") {
           pool.connectionPenalties should contain key seq0
@@ -973,7 +1007,7 @@ class SequencerConnectionPoolImplTest
 
     "use existing penalties for selection immediately after enabling penalties" in {
       withValidatedPool(halfLife = noDecay, penaltiesEnabled = false) { (pool, _, _) =>
-        increasePenalty(pool, seq0, Penalty.tryCreate(1))
+        increasePenalty(pool, seq0, PenaltyKind.Fixed(Penalty.tryCreate(1)))
         pool.connectionPenalties should contain key seq0
 
         pool

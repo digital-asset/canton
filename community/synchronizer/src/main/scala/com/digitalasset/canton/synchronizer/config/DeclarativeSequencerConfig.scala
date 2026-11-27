@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.synchronizer.config
 
-import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.ThroughputCapByMessageTypeConfig
 
 // TODO(#30999) deduplicate throughput cap config from block sequencer and store it in the node config store
 final case class DeclarativeSequencerConfig(
-    throughputCap: Map[String, IndividualThroughputCapConfig] = Map.empty,
+    throughputCap: Map[String, ThroughputCapByMessageTypeConfig] = Map.empty,
     removeCaps: Boolean = false,
     checkSelfConsistency: Boolean = false,
 )
@@ -21,7 +21,7 @@ object DeclarativeSequencerConfig {
 
     // import canton config to include the implicit that prevents unknown keys
     implicit val declarativeSequencerConfigReader: ConfigReader[DeclarativeSequencerConfig] = {
-      import IndividualThroughputCapConfig.ConfigImplicits.individualCapConfigReader
+      import ThroughputCapByMessageTypeConfig.ConfigImplicits.throughputCapByMessageTypeConfigReader
       deriveReader[DeclarativeSequencerConfig]
     }
   }
@@ -33,7 +33,7 @@ object DeclarativeSequencerConfig {
 
     implicit final val declarativeSequencerConfigWriter
         : ConfigWriter[DeclarativeSequencerConfig] = {
-      import IndividualThroughputCapConfig.ConfigImplicits.individualCapConfigWriter
+      import ThroughputCapByMessageTypeConfig.ConfigImplicits.throughputCapByMessageTypeConfigWriter
       deriveWriter[DeclarativeSequencerConfig]
     }
 

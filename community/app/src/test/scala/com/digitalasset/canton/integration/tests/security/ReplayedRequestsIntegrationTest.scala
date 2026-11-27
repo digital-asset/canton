@@ -8,6 +8,7 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.{Availability, Integrity}
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.BigDecimalImplicits.*
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.console.{CommandFailure, ParticipantReference}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCrypto}
 import com.digitalasset.canton.error.MediatorError
@@ -54,12 +55,12 @@ import org.scalatest.Assertion
 import org.slf4j.event.Level
 import org.slf4j.event.Level.WARN
 
-import java.time.Instant
+import java.time.Duration
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.{Future, Promise}
 import scala.jdk.CollectionConverters.*
 
-trait ReplayedRequestsIntegrationTest
+sealed trait ReplayedRequestsIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with EntitySyntax
@@ -83,6 +84,14 @@ trait ReplayedRequestsIntegrationTest
         // Use a sim clock so that we don't have to worry about timeouts
         ConfigTransforms.useStaticTime
       )
+      .addConfigTransform(
+        // Allow submitting with a ledger time far enough in the future so it doesn't immediately
+        // get rejected
+        ConfigTransforms.updateParticipantConfig("participant1")(
+          _.focus(_.ledgerApi.commandService.minLedgerTimeMaxDelay)
+            .replace(NonNegativeFiniteDuration.ofHours(1))
+        )
+      )
       .withSetup { implicit env =>
         import env.*
 
@@ -98,6 +107,10 @@ trait ReplayedRequestsIntegrationTest
           SequencerTestHelper
             .requestToken(
               sequencerChannel,
+              com.digitalasset.canton.networking.Endpoint(
+                sequencer1.config.publicApi.address,
+                sequencer1.config.publicApi.port,
+              ),
               daId,
               participant2.id,
               SynchronizerCrypto(participant2.crypto, staticSynchronizerParameters1),
@@ -249,7 +262,11 @@ trait ReplayedRequestsIntegrationTest
       )
     }
     val signature =
-      SequencerTestHelper.signSubmissionRequest(replayRequest, participant2).futureValueUS
+      SequencerTestHelper
+        .signSubmissionRequest(replayRequest, participant2, daId)
+        .futureValueUS
+        .value
+        .signature
 
     logger.info("Now replaying request...")
 
@@ -344,8 +361,11 @@ trait ReplayedRequestsIntegrationTest
       },
       releaseResponseP.future,
     )
-    val signature =
-      SequencerTestHelper.signSubmissionRequest(replayRequest, participant2).futureValueUS
+    val signature = SequencerTestHelper
+      .signSubmissionRequest(replayRequest, participant2, daId)
+      .futureValueUS
+      .value
+      .signature
 
     logger.info("Now replaying request...")
 
@@ -395,7 +415,9 @@ trait ReplayedRequestsIntegrationTest
           Seq(participant1.adminParty),
           Seq(createIou),
           commandId = replayCommandId,
-          minLedgerTimeAbs = Some(Instant.ofEpochSecond(10000)),
+          // Beyond the ledger time record time tolerance, but within minLedgerTimeMaxDelay
+          minLedgerTimeAbs =
+            Some(environment.simClock.value.now.plus(Duration.ofMinutes(30)).toInstant),
         ),
         entries =>
           forAtLeast(1, entries) {
@@ -403,8 +425,11 @@ trait ReplayedRequestsIntegrationTest
           },
       )
     }
-    val signature =
-      SequencerTestHelper.signSubmissionRequest(replayRequest, participant2).futureValueUS
+    val signature = SequencerTestHelper
+      .signSubmissionRequest(replayRequest, participant2, daId)
+      .futureValueUS
+      .value
+      .signature
 
     logger.info("Now replaying request...")
 
@@ -470,7 +495,11 @@ trait ReplayedRequestsIntegrationTest
       )
     }.copy(sender = participant2.id)
     val signature =
-      SequencerTestHelper.signSubmissionRequest(replayRequest, participant2).futureValueUS
+      SequencerTestHelper
+        .signSubmissionRequest(replayRequest, participant2, daId)
+        .futureValueUS
+        .value
+        .signature
 
     logger.info("Now replaying request...")
     val clock = environment.simClock.value
@@ -529,7 +558,7 @@ trait ReplayedRequestsIntegrationTest
   }
 }
 
-class ReplayedRequestsIntegrationTestPostgres extends ReplayedRequestsIntegrationTest {
+final class ReplayedRequestsIntegrationTestPostgres extends ReplayedRequestsIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))

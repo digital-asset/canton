@@ -7,8 +7,13 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.grpc.adapter.client.pekko.ClientAdapter
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.auth.{AuthInterceptor, ClaimSet}
-import com.digitalasset.canton.http.WebsocketConfig
 import com.digitalasset.canton.http.json.v2.JsSchema.JsCantonError
+import com.digitalasset.canton.http.{
+  RequestTimeoutDirective,
+  ServerRequestTimeout,
+  WebSocketMessageSizeLimit,
+  WebsocketConfig,
+}
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.InvalidArgument
 import com.digitalasset.canton.ledger.error.{JsonApiErrors, LedgerApiErrors}
@@ -30,7 +35,11 @@ import io.grpc.stub.StreamObserver
 import io.grpc.{Status, StatusRuntimeException}
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.{Flow, Sink, Source}
-import org.apache.pekko.stream.{AbruptStageTerminationException, Materializer}
+import org.apache.pekko.stream.{
+  AbruptStageTerminationException,
+  CompletionTimeoutException,
+  Materializer,
+}
 import sttp.capabilities.WebSockets
 import sttp.capabilities.pekko.PekkoStreams
 import sttp.model.{Header, StatusCode}
@@ -162,6 +171,7 @@ trait Endpoints extends NamedLogging {
       timeoutOpenEndedStream: Input => Boolean = (_: Input) => false,
   )(implicit
       wsConfig: WebsocketConfig,
+      serverRequestTimeout: ServerRequestTimeout,
       materializer: Materializer,
       authInterceptor: AuthInterceptor,
   ) =
@@ -175,13 +185,22 @@ trait Endpoints extends NamedLogging {
           val limit = tracedInput.in.limit
           val elementsLimit = maxRowsToReturn(limit)
           val systemListElementsLimit = wsConfig.httpListMaxElementsLimit
-          val idleWaitTime = tracedInput.in.waitTime
+          val requestedIdleWaitTime = tracedInput.in.waitTime
             .map(FiniteDuration.apply(_, TimeUnit.MILLISECONDS))
             .getOrElse(wsConfig.httpListWaitTime)
+          val idleWaitTime = requestedIdleWaitTime.min(wsConfig.httpListMaxWaitTime)
+          if (requestedIdleWaitTime > wsConfig.httpListMaxWaitTime) {
+            logger.info(
+              s"Requested idle wait time ${requestedIdleWaitTime.toMillis} ms exceeds the configured " +
+                s"maximum ${wsConfig.httpListMaxWaitTime.toMillis} ms; capping to the maximum."
+            )
+          }
           val source = Source
             .single(tracedInput.in.input)
             .via(flow)
             .take(elementsLimit)
+          val streamCompletionTimeout =
+            caller.validatedRequestTimeout.getOrElse(serverRequestTimeout.duration)
           (if (timeoutOpenEndedStream(tracedInput.in.input) || tracedInput.in.waitTime.isDefined) {
              source
                .map(Some(_))
@@ -195,6 +214,7 @@ trait Endpoints extends NamedLogging {
            } else {
              source
            })
+            .completionTimeout(streamCompletionTimeout)
             .runWith(Sink.seq)
             .map(
               handleListLimit(systemListElementsLimit, _)
@@ -262,6 +282,26 @@ trait Endpoints extends NamedLogging {
         }
       )
 
+  /** Like [[withServerLogic]], but for endpoints that must be reachable without a token, such as
+    * health checks. The token, if any, is passed on to the service logic unverified.
+    */
+  def withPublicServerLogic[Input, Output, R](
+      endpoint: Endpoint[CallerContext, Input, CustomError, Output, R],
+      service: CallerContext => TracedInput[Input] => Future[Either[JsCantonError, Output]],
+  ): Full[CallerContext, CallerContext, TracedInput[Input], CustomError, Output, R, Future] =
+    endpoint
+      .mapIn(traceHeadersMapping[Input]())
+      .serverSecurityLogic(caller =>
+        Future.successful[Either[CustomError, CallerContext]](Right(caller))
+      )
+      .serverLogic(caller =>
+        tracedInput => {
+          Future
+            .delegate(service(caller)(tracedInput))
+            .transform(handleErrorResponse(caller.traceContext()))
+        }
+      )
+
   /** Security logic of websocket endpoints. Websockets additionally accept the JWT from the
     * [[Endpoints.jwtCookieName]] cookie, which browsers attach to handshakes started by any web
     * site. To prevent cross-site websocket hijacking, a cookie-authenticated handshake is only
@@ -276,7 +316,8 @@ trait Endpoints extends NamedLogging {
       case None => validateJwtToken(endpointInfo)(caller)
       case Some(cookieAuth) =>
         checkCookieAuthOrigin(wsConfig.cookieAuthAllowedOrigins, cookieAuth.origin) match {
-          case CookieAuthDecision.Allowed => validateJwtToken(endpointInfo)(caller)
+          case CookieAuthDecision.Allowed =>
+            validateJwtToken(endpointInfo)(caller)
           case CookieAuthDecision.Disabled =>
             validateJwtToken(endpointInfo)(caller.copy(jwt = None, cookieAuth = None))
           case CookieAuthDecision.Rejected(reason) =>
@@ -295,7 +336,7 @@ trait Endpoints extends NamedLogging {
     implicit val traceContext = caller.traceContext()
     implicit val lc = LoggingContextWithTrace(loggerFactory)
     authInterceptor
-      .extractClaims(
+      .extractAuthenticatedClaims(
         caller.token().map(token => s"Bearer $token"),
         endpointInfo.showShort,
       )
@@ -412,6 +453,24 @@ trait Endpoints extends NamedLogging {
           ),
         )
       )
+    case tooLarge: WebSocketMessageSizeLimit.MessageTooLargeException =>
+      Left(
+        (
+          StatusCode.PayloadTooLarge,
+          JsCantonError.fromErrorCode(
+            JsonApiErrors.WebsocketMessageTooLarge.Reject(tooLarge.maxMessageSizeBytes)
+          ),
+        )
+      )
+    case _: WebSocketMessageSizeLimit.MessageBinaryNotSupportedException =>
+      Left(
+        (
+          StatusCode.BadRequest,
+          JsCantonError.fromErrorCode(
+            JsonApiErrors.WebsocketMessageBinaryNotSupported.Reject()
+          ),
+        )
+      )
     case illegalArgument: IllegalArgumentException =>
       Left(
         (
@@ -423,6 +482,18 @@ trait Endpoints extends NamedLogging {
       )
     // Special case for timed out requests
     case _: AbruptStageTerminationException =>
+      Left(
+        (
+          StatusCode.RequestTimeout,
+          JsCantonError.fromUnstructuredError(
+            code = "REQUEST_TIMEOUT",
+            cause = "The request timed out before it completed.",
+          ),
+        )
+      )
+    // The backing stream exceeded its maximum allowed duration (see WebsocketConfig.httpListMaxStreamDuration)
+    // and was cancelled, tearing down the upstream gRPC stream.
+    case _: CompletionTimeoutException =>
       Left(
         (
           StatusCode.RequestTimeout,
@@ -455,6 +526,7 @@ object Endpoints {
       optTraceContext: Option[TraceContext] = None,
       // set when `jwt` was taken from the `jwtCookieName` cookie (websocket endpoints only)
       cookieAuth: Option[CookieAuth] = None,
+      validatedRequestTimeout: Option[FiniteDuration] = None,
   ) {
     def token(): Option[String] = jwt.map(_.token)
 
@@ -573,6 +645,13 @@ object Endpoints {
           CallerContext(httpToken.orElse(wsToken), call, None, traceContext)
         }(cc => (cc.jwt, cc.jwt, cc.optTraceContext, cc.call))
     )
+    .securityIn(extractFromRequest(_.header(RequestTimeoutDirective.RequestTimeoutHeaderName)))
+    .mapSecurityIn { case (callerContext, rawRequestTimeout) =>
+      callerContext
+        .copy(validatedRequestTimeout = rawRequestTimeout.flatMap(RequestTimeoutDirective.parse))
+    }(callerContext =>
+      (callerContext, callerContext.validatedRequestTimeout.map(_.toMillis.toString))
+    )
 
   lazy val v2Endpoint: Endpoint[CallerContext, Unit, (StatusCode, JsCantonError), Unit, Any] =
     baseEndpoint
@@ -599,7 +678,7 @@ object Endpoints {
           cc.copy(jwt = Some(cookieJwt), cookieAuth = Some(CookieAuth(origin)))
         case (cc, _, _) => cc
       } {
-        case cc @ CallerContext(jwt, _, _, _, Some(cookieAuth)) =>
+        case cc @ CallerContext(jwt, _, _, _, Some(cookieAuth), _) =>
           (cc.copy(jwt = None, cookieAuth = None), jwt, cookieAuth.origin)
         case cc => (cc, None, None)
       }

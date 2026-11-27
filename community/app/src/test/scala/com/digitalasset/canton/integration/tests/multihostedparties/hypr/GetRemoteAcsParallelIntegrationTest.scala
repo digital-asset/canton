@@ -30,7 +30,7 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplica
 import com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationProcessor
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.topology.{ExternalParty, PartyId}
+import com.digitalasset.canton.topology.{ExternalParty, ForceFlag, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
@@ -156,6 +156,30 @@ sealed trait GetRemoteAcsParallelIntegrationTest
     }
   }
 
+  private def awaitParticipantRemoved(party: ExternalParty)(implicit
+      env: TestConsoleEnvironment
+  ) = {
+    import env.*
+    eventually() {
+      val ptp1 = participant1.topology.party_to_participant_mappings
+        .list(daId, filterParty = party.filterString)
+        .loneElement
+      val ptp2 = participant2.topology.party_to_participant_mappings
+        .list(daId, filterParty = party.filterString)
+        .loneElement
+
+      logger.debug(s"PTP on P1: $ptp1")
+      logger.debug(s"PTP on P2: $ptp2")
+
+      ptp1.item.participants.map(p => (p.participantId, p.state)).toSet shouldBe Set(
+        participant1.id -> HostingState.Active
+      )
+      ptp2.item.participants.map(p => (p.participantId, p.state)).toSet shouldBe Set(
+        participant1.id -> HostingState.Active
+      )
+    }
+  }
+
   private def nominateAndFreeze(party: ExternalParty)(implicit
       env: TestConsoleEnvironment
   ): Unit = {
@@ -184,32 +208,30 @@ sealed trait GetRemoteAcsParallelIntegrationTest
   }
 
   "Executing get_remote_acs in parallel for two different parties on the same TP" should {
-    // TODO(#37839): Switch this and subsequent tests to pv37 along with marking acs_replication.proto
-    //  replication protocol messages to stable/pv37
-    "Create external parties with contracts" onlyRunWith ProtocolVersion.dev in { implicit env =>
-      import env.*
+    "Create external parties with contracts" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
+      implicit env =>
+        import env.*
 
-      val amounts = 1 to numContractsInCreateBatch
-      Seq(aliceE, danaE).foreach { party =>
-        IouSyntax.createIous(participant1, carol, party, amounts).discard
-        // Create some contracts shared with a party (Bob) on the target participant P2.
-        IouSyntax.createIous(participant2, bob, party, amounts).discard
-      }
-      // Create some contracts shared by both replicated parties.
-      IouSyntax
-        .createIous(participant1, carol, aliceE, amounts, observers = Seq(danaE.partyId))
-        .discard
+        val amounts = 1 to numContractsInCreateBatch
+        Seq(aliceE, danaE).foreach { party =>
+          IouSyntax.createIous(participant1, carol, party, amounts).discard
+          // Create some contracts shared with a party (Bob) on the target participant P2.
+          IouSyntax.createIous(participant2, bob, party, amounts).discard
+        }
+        // Create some contracts shared by both replicated parties.
+        IouSyntax
+          .createIous(participant1, carol, aliceE, amounts, observers = Seq(danaE.partyId))
+          .discard
 
-      // Nominate and freeze the parties one after the other: The remote read of a party leaves out
-      // the contracts of stakeholders already having an entry on P2 at the freezing time, whereas
-      // export_party_acs leaves out the contracts of stakeholders onboarding or active on P2 at the
-      // onboarding time. Freezing and onboarding aliceE before danaE lets both agree on aliceE
-      // including and danaE excluding the contracts shared by both parties.
-      nominateAndFreeze(aliceE)
-      nominateAndFreeze(danaE)
+        // Freeze both parties before starting either remote read. Neither a Nominated nor a Freezing
+        // entry makes P2 a host, so both reads must include the contracts shared by the parties.
+        // For the export baseline below, remove each party from P2 after exporting it so that it
+        // does not exclude shared contracts from the other party's export.
+        nominateAndFreeze(aliceE)
+        nominateAndFreeze(danaE)
     }
 
-    "Call get_remote_acs in parallel on TP for both parties" onlyRunWith ProtocolVersion.dev in {
+    "Call get_remote_acs in parallel on TP for both parties" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
       implicit env =>
         import env.*
 
@@ -256,7 +278,7 @@ sealed trait GetRemoteAcsParallelIntegrationTest
         }
     }
 
-    "Invoke export_party_acs on SP for comparison" onlyRunWith ProtocolVersion.dev in {
+    "Invoke export_party_acs on SP for comparison" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
       implicit env =>
         import env.*
 
@@ -300,10 +322,25 @@ sealed trait GetRemoteAcsParallelIntegrationTest
               exportFilePath = exportAcsFileName(party),
             )
           }
+
+          // In order to be able to use export_party_acs as a baseline, we need the respective
+          // "other party" to not be considered hosted on the TP. One convenient way to achieve
+          // is to remove the party from P2, so that both the exports produce an ACS assuming the
+          // respective other party is not already hosted on the TP/P2.
+          clue(s"Removing party $party from P2") {
+            participant2.topology.party_to_participant_mappings.propose_delta(
+              party,
+              removes = Seq(participant2),
+              mustFullyAuthorize = true, // participant allowed to remove party unilaterally
+              store = daId,
+              forceFlags = ForceFlag.DisablePartyWithActiveContracts,
+            )
+            awaitParticipantRemoved(party)
+          }
         }
     }
 
-    "Compare results of TP.get_remote_acs with SP.export_party_acs" onlyRunWith ProtocolVersion.dev in {
+    "Compare results of TP.get_remote_acs with SP.export_party_acs" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
       _ =>
         import better.files.File
 

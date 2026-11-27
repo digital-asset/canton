@@ -7,6 +7,7 @@ import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.console.ConsoleEnvironment
+import com.digitalasset.canton.crypto.ValidatedPemCertificate
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.{Endpoint, UrlValidator}
 import com.digitalasset.canton.sequencing.{
@@ -47,9 +48,9 @@ sealed trait SequencerConnection extends PrettyPrinting {
 
   def sequencerAlias: SequencerAlias
 
-  def certificates: Option[ByteString]
+  def certificates: Option[ValidatedPemCertificate]
 
-  def withCertificates(certificates: ByteString): SequencerConnection
+  def withCertificates(certificates: ValidatedPemCertificate): SequencerConnection
 
   def withSequencerId(sequencerId: SequencerId): SequencerConnection
 
@@ -63,11 +64,11 @@ sealed trait SequencerConnection extends PrettyPrinting {
 final case class GrpcSequencerConnection(
     endpoints: NonEmpty[Set[Endpoint]],
     transportSecurity: Boolean,
-    customTrustCertificates: Option[ByteString],
+    customTrustCertificates: Option[ValidatedPemCertificate],
     sequencerAlias: SequencerAlias,
     sequencerId: Option[SequencerId],
 ) extends SequencerConnection {
-  override def certificates: Option[ByteString] = customTrustCertificates
+  override def certificates: Option[ValidatedPemCertificate] = customTrustCertificates
 
   override protected def pretty: Pretty[GrpcSequencerConnection] =
     prettyOfClass(
@@ -95,7 +96,7 @@ final case class GrpcSequencerConnection(
     SequencerConnection
       .merge(this +: connection +: additionalConnections)
 
-  override def withCertificates(certificates: ByteString): SequencerConnection =
+  override def withCertificates(certificates: ValidatedPemCertificate): SequencerConnection =
     copy(customTrustCertificates = Some(certificates))
 
   override def withAlias(alias: SequencerAlias): SequencerConnection = copy(sequencerAlias = alias)
@@ -119,10 +120,14 @@ object GrpcSequencerConnection {
       uri <- UrlValidator.validate(connection).leftMap(_.message)
       endpointsWithTlsFlag <- Endpoint.fromUris(NonEmpty(Seq, uri))
       (endpoints, useTls) = endpointsWithTlsFlag
+
+      validatedCustomTrustCertificates <- customTrustCertificates.traverse(
+        ValidatedPemCertificate.create
+      )
     } yield GrpcSequencerConnection(
       endpoints,
       useTls,
-      customTrustCertificates,
+      validatedCustomTrustCertificates,
       sequencerAlias,
       sequencerId,
     )

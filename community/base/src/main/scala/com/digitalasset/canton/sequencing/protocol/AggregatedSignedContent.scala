@@ -90,7 +90,7 @@ object AggregatedSignedContent
 
   override val versioningTable: VersioningTable = VersioningTable(
     // TODO(i37895): Split the wire format of SignedContent and AggregatedSignedContent
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.SignedContent)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(v30.SignedContent)(
       supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )

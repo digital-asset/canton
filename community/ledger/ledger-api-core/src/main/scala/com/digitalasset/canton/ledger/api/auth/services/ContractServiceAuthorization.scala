@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.api.auth.services
 
 import com.daml.ledger.api.v2.contract_service.*
 import com.daml.ledger.api.v2.contract_service.ContractServiceGrpc.ContractService
-import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
+import com.digitalasset.canton.auth.{Authorizer, ClaimApiArea, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.RequiredClaims
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
@@ -32,5 +32,8 @@ final class ContractServiceAuthorization(
 
 object ContractServiceAuthorization {
   def requiredClaims(request: GetContractRequest): List[RequiredClaim[GetContractRequest]] =
-    RequiredClaims.readAsForAllPartiesOrAnyPartyIfEmpty[GetContractRequest](request.queryingParties)
+    RequiredClaim.ApiArea[GetContractRequest](ClaimApiArea.ledgerRead.area) ::
+      RequiredClaims.readAsForAllPartiesOrAnyPartyIfEmpty[GetContractRequest](
+        request.queryingParties
+      )
 }

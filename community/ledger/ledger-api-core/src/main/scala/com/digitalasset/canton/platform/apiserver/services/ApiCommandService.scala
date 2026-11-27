@@ -162,6 +162,7 @@ class ApiCommandService(
                       filtersByParty = Map.empty,
                       filtersForAnyParty = Some(Filters(Nil)),
                       verbose = false,
+                      filtersByContractId = Seq.empty,
                     )
                   )
                 )
@@ -224,8 +225,14 @@ object ApiCommandService {
     transactionFormat.orElse(
       Some(
         TransactionFormat(
-          eventFormat =
-            Some(EventFormat(actAs.map(party => party -> wildcard).toMap, None, verbose = true)),
+          eventFormat = Some(
+            EventFormat(
+              filtersByParty = actAs.map(party => party -> wildcard).toMap,
+              filtersForAnyParty = None,
+              verbose = true,
+              filtersByContractId = Seq.empty,
+            )
+          ),
           transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
         )
       )

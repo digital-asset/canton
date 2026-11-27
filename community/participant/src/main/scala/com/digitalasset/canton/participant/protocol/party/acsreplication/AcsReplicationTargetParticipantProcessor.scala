@@ -252,7 +252,9 @@ class AcsReplicationTargetParticipantProcessor(
       cryptoClient <- EitherT.fromEither[FutureUnlessShutdown](
         getCryptoClient.toRight(s"Need crypto client for signature verification")
       )
-      // Use signing key valid at the ACS snapshot asOf timestamp.
+      // Use the signing key valid at the ACS snapshot timestamp, which both participants agree on,
+      // so that a key rotation during the replication does not fail it. The digest is sent only
+      // over the authenticated channel, which uses the participants' current keys.
       snapshot <- EitherT.right[String](cryptoClient.snapshot(partyOnboardingAt))
       acsDigestHash = Hash
         .build(HashPurpose.AcsReplicationDigest, HashAlgorithm.Sha256)

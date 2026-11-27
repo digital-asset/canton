@@ -4,7 +4,6 @@
 package com.digitalasset.canton.ledger.localstore
 
 import cats.syntax.either.*
-import com.daml.jwt.JwksUrl
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.user.store.IdentityProviderConfigStore.{
@@ -15,9 +14,12 @@ import com.digitalasset.canton.user.store.IdentityProviderConfigStore.{
   TooManyIdentityProviderConfigs,
 }
 import com.digitalasset.canton.user.{
+  Audience,
   IdentityProviderConfig,
   IdentityProviderConfigUpdate,
   IdentityProviderId,
+  Issuer,
+  JwksUrlLengthLimited,
 }
 import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.freespec.AsyncFreeSpec
@@ -36,9 +38,9 @@ trait IdentityProviderConfigStoreTests extends IdentityProviderConfigStoreSpecBa
     IdentityProviderConfig(
       identityProviderId = randomId(),
       isDeactivated = false,
-      jwksUrl = JwksUrl.assertFromString("http://example.com/jwks.json"),
-      issuer = UUID.randomUUID().toString,
-      audience = Some(UUID.randomUUID().toString),
+      jwksUrl = JwksUrlLengthLimited.tryCreate("http://example.com/jwks.json"),
+      issuer = Issuer.tryCreate(UUID.randomUUID().toString),
+      audience = Some(Audience.tryCreate(UUID.randomUUID().toString)),
     )
 
   def randomId() = {
@@ -75,8 +77,8 @@ trait IdentityProviderConfigStoreTests extends IdentityProviderConfigStoreSpecBa
 
     "disallow to create identity provider config with non unique issuer" in {
       testIt { tested =>
-        val cfg1 = config().copy(issuer = "issuer1")
-        val cfg2 = config().copy(issuer = "issuer1")
+        val cfg1 = config().copy(issuer = Issuer.tryCreate("issuer1"))
+        val cfg2 = config().copy(issuer = Issuer.tryCreate("issuer1"))
         for {
           res1 <- tested.createIdentityProviderConfig(cfg1)
           res2 <- tested.createIdentityProviderConfig(cfg2)
@@ -144,7 +146,7 @@ trait IdentityProviderConfigStoreTests extends IdentityProviderConfigStoreSpecBa
         val nonExistingIssuer = "issuer_which_does_not_exist"
         for {
           res1 <- tested.createIdentityProviderConfig(cfg)
-          res2 <- tested.getIdentityProviderConfig(cfg.issuer)
+          res2 <- tested.getIdentityProviderConfig(cfg.issuer.unwrap)
           res3 <- tested.getIdentityProviderConfig(nonExistingIssuer)
         } yield {
           res1 shouldBe Right(cfg)
@@ -162,9 +164,9 @@ trait IdentityProviderConfigStoreTests extends IdentityProviderConfigStoreSpecBa
         for {
           res1 <- tested.createIdentityProviderConfig(cfg)
           res2 <- tested.createIdentityProviderConfig(deactivatedConfig)
-          res3 <- tested.getActiveIdentityProviderByIssuer(cfg.issuer)
+          res3 <- tested.getActiveIdentityProviderByIssuer(cfg.issuer.unwrap)
           res4 <- tested.getActiveIdentityProviderByIssuer(nonExistingIssuer).failed
-          res5 <- tested.getActiveIdentityProviderByIssuer(deactivatedConfig.issuer).failed
+          res5 <- tested.getActiveIdentityProviderByIssuer(deactivatedConfig.issuer.unwrap).failed
         } yield {
           res1 shouldBe Right(cfg)
           res2 shouldBe Right(deactivatedConfig)
@@ -254,18 +256,20 @@ trait IdentityProviderConfigStoreTests extends IdentityProviderConfigStoreSpecBa
 
     "allows to update existing identity provider config's jwksUrl attribute" in {
       testIt { tested =>
-        val cfg = config().copy(jwksUrl = JwksUrl.assertFromString("http://daml.com/jwks1.json"))
+        val cfg =
+          config().copy(jwksUrl = JwksUrlLengthLimited.tryCreate("http://daml.com/jwks1.json"))
         for {
           _ <- tested.createIdentityProviderConfig(cfg)
           res2 <- tested.updateIdentityProviderConfig(
             IdentityProviderConfigUpdate(
               identityProviderId = cfg.identityProviderId,
-              jwksUrlUpdate = Some(JwksUrl.assertFromString("http://daml.com/jwks2.json")),
+              jwksUrlUpdate = Some(JwksUrlLengthLimited.tryCreate("http://daml.com/jwks2.json")),
             )
           )
           res3 <- tested.getIdentityProviderConfig(cfg.identityProviderId)
         } yield {
-          val expected = cfg.copy(jwksUrl = JwksUrl.assertFromString("http://daml.com/jwks2.json"))
+          val expected =
+            cfg.copy(jwksUrl = JwksUrlLengthLimited.tryCreate("http://daml.com/jwks2.json"))
           res2 shouldBe Right(expected)
           res3 shouldBe Right(expected)
         }
@@ -274,14 +278,14 @@ trait IdentityProviderConfigStoreTests extends IdentityProviderConfigStoreSpecBa
 
     "allows to update existing identity provider config's audience attribute" in {
       testIt { tested =>
-        val cfg = config().copy(audience = Some("audience1"))
+        val cfg = config().copy(audience = Some(Audience.tryCreate("audience1")))
         for {
           _ <- tested.createIdentityProviderConfig(config())
           _ <- tested.createIdentityProviderConfig(cfg)
           res2 <- tested.updateIdentityProviderConfig(
             IdentityProviderConfigUpdate(
               identityProviderId = cfg.identityProviderId,
-              audienceUpdate = Some(Some("audience2")),
+              audienceUpdate = Some(Some(Audience.tryCreate("audience2"))),
             )
           )
           res3 <- tested.getIdentityProviderConfig(cfg.identityProviderId)
@@ -302,11 +306,11 @@ trait IdentityProviderConfigStoreTests extends IdentityProviderConfigStoreSpecBa
           )
           res7 <- tested.getIdentityProviderConfig(cfg.identityProviderId)
         } yield {
-          res2 shouldBe Right(cfg.copy(audience = Some("audience2")))
-          res3 shouldBe Right(cfg.copy(audience = Some("audience2")))
+          res2 shouldBe Right(cfg.copy(audience = Some(Audience.tryCreate("audience2"))))
+          res3 shouldBe Right(cfg.copy(audience = Some(Audience.tryCreate("audience2"))))
 
-          res4 shouldBe Right(cfg.copy(audience = Some("audience2")))
-          res5 shouldBe Right(cfg.copy(audience = Some("audience2")))
+          res4 shouldBe Right(cfg.copy(audience = Some(Audience.tryCreate("audience2"))))
+          res5 shouldBe Right(cfg.copy(audience = Some(Audience.tryCreate("audience2"))))
 
           res6 shouldBe Right(cfg.copy(audience = None))
           res7 shouldBe Right(cfg.copy(audience = None))
@@ -316,38 +320,38 @@ trait IdentityProviderConfigStoreTests extends IdentityProviderConfigStoreSpecBa
 
     "allows to update existing identity provider config's issuer attribute" in {
       testIt { tested =>
-        val cfg = config().copy(issuer = "issuer1")
+        val cfg = config().copy(issuer = Issuer.tryCreate("issuer1"))
         for {
           _ <- tested.createIdentityProviderConfig(cfg)
           res2 <- tested.updateIdentityProviderConfig(
             IdentityProviderConfigUpdate(
               identityProviderId = cfg.identityProviderId,
-              issuerUpdate = Some("issuer2"),
+              issuerUpdate = Some(Issuer.tryCreate("issuer2")),
             )
           )
           res3 <- tested.getIdentityProviderConfig(cfg.identityProviderId)
         } yield {
-          res2 shouldBe Right(cfg.copy(issuer = "issuer2"))
-          res3 shouldBe Right(cfg.copy(issuer = "issuer2"))
+          res2 shouldBe Right(cfg.copy(issuer = Issuer.tryCreate("issuer2")))
+          res3 shouldBe Right(cfg.copy(issuer = Issuer.tryCreate("issuer2")))
         }
       }
     }
 
     "allows to update existing identity provider config's issuer attribute to the same value" in {
       testIt { tested =>
-        val cfg = config().copy(issuer = "issuer1")
+        val cfg = config().copy(issuer = Issuer.tryCreate("issuer1"))
         for {
           _ <- tested.createIdentityProviderConfig(cfg)
           res2 <- tested.updateIdentityProviderConfig(
             IdentityProviderConfigUpdate(
               identityProviderId = cfg.identityProviderId,
-              issuerUpdate = Some("issuer1"),
+              issuerUpdate = Some(Issuer.tryCreate("issuer1")),
             )
           )
           res3 <- tested.getIdentityProviderConfig(cfg.identityProviderId)
         } yield {
-          res2 shouldBe Right(cfg.copy(issuer = "issuer1"))
-          res3 shouldBe Right(cfg.copy(issuer = "issuer1"))
+          res2 shouldBe Right(cfg.copy(issuer = Issuer.tryCreate("issuer1")))
+          res3 shouldBe Right(cfg.copy(issuer = Issuer.tryCreate("issuer1")))
         }
       }
     }
@@ -358,19 +362,19 @@ trait IdentityProviderConfigStoreTests extends IdentityProviderConfigStoreSpecBa
         val cfg = IdentityProviderConfig(
           identityProviderId = id,
           isDeactivated = false,
-          jwksUrl = JwksUrl.assertFromString("http://example.com/jwks.json"),
-          issuer = UUID.randomUUID().toString,
-          audience = Some(UUID.randomUUID().toString),
+          jwksUrl = JwksUrlLengthLimited.tryCreate("http://example.com/jwks.json"),
+          issuer = Issuer.tryCreate(UUID.randomUUID().toString),
+          audience = Some(Audience.tryCreate(UUID.randomUUID().toString)),
         )
         for {
           _ <- tested.createIdentityProviderConfig(cfg)
           res <- tested.updateIdentityProviderConfig(
             IdentityProviderConfigUpdate(
               identityProviderId = cfg.identityProviderId,
-              issuerUpdate = Some("issuer2"),
-              jwksUrlUpdate = Some(JwksUrl.assertFromString("http://daml.com/jwks2.json")),
+              issuerUpdate = Some(Issuer.tryCreate("issuer2")),
+              jwksUrlUpdate = Some(JwksUrlLengthLimited.tryCreate("http://daml.com/jwks2.json")),
               isDeactivatedUpdate = Some(true),
-              audienceUpdate = Some(Some("aud2")),
+              audienceUpdate = Some(Some(Audience.tryCreate("aud2"))),
             )
           )
           res3 <- tested.getIdentityProviderConfig(cfg.identityProviderId)
@@ -378,9 +382,9 @@ trait IdentityProviderConfigStoreTests extends IdentityProviderConfigStoreSpecBa
           val expected = IdentityProviderConfig(
             identityProviderId = id,
             isDeactivated = true,
-            jwksUrl = JwksUrl.assertFromString("http://daml.com/jwks2.json"),
-            issuer = "issuer2",
-            audience = Some("aud2"),
+            jwksUrl = JwksUrlLengthLimited.tryCreate("http://daml.com/jwks2.json"),
+            issuer = Issuer.tryCreate("issuer2"),
+            audience = Some(Audience.tryCreate("aud2")),
           )
           res shouldBe Right(expected)
           res3 shouldBe Right(expected)
@@ -390,15 +394,15 @@ trait IdentityProviderConfigStoreTests extends IdentityProviderConfigStoreSpecBa
 
     "disallow updating issuer to non-unique value" in {
       testIt { tested =>
-        val cfg1 = config().copy(issuer = "issuer1")
-        val cfg2 = config().copy(issuer = "issuer2")
+        val cfg1 = config().copy(issuer = Issuer.tryCreate("issuer1"))
+        val cfg2 = config().copy(issuer = Issuer.tryCreate("issuer2"))
         for {
           _ <- tested.createIdentityProviderConfig(cfg1)
           _ <- tested.createIdentityProviderConfig(cfg2)
           res <- tested.updateIdentityProviderConfig(
             IdentityProviderConfigUpdate(
               identityProviderId = cfg1.identityProviderId,
-              issuerUpdate = Some("issuer2"),
+              issuerUpdate = Some(Issuer.tryCreate("issuer2")),
             )
           )
         } yield {
@@ -409,8 +413,8 @@ trait IdentityProviderConfigStoreTests extends IdentityProviderConfigStoreSpecBa
 
     "allow listing all configs" in {
       testIt { tested =>
-        val cfg1 = config().copy(issuer = "issuer1")
-        val cfg2 = config().copy(issuer = "issuer2")
+        val cfg1 = config().copy(issuer = Issuer.tryCreate("issuer1"))
+        val cfg2 = config().copy(issuer = Issuer.tryCreate("issuer2"))
         for {
           _ <- tested.createIdentityProviderConfig(cfg1)
           _ <- tested.createIdentityProviderConfig(cfg2)

@@ -769,7 +769,14 @@ class AvailabilityModuleOutputFetchTest
 
             context.runPipedMessages() shouldBe Seq(reply)
             verify(cryptoProvider).signHash(
-              AvailabilityAck.hashFor(ABatchId, anEpochNumber, Node0, metrics),
+              AvailabilityAck.hashFor(
+                ABatchId,
+                anEpochNumber,
+                Node0,
+                metrics,
+                testPsid,
+                synchronizerProtocolVersion,
+              ),
               cryptoOperationId,
             )
           }

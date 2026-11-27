@@ -22,7 +22,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
-import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.ThroughputCapByMessageTypeConfig
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.RegisterError
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
   SequencerAdminStatus,
@@ -177,12 +177,18 @@ trait Sequencer
     * sequencer or latest known sequenced event, whichever is the most recent. This method should be
     * used for information purpose only and not to get a deterministic traffic state as the state
     * will depend on current time. To get the state at a specific timestamp, use
-    * [[getTrafficStateAt]] instead. If the list is empty, return the status of all members.
-    * Requested members who are not registered in the Sequencer will not be in the response.
-    * Registered members with no sent or received event will return an empty status. Returns an
-    * error if the sequencer is awaiting LSU traffic state initialization.
+    * [[getTrafficStateAt]] instead. If the list is empty, return the status of all members. The
+    * response covers the members known in topology. If `includeOnboardingMembers` is set, it also
+    * covers the members that traffic was purchased for ahead of their registration (still
+    * onboarding). Other requested members will not be in the response. Members with no sent or
+    * received event will return an empty status. Returns an error if the sequencer is awaiting LSU
+    * traffic state initialization.
     */
-  def trafficStatus(members: Seq[Member], selector: TimestampSelector)(implicit
+  def trafficStatus(
+      members: Seq[Member],
+      selector: TimestampSelector,
+      includeOnboardingMembers: Boolean,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficControlError, SequencerTrafficStatus]
 
@@ -249,6 +255,9 @@ trait Sequencer
 
   /** Get the traffic state for LSU.
     *
+    * The state contains the registered members that are known in the topology, as well as the
+    * members that are not registered yet but for which traffic has already been purchased.
+    *
     * @param trafficTsOverride
     *   MUST be empty for regular LSUs. For regular LSUs, traffic should be taken at upgrade time
     *   and an error should be returned if no LSU is announced. However, in the context of roll
@@ -264,13 +273,15 @@ trait Sequencer
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, CantonBaseError, Unit]
 
   /** Query current throughput caps */
-  def getThroughputCap(requestType: SubmissionRequestType): Option[IndividualThroughputCapConfig] =
+  def getThroughputCap(name: String): Option[ThroughputCapByMessageTypeConfig] =
     None
+
+  def listThroughputCaps: Map[String, ThroughputCapByMessageTypeConfig] = Map.empty
 
   /** Set current throughput caps */
   def setThroughputCap(
-      requestType: SubmissionRequestType,
-      config: Option[IndividualThroughputCapConfig],
+      name: String,
+      config: Option[ThroughputCapByMessageTypeConfig],
   )(implicit traceContext: TraceContext): Unit = ()
 
   def performLsuSequencingTest(mediatorGroupRecipient: MediatorGroupRecipient)(implicit

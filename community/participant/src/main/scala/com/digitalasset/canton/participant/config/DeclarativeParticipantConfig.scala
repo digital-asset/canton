@@ -7,8 +7,9 @@ import cats.implicits.toTraverseOps
 import cats.syntax.either.*
 import com.daml.jwt.JwksUrl
 import com.digitalasset.canton.config.CantonRequireTypes.String255
-import com.digitalasset.canton.config.ConfidentialConfigWriter
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.{Confidential, ConfidentialConfigWriter}
+import com.digitalasset.canton.crypto.ValidatedPemCertificate
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
 import com.digitalasset.canton.sequencing.{
@@ -25,7 +26,6 @@ import com.digitalasset.canton.user.IdentityProviderId
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 import pureconfig.error.CannotConvert
 
 import java.io.File
@@ -88,7 +88,8 @@ final case class DeclarativeParticipantConfig(
   */
 final case class DeclarativeDarConfig(
     location: String,
-    requestHeaders: Map[String, String] = Map(),
+    // Header values are marked confidential since they can contain authorization details.
+    requestHeaders: Confidential.HttpRequestHeaders = Confidential.HttpRequestHeaders.empty,
     expectedMainPackage: Option[String] = None,
     synchronizers: Seq[String] = Seq.empty,
 )
@@ -254,11 +255,14 @@ final case class DeclarativeSequencerConnectionConfig(
     endpoints: NonEmpty[Set[Endpoint]],
     transportSecurity: Boolean = false,
     customTrustCertificates: Option[File] = None,
-)(customTrustCertificatesFromNode: Option[ByteString] = None) {
-  def customTrustCertificatesAsByteString: Either[String, Option[ByteString]] =
-    customTrustCertificates
-      .traverse(x => BinaryFileUtil.readByteStringFromFile(x.getPath))
-      .map(_.orElse(customTrustCertificatesFromNode))
+)(customTrustCertificatesFromNode: Option[ValidatedPemCertificate] = None) {
+  def customTrustCertificatesAsByteString: Either[String, Option[ValidatedPemCertificate]] =
+    for {
+      bs <- customTrustCertificates
+        .traverse(x => BinaryFileUtil.readByteStringFromFile(x.getPath))
+
+      pem <- bs.traverse(ValidatedPemCertificate.create)
+    } yield pem.orElse(customTrustCertificatesFromNode)
 
   def isEquivalent(other: DeclarativeSequencerConnectionConfig): Boolean =
     endpoints == other.endpoints && transportSecurity == other.transportSecurity && customTrustCertificatesAsByteString == other.customTrustCertificatesAsByteString
@@ -415,14 +419,18 @@ object DeclarativeParticipantConfig {
 
     val confidentialWriter = new ConfidentialConfigWriter(confidential)
 
+    implicit def confidentialValueWriter[A: ConfigWriter]: ConfigWriter[Confidential[A]] =
+      confidentialWriter.confidentialValueWriter[A]
+
     implicit val synchronizerAliasReader: ConfigWriter[SynchronizerAlias] =
       ConfigWriter.toString(_.unwrap)
 
     implicit val declarativeParticipantConfigWriter: ConfigWriter[DeclarativeParticipantConfig] = {
-      implicit val darConfigWriter: ConfigWriter[DeclarativeDarConfig] =
-        confidentialWriter[DeclarativeDarConfig](c =>
-          c.copy(requestHeaders = c.requestHeaders.map { case (k, v) => (k, "*****") })
-        )
+      implicit val darConfigWriter: ConfigWriter[DeclarativeDarConfig] = {
+        implicit val httpRequestHeadersWriter: ConfigWriter[Confidential.HttpRequestHeaders] =
+          confidentialWriter.httpRequestHeadersWriter
+        deriveWriter[DeclarativeDarConfig]
+      }
 
       implicit val permissionWriter: ConfigWriter[ParticipantPermissionConfig] = {
         implicit val submissionWriter: ConfigWriter[ParticipantPermissionConfig.Submission.type] =

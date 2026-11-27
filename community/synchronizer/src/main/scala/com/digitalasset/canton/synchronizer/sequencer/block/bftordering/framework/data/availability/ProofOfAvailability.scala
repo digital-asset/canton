@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability
 
-import com.digitalasset.canton.protocol.BftOrdererLimits
+import com.digitalasset.canton.protocol.BftOrdererLimitsView
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
@@ -20,7 +20,7 @@ final case class ProofOfAvailability(
 object ProofOfAvailability {
   def fromProto(
       pvv: ProtocolVersionValidation,
-      limits: BftOrdererLimits,
+      limits: BftOrdererLimitsView,
       value: ProtoProofOfAvailability,
   ): ParsingResult[ProofOfAvailability] =
     for {
@@ -29,7 +29,7 @@ object ProofOfAvailability {
         value.acks,
         "acks",
         pvv,
-        ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxAcks),
+        ValidationParam(ProtocolVersion.v38 -> limits.maxAcks),
       ) { (ack, _) =>
         ProtoConverter.parseRequired(
           AvailabilityAck.fromProto(pvv, ack, _),

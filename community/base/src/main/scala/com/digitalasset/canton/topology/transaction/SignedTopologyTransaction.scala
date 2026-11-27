@@ -23,7 +23,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.{TopologyLimits, v30}
+import com.digitalasset.canton.protocol.{TopologyLimitsView, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.topology.TopologyManager.assignExpectedUsageToKeys
@@ -276,7 +276,7 @@ object SignedTopologyTransaction
     SignedTopologyTransaction[TopologyChangeOp.Replace, TopologyMapping]
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(
       v30.SignedTopologyTransaction
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),
@@ -455,7 +455,7 @@ object SignedTopologyTransaction
     ) = transactionP
     val topologyLimits = context.topologyLimits
     val maxSignatures = ValidationParam(
-      ProtocolVersion.nextValidationBoundPV -> topologyLimits.maxSignaturesPerTransaction
+      ProtocolVersion.v38 -> topologyLimits.maxSignaturesPerTransaction
     )
     for {
       // An entry needs at least one signature, so the signature bound also bounds the entries.
@@ -527,7 +527,7 @@ object SignedTopologyTransaction
     GetResult { r =>
       // Trusted bytes from the node's own store, so the validators pass the content through and
       // the limits in the context are never read.
-      fromTrustedByteString(TopologyTransactionDeserializationContext(TopologyLimits.default))(
+      fromTrustedByteString(TopologyTransactionDeserializationContext(TopologyLimitsView.default))(
         r.<<[ByteString]
       ).valueOr { err =>
         throw new DbSerializationException(
@@ -588,7 +588,7 @@ object SignedTopologyTransactions
     _.transactions
   )
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.minimum)(
       v30.SignedTopologyTransactions
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),
@@ -620,7 +620,7 @@ object SignedTopologyTransactions
         "signed_transactions",
         pvv,
         ValidationParam(
-          ProtocolVersion.nextValidationBoundPV -> context.topologyLimits.maxTransactionsPerBroadcast
+          ProtocolVersion.v38 -> context.topologyLimits.maxTransactionsPerBroadcast
         ),
       )
       transactions <- signedTransactionsP

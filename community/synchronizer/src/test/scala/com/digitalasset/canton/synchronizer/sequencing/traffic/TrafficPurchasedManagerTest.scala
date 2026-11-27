@@ -299,6 +299,32 @@ class TrafficPurchasedManagerTest
         resultF.futureValueUS shouldBe Right(Some(balance2))
     }
 
+    "wait for the in-flight updates to be processed" in { env =>
+      import env.*
+
+      val processedF = manager.awaitUpdatesUntil(balance.sequencingTimestamp)
+      always() {
+        processedF.isCompleted shouldBe false
+      }
+
+      manager.addTrafficPurchased(balance).futureValueUS
+
+      // Await the future to ensure that the update has been processed
+      processedF.futureValueUS
+
+      // The member for which traffic was purchased is registered once the update has been processed
+      val member = sequencerStore.lookupMember(balance.member).futureValueUS.value
+      inside(member) { case RegisteredMember.Onboarding(_) => }
+    }
+
+    "not wait for the updates that have already been processed" in { env =>
+      import env.*
+
+      manager.tick(timestamp)
+
+      manager.awaitUpdatesUntil(timestamp).futureValueUS shouldBe (())
+    }
+
     "prune" in { env =>
       import env.*
 

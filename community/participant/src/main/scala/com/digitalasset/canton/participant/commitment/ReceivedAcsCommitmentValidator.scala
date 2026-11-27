@@ -207,7 +207,7 @@ object ReceivedAcsCommitments
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v36,
+        ProtocolVersion.minimum,
         supportedProtoVersion(v30participant.ReceivedAcsCommitments)(fromProtoV30),
         _.toProtoV30,
       )

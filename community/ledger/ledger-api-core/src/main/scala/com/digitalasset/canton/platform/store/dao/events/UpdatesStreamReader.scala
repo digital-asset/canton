@@ -64,6 +64,8 @@ import com.digitalasset.canton.platform.store.utils.{
 }
 import com.digitalasset.canton.platform.store.{LedgerApiContractStore, PruningOffsetService}
 import com.digitalasset.canton.platform.{
+  ContractIdEventFilter,
+  EventFilter,
   FatContract,
   InternalEventFormat,
   InternalTransactionFormat,
@@ -175,7 +177,7 @@ class UpdatesStreamReader(
 
     def decompose(eventFormat: Option[InternalEventFormat]): Set[DecomposedFilter] =
       eventFormat
-        .map(_.templatePartiesFilter)
+        .map(_.eventFilter)
         .toList
         .flatMap(filteringConstraints => FilterUtils.decomposeFilters(filteringConstraints).toList)
         .toSet
@@ -240,6 +242,7 @@ class UpdatesStreamReader(
           idPageSizing = idPageSizing,
           descendingOrder = descendingOrder,
           skipPruningChecks = skipPruningChecks,
+          rawEventFilter = contractIdFiltersPartiesCheck(internalUpdateFormat),
         )
       case Some(InternalTransactionFormat(internalEventFormat, LedgerEffects)) =>
         doStreamLedgerEffects(
@@ -247,13 +250,18 @@ class UpdatesStreamReader(
           txInternalEventFormat = Some(internalEventFormat),
           reassignmentInternalEventFormat = internalUpdateFormat.includeReassignments,
           internalUpdateFormat = internalUpdateFormat,
-          txAndReassignmentFilters = txAndReassignmentFilters,
-          justTxFilters = justTxFilters,
-          justReassignmentFilters = justReassignmentFilters,
+          txAndReassignmentFilters = txAndReassignmentFilters.collect {
+            case (f: DecomposedTemplatePartyFilter) => f
+          },
+          justTxFilters = justTxFilters.collect { case (f: DecomposedTemplatePartyFilter) => f },
+          justReassignmentFilters = justReassignmentFilters.collect {
+            case (f: DecomposedTemplatePartyFilter) => f
+          },
           payloadQueriesLimiter = payloadQueriesLimiter,
           idPageSizing = idPageSizing,
           descendingOrder = descendingOrder,
           skipPruningChecks = skipPruningChecks,
+          rawEventFilter = None,
         )
       case None if internalUpdateFormat.includeReassignments.isDefined =>
         doStreamAcsDelta(
@@ -268,6 +276,7 @@ class UpdatesStreamReader(
           idPageSizing = idPageSizing,
           descendingOrder = descendingOrder,
           skipPruningChecks = skipPruningChecks,
+          rawEventFilter = contractIdFiltersPartiesCheck(internalUpdateFormat),
         )
 
       case None => Source.empty
@@ -401,6 +410,7 @@ class UpdatesStreamReader(
       idPageSizing: IdPageSizing,
       descendingOrder: Boolean,
       skipPruningChecks: Boolean,
+      rawEventFilter: Option[RawEvent => Boolean],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[RawEvent, NotUsed] = {
@@ -411,19 +421,69 @@ class UpdatesStreamReader(
     val deactivateEventIdQueriesLimiter =
       new QueueBasedConcurrencyLimiter(maxParallelIdDeactivateQueries, executionContext)
 
+    val acsDeltaMetrics = dbMetrics.updatesAcsDeltaStream
+
+    def filterKind(filter: DecomposedFilter): String = filter match {
+      case _: DecomposedTemplatePartyFilter => "Stakeholder"
+      case _: DecomposedContractIdFilter => "ContractId"
+    }
+
+    def activateIdStreamName(filter: DecomposedFilter): String =
+      s"Update event seq IDs for Activate${filterKind(filter)} $filter"
+
+    def deactivateIdStreamName(filter: DecomposedFilter): String =
+      s"Update event seq IDs for Deactivate${filterKind(filter)} $filter"
+
+    def activateIdsMetric(filter: DecomposedFilter): DatabaseMetrics = filter match {
+      case _: DecomposedTemplatePartyFilter => acsDeltaMetrics.fetchEventActivateIdsStakeholder
+      case _: DecomposedContractIdFilter => acsDeltaMetrics.fetchEventActivateIdsContractId
+    }
+
+    def activateIdsFilteredRangeMetric(filter: DecomposedFilter): DatabaseMetrics = filter match {
+      case _: DecomposedTemplatePartyFilter =>
+        acsDeltaMetrics.fetchEventActivateIdsStakeholderFilteredRange
+      case _: DecomposedContractIdFilter =>
+        acsDeltaMetrics.fetchEventActivateIdsContractIdFilteredRange
+    }
+
+    def activateIdsFilteredIdsMetric(filter: DecomposedFilter): DatabaseMetrics = filter match {
+      case _: DecomposedTemplatePartyFilter =>
+        acsDeltaMetrics.fetchEventActivateIdsStakeholderFilteredIds
+      case _: DecomposedContractIdFilter =>
+        acsDeltaMetrics.fetchEventActivateIdsContractIdFilteredIds
+    }
+
+    def deactivateIdsMetric(filter: DecomposedFilter): DatabaseMetrics = filter match {
+      case _: DecomposedTemplatePartyFilter => acsDeltaMetrics.fetchEventDeactivateIdsStakeholder
+      case _: DecomposedContractIdFilter => acsDeltaMetrics.fetchEventDeactivateIdsContractId
+    }
+
+    def deactivateIdsFilteredRangeMetric(filter: DecomposedFilter): DatabaseMetrics =
+      filter match {
+        case _: DecomposedTemplatePartyFilter =>
+          acsDeltaMetrics.fetchEventDeactivateIdsStakeholderFilteredRange
+        case _: DecomposedContractIdFilter =>
+          acsDeltaMetrics.fetchEventDeactivateIdsContractIdFilteredRange
+      }
+
+    def deactivateIdsFilteredIdsMetric(filter: DecomposedFilter): DatabaseMetrics =
+      filter match {
+        case _: DecomposedTemplatePartyFilter =>
+          acsDeltaMetrics.fetchEventDeactivateIdsStakeholderFilteredIds
+        case _: DecomposedContractIdFilter =>
+          acsDeltaMetrics.fetchEventDeactivateIdsContractIdFilteredIds
+      }
+
     val idsActivate =
       txAndReassignmentFilters.iterator
         .map(filter =>
           fetchIdsNonFiltered(
             queryRange = queryRange,
-            idStreamName = s"Update event seq IDs for ActivateStakeholder $filter",
-            idPageQuery = eventStorageBackend.updateStreamingQueries.activateStakeholderIds(
-              witnessO = filter.party,
-              templateIdO = filter.templateId,
-            ),
+            idStreamName = activateIdStreamName(filter),
+            idPageQuery = eventStorageBackend.updateStreamingQueries.activateIds(filter),
             idPageSizing = idPageSizing,
             maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
-            metric = dbMetrics.updatesAcsDeltaStream.fetchEventActivateIdsStakeholder,
+            metric = activateIdsMetric(filter),
             descendingOrder = descendingOrder,
           )
         )
@@ -431,20 +491,14 @@ class UpdatesStreamReader(
           justTxFilters.iterator.map(filter =>
             fetchIdsFiltered(
               queryRange = queryRange,
-              idStreamName =
-                s"Update event seq IDs for ActivateStakeholder $filter for only Create type",
+              idStreamName = s"${activateIdStreamName(filter)} for only Create type",
               idFilterPageQuery = eventStorageBackend.updateStreamingQueries
-                .activateStakeholderIds(
-                  witnessO = filter.party,
-                  templateIdO = filter.templateId,
-                )
+                .activateIds(filter)
                 .filteredForEventTypes(Set(PersistentEventType.Create, PersistentEventType.Add)),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
-              metricForLast =
-                dbMetrics.updatesAcsDeltaStream.fetchEventActivateIdsStakeholderFilteredRange,
-              metricFiltered =
-                dbMetrics.updatesAcsDeltaStream.fetchEventActivateIdsStakeholderFilteredIds,
+              metricForLast = activateIdsFilteredRangeMetric(filter),
+              metricFiltered = activateIdsFilteredIdsMetric(filter),
               descendingOrder = descendingOrder,
             )
           )
@@ -453,20 +507,14 @@ class UpdatesStreamReader(
           justReassignmentFilters.iterator.map(filter =>
             fetchIdsFiltered(
               queryRange = queryRange,
-              idStreamName =
-                s"Update event seq IDs for ActivateStakeholder $filter for only Assign type",
+              idStreamName = s"${activateIdStreamName(filter)} for only Assign type",
               idFilterPageQuery = eventStorageBackend.updateStreamingQueries
-                .activateStakeholderIds(
-                  witnessO = filter.party,
-                  templateIdO = filter.templateId,
-                )
+                .activateIds(filter)
                 .filteredForEventTypes(Set(PersistentEventType.Assign, PersistentEventType.Add)),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
-              metricForLast =
-                dbMetrics.updatesAcsDeltaStream.fetchEventActivateIdsStakeholderFilteredRange,
-              metricFiltered =
-                dbMetrics.updatesAcsDeltaStream.fetchEventActivateIdsStakeholderFilteredIds,
+              metricForLast = activateIdsFilteredRangeMetric(filter),
+              metricFiltered = activateIdsFilteredIdsMetric(filter),
               descendingOrder = descendingOrder,
             )
           )
@@ -485,14 +533,11 @@ class UpdatesStreamReader(
         .map(filter =>
           fetchIdsNonFiltered(
             queryRange = queryRange,
-            idStreamName = s"Update event seq IDs for DeactivateStakeholder $filter",
-            idPageQuery = eventStorageBackend.updateStreamingQueries.deactivateStakeholderIds(
-              witnessO = filter.party,
-              templateIdO = filter.templateId,
-            ),
+            idStreamName = deactivateIdStreamName(filter),
+            idPageQuery = eventStorageBackend.updateStreamingQueries.deactivateIds(filter),
             idPageSizing = idPageSizing,
             maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
-            metric = dbMetrics.updatesAcsDeltaStream.fetchEventDeactivateIdsStakeholder,
+            metric = deactivateIdsMetric(filter),
             descendingOrder = descendingOrder,
           )
         )
@@ -500,22 +545,16 @@ class UpdatesStreamReader(
           justTxFilters.iterator.map(filter =>
             fetchIdsFiltered(
               queryRange = queryRange,
-              idStreamName =
-                s"Update event seq IDs for DeactivateStakeholder $filter for only ConsumingExercise type",
+              idStreamName = s"${deactivateIdStreamName(filter)} for only ConsumingExercise type",
               idFilterPageQuery = eventStorageBackend.updateStreamingQueries
-                .deactivateStakeholderIds(
-                  witnessO = filter.party,
-                  templateIdO = filter.templateId,
-                )
+                .deactivateIds(filter)
                 .filteredForEventTypes(
                   Set(PersistentEventType.ConsumingExercise, PersistentEventType.Remove)
                 ),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
-              metricForLast =
-                dbMetrics.updatesAcsDeltaStream.fetchEventDeactivateIdsStakeholderFilteredRange,
-              metricFiltered =
-                dbMetrics.updatesAcsDeltaStream.fetchEventDeactivateIdsStakeholderFilteredIds,
+              metricForLast = deactivateIdsFilteredRangeMetric(filter),
+              metricFiltered = deactivateIdsFilteredIdsMetric(filter),
               descendingOrder = descendingOrder,
             )
           )
@@ -524,22 +563,16 @@ class UpdatesStreamReader(
           justReassignmentFilters.iterator.map(filter =>
             fetchIdsFiltered(
               queryRange = queryRange,
-              idStreamName =
-                s"Update event seq IDs for DeactivateStakeholder $filter for only Unassign type",
+              idStreamName = s"${deactivateIdStreamName(filter)} for only Unassign type",
               idFilterPageQuery = eventStorageBackend.updateStreamingQueries
-                .deactivateStakeholderIds(
-                  witnessO = filter.party,
-                  templateIdO = filter.templateId,
-                )
+                .deactivateIds(filter)
                 .filteredForEventTypes(
                   Set(PersistentEventType.Unassign, PersistentEventType.Remove)
                 ),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
-              metricForLast =
-                dbMetrics.updatesAcsDeltaStream.fetchEventDeactivateIdsStakeholderFilteredRange,
-              metricFiltered =
-                dbMetrics.updatesAcsDeltaStream.fetchEventDeactivateIdsStakeholderFilteredIds,
+              metricForLast = deactivateIdsFilteredRangeMetric(filter),
+              metricFiltered = deactivateIdsFilteredIdsMetric(filter),
               descendingOrder = descendingOrder,
             )
           )
@@ -564,9 +597,9 @@ class UpdatesStreamReader(
             )(
               eventSequentialIds = Ids(ids),
               requestingPartiesForTx =
-                txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+                txInternalEventFormat.flatMap(_.eventFilter.allFilterParties),
               requestingPartiesForReassignment =
-                reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+                reassignmentInternalEventFormat.flatMap(_.eventFilter.allFilterParties),
             )(connection)
             .reverseIfDescendingOrder(descendingOrder),
         maxParallelPayloadQueries = maxParallelPayloadActivateQueries,
@@ -576,6 +609,7 @@ class UpdatesStreamReader(
         skipPruningChecks = skipPruningChecks,
         queryName = "AcsDelta/Activate",
         internalUpdateFormat = internalUpdateFormat,
+        rawEventFilter = rawEventFilter,
       )
     val payloadsDeactivate =
       fetchPayloads(
@@ -588,9 +622,9 @@ class UpdatesStreamReader(
             )(
               eventSequentialIds = Ids(ids),
               requestingPartiesForTx =
-                txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+                txInternalEventFormat.flatMap(_.eventFilter.allFilterParties),
               requestingPartiesForReassignment =
-                reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+                reassignmentInternalEventFormat.flatMap(_.eventFilter.allFilterParties),
             )(connection)
             .reverseIfDescendingOrder(descendingOrder),
         maxParallelPayloadQueries = maxParallelPayloadActivateQueries,
@@ -600,6 +634,7 @@ class UpdatesStreamReader(
         skipPruningChecks = skipPruningChecks,
         queryName = "AcsDelta/Deactivate",
         internalUpdateFormat = internalUpdateFormat,
+        rawEventFilter = rawEventFilter,
       )
 
     payloadsActivate
@@ -611,13 +646,14 @@ class UpdatesStreamReader(
       txInternalEventFormat: Option[InternalEventFormat],
       reassignmentInternalEventFormat: Option[InternalEventFormat],
       internalUpdateFormat: InternalUpdateFormat,
-      txAndReassignmentFilters: Set[DecomposedFilter],
-      justTxFilters: Set[DecomposedFilter],
-      justReassignmentFilters: Set[DecomposedFilter],
+      txAndReassignmentFilters: Set[DecomposedTemplatePartyFilter],
+      justTxFilters: Set[DecomposedTemplatePartyFilter],
+      justReassignmentFilters: Set[DecomposedTemplatePartyFilter],
       payloadQueriesLimiter: QueueBasedConcurrencyLimiter,
       idPageSizing: IdPageSizing,
       descendingOrder: Boolean,
       skipPruningChecks: Boolean,
+      rawEventFilter: Option[RawEvent => Boolean],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[RawEvent, NotUsed] = {
@@ -637,10 +673,7 @@ class UpdatesStreamReader(
           fetchIdsNonFiltered(
             queryRange = queryRange,
             idStreamName = s"Update event seq IDs for ActivateStakeholder $filter",
-            idPageQuery = eventStorageBackend.updateStreamingQueries.activateStakeholderIds(
-              witnessO = filter.party,
-              templateIdO = filter.templateId,
-            ),
+            idPageQuery = eventStorageBackend.updateStreamingQueries.activateIds(filter),
             idPageSizing = idPageSizing,
             maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
             metric = dbMetrics.updatesLedgerEffectsStream.fetchEventActivateIdsStakeholder,
@@ -654,10 +687,7 @@ class UpdatesStreamReader(
               idStreamName =
                 s"Update event seq IDs for ActivateStakeholder $filter for only Create type",
               idFilterPageQuery = eventStorageBackend.updateStreamingQueries
-                .activateStakeholderIds(
-                  witnessO = filter.party,
-                  templateIdO = filter.templateId,
-                )
+                .activateIds(filter)
                 .filteredForEventTypes(Set(PersistentEventType.Create, PersistentEventType.Add)),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
@@ -676,10 +706,7 @@ class UpdatesStreamReader(
               idStreamName =
                 s"Update event seq IDs for ActivateStakeholder $filter for only Assign type",
               idFilterPageQuery = eventStorageBackend.updateStreamingQueries
-                .activateStakeholderIds(
-                  witnessO = filter.party,
-                  templateIdO = filter.templateId,
-                )
+                .activateIds(filter)
                 .filteredForEventTypes(Set(PersistentEventType.Assign, PersistentEventType.Add)),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
@@ -697,8 +724,7 @@ class UpdatesStreamReader(
               queryRange = queryRange,
               idStreamName = s"Update event seq IDs for ActivateWitnesses $filter",
               idPageQuery = eventStorageBackend.updateStreamingQueries.activateWitnessesIds(
-                witnessO = filter.party,
-                templateIdO = filter.templateId,
+                filter
               ),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
@@ -714,8 +740,7 @@ class UpdatesStreamReader(
               queryRange = queryRange,
               idStreamName = s"Update event seq IDs for ActivateWitnesses $filter",
               idPageQuery = eventStorageBackend.updateStreamingQueries.activateWitnessesIds(
-                witnessO = filter.party,
-                templateIdO = filter.templateId,
+                filter
               ),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
@@ -738,10 +763,7 @@ class UpdatesStreamReader(
           fetchIdsNonFiltered(
             queryRange = queryRange,
             idStreamName = s"Update event seq IDs for DeactivateStakeholder $filter",
-            idPageQuery = eventStorageBackend.updateStreamingQueries.deactivateStakeholderIds(
-              witnessO = filter.party,
-              templateIdO = filter.templateId,
-            ),
+            idPageQuery = eventStorageBackend.updateStreamingQueries.deactivateIds(filter),
             idPageSizing = idPageSizing,
             maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
             metric = dbMetrics.updatesLedgerEffectsStream.fetchEventDeactivateIdsStakeholder,
@@ -755,10 +777,7 @@ class UpdatesStreamReader(
               idStreamName =
                 s"Update event seq IDs for DeactivateStakeholder $filter for only ConsumingExercise type",
               idFilterPageQuery = eventStorageBackend.updateStreamingQueries
-                .deactivateStakeholderIds(
-                  witnessO = filter.party,
-                  templateIdO = filter.templateId,
-                )
+                .deactivateIds(filter)
                 .filteredForEventTypes(
                   Set(PersistentEventType.ConsumingExercise, PersistentEventType.Remove)
                 ),
@@ -779,10 +798,7 @@ class UpdatesStreamReader(
               idStreamName =
                 s"Update event seq IDs for DeactivateStakeholder $filter for only Unassign type",
               idFilterPageQuery = eventStorageBackend.updateStreamingQueries
-                .deactivateStakeholderIds(
-                  witnessO = filter.party,
-                  templateIdO = filter.templateId,
-                )
+                .deactivateIds(filter)
                 .filteredForEventTypes(
                   Set(PersistentEventType.Unassign, PersistentEventType.Remove)
                 ),
@@ -802,8 +818,7 @@ class UpdatesStreamReader(
               queryRange = queryRange,
               idStreamName = s"Update event seq IDs for DeactivateWitnesses $filter",
               idPageQuery = eventStorageBackend.updateStreamingQueries.deactivateWitnessesIds(
-                witnessO = filter.party,
-                templateIdO = filter.templateId,
+                filter
               ),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
@@ -819,8 +834,7 @@ class UpdatesStreamReader(
               queryRange = queryRange,
               idStreamName = s"Update event seq IDs for DeactivateWitnesses $filter",
               idPageQuery = eventStorageBackend.updateStreamingQueries.deactivateWitnessesIds(
-                witnessO = filter.party,
-                templateIdO = filter.templateId,
+                filter
               ),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
@@ -843,10 +857,7 @@ class UpdatesStreamReader(
           fetchIdsNonFiltered(
             queryRange = queryRange,
             idStreamName = s"Update event seq IDs for VariousWitnesses $filter",
-            idPageQuery = eventStorageBackend.updateStreamingQueries.variousWitnessIds(
-              witnessO = filter.party,
-              templateIdO = filter.templateId,
-            ),
+            idPageQuery = eventStorageBackend.updateStreamingQueries.variousWitnessIds(filter),
             idPageSizing = idPageSizing,
             maxParallelIdQueriesLimiter = variousWitnessedEventIdQueriesLimiter,
             metric = dbMetrics.updatesLedgerEffectsStream.fetchEventVariousIdsWitness,
@@ -859,10 +870,7 @@ class UpdatesStreamReader(
             fetchIdsNonFiltered(
               queryRange = queryRange,
               idStreamName = s"Update event seq IDs for VariousWitnesses $filter",
-              idPageQuery = eventStorageBackend.updateStreamingQueries.variousWitnessIds(
-                witnessO = filter.party,
-                templateIdO = filter.templateId,
-              ),
+              idPageQuery = eventStorageBackend.updateStreamingQueries.variousWitnessIds(filter),
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = variousWitnessedEventIdQueriesLimiter,
               metric = dbMetrics.updatesLedgerEffectsStream.fetchEventVariousIdsWitness,
@@ -890,9 +898,9 @@ class UpdatesStreamReader(
             )(
               eventSequentialIds = Ids(ids),
               requestingPartiesForTx =
-                txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+                txInternalEventFormat.flatMap(_.eventFilter.allFilterParties),
               requestingPartiesForReassignment =
-                reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+                reassignmentInternalEventFormat.flatMap(_.eventFilter.allFilterParties),
             )(connection)
             .reverseIfDescendingOrder(descendingOrder),
         maxParallelPayloadQueries = maxParallelPayloadActivateQueries,
@@ -902,6 +910,7 @@ class UpdatesStreamReader(
         skipPruningChecks = skipPruningChecks,
         queryName = "LedgerEffects/Activate",
         internalUpdateFormat = internalUpdateFormat,
+        rawEventFilter = rawEventFilter,
       )
     val payloadsDeactivate =
       fetchPayloads(
@@ -914,9 +923,9 @@ class UpdatesStreamReader(
             )(
               eventSequentialIds = Ids(ids),
               requestingPartiesForTx =
-                txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+                txInternalEventFormat.flatMap(_.eventFilter.allFilterParties),
               requestingPartiesForReassignment =
-                reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+                reassignmentInternalEventFormat.flatMap(_.eventFilter.allFilterParties),
             )(connection)
             .reverseIfDescendingOrder(descendingOrder),
         maxParallelPayloadQueries = maxParallelPayloadDeactivateQueries,
@@ -926,6 +935,7 @@ class UpdatesStreamReader(
         skipPruningChecks = skipPruningChecks,
         queryName = "LedgerEffects/Deactivate",
         internalUpdateFormat = internalUpdateFormat,
+        rawEventFilter = rawEventFilter,
       )
     val payloadsVariousWitnessed =
       fetchPayloads(
@@ -938,9 +948,9 @@ class UpdatesStreamReader(
             )(
               eventSequentialIds = Ids(ids),
               requestingPartiesForTx =
-                txInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+                txInternalEventFormat.flatMap(_.eventFilter.allFilterParties),
               requestingPartiesForReassignment =
-                reassignmentInternalEventFormat.flatMap(_.templatePartiesFilter.allFilterParties),
+                reassignmentInternalEventFormat.flatMap(_.eventFilter.allFilterParties),
             )(connection)
             .reverseIfDescendingOrder(descendingOrder),
         maxParallelPayloadQueries = maxParallelPayloadVariousWitnessedQueries,
@@ -950,6 +960,7 @@ class UpdatesStreamReader(
         skipPruningChecks = skipPruningChecks,
         queryName = "LedgerEffects/VariousWitnessed",
         internalUpdateFormat = internalUpdateFormat,
+        rawEventFilter = rawEventFilter,
       )
 
     payloadsActivate
@@ -1017,6 +1028,31 @@ class UpdatesStreamReader(
         },
     )
 
+  private def contractIdFiltersPartiesCheck(
+      internalUpdateFormat: InternalUpdateFormat
+  ): Option[RawEvent => Boolean] = {
+    def filterEvent(readAsParty: Set[String])(event: RawEvent): Boolean =
+      event.witnessParties.exists(readAsParty)
+
+    def contractIdEventFilter(
+        filter: Option[EventFilter]
+    ): Option[RawEvent => Boolean] =
+      filter match {
+        // If there is contract id filter (validation ensures that it's exclusive with other filters) and we don't have read as any party, then we need to filter
+        case Some(ContractIdEventFilter(_, Some(readAsParty))) =>
+          Some(filterEvent(readAsParty.map(_.toString())))
+        case _ => None
+      }
+
+    contractIdEventFilter(
+      internalUpdateFormat.includeTransactions.map(_.internalEventFormat.eventFilter)
+    ).orElse(
+      contractIdEventFilter(
+        internalUpdateFormat.includeReassignments.map(_.eventFilter)
+      )
+    )
+  }
+
   private def mergeSortAndBatch(
       maxOutputBatchSize: Int,
       maxOutputBatchCount: Int,
@@ -1040,6 +1076,7 @@ class UpdatesStreamReader(
       skipPruningChecks: Boolean,
       queryName: String,
       internalUpdateFormat: InternalUpdateFormat,
+      rawEventFilter: Option[RawEvent => Boolean],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[RawEvent, NotUsed] = {
@@ -1063,6 +1100,7 @@ class UpdatesStreamReader(
               queryValidRange = queryValidRange,
               dbDispatcher = dbDispatcher,
               queryName = queryName,
+              rawEventFilter = rawEventFilter,
             )
           }
         }
@@ -1093,16 +1131,16 @@ object UpdatesStreamReader {
       eventFormat: InternalEventFormat
   )(event: RawEvent): Boolean = event match {
     case pe: RawFatAddEvent =>
-      eventFormat.templatePartiesFilter.apply(
-        pe.fatCreatedEventProperties.fatContract.templateId
-          .toFullIdentifier(pe.fatCreatedEventProperties.fatContract.packageName)
-          .toNameTypeConRef,
-        pe.fatCreatedEventProperties.fatContract.stakeholders.map(_.toString),
+      eventFormat.eventFilter.apply(
+        pe.templateId.toNameTypeConRef,
+        pe.fatContract.stakeholders.map(_.toString),
+        pe.contractId,
       )
     case pe: RawRemoveEvent =>
-      eventFormat.templatePartiesFilter.apply(
+      eventFormat.eventFilter.apply(
         pe.templateId.toNameTypeConRef,
         pe.witnessParties,
+        pe.contractId,
       )
     case _ => true
   }
@@ -1139,6 +1177,7 @@ object UpdatesStreamReader {
       queryValidRange: QueryValidRange,
       dbDispatcher: DbDispatcher,
       queryName: String,
+      rawEventFilter: Option[RawEvent => Boolean],
   )(implicit
       loggingContext: LoggingContextWithTrace,
       executionContext: ExecutionContext,
@@ -1175,6 +1214,9 @@ object UpdatesStreamReader {
         .flatMap(UpdateReader.withFatContractIfNeeded(contractStore))
     }
       .map(UpdateReader.tryToResolveFatInstance)
+      .map { resolved =>
+        rawEventFilter.fold(resolved)(resolved.filter)
+      }
       .map(_.pipe(filterParticipantEvents))
   }
 }

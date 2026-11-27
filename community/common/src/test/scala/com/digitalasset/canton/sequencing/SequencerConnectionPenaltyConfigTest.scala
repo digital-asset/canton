@@ -15,6 +15,7 @@ final class SequencerConnectionPenaltyConfigTest extends AnyWordSpec with BaseTe
     decayInterval = PositiveFiniteDuration.tryOfSeconds(3),
     halfLife = PositiveFiniteDuration.tryOfSeconds(30),
     zeroThreshold = PositiveDouble.tryCreate(0.01),
+    penaltyValues = PenaltyValues.default,
   )
 
   "SequencerConnectionPenaltyConfig" should {
@@ -43,6 +44,7 @@ final class SequencerConnectionPenaltyConfigTest extends AnyWordSpec with BaseTe
           decayInterval = interval,
           halfLife = halfLife,
           zeroThreshold = PositiveDouble.tryCreate(0.01),
+          penaltyValues = PenaltyValues.default,
         ).decayFactor.value
 
       factor(

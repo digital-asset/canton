@@ -1496,6 +1496,62 @@ class SBuiltinTest
       }
     }
 
+    "reject pathological strings in linear time" in {
+      import scala.concurrent.{Await, Future}
+      import scala.concurrent.ExecutionContext.Implicits.global
+      import scala.concurrent.duration.*
+
+      // Inputs that make a backtracking matcher try every split of the leading zeros before
+      // failing. With the former regex `([+-]?)0*(\d+)(\.(\d*[1-9]|0)0*)?` these take time
+      // quadratic in the input length: about 17s for 40k zeros, so hours for the sizes below.
+      // With the current regex they take milliseconds.
+      val n = 1000000
+      val testCases = Table(
+        "input",
+        () => "0" * n + "x",
+        () => "-" + "0" * n + "x",
+        () => "0" * n + ".",
+        () => "0" * n + "." + "0" * n + "x",
+      )
+      val builtin = e"""TEXT_TO_NUMERIC @10 ${w(10)}"""
+
+      forAll(testCases) { input =>
+        // Run in a Future so that a regression fails the test after the timeout rather than
+        // hanging it; java.util.regex does not react to thread interruption.
+        val result = Future(eval(Ast.EApp(builtin, Ast.EBuiltinLit(Ast.BLText(input())))))
+        Await.result(result, 30.seconds) shouldBe Right(SOptional(None))
+      }
+    }
+
+    "accept the same strings and extract the same groups as the former regex" in {
+      val formerFormat = """([+-]?)0*(\d+)(\.(\d*[1-9]|0)0*)?""".r.pattern
+      val currentFormat = SBuiltinFun.SBTextToNumeric.validFormat.pattern
+
+      def groups(pattern: java.util.regex.Pattern, s: String): Option[Seq[String]] = {
+        val m = pattern.matcher(s)
+        Option.when(m.matches())((1 to m.groupCount).map(m.group))
+      }
+
+      // Both regexes only distinguish five classes of characters: '0', [1-9], '.', [+-] and
+      // anything else. One representative per class is therefore enough to cover every
+      // behaviour on strings up to the given length.
+      val alphabet = "01.+x"
+      val maxLength = 9
+
+      var checked = 0
+      val mismatches = Seq.newBuilder[String]
+      def loop(prefix: String): Unit = {
+        if (groups(formerFormat, prefix) != groups(currentFormat, prefix))
+          mismatches += prefix
+        checked += 1
+        if (prefix.length < maxLength) alphabet.foreach(c => loop(prefix + c))
+      }
+      loop("")
+
+      checked shouldBe (0 to maxLength).map(k => List.fill(k)(alphabet.length).product).sum
+      mismatches.result() shouldBe empty
+    }
+
   }
 
   "ArithmeticBuiltins" - {

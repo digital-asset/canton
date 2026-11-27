@@ -72,7 +72,7 @@ object AcsCommitmentSummaryProtocolMessage
   override def name: String = "AcsCommitmentSummaryProtocolMessage"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.minimum)(
       v32.AcsCommitmentSummaryProtocolMessage
     )(
       supportedProtoVersionPVV(_)(fromProtoV32),

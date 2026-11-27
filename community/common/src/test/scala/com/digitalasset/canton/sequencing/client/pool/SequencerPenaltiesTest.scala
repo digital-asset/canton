@@ -4,9 +4,10 @@
 package com.digitalasset.canton.sequencing.client.pool
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeDouble, PositiveDouble}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeDouble, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.crypto.Fingerprint
-import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
+import com.digitalasset.canton.sequencing.PenaltyValues
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.{Penalty, PenaltyKind}
 import com.digitalasset.canton.topology.{Namespace, SequencerId}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -96,6 +97,18 @@ final class SequencerPenaltiesTest extends AnyWordSpec with BaseTest {
       penalties.increase(seq1, Penalty.tryCreate(1), reason = "test")
 
       penalties.get(seq1) shouldBe NonNegativeDouble.one
+    }
+
+    "resolve penalty kinds to the configured values" in {
+      PenaltyValues.default.penalty(PenaltyKind.SubscriptionPermissionDenied) shouldBe Penalty
+        .tryCreate(5)
+
+      val custom = PenaltyValues.default.copy(
+        subscriptionNonRetriableFailure = PositiveInt.tryCreate(42),
+        sequencerOverloaded = PositiveInt.tryCreate(3),
+      )
+      custom.penalty(PenaltyKind.SubscriptionNonRetriableFailure) shouldBe Penalty.tryCreate(42)
+      custom.penalty(PenaltyKind.SequencerOverloaded) shouldBe Penalty.tryCreate(3)
     }
   }
 }

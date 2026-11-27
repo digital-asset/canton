@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.api.auth.services
 
 import com.daml.ledger.api.v2.admin.party_management_alpha_service.*
 import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyManagementAlphaServiceGrpc.PartyManagementAlphaService
-import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
+import com.digitalasset.canton.auth.{Authorizer, ClaimApiArea, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.RequiredClaims
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
@@ -53,16 +53,25 @@ object PartyManagementAlphaServiceAuthorization {
 
   def getAddPartyStatusClaims: List[RequiredClaim[GetAddPartyStatusRequest]] =
     RequiredClaims(
-      RequiredClaim.AdminOrIdpAdmin[GetAddPartyStatusRequest]()
+      // This will need to updated to check the identity provider ID of the
+      // party to replicate.
+      RequiredClaim.ApiArea(ClaimApiArea.partiesWrite.area),
+      RequiredClaim.ApiArea(ClaimApiArea.idpsWrite.area),
     )
 
   def generatePartyTopologyUpdateClaims: List[RequiredClaim[GeneratePartyTopologyUpdateRequest]] =
     RequiredClaims(
-      RequiredClaim.AdminOrIdpAdmin[GeneratePartyTopologyUpdateRequest]()
+      // This will need to updated to check the identity provider ID of the
+      // party to replicate.
+      RequiredClaim.ApiArea(ClaimApiArea.partiesWrite.area),
+      RequiredClaim.ApiArea(ClaimApiArea.idpsWrite.area),
     )
 
   def authorizePartyUpdateClaims: List[RequiredClaim[AuthorizePartyUpdateRequest]] =
     RequiredClaims(
-      RequiredClaim.AdminOrIdpAdmin[AuthorizePartyUpdateRequest]()
+      // This will need to updated to check the identity provider ID of the
+      // party to replicate.
+      RequiredClaim.ApiArea(ClaimApiArea.partiesWrite.area),
+      RequiredClaim.ApiArea(ClaimApiArea.idpsWrite.area),
     )
 }

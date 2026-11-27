@@ -9,7 +9,7 @@ import com.daml.ledger.api.v2.event_query_service.{
   GetEventsByContractIdRequest,
   GetEventsByContractIdResponse,
 }
-import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
+import com.digitalasset.canton.auth.{Authorizer, ClaimApiArea, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.RequiredClaims
 import com.digitalasset.canton.ledger.api.auth.services.EventQueryServiceAuthorization.getEventsByContractIdClaims
@@ -41,7 +41,8 @@ object EventQueryServiceAuthorization {
   def getEventsByContractIdClaims(
       request: GetEventsByContractIdRequest
   ): List[RequiredClaim[GetEventsByContractIdRequest]] =
-    request.eventFormat.toList.flatMap(
-      RequiredClaims.eventFormatClaims[GetEventsByContractIdRequest]
-    )
+    RequiredClaim.ApiArea[GetEventsByContractIdRequest](ClaimApiArea.ledgerRead.area) ::
+      request.eventFormat.toList.flatMap(
+        RequiredClaims.eventFormatClaims[GetEventsByContractIdRequest]
+      )
 }

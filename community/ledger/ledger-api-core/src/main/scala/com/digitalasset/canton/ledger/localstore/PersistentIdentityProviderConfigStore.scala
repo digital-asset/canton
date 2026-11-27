@@ -44,7 +44,7 @@ class PersistentIdentityProviderConfigStore(
       for {
         _ <- idpConfigDoesNotExist(id)
         _ <- idpConfigByIssuerDoesNotExist(
-          Some(identityProviderConfig.issuer),
+          Some(identityProviderConfig.issuer.unwrap),
           identityProviderConfig.identityProviderId,
         )
         _ = backend.createIdentityProviderConfig(identityProviderConfig)(connection)
@@ -97,7 +97,10 @@ class PersistentIdentityProviderConfigStore(
       val id = update.identityProviderId
       for {
         _ <- idpConfigExists(id)
-        _ <- idpConfigByIssuerDoesNotExist(update.issuerUpdate, update.identityProviderId)
+        _ <- idpConfigByIssuerDoesNotExist(
+          update.issuerUpdate.map(_.unwrap),
+          update.identityProviderId,
+        )
         _ <- updateIssuer(update)(connection)
         _ <- updateJwksUrl(update)(connection)
         _ <- updateAudience(update)(connection)
@@ -133,14 +136,16 @@ class PersistentIdentityProviderConfigStore(
       update: IdentityProviderConfigUpdate
   )(connection: Connection): Result[Unit] = {
     val execute =
-      update.issuerUpdate.forall(backend.updateIssuer(update.identityProviderId, _)(connection))
+      update.issuerUpdate.forall(issuer =>
+        backend.updateIssuer(update.identityProviderId, issuer.unwrap)(connection)
+      )
     Either.cond(execute, (), IdentityProviderConfigNotFound(update.identityProviderId))
   }
   private def updateJwksUrl(
       update: IdentityProviderConfigUpdate
   )(connection: Connection): Result[Unit] = {
-    val execute = update.jwksUrlUpdate.forall(
-      backend.updateJwksUrl(update.identityProviderId, _)(connection)
+    val execute = update.jwksUrlUpdate.forall(jwksUrl =>
+      backend.updateJwksUrl(update.identityProviderId, jwksUrl.toJwksUrl)(connection)
     )
     Either.cond(execute, (), IdentityProviderConfigNotFound(update.identityProviderId))
   }
@@ -148,8 +153,8 @@ class PersistentIdentityProviderConfigStore(
   private def updateAudience(
       update: IdentityProviderConfigUpdate
   )(connection: Connection): Result[Unit] = {
-    val execute = update.audienceUpdate.forall(
-      backend.updateAudience(update.identityProviderId, _)(connection)
+    val execute = update.audienceUpdate.forall(audience =>
+      backend.updateAudience(update.identityProviderId, audience.map(_.unwrap))(connection)
     )
     Either.cond(execute, (), IdentityProviderConfigNotFound(update.identityProviderId))
   }

@@ -24,7 +24,7 @@ import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, GrpcError}
 import com.digitalasset.canton.sequencing.MaybeCompressedSequencedEventHandler
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.SendAsyncClientResponseError
 import com.digitalasset.canton.sequencing.client.pool.Connection.{ConnectionConfig, ConnectionError}
-import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.Penalty
+import com.digitalasset.canton.sequencing.client.pool.SequencerPenalties.PenaltyKind
 import com.digitalasset.canton.sequencing.client.transports.{
   GrpcClientTransportHelpers,
   GrpcSequencerClientAuth,
@@ -88,10 +88,10 @@ class GrpcSequencerConnection(
   override def fatal(reason: String)(implicit traceContext: TraceContext): Unit =
     underlying.fatal(reason)
 
-  override def increasePenalty(amount: Penalty, reason: String)(implicit
+  override def increasePenalty(kind: PenaltyKind, reason: String)(implicit
       traceContext: TraceContext
   ): Unit =
-    penaltyModifier.increase(amount, reason)
+    penaltyModifier.increase(kind, reason)
 
   override def onClosed(): Unit =
     LifeCycle.close(clientAuth)(logger)

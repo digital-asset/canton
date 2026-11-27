@@ -338,9 +338,7 @@ final class AssignmentProcessingStepsTest
         persistentState: SyncPersistentState,
     ): FutureUnlessShutdown[Unit] =
       for {
-        _ <- valueOrFail(persistentState.reassignmentStore.addUnassignmentData(reassignmentData))(
-          "add reassignment data failed"
-        )
+        _ <- persistentState.reassignmentStore.addUnassignmentData(reassignmentData)
       } yield ()
 
     val submissionParam = SubmissionParam(
@@ -670,11 +668,7 @@ final class AssignmentProcessingStepsTest
         deps <- statefulDependencies
         (persistentState, ephemeralState) = deps
 
-        _ <- valueOrFail(
-          persistentState.reassignmentStore.addUnassignmentData(unassignmentData)
-        )(
-          "add reassignment data failed"
-        ).failOnShutdown
+        _ <- persistentState.reassignmentStore.addUnassignmentData(unassignmentData).failOnShutdown
 
         fullAssignmentTree = fullAssignmentTreeFromUnassignmentData(unassignmentData)
 
@@ -890,11 +884,9 @@ final class AssignmentProcessingStepsTest
           deps <- statefulDependencies
           (persistentState, ephemeralState) = deps
 
-          _ <- valueOrFail(
-            persistentState.reassignmentStore.addUnassignmentData(unassignmentData)
-          )(
-            "add reassignment data failed"
-          ).failOnShutdown
+          _ <- persistentState.reassignmentStore
+            .addUnassignmentData(unassignmentData)
+            .failOnShutdown
 
           result <-
             valueOrFail(
@@ -973,8 +965,7 @@ final class AssignmentProcessingStepsTest
       PublishUpdateViaRecordOrderPublisher.noop,
       trafficCost = NonNegativeLong.tryCreate(123L),
     )
-    val mockDeliver = mock[Deliver[Batch[DefaultOpenEnvelope]]]
-    when(mockDeliver.timestamp).thenReturn(CantonTimestamp.Epoch)
+    val resultTs = CantonTimestamp.Epoch
 
     "succeed without errors" in {
 
@@ -985,9 +976,7 @@ final class AssignmentProcessingStepsTest
         result <- valueOrFail(
           assignmentProcessingSteps
             .getCommitSetAndContractsToBeStoredAndEventFactory(
-              NoOpeningErrors(
-                AggregatedSignedContent(mockDeliver, Signature.noSignature, testedProtocolVersion)
-              ),
+              resultTs,
               Verdict.Approve.create(testedProtocolVersion),
               pendingRequestData,
               None,
@@ -1007,13 +996,7 @@ final class AssignmentProcessingStepsTest
             valueOrFail(
               assignmentProcessingSteps
                 .getCommitSetAndContractsToBeStoredAndEventFactory(
-                  NoOpeningErrors(
-                    AggregatedSignedContent(
-                      mockDeliver,
-                      Signature.noSignature,
-                      testedProtocolVersion,
-                    )
-                  ),
+                  resultTs,
                   Verdict.Approve.create(testedProtocolVersion),
                   // request used MediatorGroupIndex.zero
                   pendingRequestData
@@ -1049,9 +1032,7 @@ final class AssignmentProcessingStepsTest
           valueOrFail(
             assignmentProcessingSteps
               .getCommitSetAndContractsToBeStoredAndEventFactory(
-                NoOpeningErrors(
-                  AggregatedSignedContent(mockDeliver, Signature.noSignature, testedProtocolVersion)
-                ),
+                resultTs,
                 Verdict.Approve.create(testedProtocolVersion),
                 failingAssignmentValidation,
                 None,
@@ -1073,9 +1054,7 @@ final class AssignmentProcessingStepsTest
         (_persistentState, state) = deps
         result <- steps
           .getCommitSetAndContractsToBeStoredAndEventFactory(
-            NoOpeningErrors(
-              AggregatedSignedContent(mockDeliver, Signature.noSignature, testedProtocolVersion)
-            ),
+            resultTs,
             Verdict.Approve.create(testedProtocolVersion),
             pendingAssignment,
             None,
@@ -1194,9 +1173,7 @@ final class AssignmentProcessingStepsTest
           valueOrFail(
             assignmentProcessingSteps
               .getCommitSetAndContractsToBeStoredAndEventFactory(
-                NoOpeningErrors(
-                  AggregatedSignedContent(mockDeliver, Signature.noSignature, testedProtocolVersion)
-                ),
+                resultTs,
                 Verdict.Approve.create(testedProtocolVersion),
                 reassigningParticipantData,
                 None,
@@ -1216,9 +1193,7 @@ final class AssignmentProcessingStepsTest
           valueOrFail(
             assignmentProcessingSteps
               .getCommitSetAndContractsToBeStoredAndEventFactory(
-                NoOpeningErrors(
-                  AggregatedSignedContent(mockDeliver, Signature.noSignature, testedProtocolVersion)
-                ),
+                resultTs,
                 Verdict.Approve.create(testedProtocolVersion),
                 pendingRequestData,
                 None,

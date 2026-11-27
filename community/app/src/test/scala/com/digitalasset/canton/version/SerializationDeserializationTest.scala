@@ -37,6 +37,7 @@ import com.digitalasset.canton.sequencing.protocol.channel.{
   SequencerChannelMetadata,
   SequencerChannelSessionKey,
   SequencerChannelSessionKeyAck,
+  SequencerChannelSessionKeyContent,
 }
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.GeneratorsBftOrdering
@@ -291,7 +292,11 @@ final class SerializationDeserializationTest
         test(LsuTrafficState, version)
         test(SynchronizerPredecessor, version)
 
-        testContext(ViewParticipantData, (TestHash, version), version)
+        testContext(
+          ViewParticipantData,
+          ViewParticipantDataDeserializationContext(TestHash, version, testedTransactionLimits),
+          version,
+        )
         // the generated recipient trees can be quite big, even they are already limited
         testContext(
           Batch,
@@ -321,20 +326,21 @@ final class SerializationDeserializationTest
         test(GetTrafficStateForMemberResponse, version)
         test(TopologyStateForInitRequest, version)
         test(SubscriptionRequest, version)
-        if (version.isDev) {
+        if (version >= ProtocolVersion.sequencerChannel) {
           test(ConnectToSequencerChannelRequest, version)
           test(ConnectToSequencerChannelResponse, version)
           test(SequencerChannelMetadata, version)
           test(SequencerChannelConnectedToAllEndpoints, version)
           test(SequencerChannelSessionKey, version)
+          test(SequencerChannelSessionKeyContent, version)
           test(SequencerChannelSessionKeyAck, version)
 
-          test(PartyReplicationStatus, version)
           test(AcsReplicationStatus, version)
           test(AcsReplicationSourceParticipantMessage.AcsDigest, version)
           testContext(AcsReplicationSourceParticipantMessage, version, version)
           test(AcsReplicationTargetParticipantMessage, version)
         }
+        if (version.isDev) test(PartyReplicationStatus, version)
 
         // Generated sequenced events get quite big because each batched envelope has recipient trees
         // of quadratic size breadth * depth, so this test takes longer than other tests.
@@ -428,24 +434,24 @@ final class SerializationDeserializationTest
         // CantonBFT messages
         val availabilityContext =
           bftmodules.Availability.RemoteDissemination
-            .AvailabilityDeserializationContext(actualSender, BftOrdererLimits.default)
+            .AvailabilityDeserializationContext(actualSender, BftOrdererLimitsView.default)
         val consensusSegmentContext =
           bftmodules.ConsensusSegment.ConsensusMessage
             .ConsensusSegmentDeserializationContext(
               actualSender,
               Some(actualSender),
-              BftOrdererLimits.default,
+              BftOrdererLimitsView.default,
             )
         val consensusContext =
           bftmodules.Consensus.StateTransferMessage
-            .ConsensusDeserializationContext(actualSender, BftOrdererLimits.default)
+            .ConsensusDeserializationContext(actualSender, BftOrdererLimitsView.default)
         test(bft.topology.SequencingParameters, version)
         test(BlacklistLeaderSelectionPolicyState, version)
-        testContext(OrderingRequestBatch, BftOrdererLimits.default, version)
+        testContext(OrderingRequestBatch, BftOrdererLimitsView.default, version)
         testContext(
           bftmodules.ConsensusStatus.EpochStatus,
           bftmodules.ConsensusStatus
-            .ConsensusStatusDeserializationContext(actualSender, BftOrdererLimits.default),
+            .ConsensusStatusDeserializationContext(actualSender, BftOrdererLimitsView.default),
           version,
         )
 

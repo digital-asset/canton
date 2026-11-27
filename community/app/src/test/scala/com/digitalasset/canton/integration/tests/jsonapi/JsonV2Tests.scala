@@ -685,6 +685,7 @@ class JsonV2Tests
                         filtersByParty = Map(alice.unwrap -> Filters(Nil)),
                         filtersForAnyParty = None,
                         verbose = true,
+                        filtersByContractId = Seq.empty,
                       )
                     ),
                     transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
@@ -782,6 +783,7 @@ class JsonV2Tests
                       filtersByParty = Map(alice.unwrap -> Filters(Nil)),
                       filtersForAnyParty = None,
                       verbose = true,
+                      filtersByContractId = Seq.empty,
                     )
                   ),
                   transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
@@ -1445,6 +1447,7 @@ class JsonV2Tests
           filtersByParty = Map(party.unwrap -> Filters(Nil)),
           filtersForAnyParty = None,
           verbose = true,
+          filtersByContractId = Seq.empty,
         )
       ),
       transactionShape = transactionShape,
@@ -1546,6 +1549,7 @@ class JsonV2Tests
       )
     ),
     verbose = false,
+    filtersByContractId = Seq.empty,
   )
 
   private val updatesRequest = update_service.GetUpdatesRequest(
@@ -1574,6 +1578,7 @@ class JsonV2Tests
           filtersByParty = Map(party -> Filters(Nil)),
           filtersForAnyParty = None,
           verbose = false,
+          filtersByContractId = Seq.empty,
         )
       ),
       transactionShape = TRANSACTION_SHAPE_ACS_DELTA,

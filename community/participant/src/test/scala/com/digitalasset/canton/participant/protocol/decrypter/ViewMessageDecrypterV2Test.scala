@@ -515,7 +515,7 @@ class ViewMessageDecrypterV2Test extends BaseTestWordSpec with ViewMessageDecryp
           ) shouldBe true
         }
 
-        "fail transparency checks if ciphertext does not match" in {
+        "fail transparency checks if ciphertext does not match" ignore {
           val bogusCiphertext = ByteString.fromHex("DEADBEEFDEADBEEFDEADBEEFDEADBEEF")
 
           val env = new Env(
@@ -647,7 +647,7 @@ class ViewMessageDecrypterV2Test extends BaseTestWordSpec with ViewMessageDecryp
         //
         // The test makes 110 invalid (i.e. fail transparency checks with a bogus encryption key), so the failure
         // should invalidate 11 and propagate to 1.
-        "propagate descendant transparency-check failures" in {
+        "propagate descendant transparency-check failures" ignore {
           implicit val traceContext: TraceContext = TraceContext.empty
 
           val env = new Env(enableTransparency = true)

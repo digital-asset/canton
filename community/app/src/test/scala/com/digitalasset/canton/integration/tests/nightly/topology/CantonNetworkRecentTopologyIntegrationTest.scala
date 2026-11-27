@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.integration.tests.nightly.topology
 
+import cats.syntax.either.*
+import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.UsePostgres
@@ -17,7 +19,15 @@ import com.digitalasset.canton.synchronizer.sequencer.OnboardingStateForSequence
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.processing.SequencedTime
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
+import com.digitalasset.canton.topology.transaction.{
+  MultiTransactionSignature,
+  SignedTopologyTransaction,
+  SingleTransactionSignature,
+  TopologyTransaction,
+  TopologyTransactionDeserializationContext,
+}
 import com.digitalasset.canton.util.FutureUtil
+import com.digitalasset.nonempty.NonEmpty
 import com.google.cloud.storage.Storage.BlobListOption
 import com.google.cloud.storage.{Blob, StorageOptions}
 import io.circe.parser as circeParser
@@ -26,7 +36,7 @@ import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStre
 import org.apache.commons.io.FilenameUtils
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
-import org.apache.pekko.stream.scaladsl.Source
+import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import org.scalatest.time.{Minutes, Span}
 
@@ -263,6 +273,59 @@ trait CantonNetworkRecentTopologyIntegrationTest
         }
         .mapConcat(identity)
       (physicalSynchronizerId, source)
+    }
+
+    "accept every topology transaction rebuilt with the tested protocol version" in {
+      implicit env =>
+        val (_, source) = snapshotSource()
+        val static = StaticSynchronizerParameters.defaults(testedProtocolVersion).toInternal.value
+        val context =
+          TopologyTransactionDeserializationContext(static.synchronizerLimits.topologyLimitsView)
+        implicit val materializer: Materializer = Materializer(env.actorSystem)
+
+        // The next update of a mapping is a new transaction at the synchronizer's protocol
+        // version, so rebuild each transaction at the tested one and parse it with its checks.
+        def rebuildAndParse(stored: GenericStoredTopologyTransaction): Either[String, Unit] = {
+          val signedTx = stored.transaction
+          for {
+            tx <- TopologyTransaction.create(
+              signedTx.operation,
+              signedTx.serial,
+              signedTx.mapping,
+              testedProtocolVersion,
+            )
+            signatures = signedTx.signatures.map {
+              case single: SingleTransactionSignature =>
+                SingleTransactionSignature(tx.hash, single.signature)
+              case multi: MultiTransactionSignature =>
+                multi.copy(transactionHashes =
+                  NonEmpty.mk(Set, tx.hash, (multi.transactionHashes - signedTx.hash).toSeq*)
+                )
+            }
+            rebuilt <- SignedTopologyTransaction.create(
+              tx,
+              signatures,
+              signedTx.isProposal,
+              testedProtocolVersion,
+            )
+            _ <- SignedTopologyTransaction
+              .fromProtoV30(testedProtocolVersionValidation, context, rebuilt.toProtoV30)
+              .leftMap(_.message)
+          } yield ()
+        }
+
+        val failures = source
+          .mapConcat { stored =>
+            rebuildAndParse(stored).left.toOption.map { error =>
+              s"${stored.mapping.code} ${stored.mapping.maybeUid.fold(
+                  stored.mapping.namespace.toString
+                )(_.toString)} serial=${stored.serial}: $error"
+            }.toList
+          }
+          .runWith(Sink.seq)
+          .futureValue(Timeout(timeout))
+
+        failures shouldBe empty
     }
 
     "successfully validate the topology snapshot" in { implicit env =>

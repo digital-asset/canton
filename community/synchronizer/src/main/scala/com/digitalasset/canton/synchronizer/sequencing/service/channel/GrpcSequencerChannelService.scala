@@ -9,6 +9,7 @@ import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.synchronizer.sequencer.config.AlphaSequencerChannelConfig
+import com.digitalasset.canton.synchronizer.sequencing.authentication.MemberAuthenticationStore
 import com.digitalasset.canton.synchronizer.sequencing.authentication.grpc.IdentityContextHelper
 import com.digitalasset.canton.synchronizer.sequencing.service.AuthenticationCheck
 import com.digitalasset.canton.synchronizer.sequencing.service.channel.SequencerChannelInternalError.PoolCapacityExhausted
@@ -59,7 +60,9 @@ private[synchronizer] final class GrpcSequencerChannelService(
         requestObserver <- channelPool
           .createUninitializedChannel(
             observer,
-            authenticationTokenO.map(_.expireAt), // close channel when auth token expires
+            authenticatedMemberO,
+            authenticationTokenO,
+            // checks that the member is still authenticated when the channel is initialized
             authenticationCheck.authenticate(_, authenticatedMemberO),
             timeouts,
             loggerFactory,
@@ -134,6 +137,7 @@ object GrpcSequencerChannelService {
 
   def apply(
       authenticationCheck: AuthenticationCheck,
+      memberAuthenticationStore: MemberAuthenticationStore,
       clock: Clock,
       protocolVersion: ProtocolVersion,
       timeouts: ProcessingTimeout,
@@ -144,6 +148,7 @@ object GrpcSequencerChannelService {
       authenticationCheck,
       new GrpcSequencerChannelPool(
         clock,
+        memberAuthenticationStore,
         protocolVersion,
         timeouts,
         config.maxActiveSequencerChannels,

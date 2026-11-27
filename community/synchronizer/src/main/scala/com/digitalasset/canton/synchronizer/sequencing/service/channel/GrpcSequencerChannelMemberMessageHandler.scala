@@ -8,6 +8,7 @@ import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencing.channel.ConnectToSequencerChannelResponse
+import com.digitalasset.canton.sequencing.protocol.channel.SequencerChannelId
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -46,6 +47,7 @@ import v30.ConnectToSequencerChannelResponse.Response as v30_ChannelResponse
   *   Callback to notify the sequencer channel when this handler has completed.
   */
 private[channel] final class GrpcSequencerChannelMemberMessageHandler(
+    channelId: SequencerChannelId,
     val member: Member,
     private[channel] val responseObserver: ServerCallStreamObserver[
       v30.ConnectToSequencerChannelResponse
@@ -79,7 +81,7 @@ private[channel] final class GrpcSequencerChannelMemberMessageHandler(
           .unwrap
         responseE.fold(
           error => {
-            val errorMsg = s"Error converting request: $error"
+            val errorMsg = s"[$channelId] Error converting request: $error"
             logger.warn(errorMsg)
             val throwable = new StatusRuntimeException(
               io.grpc.Status.INVALID_ARGUMENT.withDescription(errorMsg)
@@ -90,7 +92,7 @@ private[channel] final class GrpcSequencerChannelMemberMessageHandler(
           },
           responseP => {
             if (logger.underlying.isDebugEnabled()) {
-              logger.debug(msg("Received payload", "payload"))
+              logger.debug(msg(s"[$channelId] Received payload", "payload"))
             }
             forwardToRecipient(
               _.receiveOnNext(
@@ -100,7 +102,7 @@ private[channel] final class GrpcSequencerChannelMemberMessageHandler(
               () => {
                 val error =
                   s"Sequencer channel error: Sequencer channel service received payload before recipient is ready"
-                logger.warn(error)
+                logger.warn(s"[$channelId] " + error)
                 complete(
                   _.onError(
                     new StatusRuntimeException(io.grpc.Status.UNAVAILABLE.withDescription(error))
@@ -115,7 +117,9 @@ private[channel] final class GrpcSequencerChannelMemberMessageHandler(
       override def onError(t: Throwable): Unit = {
         implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
         val doubleQuotedError = s"\"${t.getMessage}\""
-        logger.warn(msg(s"Member message handler received error $doubleQuotedError.", "error"))
+        logger.warn(
+          msg(s"[$channelId] Member message handler received error $doubleQuotedError.", "error")
+        )
         forwardToRecipient(_.receiveOnError(t), s"error $doubleQuotedError")
 
         // An error on the request observer implies that this handler's response observer is already closed
@@ -125,13 +129,13 @@ private[channel] final class GrpcSequencerChannelMemberMessageHandler(
 
       override def onCompleted(): Unit = {
         implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-        logger.info(msg("Completed request stream.", "completion"))
+        logger.info(msg(s"[$channelId] Completed request stream.", "completion"))
         forwardToRecipient(_.receiveOnCompleted(), s"completion")
 
         // Completing the request stream on a channel request implies that the response stream is also complete.
         // This helps avoid complexity related to having to track two separate directions for closing a channel
         // and also simplifies the interaction of bidirectional GRPC requests.
-        logger.info("Completing response stream after request stream completion")
+        logger.info(s"[$channelId] Completing response stream after request stream completion")
         complete()
       }
 
@@ -168,24 +172,24 @@ private[channel] final class GrpcSequencerChannelMemberMessageHandler(
 
   // Methods to receive onNext/onCompleted/onError calls from the other member message handler to
   // this member message handler's response observer.
-  private[channel] def receiveOnNext(response: v30.ConnectToSequencerChannelResponse): Unit =
+  private[channel] def receiveOnNext(
+      response: v30.ConnectToSequencerChannelResponse
+  )(implicit traceContext: TraceContext): Unit =
     if (!responseObserver.isCancelled) {
       responseObserver.onNext(response)
     } else {
-      logger.info(s"Not forwarding a message because the response stream is already closed")(
-        TraceContext.empty
+      logger.info(
+        s"[$channelId] Not forwarding a message because the response stream is already closed"
       )
     }
 
-  private[channel] def receiveOnCompleted(): Unit = {
-    logger.info("Completing response stream.")(TraceContext.empty)
+  private[channel] def receiveOnCompleted()(implicit traceContext: TraceContext): Unit = {
+    logger.info(s"[$channelId] Completing response stream.")
     complete()
   }
 
-  private[channel] def receiveOnError(t: Throwable): Unit = {
-    logger.warn(s"Request stream error \"${t.getMessage}\" has terminated connection")(
-      TraceContext.empty
-    )
+  private[channel] def receiveOnError(t: Throwable)(implicit traceContext: TraceContext): Unit = {
+    logger.warn(s"[$channelId] Request stream error \"${t.getMessage}\" has terminated connection")
     complete(_.onError(t))
   }
 

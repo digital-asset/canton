@@ -607,8 +607,12 @@ private[lf] object SBuiltinFun {
   // leading and trailing '0's as long as the corresponding number fits a Numeric without loss of
   // precision. We should take care not calling String to BigDecimal conversion on huge strings.
   final case object SBTextToNumeric extends SBuiltinPure(2) {
-    private val validFormat =
-      """([+-]?)0*(\d+)(\.(\d*[1-9]|0)0*)?""".r
+    // The integer part is either a single '0' or starts with a non-zero digit, so that it cannot
+    // compete with the leading `0*` for zeros. With the more natural `0*(\d+)`, a failing match
+    // on a long run of zeros (e.g. "000...0x") backtracks over every way of splitting the zeros
+    // between `0*` and `\d+`, which takes time quadratic in the length of the input.
+    private[speedy] val validFormat =
+      """([+-]?)0*(0|[1-9]\d*)(\.(\d*[1-9]|0)0*)?""".r
 
     override private[speedy] def executePure(
         args: ArraySeq[SValue],

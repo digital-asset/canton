@@ -14,12 +14,13 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   NewView,
   ViewChange,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
 class ViewChangeMessageValidator(
     membership: Membership,
     segmentBlockNumbers: NonEmpty[Seq[BlockNumber]],
-) {
+)(implicit synchronizerProtocolVersion: ProtocolVersion) {
   private val strongQuorum = membership.orderingTopology.strongQuorum
   private val consensusCertificateValidator = new ConsensusCertificateValidator(strongQuorum)
 

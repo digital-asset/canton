@@ -17,7 +17,7 @@ class ExternalAuthorizationTest extends AnyWordSpec with BaseTest {
 
   // The newest supported version on which the bounds of the next protocol version do not apply yet
   private lazy val pvBeforeNextValidationBound: ProtocolVersion =
-    ProtocolVersion.supported.forgetNE.filter(_ < ProtocolVersion.nextValidationBoundPV).max
+    ProtocolVersion.supported.forgetNE.filter(_ < ProtocolVersion.v38).max
 
   private val limits: TransactionProtocolLimits =
     TransactionProtocolLimits.default.copy(maxActAs = PositiveInt.two)
@@ -84,7 +84,7 @@ class ExternalAuthorizationTest extends AnyWordSpec with BaseTest {
 
     "apply the limit from ProtocolVersion.nextValidationBoundPV" in {
       parse(
-        ProtocolVersionValidation(ProtocolVersion.nextValidationBoundPV),
+        ProtocolVersionValidation(ProtocolVersion.v38),
         distinctParties(max + 1),
       ).left.value shouldBe tooMany(max + 1)
     }

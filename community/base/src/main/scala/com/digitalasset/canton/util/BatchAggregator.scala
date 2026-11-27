@@ -39,6 +39,59 @@ trait BatchAggregator[A, B] {
 
   protected def maximumBatchSize: PositiveInt
 
+  protected def maxDataSizeHintO: Option[PositiveInt] = None
+
+  protected def estimateDataSizeOfItem: A => PositiveInt = (_: A) => PositiveInt.one
+
+  // For use in `runInSameBatch` to immediately reject items that exceed the max batch size
+  protected final def validateBatch(
+      items: NonEmpty[Seq[Traced[A]]]
+  ): Either[PositiveInt, Unit] =
+    Either.cond(
+      items.sizeIs <= maximumBatchSize.value,
+      (),
+      maximumBatchSize,
+    )
+
+  // For use in `runMany` to split items by maximum batch size and, if possible, data size hint
+  protected final def splitIntoAllowedBatches(
+      items: NonEmpty[immutable.Iterable[Traced[A]]]
+  ): Seq[NonEmpty[Vector[Traced[A]]]] =
+    maxDataSizeHintO match {
+      case None =>
+        // No data size hint, so just split by maximum batch size.
+        items.grouped1(maximumBatchSize.value).map(_.toVector).toVector
+      case Some(maximumDataSize) =>
+        // Split by batch size and data size hint.
+        //  Preserve input order and use the hint only when possible.
+        //  An oversized item results in a batch with only that item.
+        val itemsWithSizes =
+          items.iterator.map { item =>
+            item -> estimateDataSizeOfItem(item.value).value
+          }.toVector
+        val (batches, _) =
+          itemsWithSizes
+            .foldLeft((Vector.empty[NonEmpty[Vector[Traced[A]]]], 0L)) {
+              case ((batches, lastBatchDataSize), (item, size)) =>
+                batches.lastOption match {
+                  case Some(batch)
+                      if batch.sizeIs < maximumBatchSize.value &&
+                        lastBatchDataSize + size <= maximumDataSize.value =>
+                    // The item fits into the last batch, so add it there
+                    //  and update the last batch's data size.
+                    (
+                      batches.updated(batches.size - 1, batch :+ item),
+                      lastBatchDataSize + size,
+                    )
+                  case _ =>
+                    // First iteration, or the item does not fit into the last batch,
+                    //  so create a new batch.
+                    (batches :+ NonEmpty(Vector, item), size.toLong)
+                }
+            }
+        batches
+    }
+
   /** Runs the processor of this aggregator for the given item, possibly batching several items.
     *
     * This method can be used as the `mappingFunction` of a Scaffeine async cache.
@@ -58,7 +111,7 @@ trait BatchAggregator[A, B] {
   /** Runs the processor of this aggregator for the given item, possibly batching several items, but
     * without splitting them up into multiple batches.
     *
-    * This is useful when multiple items need to end up in the same batch, such as batched DB insert
+    * This is useful when multiple items need to end up in the same batch, like batched DB inserts
     * in which all rows need to be part of the same transaction, for example for CFT purposes.
     *
     * @return
@@ -66,19 +119,21 @@ trait BatchAggregator[A, B] {
     *   response to these items, after the batch containing them has finished. If the processor
     *   fails with an exception for some item in a batch, the exception may propagate to the
     *   [[com.digitalasset.canton.lifecycle.FutureUnlessShutdown]]s of all items in the batch.
+    *   Returns `Left` if the item count exceeds `maximumBatchSize`. The data-size hint does not
+    *   reject groups.
     */
   final def runInSameBatch(items: NonEmpty[Seq[Traced[A]]])(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
       callerCloseContext: CloseContext,
   ): Either[PositiveInt, FutureUnlessShutdown[immutable.Iterable[B]]] =
-    Either.cond(items.sizeIs <= maximumBatchSize.value, runTogether(items), maximumBatchSize)
+    validateBatch(items).map(_ => runTogether(items))
 
   /** Runs the processor for the given items, optimizing batch fill by splitting items into multiple
-    * batches. Newly created batches execute immediately if in-flight slots are available.
-    * Otherwise, items from the remaining batches are distributed to fill batches that are already
-    * in the queue if capacity is available; if not, the newly created batches are added to the
-    * queue.
+    * batches respecting the item-count limit and the optional data-size hint. Newly created batches
+    * execute immediately if in-flight slots are available. Otherwise, items from the remaining
+    * batches are distributed to fill batches that are already in the queue if capacity is
+    * available; if not, the newly created batches are added to the queue.
     *
     * Unlike [[runInSameBatch]], this method spreads items across existing batches in the queue to
     * fill them up to [[maximumBatchSize]] (runMany forwards only individual items to
@@ -88,7 +143,7 @@ trait BatchAggregator[A, B] {
     * @return
     *   The [[com.digitalasset.canton.lifecycle.FutureUnlessShutdown]] completes with the
     *   processor's responses to all items in order, after all batches containing them have
-    *   finished.
+    *   finished. An item exceeding `maxDataSizeHintO` is processed alone.
     */
   def runMany(items: NonEmpty[immutable.Iterable[Traced[A]]])(implicit
       ec: ExecutionContext,
@@ -104,15 +159,28 @@ trait BatchAggregator[A, B] {
 }
 
 object BatchAggregator {
+
+  /** @param maxDataSizeHintO
+    *   Optional target estimated data size per batch. A call to `runInSameBatch` whose combined
+    *   estimated size exceeds this hint is still accepted and kept together. Individual items
+    *   exceeding it in `run` and `runMany` are also processed, alone where splitting is possible.
+    * @param estimateDataSizeOfItem
+    *   A deterministic estimator for a single item, in the same units as `maxDataSizeHintO`. Only
+    *   evaluated when the limit is configured.
+    */
   def apply[A, B](
       processor: Processor[A, B],
       config: BatchAggregatorConfig,
+      maxDataSizeHintO: Option[PositiveInt] = None,
+      estimateDataSizeOfItem: A => PositiveInt = (_: A) => PositiveInt.one,
   ): BatchAggregator[A, B] = config match {
     case BatchAggregatorConfig.Batching(maximumInFlight, maximumBatchSize) =>
       new BatchAggregatorImpl[A, B](
         processor,
         maximumInFlight = maximumInFlight.unwrap,
         maximumBatchSize = maximumBatchSize,
+        maxDataSizeHintO = maxDataSizeHintO,
+        estimateDataSizeOfItem = estimateDataSizeOfItem,
       )
 
     case BatchAggregatorConfig.NoBatching(maxParallelBatches, maximumBatchSize) =>
@@ -121,6 +189,8 @@ object BatchAggregator {
         processor.executeBatch(_)(_, _),
         maxParallelBatches,
         maximumBatchSize,
+        maxDataSizeHintO,
+        estimateDataSizeOfItem,
       )
   }
 
@@ -174,6 +244,7 @@ object BatchAggregator {
   }
 }
 
+/** Executes individual item or batches as requested but without aggregating them. */
 class NoOpBatchAggregator[A, B](
     executeSingle: (A, ExecutionContext, TraceContext, CloseContext) => FutureUnlessShutdown[B],
     executeBatch: (
@@ -183,7 +254,10 @@ class NoOpBatchAggregator[A, B](
     ) => FutureUnlessShutdown[immutable.Iterable[B]],
     private val maxParallelBatches: PositiveInt,
     override protected val maximumBatchSize: PositiveInt,
+    override protected val maxDataSizeHintO: Option[PositiveInt] = None,
+    override protected val estimateDataSizeOfItem: A => PositiveInt = (_: A) => PositiveInt.one,
 ) extends BatchAggregator[A, B] {
+
   override def run(item: A)(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -202,30 +276,35 @@ class NoOpBatchAggregator[A, B](
       ec: ExecutionContext,
       traceContext: TraceContext,
       callerCloseContext: CloseContext,
-  ): FutureUnlessShutdown[immutable.Iterable[B]] = {
-    val batches = items.grouped1(maximumBatchSize.value).toSeq
-    batches match {
+  ): FutureUnlessShutdown[immutable.Iterable[B]] =
+    splitIntoAllowedBatches(items) match {
       case Seq(singleBatch) =>
-        executeBatch(singleBatch.toVector, traceContext, callerCloseContext)
+        executeBatch(singleBatch, traceContext, callerCloseContext)
       case multipleBatches =>
         MonadUtil
           .parTraverseWithLimit(maxParallelBatches)(multipleBatches)(batchNE =>
-            executeBatch(batchNE.toVector, traceContext, callerCloseContext)
+            executeBatch(batchNE, traceContext, callerCloseContext)
           )
           .map(_.flatten)
     }
-  }
 }
 
+/** Executes individual items and batches as requested, trying to aggregate them according to a
+  * best-fitting algorithm.
+  */
 class BatchAggregatorImpl[A, B](
     processor: BatchAggregator.Processor[A, B],
     private val maximumInFlight: Int,
     protected override val maximumBatchSize: PositiveInt,
+    protected override val maxDataSizeHintO: Option[PositiveInt] = None,
+    protected override val estimateDataSizeOfItem: A => PositiveInt = (_: A) => PositiveInt.one,
 ) extends BatchAggregator[A, B] {
 
   private val batcher =
-    new BestFittingBatcher[ItemsAndCompletionPromise[A, B]](
-      maxBatchSize = maximumBatchSize
+    new BestFittingBatcher[Traced[A], ItemsAndCompletionPromise[A, B]](
+      maxBatchSize = maximumBatchSize,
+      maxDataSizeHintO = maxDataSizeHintO,
+      estimateDataSizeOfItem = item => estimateDataSizeOfItem(item.value),
     )
 
   private val inFlight = new AtomicInteger(0)
@@ -250,32 +329,46 @@ class BatchAggregatorImpl[A, B](
       ec: ExecutionContext,
       traceContext: TraceContext,
       callerCloseContext: CloseContext,
-  ): FutureUnlessShutdown[immutable.Iterable[B]] = {
-    val oldInFlight = inFlight.getAndUpdate(v => (v + 1).min(maximumInFlight))
-
-    if (oldInFlight < maximumInFlight) { // issue single request
-      if (items.sizeIs == 1) {
-        val item = items.head1
-        implicit val traceContext: TraceContext = item.traceContext
-        runSingleWithoutIncrement(item.value).map(immutable.Iterable(_))
-      } else {
-        runBatchWithoutIncrement(items)
+  ): FutureUnlessShutdown[immutable.Iterable[B]] =
+    if (items.sizeIs > maximumBatchSize.value) {
+      // This should never happen, as items are rejected only by `runInSameBatch` upfront,
+      //  while `runMany` and `runSingle` observe the max batch size.
+      FutureUnlessShutdown.failed(
+        new IllegalStateException(
+          "Internal error: too many items in batch, " +
+            s"maximum is $maximumBatchSize"
+        )
+      )
+    } else {
+      val oldInFlight = inFlight.getAndUpdate(v => (v + 1).min(maximumInFlight))
+      if (oldInFlight < maximumInFlight) { // issue single request
+        if (items.sizeIs == 1) {
+          val item = items.head1
+          implicit val traceContext: TraceContext = item.traceContext
+          runSingleWithoutIncrement(item.value).map(immutable.Iterable(_))
+        } else {
+          runBatchWithoutIncrement(items)
+        }
+      } else { // add to the queue
+        val promise = PromiseUnlessShutdown.unsupervised[immutable.Iterable[B]]()
+        enqueue(items.toVector, promise)
+        maybeRunQueuedQueries()
+        promise.futureUS
       }
-    } else { // add to the queue
-      val promise = PromiseUnlessShutdown.unsupervised[immutable.Iterable[B]]()
-      batcher.add(ItemsAndCompletionPromise(items.toVector, promise)).discard
-      maybeRunQueuedQueries()
-      promise.futureUS
     }
-  }
 
   override def runMany(items: NonEmpty[immutable.Iterable[Traced[A]]])(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
       callerCloseContext: CloseContext,
-  ): FutureUnlessShutdown[immutable.Iterable[B]] = {
-    val batches = items.grouped1(maximumBatchSize.value).toSeq
+  ): FutureUnlessShutdown[immutable.Iterable[B]] =
+    runBatches(splitIntoAllowedBatches(items))
 
+  private def runBatches(batches: Seq[NonEmpty[Vector[Traced[A]]]])(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      callerCloseContext: CloseContext,
+  ): FutureUnlessShutdown[immutable.Iterable[B]] = {
     val futures = batches.flatMap { batch =>
       val batchSeq = batch.toVector
       val oldInFlight = inFlight.getAndUpdate(v => (v + 1).min(maximumInFlight))
@@ -285,7 +378,7 @@ class BatchAggregatorImpl[A, B](
       } else {
         val individualFutures = batchSeq.map { tracedItem =>
           val promise = PromiseUnlessShutdown.unsupervised[immutable.Iterable[B]]()
-          batcher.add(ItemsAndCompletionPromise(NonEmpty(Vector, tracedItem), promise)).discard
+          enqueue(NonEmpty(Vector, tracedItem), promise)
           promise.futureUS
         }
         maybeRunQueuedQueries()
@@ -295,6 +388,24 @@ class BatchAggregatorImpl[A, B](
 
     FutureUnlessShutdown.sequence(futures).map(_.flatten)
   }
+
+  private def enqueue(
+      items: NonEmpty[Vector[Traced[A]]],
+      promise: PromiseUnlessShutdown[immutable.Iterable[B]],
+  ): Unit =
+    Try(batcher.add(ItemsAndCompletionPromise(items, promise))) match {
+      case Success(true) => ()
+      case Success(false) =>
+        // This should never happen, as items are rejected only by `runInSameBatch` upfront,
+        //  while `runMany` and `runSingle` observe the max batch size.
+        promise.failure(
+          new IllegalStateException(
+            "Internal error: too many items in batch, " +
+              s"maximum is $maximumBatchSize"
+          )
+        )
+      case Failure(error) => promise.failure(error)
+    }
 
   private def runSingleWithoutIncrement(
       item: A
@@ -355,7 +466,7 @@ class BatchAggregatorImpl[A, B](
       ec: ExecutionContext,
       callerCloseContext: CloseContext,
   ): Unit =
-    batcher.poll() match {
+    batcher.extractFullestBatch() match {
       case Some(itemsAndCompletionPromisesNE) =>
         if (
           itemsAndCompletionPromisesNE.sizeIs == 1 && itemsAndCompletionPromisesNE.head1.items.sizeIs == 1
@@ -432,8 +543,9 @@ object BatchAggregatorImpl {
   private final case class ItemsAndCompletionPromise[A, B](
       items: NonEmpty[Vector[Traced[A]]],
       completionPromise: PromiseUnlessShutdown[immutable.Iterable[B]],
-  ) extends BestFittingBatcher.Sized {
+  ) extends BestFittingBatcher.Sized[Traced[A]] {
     override val size: PositiveInt = PositiveInt.tryCreate(items.size)
     override def sizeIs: IterableOps.SizeCompareOps = items.sizeIs
+    override def iterator: Iterator[Traced[A]] = items.iterator
   }
 }

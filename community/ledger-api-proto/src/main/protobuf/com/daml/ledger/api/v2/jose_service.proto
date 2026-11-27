@@ -12,6 +12,9 @@ option java_package = "com.daml.ledger.api.v2";
 // Allows clients to access JOSE (JSON Object Signing and Encryption) primitives
 // to use for authentication
 service JoseService {
+  // Retrieve the public key of a specific party and synchronizer in JWKS format.
+  //
+  // Required permissions: no authentication required
   rpc GetJwks(GetJwksRequest) returns (GetJwksResponse);
 }
 

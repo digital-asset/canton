@@ -17,6 +17,7 @@ public final class EventFormat {
   private final Map<String, Filter> partyToFilters;
   private final Optional<Filter> anyPartyFilterO;
   private final boolean verbose;
+  private final List<ContractIdFilter> contractIdFilters;
 
   public static EventFormat fromProto(TransactionFilterOuterClass.EventFormat eventFormat) {
     Map<String, TransactionFilterOuterClass.Filters> partyToFilters =
@@ -34,7 +35,12 @@ public final class EventFormat {
             ? Optional.empty()
             : Optional.of(convertedAnyPartyFilter);
 
-    return new EventFormat(converted, anyPartyFilterO, eventFormat.getVerbose());
+    List<ContractIdFilter> contractIdFilters =
+        eventFormat.getFiltersByContractIdList().stream()
+            .map(ContractIdFilter::fromProto)
+            .collect(Collectors.toList());
+
+    return new EventFormat(converted, anyPartyFilterO, eventFormat.getVerbose(), contractIdFilters);
   }
 
   public TransactionFilterOuterClass.EventFormat toProto() {
@@ -51,6 +57,11 @@ public final class EventFormat {
 
     builder.setVerbose(verbose);
 
+    builder.addAllFiltersByContractId(
+        this.contractIdFilters.stream()
+            .map(ContractIdFilter::toProto)
+            .collect(Collectors.toList()));
+
     return builder.build();
   }
 
@@ -66,13 +77,32 @@ public final class EventFormat {
     return anyPartyFilterO;
   }
 
+  public List<ContractIdFilter> getContractIdFilters() {
+    return contractIdFilters;
+  }
+
   public EventFormat(
       @NonNull Map<@NonNull String, @NonNull Filter> partyToFilters,
       @NonNull Optional<@NonNull Filter> anyPartyFilterO,
       boolean verbose) {
+    this(partyToFilters, anyPartyFilterO, verbose, Collections.emptyList());
+  }
+
+  public EventFormat(
+      @NonNull Map<@NonNull String, @NonNull Filter> partyToFilters,
+      @NonNull Optional<@NonNull Filter> anyPartyFilterO,
+      boolean verbose,
+      @NonNull List<@NonNull ContractIdFilter> contractIdFilters) {
     this.partyToFilters = partyToFilters;
     this.anyPartyFilterO = anyPartyFilterO;
     this.verbose = verbose;
+    this.contractIdFilters = List.copyOf(contractIdFilters);
+  }
+
+  /** Creates an event format matching only the events of the given contract ids. */
+  public static EventFormat byContractIds(
+      @NonNull List<@NonNull ContractIdFilter> contractIdFilters, boolean verbose) {
+    return new EventFormat(Collections.emptyMap(), Optional.empty(), verbose, contractIdFilters);
   }
 
   public boolean getVerbose() {
@@ -118,6 +148,8 @@ public final class EventFormat {
         + anyPartyFilterO
         + ", verbose="
         + verbose
+        + ", contractIdFilters="
+        + contractIdFilters
         + '}';
   }
 
@@ -128,11 +160,12 @@ public final class EventFormat {
     EventFormat that = (EventFormat) o;
     return verbose == that.verbose
         && Objects.equals(partyToFilters, that.partyToFilters)
-        && Objects.equals(anyPartyFilterO, that.anyPartyFilterO);
+        && Objects.equals(anyPartyFilterO, that.anyPartyFilterO)
+        && Objects.equals(contractIdFilters, that.contractIdFilters);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(partyToFilters, anyPartyFilterO, verbose);
+    return Objects.hash(partyToFilters, anyPartyFilterO, verbose, contractIdFilters);
   }
 }

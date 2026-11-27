@@ -146,7 +146,7 @@ object SequencerSnapshot
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec.applyE(ProtocolVersion.v36)(v30.SequencerSnapshot)(
+    ProtoVersion(30) -> VersionedProtoCodec.applyE(ProtocolVersion.minimum)(v30.SequencerSnapshot)(
       supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     ),

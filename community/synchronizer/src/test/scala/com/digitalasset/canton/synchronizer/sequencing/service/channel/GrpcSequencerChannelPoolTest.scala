@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencing.service.channel
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.sequencer.api.v30
@@ -12,12 +13,20 @@ import com.digitalasset.canton.sequencer.api.v30.{
   ConnectToSequencerChannelRequest,
   ConnectToSequencerChannelResponse,
 }
+import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.sequencing.channel
 import com.digitalasset.canton.sequencing.protocol.channel.{
   SequencerChannelId,
   SequencerChannelMetadata,
 }
-import com.digitalasset.canton.synchronizer.sequencing.service.channel.SequencerChannelInternalError.PoolCapacityExhausted
+import com.digitalasset.canton.synchronizer.sequencing.authentication.{
+  MemberAuthenticationStore,
+  StoredAuthenticationToken,
+}
+import com.digitalasset.canton.synchronizer.sequencing.service.channel.SequencerChannelInternalError.{
+  PermissionDenied,
+  PoolCapacityExhausted,
+}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.tracing.SerializableTraceContext
@@ -25,6 +34,7 @@ import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, config, time}
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
+import org.mockito.invocation.InvocationOnMock
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
@@ -49,16 +59,20 @@ final class GrpcSequencerChannelPoolTest
     val member1 = ParticipantId("member-1")
     val member2 = ParticipantId("member-2")
     val member3 = ParticipantId("member-3")
-    val channelId1 = SequencerChannelId("channel-1")
-    val channelId2 = SequencerChannelId("channel-2")
-    val channelId3 = SequencerChannelId("channel-3")
+    val channelId1 = SequencerChannelId.tryCreate("channel-1")
+    val channelId2 = SequencerChannelId.tryCreate("channel-2")
+    val channelId3 = SequencerChannelId.tryCreate("channel-3")
 
     val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory = loggerFactory)
+    val crypto = new SymbolicPureCrypto
+    val authenticationStore =
+      spy(new MemberAuthenticationStore(PositiveInt.MaxValue, loggerFactory))
     // Keep the test from hanging for long if pool.close() fails
     val timeouts = ProcessingTimeout().copy(network = config.NonNegativeDuration.ofSeconds(5))
 
     val channelPool = new GrpcSequencerChannelPool(
       clock,
+      authenticationStore,
       protocolVersion,
       timeouts,
       maxPoolSize,
@@ -69,18 +83,33 @@ final class GrpcSequencerChannelPoolTest
 
     override def close(): Unit = channelPool.close()
 
-    def createUninitializedChannel(memberTokenExpiresAt: Option[CantonTimestamp] = None): Either[
+    def createUninitializedChannel(
+        memberTokenExpiresAt: Option[CantonTimestamp] = None,
+        authenticatedMemberO: Option[Member] = None,
+    ): Either[
       SequencerChannelInternalError,
       (
           ServerCallStreamObserver[ConnectToSequencerChannelResponse],
           StreamObserver[ConnectToSequencerChannelRequest],
       ),
     ] = {
+      val authenticationTokenO = memberTokenExpiresAt.map { expiresAt =>
+        val member = authenticatedMemberO.getOrElse(member1)
+        val token = StoredAuthenticationToken(
+          member,
+          expiresAt,
+          AuthenticationToken.generate(crypto),
+          member.fingerprint,
+        )
+        authenticationStore.saveToken(token)
+        token
+      }
       val responseObserver = mock[ServerCallStreamObserver[v30.ConnectToSequencerChannelResponse]]
       channelPool
         .createUninitializedChannel(
           responseObserver,
-          memberTokenExpiresAt,
+          authenticatedMemberO.orElse(authenticationTokenO.map(_.member)),
+          authenticationTokenO,
           _ => Right(()),
           timeouts,
           loggerFactory,
@@ -135,7 +164,7 @@ final class GrpcSequencerChannelPoolTest
         ServerCallStreamObserver[ConnectToSequencerChannelResponse],
         StreamObserver[ConnectToSequencerChannelRequest],
     ) = {
-      val res = createUninitializedChannel(memberTokenExpiresAt).value
+      val res = createUninitializedChannel(memberTokenExpiresAt, Some(initiatingMember)).value
       initializeChannel(sequencerChannelId, initiatingMember, receivingMember).tupled(res)
       res
     }
@@ -449,26 +478,54 @@ final class GrpcSequencerChannelPoolTest
       verify(responseObserver2, times(1)).onCompleted()
     }
 
-    "release the slot when the member token has already expired at initialization" in withEnv(
+    "reject an already expired token without retaining its slot" in withEnv(
       PositiveInt.one
     ) { env =>
       import env.*
 
-      val res = createUninitializedChannel(
-        // Token already expired
+      val result = createUninitializedChannel(
         memberTokenExpiresAt = Some(clock.now.minusSeconds(1))
+      )
+
+      result.left.value shouldBe PermissionDenied(
+        "Authentication token has expired or been revoked."
+      )
+      checkMetrics()
+      assertNumOfScheduledTasks(0)
+    }
+
+    "close a pending connection when its token expires before the metadata timeout" in withEnv(
+      maxPoolSize = PositiveInt.one,
+      maxMetadataWaitingTime = PositiveFiniteDuration(2.minutes),
+    ) { env =>
+      import env.*
+
+      val tokenExpiresAt = clock.now.add(10.seconds)
+      val (responseObserver, requestObserver) = createUninitializedChannel(
+        // Token expires after now before the metadata timeout
+        memberTokenExpiresAt = Some(tokenExpiresAt)
       ).value
 
       checkMetrics(pending = 1)
-      channelPool.size shouldBe 0
-      channelPool.numOfAvailableSlots shouldBe 1
+      assertNumOfScheduledTasks(1)
 
-      initializeChannel(channelId1, expectSuccess = false).tupled(res)
+      clock.advanceTo(tokenExpiresAt.minusSeconds(1))
+
+      checkMetrics(pending = 1)
+      verify(responseObserver, never).onCompleted()
+
+      clock.advanceTo(tokenExpiresAt)
 
       checkMetrics()
-      channelPool.size shouldBe 0
-      channelPool.numOfAvailableSlots shouldBe 2
+      initializeChannel(channelId1, expectSuccess = false)(responseObserver, requestObserver)
+      verify(responseObserver, times(1)).onCompleted()
+      verify(responseObserver, never).onError(any[Throwable])
+      assertNumOfScheduledTasks(0)
 
+      clock.advance(2.minutes.toJava)
+
+      checkMetrics()
+      verify(responseObserver, times(1)).onCompleted()
       assertNumOfScheduledTasks(0)
     }
 
@@ -483,6 +540,65 @@ final class GrpcSequencerChannelPoolTest
         createAndInitializeChannel(channelId1, member2, member1)
       val (channel2Observer, _) =
         createAndInitializeChannel(channelId2, member1, member3)
+      val (channel3Observer, _) =
+        createAndInitializeChannel(channelId3, member2, member3)
+
+      checkMetrics(pending = 1, waiting = 2, active = 1)
+
+      channelPool.closeChannels(Some(member1), waitForClosed = true)
+
+      eventually(2.seconds) {
+        verify(channel1Observer).onCompleted()
+        verify(channel1ObserverForJoiningMember).onCompleted()
+        verify(channel2Observer).onCompleted()
+        verify(channel3Observer, never).onCompleted()
+      }
+      checkMetrics(pending = 1, waiting = 1)
+    }
+
+    "close every pending connection owned by a revoked member and cancel its timer" in withEnv(
+      PositiveInt.two
+    ) { env =>
+      import env.*
+
+      val (revoked1, _) =
+        createUninitializedChannel(authenticatedMemberO = Some(member1)).value
+      val (revoked2, _) =
+        createUninitializedChannel(authenticatedMemberO = Some(member1)).value
+      val (otherMember, _) =
+        createUninitializedChannel(authenticatedMemberO = Some(member2)).value
+      val (unauthenticated, _) = createUninitializedChannel().value
+      checkMetrics(pending = 4)
+      assertNumOfScheduledTasks(4)
+
+      channelPool.closeChannels(Some(member1), waitForClosed = true)
+
+      verify(revoked1).onCompleted()
+      verify(revoked2).onCompleted()
+      verifyNoMoreInteractions(otherMember, unauthenticated)
+      checkMetrics(pending = 2)
+      assertNumOfScheduledTasks(2)
+
+      channelPool.closeChannels(waitForClosed = true)
+
+      verify(otherMember).onCompleted()
+      verify(unauthenticated).onCompleted()
+      verifyNoMoreInteractions(revoked1, revoked2)
+      checkMetrics()
+      assertNumOfScheduledTasks(0)
+    }
+
+    "release slots when a second member is revoked via closeChannels(member)" in withEnv() { env =>
+      import env.*
+
+      createUninitializedChannel().value
+      val (channel1Observer, _) =
+        createAndInitializeChannel(channelId1, member2, member1)
+      // Make 1st channel active, member1 is a secondMemeber
+      val (channel1ObserverForJoiningMember, _) =
+        createAndInitializeChannel(channelId1, member1, member2)
+      val (channel2Observer, _) =
+        createAndInitializeChannel(channelId2, member2, member1)
       val (channel3Observer, _) =
         createAndInitializeChannel(channelId3, member2, member3)
 
@@ -582,6 +698,7 @@ final class GrpcSequencerChannelPoolTest
       val reqObs = channelPool
         .createUninitializedChannel(
           resObs,
+          authenticatedMemberO = None,
           None,
           // Used to park one of the threads by pausing the auth check. Eventually returns Right(()).
           _ => { inAuthCheck.countDown(); resume.await(5, TimeUnit.SECONDS); Right(()) },
@@ -602,6 +719,86 @@ final class GrpcSequencerChannelPoolTest
       // slots back to 2 * maxPoolSize, nothing pending/waiting
       checkMetrics()
     }
+
+    "not initialize a pending connection removed by member revocation while processing metadata" in
+      withEnv(PositiveInt.one) { env =>
+        import env.*
+
+        val inAuthCheck = new CountDownLatch(1)
+        val resume = new CountDownLatch(1)
+        val resObs = mock[ServerCallStreamObserver[v30.ConnectToSequencerChannelResponse]]
+        val reqObs = channelPool
+          .createUninitializedChannel(
+            resObs,
+            Some(member1),
+            None,
+            // Pause metadata processing before it acquires the pool lock.
+            _ => { inAuthCheck.countDown(); resume.await(5, TimeUnit.SECONDS); Right(()) },
+            ProcessingTimeout(),
+            loggerFactory,
+          )
+          .value
+
+        val onNextF = Future(initializeChannel(channelId1, expectSuccess = false)(resObs, reqObs))
+        try {
+          inAuthCheck.await(5, TimeUnit.SECONDS) shouldBe true
+          channelPool.closeChannels(Some(member1))
+        } finally resume.countDown()
+
+        onNextF.futureValue
+        verify(resObs).onCompleted()
+        verifyNoMoreInteractions(resObs)
+        checkMetrics()
+        assertNumOfScheduledTasks(0)
+      }
+
+    "not miss revocation between token validation and pending connection registration" in
+      withEnv(PositiveInt.one) { env =>
+        import env.*
+
+        val inTokenCheck = new CountDownLatch(1)
+        val resume = new CountDownLatch(1)
+        val revoked = new CountDownLatch(1)
+        org.mockito.Mockito
+          .doAnswer { (invocation: InvocationOnMock) =>
+            val validToken = invocation.callRealMethod()
+            inTokenCheck.countDown()
+            resume.await(5, TimeUnit.SECONDS) shouldBe true
+            validToken
+          }
+          .when(authenticationStore)
+          .tokenForMemberAt(any[Member], any[AuthenticationToken], any[CantonTimestamp])
+
+        val connectionF = Future(
+          createUninitializedChannel(
+            memberTokenExpiresAt = Some(clock.now.plusSeconds(30)),
+            authenticatedMemberO = Some(member1),
+          ).value
+        )
+
+        val disconnectF =
+          try {
+            inTokenCheck.await(5, TimeUnit.SECONDS) shouldBe true
+            val disconnect = Future {
+              authenticationStore.invalidateMember(member1)
+              revoked.countDown()
+              channelPool.closeChannels(Some(member1), waitForClosed = true)
+            }
+            revoked.await(5, TimeUnit.SECONDS) shouldBe true
+            disconnect
+          } finally resume.countDown()
+
+        val (response, request) = connectionF.futureValue
+        disconnectF.futureValue
+        verify(response).onCompleted()
+        checkMetrics()
+        assertNumOfScheduledTasks(0)
+
+        initializeChannel(channelId1, expectSuccess = false)(response, request)
+        verifyNoMoreInteractions(response)
+        checkMetrics()
+        assertNumOfScheduledTasks(0)
+      }
 
     "not deadlock when a pending connection completes while closeChannels runs" in withEnv() {
       env =>

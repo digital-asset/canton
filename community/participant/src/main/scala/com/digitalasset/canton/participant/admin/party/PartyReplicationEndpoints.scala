@@ -311,7 +311,7 @@ class PartyReplicationEndpointsImpl(
           .fromByteString(
             ProtocolVersionValidation(protocolVersion),
             TopologyTransactionDeserializationContext(
-              connectedSynchronizer.staticSynchronizerParameters.synchronizerLimits.topologyLimits
+              connectedSynchronizer.staticSynchronizerParameters.synchronizerLimits.topologyLimitsView
             ),
             txBytes,
           )

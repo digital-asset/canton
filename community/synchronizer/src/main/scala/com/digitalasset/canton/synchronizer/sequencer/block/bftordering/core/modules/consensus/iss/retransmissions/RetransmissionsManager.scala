@@ -44,6 +44,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ModuleRef,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.time.Instant
 import scala.concurrent.duration.*
@@ -74,7 +75,8 @@ class RetransmissionsManager[E <: Env[E]](
     // Monotonic elapsed-time source (nanoseconds) for the request rate limiter, injectable in tests.
     rateLimiterNanoTime: () => Long = () => System.nanoTime(),
 )(implicit
-    mc: MetricsContext
+    mc: MetricsContext,
+    synchronizerProtocolVersion: ProtocolVersion,
 ) extends NamedLogging {
   private val signatureVerifier = new IssConsensusSignatureVerifier[E](metrics)
 

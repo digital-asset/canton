@@ -148,6 +148,8 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present reserved range "[2]" on message "InitializeSequencerFromGenesisStateRequest" is missing values: [2] were removed.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present reserved range "[2]" on message "InitializeSequencerFromGenesisStateV2Request" is missing values: [2] were removed.""",
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present reserved range "[2]" on message "GetSynchronizerParametersResponse" is missing values: [2] were removed.""",
+      // Added `include_onboarding_members` to `TrafficControlStateRequest`; older nodes simply ignore the new field
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "4" with name "include_onboarding_members" on message "TrafficControlStateRequest" was deleted.""",
       // Added new StaticSynchronizerParameters in v33
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "5" with name "v33" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "5" with name "v33" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
@@ -233,6 +235,8 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "6" with name "labels" on message "ComponentStatus" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present RPC "OnboardingState" on service "SequencerAdministrationService" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present RPC "InitializeSequencerFromOnboardingState" on service "SequencerInitializationService" was deleted.""",
+      // Added `include_onboarding_members` to `TrafficControlStateRequest`; older nodes simply ignore the new field
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "4" with name "include_onboarding_members" on message "TrafficControlStateRequest" was deleted.""",
       // Added new StaticSynchronizerParameters in v33
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "5" with name "v33" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "7" with name "v33" on message "InitializeSequencerFromLsuPredecessorRequest" was deleted.""",
@@ -246,6 +250,8 @@ final class ProtobufCompatibilityReaderTest
       """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
       // Added `min_stable_duration` field to `SequencerConnectionPoolDelays` for connection stability configuration
       """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "5" with name "min_stable_duration" on message "SequencerConnectionPoolDelays" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "5" with name "observation_period_seconds" on message "IndividualThroughputCapConfig" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "6" with name "request_type" on message "IndividualThroughputCapConfig" was deleted.""",
     ),
     (3, 6) -> Seq(
       // Added LF-Vlue(s)
@@ -293,6 +299,10 @@ final class ProtobufCompatibilityReaderTest
       """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
       // Added `min_stable_duration` field to `SequencerConnectionPoolDelays` for connection stability configuration
       """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "5" with name "min_stable_duration" on message "SequencerConnectionPoolDelays" was deleted.""",
+      // Added `include_onboarding_members` to `TrafficControlStateRequest`; older nodes simply ignore the new field
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "4" with name "include_onboarding_members" on message "TrafficControlStateRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "5" with name "observation_period_seconds" on message "IndividualThroughputCapConfig" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "6" with name "request_type" on message "IndividualThroughputCapConfig" was deleted.""",
     ),
     (3, 7) -> Seq(
       // Added LF-Value(s)
@@ -316,6 +326,10 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/sequencer/admin/v31/sequencer_administration_service.proto:Previously present field "4" with name "synchronizer_id" on message "OnboardingStateForSequencerV2" was deleted.""",
       // Added `min_stable_duration` field to `SequencerConnectionPoolDelays` for connection stability configuration
       """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "5" with name "min_stable_duration" on message "SequencerConnectionPoolDelays" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "5" with name "observation_period_seconds" on message "IndividualThroughputCapConfig" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "6" with name "request_type" on message "IndividualThroughputCapConfig" was deleted.""",
+    ),
+    (3, 8) -> Seq(
     ),
   )
 

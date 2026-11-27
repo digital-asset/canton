@@ -58,7 +58,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
     EnvironmentDefinition.P2S1M1_Manual
       .addConfigTransforms(
         ConfigTransforms
-          .enableAlphaOnlinePartyReplicationSupport()*
+          .enableAlphaAcsReplicationSupport()*
       )
       .withNetworkBootstrap { implicit env =>
         import env.*
@@ -78,9 +78,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
         participants.local.synchronizers.connect_local(sequencer1, daName)
       }
 
-  // OnlinePartyReplication messages require dev protocol version for added safety
-  // to ensure that they aren't accidentally used in production.
-  "Participants able to perform empty conversation via sequencer channel" onlyRunWith ProtocolVersion.dev in {
+  "Participants able to perform empty conversation via sequencer channel" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
     implicit env =>
       import env.*
 
@@ -95,7 +93,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
         asyncExec("ping2")(client2.ping(sequencer1.id, ignorePoolCapacityExhaustion = false))
       }
 
-      val channelId = SequencerChannelId("empty channel")
+      val channelId = SequencerChannelId.tryCreate("empty channel")
       val testProcessor1 = new TestProcessor(daId)
       val testProcessor2 = new TestProcessor(daId)
 
@@ -139,7 +137,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
         val sessionKeyMessages = recorder1.fetchSessionKeyMessages
         sessionKeyMessages should have size 1
         sessionKeyMessages.head should matchPattern {
-          case SequencerChannelSessionKey(enc) if enc.ciphertext.size() > 0 =>
+          case SequencerChannelSessionKey(enc, _) if enc.ciphertext.size() > 0 =>
         }
       }
 
@@ -160,7 +158,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
       }
   }
 
-  "Participants receive each other's messages via sequencer channel" onlyRunWith ProtocolVersion.dev in {
+  "Participants receive each other's messages via sequencer channel" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
     implicit env =>
       import env.*
 
@@ -173,7 +171,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
       val messagesReceivedP1 = mutable.Buffer[String]()
       val responsesReceivedP2 = mutable.Buffer[String]()
 
-      val channelId = SequencerChannelId("exchange messages channel")
+      val channelId = SequencerChannelId.tryCreate("exchange messages channel")
       val testProcessor1 = new TestProcessor(daId) {
         override def handlePayload(payload: ByteString)(implicit
             traceContext: TraceContext
@@ -266,14 +264,14 @@ sealed trait SequencerChannelProtocolIntegrationTest
       }
   }
 
-  "Participant can cancel channel when connection takes too long" onlyRunWith ProtocolVersion.dev in {
+  "Participant can cancel channel when connection takes too long" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
     implicit env =>
       import env.*
       val channelClient = participant1.testing.state_inspection
         .getSequencerChannelClient(daId)
         .getOrElse(fail("Cannot find client"))
 
-      val channelId = SequencerChannelId("canceled channel")
+      val channelId = SequencerChannelId.tryCreate("canceled channel")
       val testProcessor1 = new TestProcessor(daId)
       val recorder1 = new TestRecorder(participant1, daId, staticSynchronizerParameters1)
 
@@ -324,7 +322,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
       )
   }
 
-  "Participant can reuse channel processor for multiple connections" onlyRunWith ProtocolVersion.dev in {
+  "Participant can reuse channel processor for multiple connections" onlyRunWithOrGreaterThan ProtocolVersion.sequencerChannel in {
     implicit env =>
       import env.*
       val channelClient = participant1.testing.state_inspection
@@ -338,7 +336,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
       exec("connect processor the first time")(
         channelClient.connectToSequencerChannel(
           sequencer1.id,
-          SequencerChannelId("reuse processor channel1"),
+          SequencerChannelId.tryCreate("reuse processor channel1"),
           participant2.id,
           testProcessor,
           isSessionKeyOwner = true,
@@ -358,7 +356,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
       exec("connect processor the second time")(
         channelClient.connectToSequencerChannel(
           sequencer1.id,
-          SequencerChannelId("reuse processor channel2"),
+          SequencerChannelId.tryCreate("reuse processor channel2"),
           participant2.id,
           testProcessor,
           isSessionKeyOwner = true,
