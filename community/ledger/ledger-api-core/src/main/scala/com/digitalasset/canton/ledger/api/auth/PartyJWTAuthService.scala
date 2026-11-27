@@ -24,6 +24,7 @@ import com.digitalasset.canton.crypto.{
   SignatureFormat,
   SignatureWithoutSigner,
   SigningAlgorithmSpec,
+  SigningKeySpec,
   SigningKeyUsage,
   SynchronizerCryptoClient,
 }
@@ -219,6 +220,7 @@ class PartyJWTAuthService(
           SignatureWithoutSigner(
             format = SignatureFormat.Concat,
             signingAlgorithmSpec = SigningAlgorithmSpec.Ed25519,
+            keySpec = SigningKeySpec.EcCurve25519,
             signature = ByteString.copyFrom(signatureBytes),
           )
         )
@@ -232,6 +234,7 @@ class PartyJWTAuthService(
           SignatureWithoutSigner(
             format = SignatureFormat.Der,
             signingAlgorithmSpec = SigningAlgorithmSpec.EcDsaSha256,
+            keySpec = SigningKeySpec.EcP256,
             signature = ByteString.copyFrom(der),
           )
         }
@@ -245,6 +248,7 @@ class PartyJWTAuthService(
           SignatureWithoutSigner(
             format = SignatureFormat.Der,
             signingAlgorithmSpec = SigningAlgorithmSpec.EcDsaSha384,
+            keySpec = SigningKeySpec.EcP384,
             signature = ByteString.copyFrom(der),
           )
         }
@@ -258,6 +262,7 @@ class PartyJWTAuthService(
           SignatureWithoutSigner(
             format = SignatureFormat.Der,
             signingAlgorithmSpec = SigningAlgorithmSpec.EcDsaSha256,
+            keySpec = SigningKeySpec.EcSecp256k1,
             signature = ByteString.copyFrom(der),
           )
         }

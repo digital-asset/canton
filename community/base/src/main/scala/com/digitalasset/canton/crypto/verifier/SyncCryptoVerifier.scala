@@ -599,17 +599,24 @@ class SyncCryptoVerifier(
         ): SignatureCheckError,
       )
       (errs, oks) = signingKeysWithThreshold.keys.toList.partitionMap { key =>
-        verifyPublicApiWithLongTermKeys.verifySignature(
-          bytes = bytes,
-          publicKey = key,
-          signature = Signature.fromExternalSigning(
-            format = signature.format,
-            signedBy = key.fingerprint,
-            signature = signature.signature,
-            signingAlgorithmSpec = signature.signingAlgorithmSpec,
-          ),
-          usage = usage,
-        )
+        if (key.keySpec != signature.keySpec)
+          Left(
+            SignatureCheckError.SignatureWithWrongKey(
+              s"Key ${key.fingerprint} has key spec ${key.keySpec}, but the signature requires ${signature.keySpec}"
+            )
+          )
+        else
+          verifyPublicApiWithLongTermKeys.verifySignature(
+            bytes = bytes,
+            publicKey = key,
+            signature = Signature.fromExternalSigning(
+              format = signature.format,
+              signedBy = key.fingerprint,
+              signature = signature.signature,
+              signingAlgorithmSpec = signature.signingAlgorithmSpec,
+            ),
+            usage = usage,
+          )
       }
       _ <- EitherT.cond[FutureUnlessShutdown](
         !oks.isEmpty,

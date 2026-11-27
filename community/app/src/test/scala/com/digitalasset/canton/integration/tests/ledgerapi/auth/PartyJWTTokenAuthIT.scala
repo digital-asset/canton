@@ -446,8 +446,7 @@ class PartyJWTTokenAuthIT
         import env.*
         case class WrongAlgJwtSigner(delegate: JwtSigner) extends JwtSigner {
           def kid = delegate.kid
-          // ES256 and ES256K have the same signature size, so use a size-mismatched alg for ES256K
-          def alg = if (delegate.alg == "ES256" || delegate.alg == "ES256K") "ES384" else "ES256"
+          def alg = if (delegate.alg == "ES256") "ES384" else "ES256"
           def sign(jwt: DecodedJwt[String]) = delegate.sign(jwt)
         }
         loggerFactory.suppress(suppressionRule) {

@@ -375,6 +375,7 @@ trait SyncCryptoTest
         format = signature.format,
         signature = signature.unwrap,
         signingAlgorithmSpec = signature.signingAlgorithmSpec.valueOrFail("no algorithm spec"),
+        keySpec = SigningKeySpec.EcCurve25519,
       )
 
       List(syncCryptoVerifierP1, syncCryptoVerifierP2).foreach { verifier =>
@@ -425,6 +426,18 @@ trait SyncCryptoTest
         .futureValueUS
         .left
         .value shouldBe a[SignatureCheckError.PartyKeysInvalidThreshold]
+
+      syncCryptoVerifierP1
+        .verifyPartyJwtSignature(
+          topologySnapshot = testSnapshot,
+          bytes = ByteString.copyFromUtf8("hello, world!"),
+          signer = externalParty1Id,
+          signature = signatureWithoutSigner.copy(keySpec = SigningKeySpec.EcP256), // Wrong
+          usage = SigningKeyUsage.ProtocolOnly,
+        )
+        .futureValueUS
+        .left
+        .value shouldBe a[SignatureCheckError.SignatureWithWrongKey]
     }
   }
 
