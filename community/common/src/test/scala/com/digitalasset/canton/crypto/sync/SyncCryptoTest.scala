@@ -437,7 +437,7 @@ trait SyncCryptoTest
         )
         .futureValueUS
         .left
-        .value shouldBe a[SignatureCheckError.SignatureWithWrongKey]
+        .value shouldBe a[SignatureCheckError.UnsupportedKeySpec]
     }
   }
 

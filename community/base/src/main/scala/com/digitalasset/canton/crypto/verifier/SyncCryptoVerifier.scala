@@ -601,8 +601,9 @@ class SyncCryptoVerifier(
       (errs, oks) = signingKeysWithThreshold.keys.toList.partitionMap { key =>
         if (key.keySpec != signature.expectedKeySpec)
           Left(
-            SignatureCheckError.SignatureWithWrongKey(
-              s"Key ${key.fingerprint} has key spec ${key.keySpec}, but the signature requires ${signature.expectedKeySpec}"
+            SignatureCheckError.UnsupportedKeySpec(
+              signingKeySpec = key.keySpec,
+              supportedKeySpecs = Set(signature.expectedKeySpec),
             )
           )
         else
