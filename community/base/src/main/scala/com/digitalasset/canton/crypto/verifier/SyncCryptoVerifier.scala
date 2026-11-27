@@ -599,10 +599,10 @@ class SyncCryptoVerifier(
         ): SignatureCheckError,
       )
       (errs, oks) = signingKeysWithThreshold.keys.toList.partitionMap { key =>
-        if (key.keySpec != signature.keySpec)
+        if (key.keySpec != signature.signingKeySpec)
           Left(
             SignatureCheckError.SignatureWithWrongKey(
-              s"Key ${key.fingerprint} has key spec ${key.keySpec}, but the signature requires ${signature.keySpec}"
+              s"Key ${key.fingerprint} has key spec ${key.keySpec}, but the signature requires ${signature.signingKeySpec}"
             )
           )
         else
